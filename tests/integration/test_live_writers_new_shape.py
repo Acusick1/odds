@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
+import pytest
 from odds_core.models import (
     DataQualityLog,
     Event,
@@ -16,11 +18,14 @@ from odds_core.models import (
     SnapshotPayload,
 )
 from odds_core.vocabulary import Market, MarketStatus, Source, TimeBasis
+from odds_lambda import live_events
 from odds_lambda.betfair.client import BetfairBook, BetfairRunner
 from odds_lambda.betfair.constants import SPORT_CONFIG
 from odds_lambda.jobs import fetch_betfair_exchange
 from odds_lambda.jobs.fetch_oddsportal import LEAGUE_SPEC_BY_NAME, LeagueScrape, ingest_league
 from odds_lambda.oddsportal_adapter import MatchOdds
+from odds_lambda.storage.event_resolver import ListedGame, ResolvedEvent, event_lock_key
+from odds_lambda.storage.writers import OddsWriter
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -106,6 +111,101 @@ async def _count(session: AsyncSession, model: type) -> int:
 
 async def _external_ids(session: AsyncSession) -> set[tuple[str, str]]:
     return {(row.source.value, row.external_id) for row in await _all(session, EventExternalId)}
+
+
+def _fixture(home: str, away: str, scraped: datetime) -> MatchOdds:
+    match = _op_match("1x2", [_book_entry("bet365", (2.0, 3.3, 3.5))], scraped)
+    raw = {
+        **match.raw_data,
+        "oddsportal_event_id": f"{home[:3]}{away[:3]}",
+        "bookmakers": [
+            {
+                **match.raw_data["bookmakers"][0],
+                "markets": [
+                    {
+                        "key": "1x2",
+                        "outcomes": [
+                            {"name": home, "price_decimal": 2.0},
+                            {"name": "Draw", "price_decimal": 3.3},
+                            {"name": away, "price_decimal": 3.5},
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    return MatchOdds(
+        market="1x2",
+        home_team=home,
+        away_team=away,
+        match_date=KICKOFF,
+        match_link="",
+        scraped_date=scraped,
+        raw_data=raw,
+        bookmaker_count=1,
+    )
+
+
+FIXTURES = [
+    ("Arsenal", "Chelsea"),
+    ("Liverpool", "Everton"),
+    ("Brighton", "Fulham"),
+    ("Newcastle", "Wolves"),
+    ("West Ham", "Brentford"),
+    ("Bournemouth", "Burnley"),
+    ("Tottenham", "Leeds"),
+    ("Aston Villa", "Sunderland"),
+]
+
+
+class TestOddsPortalLiveRun:
+    async def test_a_mixed_team_run_takes_its_locks_in_order(
+        self, job_session: AsyncSession
+    ) -> None:
+        scraped = datetime.now(UTC)
+        keys = [event_lock_key(EPL, h, a) for h, a in FIXTURES]
+        assert keys != sorted(keys), "the listing order must not already be lock order"
+
+        stats = await ingest_league(
+            LEAGUE_SPEC_BY_NAME["england-premier-league"],
+            scraped=LeagueScrape(
+                matches=[_fixture(h, a, scraped) for h, a in FIXTURES],
+                events_listed=len(FIXTURES),
+                upcoming_listed=len(FIXTURES),
+            ),
+        )
+
+        assert stats.errors == []
+        assert (stats.events_created, stats.snapshots_stored) == (len(FIXTURES), len(FIXTURES))
+
+    async def test_a_failing_game_rolls_back_alone(
+        self, job_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        resolve = live_events.resolve_event
+
+        async def failing(session: AsyncSession, game: ListedGame) -> ResolvedEvent:
+            resolved = await resolve(session, game)
+            if game.home_team == "Liverpool":
+                raise RuntimeError("failed after writing")
+            return resolved
+
+        monkeypatch.setattr(live_events, "resolve_event", failing)
+        scraped = datetime.now(UTC)
+
+        stats = await ingest_league(
+            LEAGUE_SPEC_BY_NAME["england-premier-league"],
+            scraped=LeagueScrape(
+                matches=[_fixture(h, a, scraped) for h, a in FIXTURES[:3]],
+                events_listed=3,
+                upcoming_listed=3,
+            ),
+        )
+
+        job_session.expire_all()
+        assert len(stats.errors) == 1
+        assert {e.home_team for e in await _all(job_session, Event)} == {"Arsenal", "Brighton"}
+        assert await _count(job_session, OddsSnapshot) == 2
+        assert ("oddsportal", "LivEve") not in await _external_ids(job_session)
 
 
 class TestOddsPortalLive:
@@ -320,3 +420,38 @@ class TestBetfair:
         assert ("home", "back") in sides
         assert ("home", "lay") not in sides
         assert "invalid_price" in {r.issue_type for r in await _all(job_session, DataQualityLog)}
+
+    async def test_a_failing_book_rolls_back_alone(
+        self, job_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store = OddsWriter.store_odds_snapshot
+
+        async def failing(
+            self: OddsWriter, event_id: str, raw_data: dict, *args: Any, **kwargs: Any
+        ) -> Any:
+            result = await store(self, event_id, raw_data, *args, **kwargs)
+            if raw_data["betfair_event_id"] == "35002":
+                raise RuntimeError("failed after writing")
+            return result
+
+        monkeypatch.setattr(OddsWriter, "store_odds_snapshot", failing)
+        base = _betfair_book(KICKOFF, event_id="35002")
+        second = replace(
+            base,
+            betfair_event_name="Liverpool v Everton",
+            runners=[
+                BetfairRunner(1, "Liverpool", 2.1, 2.12, 292.0, 314.0, 2.1),
+                BetfairRunner(2, "Everton", 3.6, 3.7, 50.0, 40.0, None),
+                base.runners[2],
+            ],
+        )
+
+        stats = await _ingest_betfair(
+            _betfair_book(KICKOFF), second, snapshot_time=datetime.now(UTC)
+        )
+
+        job_session.expire_all()
+        assert len(stats.errors) == 1
+        assert [e.home_team for e in await _all(job_session, Event)] == [HOME]
+        assert await _count(job_session, OddsSnapshot) == 1
+        assert await _external_ids(job_session) == {("betfair", "35001")}

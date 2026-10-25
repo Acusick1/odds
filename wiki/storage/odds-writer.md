@@ -1,12 +1,12 @@
 ---
 type: reference
 title: OddsWriter
-description: store_odds_snapshot (old and new snapshot shapes), event upserts, logging helpers, and their edge cases.
+description: store_odds_snapshot (envelope, odds rows and price rows), event upserts, logging helpers, and their edge cases.
 sources:
   - odds_lambda.storage.writers.OddsWriter
   - odds_lambda.storage.writers.OddsWriter.store_odds_snapshot
   - odds_lambda.storage.writers.OddsWriter._parse_and_store_odds
-  - odds_lambda.storage.writers.SnapshotShape
+  - odds_lambda.storage.shaped_snapshots.SnapshotShape
   - odds_lambda.storage.shaped_snapshots.store_shaped_snapshot
   - odds_lambda.storage.writers.OddsWriter.log_fetch
   - odds_lambda.storage.writers.OddsWriter.log_data_quality_issue
@@ -24,14 +24,14 @@ status: stable
 
 ## store_odds_snapshot
 
-`odds_lambda.storage.writers.OddsWriter.store_odds_snapshot(event_id, raw_data, snapshot_time=None, validate=True, *, shape=None, api_request_id=None)` stores one event's envelope (`raw_data`). `shape` (`odds_lambda.storage.writers.SnapshotShape`) names the snapshot's source, its [time basis](odds-tables.md#odds_snapshots) and the payload it came in; the OddsPortal live and Betfair jobs pass it, and the Odds API, Polymarket and historical writers do not yet. Steps:
+`odds_lambda.storage.writers.OddsWriter.store_odds_snapshot(event_id, raw_data, snapshot_time=None, validate=True, *, shape=None, api_request_id=None)` stores one event's envelope (`raw_data`). `shape` (`odds_lambda.storage.shaped_snapshots.SnapshotShape`) names the snapshot's source, its [time basis](odds-tables.md#odds_snapshots) and the payload it came in; the OddsPortal live and Betfair jobs pass it, and the other writers pass none. Steps:
 
 1. Loads the event and computes `hours_until_commence` and the fetch tier from `snapshot_time` and the event's own `commence_time` (`odds_lambda.tier_utils.calculate_tier_from_timestamps`). The tier is per event, not per job run. If the event row is missing, both `fetch_tier` and `hours_until_commence` are stored as NULL ([Fetch tier](fetch-tier.md)); with `shape`, a missing event raises `ValueError`, since outcomes are matched to its teams.
 2. If `validate`, runs the validator and writes one `odds_core.models.DataQualityLog` row for any warnings; storage proceeds regardless ([Odds validation](odds-validator.md)). `odds_lambda.ingestion.OddsIngestionService.ingest_sport` is the only caller that passes `validate`: the `validate` argument of that method or of `odds_lambda.ingestion.OddsIngestionService.ingest_sports` when given, else `odds_core.config.DataQualityConfig.enable_validation`. Every other caller of `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` uses the default `True`.
 3. Builds an `odds_core.models.OddsSnapshot` ([columns and indexes](odds-tables.md#odds_snapshots)) with the full `raw_data`, `bookmaker_count` and `api_request_id`.
    - Without `shape` it is added with the redesigned columns (`source`, `market`, `time_basis`, the market metadata and `payload_id`) NULL, and flushed to get its id.
-   - With `shape` it goes through `odds_lambda.storage.shaped_snapshots.store_shaped_snapshot`, which fills those columns, writes its price rows and splits the envelope's other markets into their own snapshots ([Writing the new shape](price-tables.md#writing-the-new-shape)). When a snapshot already holds its key (event, source, market, time), nothing is written, `odds_snapshot_already_stored` is logged and the stored snapshot is returned with no odds rows.
-4. `odds_lambda.storage.writers.OddsWriter._parse_and_store_odds` adds one `odds_core.models.Odds` row per bookmaker/market/outcome of the whole envelope, each with `snapshot_id` set to the envelope's snapshot (not to the split ones). Bookmakers without a key are skipped; `last_update` falls back to `snapshot_time` if unparseable; `odds_timestamp` is `snapshot_time`. It stores the decimal price (it must exceed 1.0, `ck_odds_price_decimal_gt_one`) from `odds_core.odds_math.outcome_price_decimal`, which raises `KeyError` for an outcome with neither `price_decimal` nor `price`; the validator flags such an outcome as an error.
+   - With `shape` it goes through `odds_lambda.storage.shaped_snapshots.store_shaped_snapshot`, which fills those columns, writes its price rows and, for an envelope quoting several markets, stores one snapshot per market with `raw_data` cut to that market ([Writing price rows](price-tables.md#writing-price-rows)). When a snapshot already holds its key (event, source, market, time), nothing is written, `odds_snapshot_already_stored` is logged and the stored snapshot is returned with no odds rows.
+4. `odds_lambda.storage.writers.OddsWriter._parse_and_store_odds` adds one `odds_core.models.Odds` row per bookmaker/market/outcome of the whole envelope, each with `snapshot_id` set to the stored snapshot (the first market's when the envelope was split). Bookmakers without a key are skipped; `last_update` falls back to `snapshot_time` if unparseable; `odds_timestamp` is `snapshot_time`. It stores the decimal price (it must exceed 1.0, `ck_odds_price_decimal_gt_one`) from `odds_core.odds_math.outcome_price_decimal`, which raises `KeyError` for an outcome with neither `price_decimal` nor `price`; the validator flags such an outcome as an error.
 
 Returns `(OddsSnapshot, list[Odds])`.
 

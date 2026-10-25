@@ -22,7 +22,7 @@ status: stable
 
 # The fetch-oddsportal job
 
-`odds_lambda.jobs.fetch_oddsportal.main(ctx)` reads pre-match odds over HTTP ([oddsportal-scraper](oddsportal-scraper.md)), converts them to the canonical shape and stores snapshots, their odds rows and, in the new shape, their price rows through `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` ([Writing the new shape](../storage/price-tables.md#writing-the-new-shape)). It is in the default local `bootstrap_jobs` and runs on the production host ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). It has no Terraform rule or Lambda; a rule left in the AWS account from before their removal would scrape alongside the production host, and no code checks for a job enabled in both places. Deployed state: `odds scheduler list-jobs --backend aws`. On the production host, one hung run ends the local chains (#485).
+`odds_lambda.jobs.fetch_oddsportal.main(ctx)` reads pre-match odds over HTTP ([oddsportal-scraper](oddsportal-scraper.md)), converts them to the canonical shape and stores snapshots, their odds rows and their price rows through `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` ([Writing price rows](../storage/price-tables.md#writing-price-rows)). It is in the default local `bootstrap_jobs` and runs on the production host ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). It has no Terraform rule or Lambda; a rule left in the AWS account from before their removal would scrape alongside the production host, and no code checks for a job enabled in both places. Deployed state: `odds scheduler list-jobs --backend aws`. On the production host, one hung run ends the local chains (#485).
 
 ## Leagues
 

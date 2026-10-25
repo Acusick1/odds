@@ -11,6 +11,7 @@ from odds_lambda.price_rows import (
     ExpandedEnvelope,
     MarketSnapshot,
     PriceSpec,
+    RowIssueType,
     expand_envelope,
     market_envelope,
 )
@@ -267,15 +268,15 @@ class TestBetfair:
             self._raw(market_status="SUSPENDED", inplay=True), Source.BETFAIR
         ).markets
 
-        assert market.market_status is MarketStatus.SUSPENDED
-        assert market.in_play is True
-        assert market.total_matched == Decimal("385702.5")
-        assert market.market_start_time == datetime(2026, 10, 24, 14, tzinfo=UTC)
+        assert market.meta.market_status is MarketStatus.SUSPENDED
+        assert market.meta.in_play is True
+        assert market.meta.total_matched == Decimal("385702.5")
+        assert market.meta.market_start_time == datetime(2026, 10, 24, 14, tzinfo=UTC)
 
     def test_unknown_market_status_is_logged_and_left_empty(self) -> None:
         expanded = _expand(self._raw(market_status="WEIRD"), Source.BETFAIR)
 
-        assert expanded.markets[0].market_status is None
+        assert expanded.markets[0].meta.market_status is None
         assert _issue_types(expanded) == ["unknown_market_status"]
 
     def test_pitcher_annotations_on_runner_names_still_match(self) -> None:
@@ -427,6 +428,57 @@ class TestOddsApi:
         }
         assert {p.bookmaker for p in one_x_two.prices if p.side is Side.LAY} == {"betfair_exchange"}
 
+    def test_h2h_lay_without_a_draw_becomes_lay_rows_of_the_h2h_snapshot(self) -> None:
+        raw = {
+            "bookmakers": [
+                {
+                    "key": "fanduel",
+                    "markets": [
+                        {
+                            "key": "h2h",
+                            "outcomes": [
+                                {"name": HOME, "price": 110},
+                                {"name": AWAY, "price": -130},
+                            ],
+                        }
+                    ],
+                },
+                {
+                    "key": "betfair_ex_uk",
+                    "markets": [
+                        {
+                            "key": "h2h_lay",
+                            "outcomes": [
+                                {"name": HOME, "price": 115},
+                                {"name": AWAY, "price": -125},
+                            ],
+                        }
+                    ],
+                },
+            ]
+        }
+
+        [h2h] = _expand(raw, Source.ODDS_API).markets
+
+        assert h2h.market is Market.H2H
+        assert {(p.bookmaker, p.side) for p in h2h.prices} == {
+            ("fanduel", Side.BACK),
+            ("betfair_exchange", Side.LAY),
+        }
+        assert [b["key"] for b in market_envelope(raw, Market.H2H)["bookmakers"]] == [
+            "fanduel",
+            "betfair_ex_uk",
+        ]
+        assert market_envelope(raw, Market.ONE_X_TWO)["bookmakers"] == []
+
+    def test_market_envelope_folds_a_three_way_lay_into_1x2(self) -> None:
+        cut = market_envelope(self._raw(), Market.ONE_X_TWO)
+
+        assert [(b["key"], [m["key"] for m in b["markets"]]) for b in cut["bookmakers"]] == [
+            ("betmgm", ["1x2"]),
+            ("betfair_exchange", ["h2h_lay"]),
+        ]
+
     def test_market_envelope_keeps_only_that_markets_books(self) -> None:
         cut = market_envelope(self._raw(), Market.TOTALS)
 
@@ -440,7 +492,7 @@ class TestOddsApi:
         expanded = _expand(raw, Source.ODDS_API)
 
         assert expanded.markets == ()
-        assert _issue_types(expanded) == ["unknown_market"]
+        assert _issue_types(expanded) == [RowIssueType.UNKNOWN_MARKET]
 
 
 class TestFootballDataUk:

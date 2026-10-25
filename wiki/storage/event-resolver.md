@@ -13,7 +13,7 @@ status: stable
 
 # Event resolver
 
-`odds_lambda.storage.event_resolver.resolve_event(session, game)` returns the one [event](events.md) of a game a source lists, creating it only when none matches, and records the source's id for it in `event_external_ids` ([Events table](events.md#external-ids)). The live OddsPortal and Betfair jobs call it through `odds_lambda.live_events.LiveEventFinder.resolve` ([live MLB events](event-matching.md#live-mlb-events)); the Odds API, Polymarket and historical writers do not yet. The decision behind it is [ADR-0018](../../docs/adr/0018-surrogate-event-key-with-external-ids.md).
+`odds_lambda.storage.event_resolver.resolve_event(session, game)` returns the one [event](events.md) of a game a source lists, creating it only when none matches, and records the source's id for it in `event_external_ids` ([Events table](events.md#external-ids)). The live OddsPortal and Betfair jobs call it through `odds_lambda.live_events.LiveEventFinder.resolve` ([live MLB events](event-matching.md#live-mlb-events)); the other writers find events their own way ([Event matching across sources](event-matching.md)). The decision behind it is [ADR-0018](../../docs/adr/0018-surrogate-event-key-with-external-ids.md).
 
 ## Input
 
@@ -41,9 +41,13 @@ Then it records the ids and moves the kick-off:
 
 - The source's id, when the game has one.
 - For MLB, the `gamePk` as an `mlb_stats_api` id; an event recording it that has no `mlb_game_pk` also takes it there (`odds_core.models.Event.assign_game_pk`).
-- `odds_lambda.storage.event_kickoff.move_kickoff` once, with the current time as the clock (the MLB Stats API may move an event to a past start): for MLB with the MLB Stats API and the schedule's start; for other sports with the source and its listed start, only while that start is in the future, since a start already past is an in-play or historical time rather than a schedule. Only a sport's schedule authority moves the event ([Kick-off authority](kickoff-authority.md)).
+- `odds_lambda.storage.event_kickoff.move_kickoff` once, with the current time as the clock (the MLB Stats API may move an event to a past start): for MLB with the MLB Stats API and the schedule's start; for other sports with the source and its listed start. `odds_lambda.storage.event_kickoff.move_kickoff` alone decides whether it moves: only a sport's schedule authority moves the event, and an in-play start after the stored kick-off is refused ([Kick-off authority](kickoff-authority.md)).
 
 It flushes and never commits ([Commit contract](storage-layer.md#commit-contract)).
+
+## MLB without the schedule
+
+`odds_lambda.storage.event_resolver.resolve_unscheduled_mlb_event` is the lookup for an MLB game listed while the MLB schedule is unavailable. Under the same fixture lock it matches only the one event of the pair within ±2 h, and only for a row with no doubleheader game number, since without the schedule either game could be another. It records the source's id on that event, never creates one and moves no kick-off; with no match it returns `None`.
 
 ## Locks and transactions
 

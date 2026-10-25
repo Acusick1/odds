@@ -4,7 +4,7 @@ import time
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from odds_core.models import Event, EventExternalId, EventStatus
+from odds_core.models import Event, EventExternalId, EventStatus, OddsSnapshot
 from odds_core.vocabulary import Source
 from odds_lambda.storage.writers import OddsWriter
 from sqlalchemy import select
@@ -554,3 +554,34 @@ class TestBulkUpsertKeepsResults:
         started = await test_session.get(Event, "started")
         assert delayed is not None and started is not None
         assert (delayed.status, started.status) == (EventStatus.SCHEDULED, EventStatus.LIVE)
+
+    async def test_a_status_reset_moves_through_move_kickoff_and_retimes_snapshots(
+        self, test_session: AsyncSession
+    ) -> None:
+        kickoff = datetime(2026, 8, 22, 14, 0, tzinfo=UTC)
+        taken = kickoff - timedelta(hours=1)
+        test_session.add(_discovered("postponed", kickoff, EventStatus.POSTPONED))
+        await test_session.flush()
+        test_session.add(
+            OddsSnapshot(
+                event_id="postponed",
+                snapshot_time=taken,
+                raw_data={"bookmakers": []},
+                bookmaker_count=0,
+                hours_until_commence=1.0,
+            )
+        )
+        await test_session.commit()
+        replay = kickoff + timedelta(days=7)
+
+        await OddsWriter(test_session).bulk_upsert_events(
+            [_discovered("postponed", replay)], now=kickoff + timedelta(hours=1)
+        )
+        await test_session.commit()
+
+        test_session.expire_all()
+        event = await test_session.get(Event, "postponed")
+        snapshot = (await test_session.execute(select(OddsSnapshot))).scalar_one()
+        assert event is not None
+        assert (event.status, event.commence_time) == (EventStatus.SCHEDULED, replay)
+        assert snapshot.hours_until_commence == (replay - taken).total_seconds() / 3600

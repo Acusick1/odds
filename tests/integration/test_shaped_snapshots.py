@@ -8,8 +8,8 @@ from typing import Any
 import pytest
 from odds_core.models import DataQualityLog, Event, Odds, OddsSnapshot, Price, SnapshotPayload
 from odds_core.vocabulary import Market, Source, TimeBasis
-from odds_lambda.storage.shaped_snapshots import store_payload
-from odds_lambda.storage.writers import OddsWriter, SnapshotShape
+from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload
+from odds_lambda.storage.writers import OddsWriter
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -84,7 +84,7 @@ async def _snapshots(session: AsyncSession) -> list[OddsSnapshot]:
 
 
 class TestMultiMarketEnvelope:
-    async def test_the_envelope_row_keeps_its_id_and_the_other_markets_split(
+    async def test_each_market_is_a_snapshot_cut_to_its_own_market(
         self, pglite_async_session: AsyncSession, event: Event
     ) -> None:
         session = pglite_async_session
@@ -94,18 +94,21 @@ class TestMultiMarketEnvelope:
 
         first, spreads, totals = await _snapshots(session)
         assert stored.id == first.id
-        assert first.raw_data == raw
+        assert [
+            [m["key"] for m in s.raw_data["bookmakers"][0]["markets"]]
+            for s in (first, spreads, totals)
+        ] == [["1x2"], ["spreads"], ["totals"]]
+        assert first.raw_data["id"] == raw["id"]
         assert [s.market for s in (first, spreads, totals)] == [
             Market.ONE_X_TWO,
             Market.SPREADS,
             Market.TOTALS,
         ]
-        assert [m["key"] for m in totals.raw_data["bookmakers"][0]["markets"]] == ["totals"]
         assert {s.payload_id for s in (first, spreads, totals)} == {first.payload_id}
         assert {s.api_request_id for s in (first, spreads, totals)} == {"req"}
         assert {s.fetch_tier for s in (first, spreads, totals)} == {first.fetch_tier}
 
-    async def test_odds_rows_stay_on_the_envelope_row_and_prices_go_to_each_market(
+    async def test_odds_rows_stay_on_the_first_snapshot_and_prices_go_to_each_market(
         self, pglite_async_session: AsyncSession, event: Event
     ) -> None:
         session = pglite_async_session
@@ -113,8 +116,9 @@ class TestMultiMarketEnvelope:
         await _store(session, _odds_api_envelope())
 
         first, spreads, totals = await _snapshots(session)
-        odds_snapshots = set((await session.execute(select(Odds.snapshot_id))).scalars())
-        assert odds_snapshots == {first.id}
+        odds = (await session.execute(select(Odds.snapshot_id, Odds.market_key))).all()
+        assert {snapshot_id for snapshot_id, _ in odds} == {first.id}
+        assert {market for _, market in odds} == {"1x2", "spreads", "totals"}
         per_snapshot = dict(
             (
                 await session.execute(

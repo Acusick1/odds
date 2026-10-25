@@ -2,34 +2,23 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import structlog
 from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
 from odds_core.odds_math import outcome_price_decimal
 from odds_core.time import ensure_utc, parse_api_datetime
-from odds_core.vocabulary import Source, TimeBasis
+from odds_core.vocabulary import Source
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.storage.event_kickoff import move_kickoff
-from odds_lambda.storage.shaped_snapshots import store_shaped_snapshot
+from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_shaped_snapshot
 from odds_lambda.storage.validators import OddsValidator
 from odds_lambda.tier_utils import calculate_hours_until_commence, calculate_tier_from_timestamps
 
 logger = structlog.get_logger()
-
-
-@dataclass(frozen=True)
-class SnapshotShape:
-    """What a writer knows about a snapshot beyond its envelope: its provider, what its time
-    means, and the archived fetch response it came in."""
-
-    source: Source
-    time_basis: TimeBasis
-    payload_id: int | None
 
 
 class OddsWriter:
@@ -49,8 +38,7 @@ class OddsWriter:
         """Insert an Odds API event, or update the stored one's sport and teams.
 
         The stored ``commence_time`` moves only through ``move_kickoff`` on the Odds API's
-        authority, and only to a start after ``now`` (defaults to the current time): a start
-        already past is an in-play or historical time, not a schedule.
+        authority, against the clock ``now`` (defaults to the current time).
         """
         result = await self.session.execute(select(Event).where(Event.id == event.id))
         existing_event = result.scalar_one_or_none()
@@ -61,7 +49,13 @@ class OddsWriter:
             existing_event.home_team = event.home_team
             existing_event.away_team = event.away_team
             existing_event.updated_at = datetime.now(UTC)
-            await self._offer_kickoff(existing_event, event.commence_time, now or datetime.now(UTC))
+            await move_kickoff(
+                self.session,
+                existing_event,
+                Source.ODDS_API,
+                event.commence_time,
+                now=now or datetime.now(UTC),
+            )
 
             logger.info("event_updated", event_id=event.id)
             return existing_event
@@ -69,10 +63,6 @@ class OddsWriter:
             self.session.add(event)
             logger.info("event_created", event_id=event.id)
             return event
-
-    async def _offer_kickoff(self, event: Event, start: datetime, now: datetime) -> None:
-        if ensure_utc(start) > ensure_utc(now):
-            await move_kickoff(self.session, event, Source.ODDS_API, start, now=now)
 
     async def store_odds_snapshot(
         self,
@@ -146,20 +136,13 @@ class OddsWriter:
         else:
             if event is None:
                 raise ValueError(f"event {event_id} is not stored")
-            written = await store_shaped_snapshot(
-                self.session,
-                snapshot,
-                event,
-                source=shape.source,
-                time_basis=shape.time_basis,
-                payload_id=shape.payload_id,
-            )
+            written = await store_shaped_snapshot(self.session, snapshot, event, shape)
             if not written.inserted:
                 logger.info(
                     "odds_snapshot_already_stored",
                     event_id=event_id,
                     snapshot_id=written.snapshot.id,
-                    outcome=written.envelope.outcome if written.envelope else None,
+                    outcome=written.first.outcome if written.first else None,
                 )
                 return written.snapshot, []
             snapshot = written.snapshot
@@ -382,9 +365,9 @@ class OddsWriter:
             Preserves created_at timestamps on updates, updates updated_at field.
             Status, scores, completed_at and commence_time are never overwritten, because the
             incoming events are discovery records (scheduled, no scores). A stored event's
-            kick-off moves through ``move_kickoff`` on the Odds API's authority, only to an
-            incoming start after ``now``; a POSTPONED or LIVE event that moves to a start after
-            ``now`` becomes SCHEDULED.
+            kick-off moves through ``move_kickoff`` on the Odds API's authority against the
+            clock ``now``, which makes a POSTPONED event that moves, or a LIVE one moved to a
+            start after ``now``, SCHEDULED.
 
         Example:
             events = [
@@ -457,7 +440,9 @@ class OddsWriter:
             for event in events:
                 held = stored_by_id.get(event.id)
                 if held is not None:
-                    await self._offer_kickoff(held, event.commence_time, now)
+                    await move_kickoff(
+                        self.session, held, Source.ODDS_API, event.commence_time, now=now
+                    )
 
         logger.info(
             "bulk_events_upserted",

@@ -7,10 +7,11 @@ the backfill can expand stored envelopes with the same reading.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
+from enum import StrEnum
 from typing import Any
 
 from odds_core.bookmakers import canonical_bookmaker
@@ -54,11 +55,9 @@ class PriceSpec:
 
 
 @dataclass(frozen=True)
-class MarketSnapshot:
-    """One market of an envelope: the snapshot's market, market metadata and prices."""
+class MarketMeta:
+    """An exchange market's state, which goes on its snapshot (Betfair only)."""
 
-    market: Market
-    prices: tuple[PriceSpec, ...]
     in_play: bool | None = None
     market_status: MarketStatus | None = None
     total_matched: Decimal | None = None
@@ -66,10 +65,31 @@ class MarketSnapshot:
 
 
 @dataclass(frozen=True)
+class MarketSnapshot:
+    """One market of an envelope: the snapshot's market, market metadata and prices."""
+
+    market: Market
+    prices: tuple[PriceSpec, ...]
+    meta: MarketMeta = MarketMeta()
+
+
+class RowIssueType(StrEnum):
+    """The ``data_quality_logs.issue_type`` of something an envelope held but no row took."""
+
+    BOOKMAKER_WITHOUT_KEY = "bookmaker_without_key"
+    BOOKMAKER_ALIAS_COLLISION = "bookmaker_alias_collision"
+    DUPLICATE_PRICE = "duplicate_price"
+    INVALID_PRICE = "invalid_price"
+    UNMATCHED_OUTCOME = "unmatched_outcome"
+    UNKNOWN_MARKET = "unknown_market"
+    UNKNOWN_MARKET_STATUS = "unknown_market_status"
+
+
+@dataclass(frozen=True)
 class RowIssue:
     """Something in the envelope that became no row; written to ``data_quality_logs``."""
 
-    issue_type: str
+    issue_type: RowIssueType
     description: str
     context: dict[str, Any]
 
@@ -97,10 +117,10 @@ class _Reader:
         self.home_team = normalize_team_name(home_team)
         self.away_team = normalize_team_name(away_team)
         self.markets: dict[Market, _MarketRows] = {}
-        self.meta: dict[Market, dict[str, Any]] = {}
+        self.meta: dict[Market, MarketMeta] = {}
         self.issues: list[RowIssue] = []
 
-    def log_issue(self, issue_type: str, description: str, **context: Any) -> None:
+    def log_issue(self, issue_type: RowIssueType, description: str, **context: Any) -> None:
         self.issues.append(
             RowIssue(issue_type, description, {"source": self.source.value, **context})
         )
@@ -127,7 +147,7 @@ class _Reader:
             rows.first_keys[book] = raw_key
             return book
         self.log_issue(
-            "bookmaker_alias_collision",
+            RowIssueType.BOOKMAKER_ALIAS_COLLISION,
             f"{self.source} {market} book {raw_key!r} is {book!r}, already read from {first!r}; "
             "the first entry is kept",
             market=market.value,
@@ -141,7 +161,7 @@ class _Reader:
         rows = self.markets.setdefault(market, _MarketRows())
         if spec.key in rows.prices:
             self.log_issue(
-                "duplicate_price",
+                RowIssueType.DUPLICATE_PRICE,
                 f"{self.source} {market} {spec.bookmaker} {spec.outcome} {spec.side} is quoted "
                 "twice; the first is kept",
                 market=market.value,
@@ -161,7 +181,7 @@ class _Reader:
         if number is not None and number > 1.0:
             return _decimal(number)
         self.log_issue(
-            "invalid_price",
+            RowIssueType.INVALID_PRICE,
             f"{self.source} {market} {bookmaker} {outcome} {side} price {value!r} is not above 1.0",
             market=market.value,
             bookmaker=bookmaker,
@@ -179,7 +199,7 @@ class _Reader:
         if number is not None and 0.0 < number < 1.0:
             return _decimal(1 / number)
         self.log_issue(
-            "invalid_price",
+            RowIssueType.INVALID_PRICE,
             f"{self.source} {market} {bookmaker} {outcome} {side} probability {value!r} is not "
             "between 0 and 1",
             market=market.value,
@@ -192,7 +212,7 @@ class _Reader:
 
     def log_unmatched(self, market: Market, bookmaker: str, name: object) -> None:
         self.log_issue(
-            "unmatched_outcome",
+            RowIssueType.UNMATCHED_OUTCOME,
             f"{self.source} {market} {bookmaker} outcome {name!r} is neither "
             f"{self.home_team!r}, {self.away_team!r} nor a draw, over or under",
             market=market.value,
@@ -218,7 +238,9 @@ def expand_envelope(
     for entry in raw_data.get("bookmakers") or []:
         raw_key = str(entry.get("key") or "").strip()
         if not raw_key:
-            reader.log_issue("bookmaker_without_key", f"{source} entry has no bookmaker key")
+            reader.log_issue(
+                RowIssueType.BOOKMAKER_WITHOUT_KEY, f"{source} entry has no bookmaker key"
+            )
             continue
         if source is Source.FOOTBALL_DATA_UK and raw_key in FDUK_AGGREGATE_BOOKMAKERS:
             continue
@@ -232,7 +254,7 @@ def expand_envelope(
         MarketSnapshot(
             market=market,
             prices=tuple(reader.markets[market].prices.values()),
-            **reader.meta.get(market, {}),
+            meta=reader.meta.get(market, MarketMeta()),
         )
         for market in MARKET_ORDER
         if market in reader.markets
@@ -240,7 +262,10 @@ def expand_envelope(
     return ExpandedEnvelope(markets, tuple(reader.issues))
 
 
-def _market_of(reader: _Reader, raw_market: Mapping[str, Any]) -> tuple[Market, Side] | None:
+def stored_market(raw_market: Mapping[str, Any]) -> tuple[Market, Side] | None:
+    """The market and side an envelope market's prices are stored under, ``None`` for a market
+    no snapshot takes. ``h2h_lay`` is the lay side of the match odds: 1x2 when it quotes a draw,
+    else h2h."""
     key = raw_market.get("key")
     if key == ODDS_API_LAY_MARKET:
         draw = any(o.get("name") == DRAW_NAME for o in raw_market.get("outcomes") or [])
@@ -248,10 +273,17 @@ def _market_of(reader: _Reader, raw_market: Mapping[str, Any]) -> tuple[Market, 
     try:
         return Market(key), Side.BACK
     except ValueError:
-        reader.log_issue(
-            "unknown_market", f"{reader.source} market {key!r} is not stored", market=key
-        )
         return None
+
+
+def _market_of(reader: _Reader, raw_market: Mapping[str, Any]) -> tuple[Market, Side] | None:
+    read = stored_market(raw_market)
+    if read is None:
+        key = raw_market.get("key")
+        reader.log_issue(
+            RowIssueType.UNKNOWN_MARKET, f"{reader.source} market {key!r} is not stored", market=key
+        )
+    return read
 
 
 def _read_retail(reader: _Reader, entry: Mapping[str, Any], raw_key: str) -> None:
@@ -306,12 +338,12 @@ def _read_betfair(reader: _Reader, entry: Mapping[str, Any], raw_key: str) -> No
         book = reader.claim_book(market, raw_key)
         if book is None:
             continue
-        reader.meta[market] = {
-            "in_play": meta.get("inplay"),
-            "market_status": _market_status(reader, meta.get("market_status")),
-            "total_matched": _decimal(_finite(meta.get("total_matched"))),
-            "market_start_time": _datetime(meta.get("market_start_time")),
-        }
+        reader.meta[market] = MarketMeta(
+            in_play=meta.get("inplay"),
+            market_status=_market_status(reader, meta.get("market_status")),
+            total_matched=_decimal(_finite(meta.get("total_matched"))),
+            market_start_time=_datetime(meta.get("market_start_time")),
+        )
         for runner in meta.get("runners") or []:
             name = str(runner.get("runner_name") or "")
             if market is Market.ONE_X_TWO and name.strip().lower() in BETFAIR_DRAW_NAMES:
@@ -368,7 +400,7 @@ def _market_status(reader: _Reader, value: object) -> MarketStatus | None:
         return MarketStatus(str(value).lower())
     except ValueError:
         reader.log_issue(
-            "unknown_market_status",
+            RowIssueType.UNKNOWN_MARKET_STATUS,
             f"{reader.source} market status {value!r} is not stored",
             market_status=repr(value),
         )
@@ -409,17 +441,15 @@ def _decimal(value: float | None) -> Decimal | None:
 
 
 def market_envelope(raw_data: Mapping[str, Any], market: Market) -> dict[str, Any]:
-    """``raw_data`` with each book's markets cut to ``market``, dropping books left without one."""
-    keys = set(_raw_keys(market))
+    """``raw_data`` with each book's markets cut to those stored under ``market``
+    (``stored_market``), dropping books left without one."""
     books = []
     for entry in raw_data.get("bookmakers") or []:
-        kept = [m for m in entry.get("markets") or [] if m.get("key") in keys]
+        kept = [
+            m
+            for m in entry.get("markets") or []
+            if (read := stored_market(m)) is not None and read[0] is market
+        ]
         if kept:
             books.append({**entry, "markets": kept})
     return {**raw_data, "bookmakers": books}
-
-
-def _raw_keys(market: Market) -> Iterator[str]:
-    yield market.value
-    if market is Market.ONE_X_TWO:
-        yield ODDS_API_LAY_MARKET

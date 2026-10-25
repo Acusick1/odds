@@ -244,14 +244,30 @@ class TestListedStartMovesTheEvent:
         assert event.commence_time == kickoff + timedelta(minutes=30)
 
     @pytest.mark.asyncio
-    async def test_a_start_already_past_never_moves_the_event(self, pglite_async_session) -> None:
+    async def test_a_game_brought_forward_to_a_time_already_past_moves(
+        self, pglite_async_session
+    ) -> None:
         kickoff = (datetime.now(UTC) + timedelta(minutes=20)).replace(microsecond=0)
+        event = make_epl_event("odds_api_hex_1", kickoff)
+        pglite_async_session.add(event)
+        await pglite_async_session.flush()
+        brought_forward = kickoff - timedelta(minutes=40)
+
+        await resolve_event(pglite_async_session, epl_listing(commence_time=brought_forward))
+
+        assert event.commence_time == brought_forward
+
+    @pytest.mark.asyncio
+    async def test_an_in_play_start_after_the_stored_kick_off_never_moves(
+        self, pglite_async_session
+    ) -> None:
+        kickoff = (datetime.now(UTC) - timedelta(minutes=20)).replace(microsecond=0)
         event = make_epl_event("odds_api_hex_1", kickoff)
         pglite_async_session.add(event)
         await pglite_async_session.flush()
 
         await resolve_event(
-            pglite_async_session, epl_listing(commence_time=kickoff - timedelta(minutes=40))
+            pglite_async_session, epl_listing(commence_time=kickoff + timedelta(minutes=5))
         )
 
         assert event.commence_time == kickoff

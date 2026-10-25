@@ -108,9 +108,8 @@ async def resolve_event(session: AsyncSession, game: ListedGame) -> ResolvedEven
     ``LockOrderError``. Looks an MLB game up by ``gamePk``, then any game by the source's id;
     else matches the sport and teams within ±2 h (for MLB, only events holding no ``gamePk``);
     else creates the event. A second id from one source for the event, or an id another event
-    holds, is refused and logged rather than recorded. A listed start offers the event a
-    kick-off move (``move_kickoff``) only while it is in the future: a start already past is an
-    in-play or historical time, not a schedule.
+    holds, is refused and logged rather than recorded. The listed start is offered to
+    ``move_kickoff``, which decides whether the source may move the event.
 
     Raises:
         StaleListing: when no event matches and the game starts before
@@ -132,9 +131,38 @@ async def resolve_event(session: AsyncSession, game: ListedGame) -> ResolvedEven
     if game.mlb_game is not None:
         await _record_game_pk(session, event, game.mlb_game.game_pk)
         await move_kickoff(session, event, Source.MLB_STATS_API, game.mlb_game.start, now=now)
-    elif ensure_utc(game.commence_time) > now:
+    else:
         await move_kickoff(session, event, game.source, game.commence_time, now=now)
     return resolved
+
+
+async def resolve_unscheduled_mlb_event(
+    session: AsyncSession,
+    source: Source,
+    home_team: str,
+    away_team: str,
+    start: datetime,
+    game_number: int | None,
+    external_id: str | None,
+) -> ResolvedEvent | None:
+    """The MLB event of a game listed while the MLB schedule is unavailable, recording the
+    source's id on it under the fixture lock; ``None`` when it matches none. Never creates.
+
+    Only the one event of the pair within ±2 h matches, and only for a row with no doubleheader
+    game number: without the schedule either game could be another. Flushes; the caller commits.
+    """
+    home = normalize_team_name(home_team)
+    away = normalize_team_name(away_team)
+    await _lock(session, event_lock_key(MLB_SPORT_KEY, home, away))
+    if game_number is not None:
+        return None
+    candidates = await find_match_candidates(session, home, away, start, MLB_SPORT_KEY)
+    if len(candidates) != 1:
+        return None
+    event = candidates[0]
+    if external_id is not None:
+        await _record_external_id(session, event, source, external_id)
+    return ResolvedEvent(event, Resolution.MATCHED)
 
 
 def _lock_key(game: ListedGame) -> int:

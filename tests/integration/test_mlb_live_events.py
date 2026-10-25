@@ -10,7 +10,8 @@ import httpx
 import pytest
 from odds_core.config import get_settings
 from odds_core.mlb_data_models import MlbProbablePitchers
-from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.models import Event, EventExternalId, EventStatus, OddsSnapshot
+from odds_core.vocabulary import Source
 from odds_lambda import live_events
 from odds_lambda.betfair.client import BetfairBook, BetfairRunner
 from odds_lambda.betfair.constants import SPORT_CONFIG
@@ -732,6 +733,21 @@ class TestScheduleOutage:
             "game_one",
             "game_two",
         ]
+
+    async def test_an_attached_game_records_the_sources_id(
+        self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
+    ) -> None:
+        job_session.add(_null_event("game_one", AFTERNOON, mlb_game_pk=901))
+        await job_session.commit()
+        mlb_schedule.down = True
+        match = _op_match(CUBS, CARDINALS, AFTERNOON)
+        match.raw_data["oddsportal_event_id"] = "Op12AbCd"
+
+        stats = await _ingest_op(match)
+
+        assert (stats.events_matched, stats.events_created) == (1, 0)
+        ids = (await job_session.execute(select(EventExternalId))).scalars().all()
+        assert [(i.source, i.external_id) for i in ids] == [(Source.ODDSPORTAL, "Op12AbCd")]
 
     async def test_two_events_in_the_window_attach_nothing(
         self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]

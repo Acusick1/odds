@@ -31,7 +31,7 @@ Odds are stored twice ([How odds are stored](odds-storage-model.md)). `odds_core
 - `api_request_id`: free-text provenance tag, see [Provenance](#provenance).
 - Indexes: single-column `event_id`, `snapshot_time`, `fetch_tier`, `payload_id`; composite `ix_event_snapshot_time (event_id, snapshot_time)` and `ix_event_tier (event_id, fetch_tier)`.
 
-The columns of the redesigned snapshot are nullable. Snapshots the OddsPortal live and Betfair jobs store have them filled ([Writing the new shape](price-tables.md#writing-the-new-shape)); every other snapshot holds NULL in them:
+The columns of the redesigned snapshot are nullable. Snapshots the OddsPortal live and Betfair jobs store have them filled ([Writing price rows](price-tables.md#writing-price-rows)); every other snapshot holds NULL in them:
 
 - `source` (`odds_core.vocabulary.PRICE_SOURCES`), `market` (`odds_core.vocabulary.Market`) and `time_basis` (`odds_core.vocabulary.TimeBasis`), each a CHECKed closed set ([closed sets](price-tables.md#closed-sets)).
 - Market metadata: `in_play`, `market_status` (`odds_core.vocabulary.MarketStatus`, a closed set), `total_matched` and `market_start_time`.

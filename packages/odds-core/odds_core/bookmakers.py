@@ -68,12 +68,22 @@ def canonical_bookmaker_key(key: str, kind: SnapshotKind) -> str:
     return BOOKMAKER_ALIASES.get(key, key)
 
 
+# Odds API keys that differ from the pipeline's bookmaker keys, rewritten in its responses as
+# they are fetched. Kept apart from the read-time maps above, which candidate rules hash.
+ODDS_API_BOOKMAKER_KEY_MAP: dict[str, str] = {
+    "betfair_ex_uk": "betfair_exchange",
+    "betfair_ex_eu": "betfair_exchange",
+    "ladbrokes_uk": "ladbrokes",
+    "betfred_uk": "betfred",
+    "sport888": "888sport",
+}
+
 # Per source, every key a source names a book by mapped to the book's canonical key; price rows
-# store only canonical keys. The Odds API names Betfair's exchange by region.
+# store only canonical keys.
 BOOKMAKER_ALIASES_BY_SOURCE: Mapping[Source, Mapping[str, str]] = MappingProxyType(
     {
         source: MappingProxyType(
-            {**BOOKMAKER_ALIASES, **ODDS_API_KEY_ALIASES, "betfair_ex_eu": "betfair_exchange"}
+            {**BOOKMAKER_ALIASES, **ODDS_API_BOOKMAKER_KEY_MAP, **ODDS_API_KEY_ALIASES}
             if source is Source.ODDS_API
             else dict(BOOKMAKER_ALIASES)
         )

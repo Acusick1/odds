@@ -8,15 +8,15 @@ found by, or created with, its ``gamePk``. Every game then goes through the even
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+from typing import Any
 
 import structlog
 from odds_core.alerts import send_recorded_alert
 from odds_core.config import get_settings
 from odds_core.event_ids import LIVE_EVENT_ID_PREFIX
-from odds_core.models import Event
 from odds_core.team import normalize_team_name, team_abbrev
 from odds_core.vocabulary import Source
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,14 +33,17 @@ from odds_lambda.mlb_game_resolver import (
     resolve_batch,
 )
 from odds_lambda.mlb_stats_fetcher import MlbStatsFetcher
-from odds_lambda.storage.event_merge import find_match_candidates, find_match_id
+from odds_lambda.storage.event_merge import find_match_id
 from odds_lambda.storage.event_resolver import (
     ListedGame,
     Resolution,
     ResolvedEvent,
     event_lock_key,
     resolve_event,
+    resolve_unscheduled_mlb_event,
 )
+from odds_lambda.storage.shaped_snapshots import SnapshotShape
+from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
 
@@ -87,6 +90,28 @@ class DroppedGame:
             f"{self.game.away_team} @ {self.game.home_team}{label} "
             f"{self.game.start:%Y-%m-%d %H:%M}Z ({why})"
         )
+
+
+@dataclass(frozen=True)
+class LiveListing:
+    """One market of one game as a live run read it: the envelope it stores."""
+
+    game: GameRow
+    external_id: str | None
+    raw_data: dict[str, Any]
+    snapshot_time: datetime
+    label: str
+
+
+@dataclass
+class ListingWrites:
+    """What storing a run's listings did; ``dropped`` holds each dropped game once."""
+
+    events_created: int = 0
+    events_matched: int = 0
+    snapshots_stored: int = 0
+    dropped: dict[GameRow, DroppedGame] = field(default_factory=dict)
+    errors: list[str] = field(default_factory=list)
 
 
 def count_dropped(dropped: Iterable[DroppedGame], reason: SkipReason) -> int:
@@ -169,10 +194,16 @@ class LiveEventFinder:
         start = game.start
         if self.sport_key == MLB_SPORT_KEY:
             if self.resolutions is None:
-                event = await find_unscheduled_mlb_event(session, game)
-                if event is None:
-                    return DroppedGame(game, SkipReason.SCHEDULE_UNAVAILABLE)
-                return ResolvedEvent(event, Resolution.MATCHED)
+                found = await resolve_unscheduled_mlb_event(
+                    session,
+                    source,
+                    game.home_team,
+                    game.away_team,
+                    game.start,
+                    game.game_number,
+                    external_id,
+                )
+                return found or DroppedGame(game, SkipReason.SCHEDULE_UNAVAILABLE)
             resolution = self.resolutions[game]
             if isinstance(resolution, UnresolvedGame):
                 return DroppedGame(game, SkipReason.UNRESOLVED, resolution.reason)
@@ -196,21 +227,51 @@ class LiveEventFinder:
             ),
         )
 
+    async def store_listings(
+        self,
+        session: AsyncSession,
+        listings: Sequence[LiveListing],
+        shape: SnapshotShape,
+        api_request_id: str,
+        *,
+        now: datetime | None = None,
+    ) -> ListingWrites:
+        """Resolve each listing's game and store its snapshot, all in the caller's transaction.
 
-async def find_unscheduled_mlb_event(session: AsyncSession, game: GameRow) -> Event | None:
-    """The MLB event of a listed game while the MLB schedule is unavailable: the one event of the
-    pair within ±2 h. A doubleheader game (``game_number`` set) or a window holding several
-    events matches nothing, since without the schedule it could be another game."""
-    if game.game_number is not None:
-        return None
-    candidates = await find_match_candidates(
-        session,
-        normalize_team_name(game.home_team),
-        normalize_team_name(game.away_team),
-        game.start,
-        MLB_SPORT_KEY,
-    )
-    return candidates[0] if len(candidates) == 1 else None
+        Listings go in fixture-lock order (``lock_order``), so one transaction never asks for a
+        lock below one it holds. Each runs in its own savepoint: a failing listing is rolled
+        back and recorded in ``errors``, and the run's other writes stand. Does not commit.
+        """
+        writer = OddsWriter(session)
+        writes = ListingWrites()
+        for listing in sorted(listings, key=lambda item: lock_order(self.sport_key, item.game)):
+            try:
+                async with session.begin_nested():
+                    found = await self.resolve(
+                        session, listing.game, shape.source, listing.external_id, now=now
+                    )
+                    if isinstance(found, DroppedGame):
+                        writes.dropped[found.game] = found
+                        continue
+                    if found.resolution is Resolution.CREATED:
+                        writes.events_created += 1
+                    else:
+                        writes.events_matched += 1
+                    await writer.store_odds_snapshot(
+                        event_id=found.event.id,
+                        raw_data=listing.raw_data,
+                        snapshot_time=listing.snapshot_time,
+                        shape=shape,
+                        api_request_id=api_request_id,
+                    )
+                    writes.snapshots_stored += 1
+            except Exception as e:
+                msg = f"{listing.label}: {type(e).__name__}: {e}"
+                writes.errors.append(msg)
+                logger.error(
+                    "listing_ingestion_failed", source=shape.source.value, error=msg, exc_info=True
+                )
+        return writes
 
 
 async def alert_dropped_games(job_name: str, dropped: Sequence[DroppedGame]) -> bool:

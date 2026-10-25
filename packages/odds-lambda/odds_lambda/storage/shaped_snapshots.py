@@ -1,4 +1,4 @@
-"""Store an envelope snapshot with its new-shape columns, the other markets' snapshots and prices."""
+"""Store an envelope snapshot with its source, market and price rows, one snapshot per market."""
 
 from __future__ import annotations
 
@@ -16,17 +16,28 @@ from odds_lambda.storage.snapshot_store import SnapshotWrite, SnapshotWriteOutco
 
 
 @dataclass(frozen=True)
+class SnapshotShape:
+    """What a writer knows about a snapshot beyond its envelope: its provider, what its time
+    means, and the archived fetch response it came in."""
+
+    source: Source
+    time_basis: TimeBasis
+    payload_id: int | None
+
+
+@dataclass(frozen=True)
 class ShapedWrite:
-    """``envelope`` is the write of the snapshot holding the whole envelope, ``None`` when the
-    envelope quoted no market and was added without a key; ``others`` are its other markets."""
+    """``first`` is the write of the snapshot the writer built, ``None`` when the envelope
+    quoted no market and the snapshot was added without a key; ``others`` are its other
+    markets' snapshots."""
 
     snapshot: OddsSnapshot
-    envelope: SnapshotWrite | None
+    first: SnapshotWrite | None
     others: tuple[SnapshotWrite, ...]
 
     @property
     def inserted(self) -> bool:
-        return self.envelope is None or self.envelope.outcome is SnapshotWriteOutcome.INSERTED
+        return self.first is None or self.first.outcome is SnapshotWriteOutcome.INSERTED
 
 
 async def store_payload(session: AsyncSession, payload: dict[str, Any] | list[Any]) -> int:
@@ -39,63 +50,67 @@ async def store_payload(session: AsyncSession, payload: dict[str, Any] | list[An
 
 
 async def store_shaped_snapshot(
-    session: AsyncSession,
-    snapshot: OddsSnapshot,
-    event: Event,
-    *,
-    source: Source,
-    time_basis: TimeBasis,
-    payload_id: int | None,
+    session: AsyncSession, snapshot: OddsSnapshot, event: Event, shape: SnapshotShape
 ) -> ShapedWrite:
-    """Store ``snapshot`` (its ``raw_data`` envelope and old-shape columns already set) under
-    the key of the envelope's first market, filling its new-shape columns and price rows.
+    """Store ``snapshot`` (its ``raw_data`` envelope and the envelope columns already set) under
+    the key of the envelope's first market, filling its source, market, time basis, market
+    metadata, payload and price rows.
 
-    Each further market of the envelope (the Odds API's spreads and totals) becomes its own
-    snapshot, whose ``raw_data`` holds only that market. A snapshot whose key is already stored
-    is not written (``odds_lambda.storage.snapshot_store.store_snapshot``). An envelope that quotes
-    no market is added as it is, with no market and no prices. What the envelope held but no row
-    could take is logged to ``data_quality_logs``. Flushes; the caller commits.
+    An envelope quoting several markets (the Odds API's 1x2, spreads and totals) becomes one
+    snapshot per market, each with ``raw_data`` cut to its own market; ``snapshot`` takes the
+    first. A snapshot whose key is already stored is not written
+    (``odds_lambda.storage.snapshot_store.store_snapshot``). An envelope that quotes no market is
+    added as it is, with no market and no prices. What the envelope held but no row could take is
+    logged to ``data_quality_logs``. Flushes; the caller commits.
     """
-    expanded = expand_envelope(snapshot.raw_data, source, event.home_team, event.away_team)
+    expanded = expand_envelope(snapshot.raw_data, shape.source, event.home_team, event.away_team)
     for issue in expanded.issues:
-        record_issue(session, event.id, issue.issue_type, issue.description, issue.context)
-    snapshot.source = source
-    snapshot.time_basis = time_basis
-    snapshot.payload_id = payload_id
+        record_issue(session, event.id, issue.issue_type.value, issue.description, issue.context)
     if not expanded.markets:
+        _set_shape(snapshot, shape)
         session.add(snapshot)
         await session.flush()
         return ShapedWrite(snapshot, None, ())
 
-    first, *rest = expanded.markets
-    _set_market(snapshot, first)
-    envelope = await store_snapshot(session, snapshot, _prices(first.prices))
-    others: list[SnapshotWrite] = []
-    for market in rest:
-        raw_data = market_envelope(snapshot.raw_data, market.market)
-        other = OddsSnapshot(
-            event_id=snapshot.event_id,
-            snapshot_time=snapshot.snapshot_time,
-            raw_data=raw_data,
-            bookmaker_count=len(raw_data["bookmakers"]),
-            api_request_id=snapshot.api_request_id,
-            fetch_tier=snapshot.fetch_tier,
-            hours_until_commence=snapshot.hours_until_commence,
-            source=source,
-            time_basis=time_basis,
-            payload_id=payload_id,
-        )
-        _set_market(other, market)
-        others.append(await store_snapshot(session, other, _prices(market.prices)))
-    return ShapedWrite(envelope.snapshot, envelope, tuple(others))
+    envelope = snapshot.raw_data
+    split = len(expanded.markets) > 1
+    writes: list[SnapshotWrite] = []
+    for i, market in enumerate(expanded.markets):
+        target = snapshot if i == 0 else _sibling(snapshot)
+        if split:
+            target.raw_data = market_envelope(envelope, market.market)
+            target.bookmaker_count = len(target.raw_data["bookmakers"])
+        _set_shape(target, shape)
+        _set_market(target, market)
+        writes.append(await store_snapshot(session, target, _prices(market.prices)))
+    first, *others = writes
+    return ShapedWrite(first.snapshot, first, tuple(others))
+
+
+def _sibling(snapshot: OddsSnapshot) -> OddsSnapshot:
+    return OddsSnapshot(
+        event_id=snapshot.event_id,
+        snapshot_time=snapshot.snapshot_time,
+        raw_data={},
+        bookmaker_count=0,
+        api_request_id=snapshot.api_request_id,
+        fetch_tier=snapshot.fetch_tier,
+        hours_until_commence=snapshot.hours_until_commence,
+    )
+
+
+def _set_shape(snapshot: OddsSnapshot, shape: SnapshotShape) -> None:
+    snapshot.source = shape.source
+    snapshot.time_basis = shape.time_basis
+    snapshot.payload_id = shape.payload_id
 
 
 def _set_market(snapshot: OddsSnapshot, market: MarketSnapshot) -> None:
     snapshot.market = market.market
-    snapshot.in_play = market.in_play
-    snapshot.market_status = market.market_status
-    snapshot.total_matched = market.total_matched
-    snapshot.market_start_time = market.market_start_time
+    snapshot.in_play = market.meta.in_play
+    snapshot.market_status = market.meta.market_status
+    snapshot.total_matched = market.meta.total_matched
+    snapshot.market_start_time = market.meta.market_start_time
 
 
 def _prices(specs: Sequence[PriceSpec]) -> list[Price]:

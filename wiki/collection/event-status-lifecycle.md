@@ -54,7 +54,7 @@ A result is the strongest evidence, so every status but FINAL and UNMATCHED can 
 | → FINAL | `scripts/ingest_football_data_uk.py` | an existing event with no scores, whatever its status, gets FDUK's full-time score and FINAL ([historical-ingest-scripts](historical-ingest-scripts.md)) |
 | → FINAL | `odds fetch scores` (`odds_cli.commands.fetch.fetch_scores`), `odds backfill scores` | manual; `backfill scores` sets FINAL from NBA game logs ([odds-api-backfill](odds-api-backfill.md)) |
 
-Re-discovery changes a status only through a kick-off move, back to SCHEDULED: a POSTPONED event that moves, and a LIVE event that moves to a start in the future. Every other status, and every score and `completed_at`, is left alone: `odds_lambda.storage.writers.OddsWriter.bulk_upsert_events` ([events](../storage/events.md#upsert-verbs)).
+Re-discovery changes a status only through a kick-off move by `odds_lambda.storage.event_kickoff.move_kickoff`, back to SCHEDULED: a POSTPONED event that moves, and a LIVE event that moves to a start in the future. Every other status, and every score and `completed_at`, is left alone: `odds_lambda.storage.writers.OddsWriter.bulk_upsert_events` ([events](../storage/events.md#upsert-verbs)).
 
 Two kinds of orphan have no source signal and stay SCHEDULED or LIVE: a fixture whose kick-off moved by more than the matching window leaves its old `op_live_` event beside a new one (`op_live_ASTVIL_LIV_2026-05-17T1130` in development), and an EPL match that neither OddsPortal nor ESPN reports as cancelled or postponed. They age out of the status and scores windows ([results-jobs](results-jobs.md)). ESPN's "Canceled" description and OddsPortal's postponed status id have not been observed in collected data, so neither is mapped.
 
