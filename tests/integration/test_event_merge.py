@@ -9,7 +9,7 @@ from odds_cli.commands import events as events_cli
 from odds_core.api_models import EventsResponse
 from odds_core.match_brief_models import MatchBrief
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot, utc_now
-from odds_core.paper_trade_models import PaperTrade
+from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from odds_lambda.event_sync import EventSyncService
 from odds_lambda.oddsportal_common import find_existing_event
 from odds_lambda.storage.event_merge import EventMerger
@@ -48,6 +48,70 @@ def _session_maker(session):
 
 async def _stored_event_ids(session) -> set[str]:
     return set((await session.execute(select(Event.id))).scalars().all())
+
+
+def _decision(event_id: str, candidate: str) -> CandidateDecision:
+    return CandidateDecision(
+        candidate_name=candidate,
+        candidate_version=1,
+        event_id=event_id,
+        decision_time=TWIN_KICKOFF,
+        kickoff_at_decision=TWIN_KICKOFF,
+        known_at=TWIN_KICKOFF,
+        bets_placed=1,
+    )
+
+
+def _trade(event_id: str, candidate: str, decision_id: int | None) -> PaperTrade:
+    return PaperTrade(
+        event_id=event_id,
+        market="1x2",
+        selection="home",
+        bookmaker="bet365",
+        price_decimal=2.0,
+        stake=1.0,
+        candidate_name=candidate,
+        candidate_version=1,
+        decision_id=decision_id,
+    )
+
+
+class TestMergeDecidedTwins:
+    @pytest.mark.asyncio
+    async def test_kept_decision_wins_and_other_decisions_move(self, pglite_async_session) -> None:
+        session = pglite_async_session
+        keep = make_epl_event(API_EVENT_ID)
+        twin = make_epl_event(TWIN_EVENT_ID)
+        session.add_all([keep, twin])
+        await session.flush()
+        decisions = {
+            (event_id, name): _decision(event_id, name)
+            for event_id in (API_EVENT_ID, TWIN_EVENT_ID)
+            for name in ("shared", "only-twin")
+            if not (event_id == API_EVENT_ID and name == "only-twin")
+        }
+        session.add_all(decisions.values())
+        await session.flush()
+        for (event_id, name), decision in decisions.items():
+            session.add(_trade(event_id, name, decision.id))
+        await session.commit()
+
+        await EventMerger(session).merge(keep, [twin])
+        await session.commit()
+        session.expire_all()
+
+        stored = (await session.execute(select(CandidateDecision))).scalars().all()
+        assert {(d.event_id, d.candidate_name) for d in stored} == {
+            (API_EVENT_ID, "shared"),
+            (API_EVENT_ID, "only-twin"),
+        }
+        trades = (await session.execute(select(PaperTrade))).scalars().all()
+        assert {(t.event_id, t.candidate_name) for t in trades} == {
+            (API_EVENT_ID, "shared"),
+            (API_EVENT_ID, "only-twin"),
+        }
+        assert len(trades) == 2
+        assert await session.get(Event, TWIN_EVENT_ID) is None
 
 
 class TestAdoptTwins:

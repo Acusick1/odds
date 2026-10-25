@@ -8,8 +8,9 @@ from datetime import datetime, timedelta
 import structlog
 from odds_core.event_source import EventSource, canonical_event_id
 from odds_core.models import Event, OddsSnapshot
+from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from odds_core.time import ensure_utc
-from sqlalchemy import and_, select, text
+from sqlalchemy import and_, delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.tier_utils import calculate_hours_until_commence, calculate_tier_from_timestamps
@@ -240,6 +241,7 @@ class EventMerger:
         rows_moved: dict[str, int] = {}
         for duplicate in duplicates:
             await self._rebase_snapshot_timing(duplicate, keep)
+            await self._drop_clashing_decisions(duplicate, keep)
             for table, count in (
                 await self._repoint_event_references(duplicate.id, keep.id)
             ).items():
@@ -264,6 +266,49 @@ class EventMerger:
         if ensure_utc(duplicate.commence_time) == ensure_utc(keep.commence_time):
             return
         await retime_snapshots(self.session, duplicate.id, keep.commence_time)
+
+    async def _drop_clashing_decisions(self, duplicate: Event, keep: Event) -> None:
+        """Delete the duplicate's decisions, and their trades, that the kept event has too.
+
+        A candidate version decides an event once (``uq_candidate_decisions_candidate_event``),
+        so a decision the kept event already holds wins. The other decisions and trades move
+        with the foreign keys: a trade only clashes with the kept event's trades through a
+        decision of the same candidate version, and those are the ones deleted here.
+        """
+        kept = {
+            (name, version)
+            for name, version in (
+                await self.session.execute(
+                    select(
+                        CandidateDecision.candidate_name, CandidateDecision.candidate_version
+                    ).where(CandidateDecision.event_id == keep.id)
+                )
+            ).all()
+        }
+        clashing = [
+            decision.id
+            for decision in (
+                await self.session.execute(
+                    select(CandidateDecision).where(CandidateDecision.event_id == duplicate.id)
+                )
+            ).scalars()
+            if (decision.candidate_name, decision.candidate_version) in kept
+        ]
+        if not clashing:
+            return
+        trades = await self.session.execute(
+            delete(PaperTrade).where(PaperTrade.decision_id.in_(clashing))  # type: ignore[union-attr]
+        )
+        await self.session.execute(
+            delete(CandidateDecision).where(CandidateDecision.id.in_(clashing))  # type: ignore[union-attr]
+        )
+        logger.warning(
+            "merge_dropped_clashing_decisions",
+            kept_id=keep.id,
+            duplicate_id=duplicate.id,
+            decisions=len(clashing),
+            trades=trades.rowcount,
+        )
 
     @staticmethod
     def _carry_result(keep: Event, duplicate: Event) -> None:

@@ -9,39 +9,43 @@ mentions:
   - odds_lambda.paper_trading.place_trade
   - odds_lambda.paper_trading.settle_trades
   - odds_core.alerts.job_alert_context
+  - odds_lambda.scheduling.jobs._CANDIDATE_JOBS
+  - odds_lambda.storage.event_merge.find_match_id
 status: stable
 ---
 
 # The run-candidates job
 
-`odds_lambda.jobs.run_candidates.main` places the paper trades of every active [mechanical candidate](candidate-registry.md) of one sport. It runs per sport as `run-candidates-epl` and `run-candidates-mlb`, self-schedules ([self-scheduling](../scheduling/self-scheduling.md)) and is bootstrapped by default ([where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs)). Smoke checks skip it, because it places bets (`odds_lambda.scheduling.jobs._SMOKE_UNSAFE_JOBS`).
+`odds_lambda.jobs.run_candidates.main` places the paper trades of every active [mechanical candidate](candidate-registry.md) of one sport. It runs per sport as `run-candidates-epl` and `run-candidates-mlb`, self-schedules ([self-scheduling](../scheduling/self-scheduling.md)) and is bootstrapped by default ([where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs)). Smoke checks skip it, because it places bets, unless `--include-candidates` (`odds_lambda.scheduling.jobs._CANDIDATE_JOBS`).
 
 ## One run
 
 At its run time `now`:
 
-1. **Book the next run** ([next run](#next-run)), before any work, so a failure later leaves the chain intact.
-2. **Settle.** `odds_lambda.paper_trading.settle_trades` runs and commits. Nothing else settles paper trades on a schedule ([settlement](../agent/paper-trading.md#settlement)).
-3. **Select candidates.** `odds_lambda.jobs.run_candidates.runnable_candidates` keeps the registry's mechanical candidates whose sport is the job's, whose status is active and whose `start_date` is not after today (UTC), and that pass `odds_lambda.candidate_rules.validate_candidate_rules` one at a time. An invalid candidate (bad params, an `odds_core.candidates.MechanicalCandidate.rule_sha256` that does not match the rule's code, an unknown rule or an unsupported sport) is skipped and raises a `candidate_invalid:<name>` warning, sent at most once per `odds_core.alerts.stale_reminder_interval`; the other candidates still run. A registry file that cannot be read skips every candidate and raises `candidate_invalid:registry`.
-4. **Take the due decisions** ([decisions](#decisions)).
-5. The run raises when a decision failed, so `odds_core.alerts.job_alert_context` sends its failure alert. A clean run writes the job's heartbeat.
+1. **Select candidates.** `odds_lambda.jobs.run_candidates.runnable_candidates` keeps the registry's mechanical candidates whose sport is the job's, whose status is active and whose `start_date` is not after today (UTC), and that pass `odds_lambda.candidate_rules.validate_candidate_rules` one at a time. An invalid candidate (bad params, an `odds_core.candidates.MechanicalCandidate.rule_sha256` that does not match the rule's code, an unknown rule or an unsupported sport) is skipped and raises a `candidate_invalid:<name>` warning, sent at most once per `odds_core.alerts.stale_reminder_interval`; the other candidates still run. A registry file that cannot be read skips every candidate and raises `candidate_invalid:registry`.
+2. **Select events** ([decisions](#decisions)).
+3. **Book the next run** ([next run](#next-run)), before any decision, so a failure later leaves the chain intact. A failure in steps 1 to 3 (a database error, a failed booking) raises before anything is booked, and the scheduler re-books the chain ([self-scheduling](../scheduling/local-scheduler.md#scheduling-primitives)).
+4. **Take the due decisions** ([decisions](#decisions)) inside `odds_core.alerts.job_alert_context`.
+5. **Settle.** `odds_lambda.paper_trading.settle_trades` runs in a session of its own and commits, after the decisions so a settlement failure cannot affect them. A failure is logged as `candidate_settlement_failed` and alerted as `candidate_settlement_failed:<sport>` (critical, at most once per `odds_core.alerts.stale_reminder_interval`), and the run goes on. Nothing else settles paper trades on a schedule ([settlement](../agent/paper-trading.md#settlement)).
+6. **Retry.** When a decision failed, the next run is re-booked at the earlier of the booked time and `odds_lambda.jobs.run_candidates.RETRY_DELAY` (2 minutes) after `now`, and the run raises so `odds_core.alerts.job_alert_context` sends its failure alert. A clean run writes the job's heartbeat.
 
 ## Decisions
 
-The events considered are those of the sport with status `scheduled` and a kick-off after `now` (`odds_lambda.jobs.run_candidates.upcoming_events`). For each candidate and event the decision time is `odds_lambda.candidate_rules.rules.decision_time` of the event's kick-off and the candidate's params. A decision is due when that time is at or before `now` and the candidate version has no `odds_core.paper_trade_models.CandidateDecision` row for the event. Each due decision commits on its own:
+`odds_lambda.jobs.run_candidates.candidate_events` selects the events of the sport that are scheduled with a kick-off after `now`, or whose kick-off is at most `odds_lambda.jobs.run_candidates.MISSED_LOOKBACK` (7 days) before `now`. Twins of one match ([event merge](../storage/event-merge.md#canonical-event)) are collapsed to the canonical event, found with `odds_lambda.storage.event_merge.find_match_id`, so a match is decided once whichever twin was selected. For each candidate and event the decision time is `odds_lambda.candidate_rules.rules.decision_time` of the event's kick-off and the candidate's params. A decision is due when that time is at or before `now` and not before the candidate's `start_date`, and the candidate version has no `odds_core.paper_trade_models.CandidateDecision` row for the event. Each due decision commits on its own:
 
-- **On time.** When `now` is at most `odds_lambda.jobs.run_candidates.MAX_LATENESS` (10 minutes) after the decision time, `odds_lambda.candidate_rules.load_market_state` builds the state at the decision time with `known_at=now`, so only snapshots stored by the run are visible. The rule's bets are placed with `odds_lambda.paper_trading.place_trade`: flat stake, no bankroll, the candidate's name and version, and the decision's id.
-- **Late.** Beyond `odds_lambda.jobs.run_candidates.MAX_LATENESS` nothing is placed. The decision is recorded as missed and logged as `candidate_decision_missed` (a warning with the candidate, event and decision time). Recording it stops later runs from taking, or logging, it again.
+- **On time.** When `now` is at most `odds_lambda.jobs.run_candidates.MAX_LATENESS` (10 minutes) after the decision time and the event has not kicked off, `odds_lambda.candidate_rules.load_market_state` builds the state at the decision time with `known_at=now`, so only snapshots stored by the run are visible. The rule's bets are placed with `odds_lambda.paper_trading.place_trade`: flat stake, no bankroll, the candidate's name and version, and the decision's id.
+- **Missed.** Beyond `odds_lambda.jobs.run_candidates.MAX_LATENESS`, or once the event has kicked off, nothing is placed. The decision is recorded as missed and logged as `candidate_decision_missed` (a warning with the candidate, event and decision time). Recording it stops later runs from taking, or logging, it again, and an event that kicked off within `odds_lambda.jobs.run_candidates.MISSED_LOOKBACK` without a decision gets its missed record this way.
+- **Already decided.** A unique violation on the decision row means a concurrent run committed it first. The decision is rolled back and counted as already decided, with no failure and no alert. A unique violation on a trade of this decision, with no decision row behind it, is a failure.
 - **Failed.** A decision that raises (a rejected bet, a duplicate bet from one rule call) is rolled back whole, with no decision row, and logged as `candidate_decision_failed`. The run goes on with the other decisions and raises at the end. The next run retries it only while within `odds_lambda.jobs.run_candidates.MAX_LATENESS`.
 
 A decision whose rule returns no bet is recorded with zero bets, so it is not retaken. A kick-off that moves after the decision was taken does not reopen it.
 
 ### The decision record
 
-`odds_core.paper_trade_models.CandidateDecision` is table `candidate_decisions`, unique on candidate name, version and event. It holds the decision time and the kick-off the decision used, `known_at` (the run time), `bets_placed` and `missed`. A trade placed by the job references its decision through `odds_core.paper_trade_models.PaperTrade.decision_id`. A parity check replays the decision with the recorded kick-off and `known_at`, so a kick-off rescheduled afterwards does not change the replay's decision time.
+`odds_core.paper_trade_models.CandidateDecision` is table `candidate_decisions`, unique on candidate name, version and event. It holds the decision time and the kick-off the decision used, `known_at` (the run time), `bets_placed` and `missed`. A trade placed by the job references its decision through `odds_core.paper_trade_models.PaperTrade.decision_id`. A parity check replays the decision with the recorded kick-off and `known_at` (not the trade's `placed_at`), so a kick-off rescheduled afterwards does not change the replay's decision time.
 
 A unique index on a runner trade's candidate, version, event, selection and bookmaker, for trades with a decision, rejects a rule that returns the same bet twice. The agent's trades have no decision and may repeat a bet ([paper trading](../agent/paper-trading.md#candidate-fields)).
 
 ## Next run
 
-`odds_lambda.jobs.run_candidates.next_decision_wakeup` is the earliest decision time after `now` across the runnable candidates and the upcoming events, at most `odds_lambda.jobs.run_candidates.MAX_WAIT` (6 hours) after `now`. The cap picks up new fixtures and newly registered candidates. With no candidate or no fixture the next run is `odds_lambda.jobs.run_candidates.MAX_WAIT` away. The time is booked with `odds_lambda.scheduling.helpers.self_schedule` under the compound job name.
+`odds_lambda.jobs.run_candidates.next_decision_wakeup` is the earliest decision time after `now` across the runnable candidates and the selected events, at most `odds_lambda.jobs.run_candidates.MAX_WAIT` (30 minutes) after `now`. The cap picks up new fixtures and newly registered candidates. With no candidate or no fixture the next run is `odds_lambda.jobs.run_candidates.MAX_WAIT` away. The time is booked with `odds_lambda.scheduling.helpers.self_schedule` under the compound job name.

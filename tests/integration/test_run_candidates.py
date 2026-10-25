@@ -22,10 +22,10 @@ from odds_lambda.jobs import run_candidates
 from odds_lambda.jobs.run_candidates import (
     MAX_LATENESS,
     MAX_WAIT,
+    candidate_events,
     next_decision_wakeup,
     run_decisions,
     runnable_candidates,
-    upcoming_events,
 )
 from odds_lambda.paper_trading import get_portfolio_summary, place_trade, settle_trades
 from odds_lambda.scheduling.jobs import JobContext
@@ -88,8 +88,10 @@ def write_candidate(directory: Path, name: str = "cand", **fields: Any) -> None:
     (directory / f"{name}.yaml").write_text(yaml.safe_dump(data))
 
 
-async def add_event(session: Any, event_id: str, kickoff: datetime) -> None:
-    session.add(make_epl_event(event_id, kickoff))
+async def add_event(
+    session: Any, event_id: str, kickoff: datetime, away_team: str = "Chelsea"
+) -> None:
+    session.add(make_epl_event(event_id, kickoff, away_team=away_team))
     snapshot = make_tagged_snapshot(
         event_id,
         NOW - timedelta(hours=1),
@@ -103,7 +105,7 @@ async def add_event(session: Any, event_id: str, kickoff: datetime) -> None:
 
 async def run(session: Any, now: datetime = NOW) -> run_candidates.RunSummary:
     runnable = await runnable_candidates(EPL, now)
-    events = await upcoming_events(session, EPL, now)
+    events = await candidate_events(session, EPL, now)
     return await run_decisions(session, runnable, events, now)
 
 
@@ -166,7 +168,7 @@ class TestDecisions:
     async def test_rerun_places_nothing_new(self, pglite_async_session, registry) -> None:
         write_candidate(registry)
         await add_event(pglite_async_session, "e1", DUE)
-        await add_event(pglite_async_session, "e2", LATE)
+        await add_event(pglite_async_session, "e2", LATE, away_team="Spurs")
 
         await run(pglite_async_session)
         again = await run(pglite_async_session, NOW + timedelta(minutes=1))
@@ -195,13 +197,82 @@ class TestDecisions:
 
         assert await all_of(pglite_async_session, CandidateDecision) == []
 
-    async def test_started_event_is_skipped(self, pglite_async_session, registry) -> None:
+    async def test_started_event_is_recorded_as_missed(
+        self, pglite_async_session, registry
+    ) -> None:
         write_candidate(registry)
         await add_event(pglite_async_session, "e1", NOW - timedelta(minutes=5))
+        await add_event(pglite_async_session, "e2", NOW - timedelta(days=8))
 
-        await run(pglite_async_session)
+        summary = await run(pglite_async_session)
+
+        assert (summary.missed, summary.placed) == (1, 0)
+        [decision] = await all_of(pglite_async_session, CandidateDecision)
+        assert (decision.event_id, decision.missed, decision.bets_placed) == ("e1", True, 0)
+        assert await all_of(pglite_async_session, PaperTrade) == []
+
+    async def test_decision_time_before_the_start_date_is_not_decided(
+        self, pglite_async_session, registry
+    ) -> None:
+        write_candidate(registry, start_date=NOW.date().isoformat())
+        before_start = datetime.combine(NOW.date(), datetime.min.time(), tzinfo=UTC)
+        await add_event(pglite_async_session, "e1", before_start + timedelta(minutes=30))
+
+        await run(pglite_async_session, before_start + timedelta(hours=2))
 
         assert await all_of(pglite_async_session, CandidateDecision) == []
+
+    async def test_twins_are_decided_once_on_the_canonical_event(
+        self, pglite_async_session, registry
+    ) -> None:
+        write_candidate(registry)
+        await add_event(pglite_async_session, "op_live_e1", DUE)
+        await add_event(pglite_async_session, "api1", DUE - timedelta(minutes=5))
+        for event_id in ("op_live_e1", "api1"):
+            pglite_async_session.add(
+                make_tagged_snapshot(
+                    event_id,
+                    NOW - timedelta(minutes=30),
+                    [three_way_bookmaker("bet365", (2.0, 3.4, 4.0))],
+                    "oddsportal_live",
+                )
+            )
+        await pglite_async_session.commit()
+
+        summary = await run(pglite_async_session)
+
+        assert summary.placed == 1
+        [decision] = await all_of(pglite_async_session, CandidateDecision)
+        assert decision.event_id == "api1"
+
+    async def test_a_decision_committed_by_a_concurrent_run_is_not_a_failure(
+        self, pglite_async_session, registry, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        write_candidate(registry)
+        await add_event(pglite_async_session, "e1", DUE)
+        real_decide = run_candidates._decide
+
+        async def racing(session: Any, item: Any, event: Any, now: datetime) -> Any:
+            # The other run's decision is committed between our check and our insert.
+            session.add(
+                CandidateDecision(
+                    candidate_name="cand",
+                    candidate_version=1,
+                    event_id="e1",
+                    decision_time=DUE,
+                    kickoff_at_decision=DUE,
+                    known_at=now,
+                )
+            )
+            await session.commit()
+            return await real_decide(session, item, event, now)
+
+        monkeypatch.setattr(run_candidates, "_decide", racing)
+
+        summary = await run(pglite_async_session)
+
+        assert (summary.failed, summary.already_decided, summary.placed) == (0, 1, 0)
+        assert len(await all_of(pglite_async_session, CandidateDecision)) == 1
 
     async def test_snapshots_are_loaded_as_known_at_run_time(
         self, pglite_async_session, registry, monkeypatch: pytest.MonkeyPatch
@@ -285,16 +356,16 @@ def _runnable(minutes: int) -> Any:
 
 class TestNextRunTime:
     def test_is_the_earliest_future_decision_time(self) -> None:
-        events = [_event(NOW + timedelta(hours=5)), _event(NOW + timedelta(hours=3))]
+        events = [_event(NOW + timedelta(minutes=200)), _event(NOW + timedelta(minutes=80))]
         runnable = [_runnable(60), _runnable(30)]
 
-        # 3h kick-off minus 60 minutes
-        assert next_decision_wakeup(runnable, events, NOW) == NOW + timedelta(hours=2)
+        # 80 minutes to the nearer kick-off, minus 60 minutes
+        assert next_decision_wakeup(runnable, events, NOW) == NOW + timedelta(minutes=20)
 
     def test_past_decision_times_do_not_count(self) -> None:
-        events = [_event(NOW + timedelta(minutes=30)), _event(NOW + timedelta(hours=4))]
+        events = [_event(NOW + timedelta(minutes=30)), _event(NOW + timedelta(minutes=80))]
 
-        assert next_decision_wakeup([_runnable(60)], events, NOW) == NOW + timedelta(hours=3)
+        assert next_decision_wakeup([_runnable(60)], events, NOW) == NOW + timedelta(minutes=20)
 
     def test_is_capped(self) -> None:
         events = [_event(NOW + timedelta(days=2))]
@@ -333,7 +404,7 @@ class TestMain:
 
         monkeypatch.setattr(run_candidates, "async_session_maker", session_maker)
         monkeypatch.setattr(run_candidates, "runnable_candidates", AsyncMock(return_value=[]))
-        monkeypatch.setattr(run_candidates, "upcoming_events", AsyncMock(return_value=[]))
+        monkeypatch.setattr(run_candidates, "candidate_events", AsyncMock(return_value=[]))
         monkeypatch.setattr(run_candidates, "self_schedule", schedule)
         monkeypatch.setattr(run_candidates, "settle_trades", settle)
         monkeypatch.setattr(run_candidates, "run_decisions", decide)
@@ -341,12 +412,38 @@ class TestMain:
 
         await run_candidates.main(JobContext(sport=EPL))
 
-        assert calls == ["schedule", "settle", "decide"]
+        assert calls == ["schedule", "decide", "settle"]
         kwargs = schedule.await_args.kwargs
         assert kwargs["job_name"] == "run-candidates-epl"
         assert kwargs["sport"] == EPL
 
-    async def test_a_failed_decision_fails_the_run(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_a_failed_decision_rebooks_soon_and_fails_the_run(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        schedule = self._patch(monkeypatch, run_candidates.RunSummary(failed=1))
+
+        with pytest.raises(RuntimeError, match="1 candidate decision"):
+            await run_candidates.main(JobContext(sport=EPL))
+
+        first, retry = (call.kwargs["next_time"] for call in schedule.await_args_list)
+        assert retry < first
+        assert retry - datetime.now(UTC) <= run_candidates.RETRY_DELAY
+
+    async def test_a_settlement_failure_is_alerted_and_does_not_fail_the_run(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        schedule = self._patch(monkeypatch, run_candidates.RunSummary(placed=1))
+        monkeypatch.setattr(run_candidates, "settle_trades", AsyncMock(side_effect=ValueError("x")))
+        alert = AsyncMock()
+        monkeypatch.setattr(run_candidates, "send_recorded_alert", alert)
+
+        await run_candidates.main(JobContext(sport=EPL))
+
+        assert alert.await_args.args[0] == "candidate_settlement_failed:soccer_epl"
+        assert schedule.await_count == 1
+
+    @staticmethod
+    def _patch(monkeypatch: pytest.MonkeyPatch, summary: run_candidates.RunSummary) -> AsyncMock:
         @asynccontextmanager
         async def session_maker() -> Iterator[Any]:
             yield AsyncMock()
@@ -355,20 +452,15 @@ class TestMain:
         async def alert_context(name: str) -> Iterator[None]:
             yield
 
+        schedule = AsyncMock()
         monkeypatch.setattr(run_candidates, "async_session_maker", session_maker)
         monkeypatch.setattr(run_candidates, "runnable_candidates", AsyncMock(return_value=[]))
-        monkeypatch.setattr(run_candidates, "upcoming_events", AsyncMock(return_value=[]))
-        monkeypatch.setattr(run_candidates, "self_schedule", AsyncMock())
+        monkeypatch.setattr(run_candidates, "candidate_events", AsyncMock(return_value=[]))
+        monkeypatch.setattr(run_candidates, "self_schedule", schedule)
         monkeypatch.setattr(run_candidates, "settle_trades", AsyncMock(return_value=[]))
-        monkeypatch.setattr(
-            run_candidates,
-            "run_decisions",
-            AsyncMock(return_value=run_candidates.RunSummary(failed=1)),
-        )
+        monkeypatch.setattr(run_candidates, "run_decisions", AsyncMock(return_value=summary))
         monkeypatch.setattr(run_candidates, "job_alert_context", alert_context)
-
-        with pytest.raises(RuntimeError, match="1 candidate decision"):
-            await run_candidates.main(JobContext(sport=EPL))
+        return schedule
 
 
 class TestFlatStakeTrades:

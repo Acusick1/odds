@@ -35,7 +35,7 @@ Three lists in code decide what the production scheduler runs:
 | `fetch-oddsportal`, `fetch-oddsportal-results` | yes | every configured sport | proximity (30 min to 2 h), dormant with no fixture in 28 days / daily 08:00 UTC |
 | `fetch-betfair-exchange` | yes | every Betfair-supported sport | self-scheduling, 15 min to 2 h, plus a run 5 min before each kickoff, dormant with no fixture in 28 days ([Betfair job](../collection/betfair-exchange.md#flow)) |
 | `fetch-polymarket-odds` | yes ([ADR-0013](../../docs/adr/0013-collect-polymarket-epl-as-sharp-reference.md)) | every sport with three-way Polymarket match markets (EPL) | self-scheduling, 5 min to 2 h, dormant with no event in 28 days ([Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md#the-fetch-polymarket-odds-job)) |
-| `run-candidates` | yes | every configured sport | self-scheduling, at the next decision time of an active mechanical candidate, at most 6 h apart ([run-candidates job](../evaluation/run-candidates-job.md#next-run)) |
+| `run-candidates` | yes | every configured sport | self-scheduling, at the next decision time of an active mechanical candidate, at most 30 min apart ([run-candidates job](../evaluation/run-candidates-job.md#next-run)) |
 | `fetch-espn-fixtures` | yes | EPL | cron `0 6 * * *` |
 | `fetch-mlb-probables` | yes | MLB | cron `0 6 * * *` |
 | `agent-run` | no | every configured sport | fixture proximity |
