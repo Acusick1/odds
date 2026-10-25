@@ -3,7 +3,7 @@ type: explanation
 title: Decision time and look-ahead bias
 description: The as-of instant for bets and training rows, the no-future-data rule per layer, and where it breaks.
 sources:
-  - odds_analytics.candidate_backtest.replay
+  - odds_lambda.candidate_rules.rules.run_rule
   - odds_lambda.candidate_rules.market_state.load_market_state
   - odds_analytics.feature_groups.TierSampler
   - odds_analytics.feature_groups.TimeRangeSampler
@@ -21,7 +21,7 @@ Decision time is the instant a prediction or bet is assumed to be made. Everythi
 
 ## Backtests
 
-`odds_analytics.candidate_backtest.replay` decides each event at `odds_lambda.candidate_rules.rules.decision_time` before its kick-off and builds the market state with `odds_lambda.candidate_rules.market_state.load_market_state`, which reads only snapshots stamped at or before that time ([replay backtest](../evaluation/candidate-backtest.md#replay)). `odds_lambda.storage.readers.OddsReader.get_odds_at_time` is a separate reader for other analyses ([odds at a point in time](../storage/odds-reader.md#odds-at-a-point-in-time)).
+The replay backtest decides each event at `odds_lambda.candidate_rules.rules.decision_time` before its kick-off, and `odds_lambda.candidate_rules.rules.run_rule` builds the market state with `odds_lambda.candidate_rules.market_state.load_market_state`, which reads only snapshots stamped at or before that time ([replay backtest](../evaluation/candidate-backtest.md#replay)). `odds_lambda.storage.readers.OddsReader.get_odds_at_time` is a separate reader for other analyses ([odds at a point in time](../storage/odds-reader.md#odds-at-a-point-in-time)).
 
 ## Training
 

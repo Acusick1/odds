@@ -24,7 +24,6 @@ from odds_core.paper_trade_models import CandidateDecision, PaperTrade, TradeRes
 from odds_core.snapshot_sources import FdukTimeBasis, SnapshotSource
 from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import col
 
 from odds_analytics.retail_ev_metrics import event_clustered_ratio
 
@@ -373,9 +372,10 @@ async def load_scored_trades(session: AsyncSession) -> list[ScoredBet]:
 
 async def load_decision_starts(session: AsyncSession) -> dict[tuple[str, int], datetime]:
     """The first recorded decision time of every candidate version that has one."""
-    name, version = col(CandidateDecision.candidate_name), col(CandidateDecision.candidate_version)
+    name = CandidateDecision.candidate_name
+    version = CandidateDecision.candidate_version
     rows = await session.execute(
-        select(name, version, func.min(CandidateDecision.decision_time)).group_by(name, version)
+        select(name, version, func.min(CandidateDecision.decision_time)).group_by(name, version)  # type: ignore[call-overload]
     )
     return {(name, version): first for name, version, first in rows.all()}
 
