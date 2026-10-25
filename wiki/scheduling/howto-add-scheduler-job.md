@@ -12,6 +12,8 @@ sources:
   - odds_core.alerts.job_alert_context
   - odds_core.config.AlertConfig
   - deployment/aws/terraform/eventbridge.tf
+mentions:
+  - odds_lambda.health_monitor.HealthMonitor
 status: stable
 ---
 

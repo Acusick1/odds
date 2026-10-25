@@ -99,6 +99,18 @@ def _day_games(slots: Sequence[MlbGameResult]) -> list[MlbGameResult]:
     return sorted(by_pk.values(), key=lambda g: (g.game_number, g.start_time))
 
 
+def played_starts(schedule: Sequence[MlbGameResult]) -> dict[int, datetime]:
+    """Each game's scheduled start, from a slot that is neither postponed, cancelled, TBD nor a
+    resumed continuation; a game with no such slot is left out."""
+    return {
+        slot.game_pk: slot.start_time
+        for slot in schedule
+        if not slot.resumed
+        and not slot.start_time_tbd
+        and slot.state not in (MlbGameState.POSTPONED, MlbGameState.CANCELLED)
+    }
+
+
 def resolve_game_pks(
     rows: Sequence[GameRow], schedule: Sequence[MlbGameResult]
 ) -> list[GameResolution]:
@@ -131,13 +143,7 @@ def resolve_game_pks(
         if row.game_number is None:
             unnumbered_by_group.setdefault(key, []).append(row)
 
-    played_starts = {
-        slot.game_pk: slot.start_time
-        for slot in schedule
-        if not slot.resumed
-        and not slot.start_time_tbd
-        and slot.state not in (MlbGameState.POSTPONED, MlbGameState.CANCELLED)
-    }
+    starts = played_starts(schedule)
     resolutions: list[GameResolution] = []
     for row, key in zip(rows, row_keys, strict=True):
         slots = slots_by_group.get(key, [])
@@ -145,7 +151,7 @@ def resolve_game_pks(
         if isinstance(resolution, ResolvedGame):
             resolution = replace(
                 resolution,
-                start=played_starts.get(resolution.game_pk),
+                start=starts.get(resolution.game_pk),
                 sibling_starts=tuple(
                     g.start_time for g in _day_games(slots) if g.game_pk != resolution.game_pk
                 ),

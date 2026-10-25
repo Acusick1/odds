@@ -1,7 +1,8 @@
-"""CLI commands for events that exist more than once for one match."""
+"""CLI commands that repair events: duplicates, team names, scores and MLB gamePks."""
 
 import asyncio
 from collections import Counter
+from datetime import UTC, date, datetime
 
 import typer
 from odds_core.database import async_session_maker
@@ -9,6 +10,18 @@ from odds_core.models import Event
 from odds_lambda.mlb_stats_fetcher import MlbStatsFetcher
 from odds_lambda.storage.event_merge import EventMerger, source_pair
 from odds_lambda.storage.event_name_repair import repair_team_names
+from odds_lambda.storage.game_pk_backfill import (
+    AssignmentOutcome,
+    GamePkRefused,
+    OutcomeStatus,
+    ScoreCarry,
+    Settlement,
+    delete_ghosts,
+    mark_no_game_pk,
+    plan_game_pks,
+    plan_hand_assignment,
+    run_assignments,
+)
 from odds_lambda.storage.mlb_score_repair import ScoreOutcome, repair_scores
 from rich.console import Console
 from rich.table import Table
@@ -171,3 +184,198 @@ def repair_scores_command(
         odds events repair-scores --apply
     """
     asyncio.run(_repair_scores(apply))
+
+
+def _counts(counts: dict[str, int]) -> str:
+    return ",".join(f"{table}:{n}" for table, n in sorted(counts.items())) or "none"
+
+
+def _utc(moment: datetime) -> str:
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%MZ")
+
+
+def _outcome_line(tag: str, outcome: AssignmentOutcome) -> str:
+    line = f"{tag} game_pk={outcome.game_pk} kept={outcome.kept_id}"
+    if outcome.rule is not None:
+        line += f" rule={outcome.rule.value}"
+    merged = ",".join(outcome.merged_ids) or "none"
+    if outcome.status is OutcomeStatus.REFUSED:
+        return (
+            f"{line} merged={merged} reason={outcome.detail}"
+            f" would_delete={_counts(outcome.rows_deleted)}"
+        )
+    if outcome.status is OutcomeStatus.FAILED:
+        return f"{line} merged={merged} error={outcome.detail!r}"
+    if outcome.merged_ids:
+        line += f" merged={merged} rows={_counts(outcome.rows_moved)}"
+    if outcome.moved_from is not None and outcome.moved_to is not None:
+        line += f" moved_from={_utc(outcome.moved_from)}→{_utc(outcome.moved_to)}"
+    else:
+        line += " moved=no"
+    line += f" score={outcome.score.value}"
+    if outcome.score_detail:
+        line += f":{outcome.score_detail}"
+    line += f" settled={outcome.settled.value if outcome.settled else 'no'}"
+    if outcome.settled_detail:
+        line += f":{outcome.settled_detail}"
+    return (
+        f"{line} same_time_pairs_identical={outcome.pairs.identical}"
+        f" same_time_pairs_conflicting={outcome.pairs.conflicting}"
+    )
+
+
+def _print_outcomes(outcomes: list[AssignmentOutcome]) -> None:
+    done = [o for o in outcomes if o.status is OutcomeStatus.APPLIED]
+    for tag, group in (
+        ("SINGLE", [o for o in done if not o.merged_ids]),
+        ("MERGE", [o for o in done if o.merged_ids and not o.read_only_rows]),
+        ("MERGE_READ_ONLY", [o for o in done if o.merged_ids and o.read_only_rows]),
+        ("REFUSED", [o for o in outcomes if o.status is OutcomeStatus.REFUSED]),
+        ("FAILED", [o for o in outcomes if o.status is OutcomeStatus.FAILED]),
+    ):
+        for outcome in group:
+            typer.echo(_outcome_line(tag, outcome))
+
+
+async def _assign_game_pks(since: date | None, apply: bool, delete_ghosts_: bool) -> None:
+    async with async_session_maker() as session, MlbStatsFetcher() as fetcher:
+        plan = await plan_game_pks(session, fetcher, since, datetime.now(UTC).date())
+        outcomes = await run_assignments(session, plan.assignments, commit=apply)
+        deleted = 0
+        if apply and delete_ghosts_:
+            deleted = await delete_ghosts(session, plan.ghost_ids)
+            await session.commit()
+        else:
+            await session.rollback()
+
+        done = [o for o in outcomes if o.status is OutcomeStatus.APPLIED]
+        merges = [o for o in done if o.merged_ids]
+        by_status = Counter(o.status for o in outcomes)
+        unresolved = Counter(u.reason.value for u in plan.unresolved)
+        typer.echo(
+            f"MLB events without a gamePk: {plan.pending} (since {since or 'any date'})\n"
+            f"singles: {len(done) - len(merges)}\n"
+            f"merge groups: {len(merges)} (read-only: {sum(1 for o in merges if o.read_only_rows)};"
+            f" events merged: {sum(len(o.merged_ids) for o in merges)})\n"
+            f"settled from MLB: {sum(1 for o in done if o.settled is Settlement.MLB)};"
+            f" score conflicts: {sum(1 for o in done if o.score is ScoreCarry.CONFLICT or o.settled is Settlement.CONFLICT)}\n"
+            f"refused: {by_status[OutcomeStatus.REFUSED]}\n"
+            f"failed: {by_status[OutcomeStatus.FAILED]}\n"
+            f"unresolved: {len(plan.unresolved)} ("
+            + (", ".join(f"{r}: {n}" for r, n in sorted(unresolved.items())) or "none")
+            + ")\n"
+            f"ghosts: {len(plan.ghost_ids)}\n"
+            f"marked unassignable: {len(plan.marked)}"
+        )
+        _print_outcomes(outcomes)
+        for item in plan.unresolved:
+            detail = f" detail={item.detail!r}" if item.detail else ""
+            typer.echo(f"UNRESOLVED event={item.event_id} reason={item.reason.value}{detail}")
+        for event_id in plan.ghost_ids:
+            typer.echo(f"GHOST event={event_id}")
+        for event_id, reason in sorted(plan.marked.items()):
+            typer.echo(f"UNASSIGNABLE event={event_id} reason={reason!r}")
+        if not apply:
+            typer.echo("Dry run: nothing written. Re-run with --apply.")
+            if delete_ghosts_:
+                typer.echo(
+                    f"--apply --delete-ghosts would delete {len(plan.ghost_ids)} ghost events."
+                )
+        elif delete_ghosts_:
+            typer.echo(f"Deleted {deleted} ghost events.")
+
+
+@app.command("assign-game-pks")
+def assign_game_pks(
+    apply: bool = typer.Option(False, "--apply", help="Write; without it the plan is rolled back"),
+    since: str | None = typer.Option(
+        None, "--since", help="Only events on or after this MLB date (YYYY-MM-DD)"
+    ),
+    delete_ghosts_: bool = typer.Option(
+        False,
+        "--delete-ghosts",
+        help="With --apply, delete events with no MLB game that nothing references",
+    ),
+) -> None:
+    """Give every MLB event without a gamePk its MLB Stats API gamePk, merging events of one game.
+
+    Prints a summary, then one line per assignment (SINGLE, MERGE, MERGE_READ_ONLY for merges
+    that move paper trades, match briefs or candidate decisions; REFUSED for merges that would
+    delete a candidate decision or paper trade; FAILED), then UNRESOLVED, GHOST and UNASSIGNABLE
+    events. --apply commits each game in its own transaction. Safe to re-run.
+
+    Examples:
+        odds events assign-game-pks --since 2026-03-01
+
+        odds events assign-game-pks --since 2026-03-01 --apply
+    """
+    try:
+        since_date = date.fromisoformat(since) if since else None
+    except ValueError as e:
+        raise typer.BadParameter(f"--since must be YYYY-MM-DD: {since}") from e
+    asyncio.run(_assign_game_pks(since_date, apply, delete_ghosts_))
+
+
+async def _set_game_pk(event_id: str, game_pk: int, merge: bool, apply: bool) -> None:
+    async with async_session_maker() as session, MlbStatsFetcher() as fetcher:
+        try:
+            assignment = await plan_hand_assignment(session, fetcher, event_id, game_pk, merge)
+        except GamePkRefused as e:
+            raise typer.BadParameter(str(e)) from e
+        [outcome] = await run_assignments(session, [assignment], commit=apply)
+        if not apply:
+            await session.rollback()
+        _print_outcomes([outcome])
+        if outcome.status is not OutcomeStatus.APPLIED:
+            raise typer.Exit(1)
+        if not apply:
+            typer.echo("Dry run: nothing written. Re-run with --apply.")
+
+
+@app.command("set-game-pk")
+def set_game_pk(
+    event_id: str = typer.Argument(..., help="MLB event without a gamePk"),
+    game_pk: int = typer.Argument(..., help="MLB Stats API gamePk of its game"),
+    merge: bool = typer.Option(
+        False, "--merge", help="Merge the event into the event already holding the gamePk"
+    ),
+    apply: bool = typer.Option(False, "--apply", help="Write; without it the plan is rolled back"),
+) -> None:
+    """Give one MLB event a gamePk by hand, moving it to the game's scheduled start.
+
+    Refuses a game of other teams, and a gamePk another event holds unless --merge.
+
+    Example:
+        odds events set-game-pk op_live_PITPIR_MILBRE_2026-07-10T2240 823357 --merge --apply
+    """
+    asyncio.run(_set_game_pk(event_id, game_pk, merge, apply))
+
+
+async def _mark_unassignable(event_id: str, reason: str, apply: bool) -> None:
+    async with async_session_maker() as session:
+        try:
+            await mark_no_game_pk(session, event_id, reason)
+        except GamePkRefused as e:
+            raise typer.BadParameter(str(e)) from e
+        typer.echo(f"UNASSIGNABLE event={event_id} reason={reason.strip()!r}")
+        if not apply:
+            await session.rollback()
+            typer.echo("Dry run: nothing written. Re-run with --apply.")
+            return
+        await session.commit()
+
+
+@app.command("mark-unassignable")
+def mark_unassignable(
+    event_id: str = typer.Argument(..., help="MLB event without a gamePk"),
+    reason: str = typer.Option(..., "--reason", help="Why the event has no MLB game"),
+    apply: bool = typer.Option(False, "--apply", help="Write; without it nothing is stored"),
+) -> None:
+    """Record that an MLB event has no gamePk, so the missing_game_pk warning leaves it out.
+
+    Setting a gamePk later clears the mark.
+
+    Example:
+        odds events mark-unassignable op_live_ATLBRA_SANGIA_2026-06-17T1605 --reason "no such game" --apply
+    """
+    asyncio.run(_mark_unassignable(event_id, reason, apply))

@@ -29,7 +29,7 @@ Point-in-time snapshots of MLBAM's announced probable starters, stored in `mlb_p
 
 The job raises unless `ctx.sport` is set and is `baseball_mlb`. Inside [`odds_core.alerts.job_alert_context`](../operations/alerts.md#delivery), a fetch that returns no games raises `odds_lambda.collection_calendar.EmptyCollectionError` when `odds_lambda.collection_calendar.event_calendar` (excluding no fixture) finds a SCHEDULED MLB event within the next 72 h, because an empty fetch leaves the MLB stale checks without a calendar ([stale-data check](../operations/health-monitor.md#stale-data-check)). It sends the critical alert and skips the heartbeat. With no scheduled event in the window (the off-season) the run logs `fetch_mlb_probables_empty`, writes nothing and passes.
 
-`odds_lambda.mlb_stats_fetcher.MlbStatsFetcher.fetch_results` reads the same endpoint with `hydrate=linescore` for game scores and states, used by the score check in [results-jobs](results-jobs.md#verifying-mlb-scores) and the `gamePk` resolver ([event matching](../storage/event-matching.md#mlb-gamepk-resolver)).
+`odds_lambda.mlb_stats_fetcher.MlbStatsFetcher.fetch_results` reads the same endpoint with `hydrate=linescore` for game scores and states, used by the score check in [results-jobs](results-jobs.md#verifying-mlb-scores) and the `gamePk` resolver ([event matching](../storage/event-matching.md#mlb-gamepk-resolver)). `odds_lambda.mlb_stats_fetcher.MlbStatsFetcher.fetch_game` reads it with `gamePk` instead of a date range, returning every slot of one game, for `odds events set-game-pk` ([Event merge](../storage/event-merge.md#assigning-gamepks)).
 
 ## Where it runs
 

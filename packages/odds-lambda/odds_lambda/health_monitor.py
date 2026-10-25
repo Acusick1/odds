@@ -470,7 +470,8 @@ class HealthMonitor:
         return is_healthy, total_errors
 
     async def find_mlb_events_without_game_pk(self, now: datetime) -> list[str]:
-        """MLB events created over ``GAME_PK_GRACE`` ago with no ``mlb_game_pk``.
+        """MLB events created over ``GAME_PK_GRACE`` ago with no ``mlb_game_pk`` and not marked as
+        having none (``no_game_pk_reason``).
 
         Only events created since the earliest event that holds a ``gamePk`` count, so events
         stored before the live jobs assigned ``gamePk``s are left out.
@@ -485,6 +486,7 @@ class HealthMonitor:
             .where(
                 Event.sport_key == MLB_SPORT_KEY,
                 Event.mlb_game_pk.is_(None),
+                Event.no_game_pk_reason.is_(None),
                 Event.created_at < now - GAME_PK_GRACE,
                 Event.created_at >= first_assigned,
             )

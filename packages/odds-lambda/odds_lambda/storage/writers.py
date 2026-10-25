@@ -20,7 +20,7 @@ from odds_lambda.mlb_game_resolver import MLB_SPORT_KEY, ResolvedGame
 from odds_lambda.storage.event_merge import (
     find_match_candidates,
     find_match_id,
-    retime_snapshots,
+    follow_schedule,
 )
 from odds_lambda.storage.validators import OddsValidator
 from odds_lambda.tier_utils import calculate_hours_until_commence, calculate_tier_from_timestamps
@@ -169,7 +169,7 @@ class OddsWriter:
         anchor = game.start or match_date
         held = await self._event_by_game_pk(game.game_pk)
         if held is not None:
-            await self._follow_schedule(held, game)
+            await follow_schedule(self.session, held, game.game_pk, game.start)
             return held.id, False
 
         claimable = await self._claimable_event(home_team, away_team, anchor, game)
@@ -180,8 +180,8 @@ class OddsWriter:
         try:
             async with self.session.begin_nested():
                 if claimable is not None:
-                    claimable.mlb_game_pk = game.game_pk
-                    await self._follow_schedule(claimable, game)
+                    claimable.assign_game_pk(game.game_pk)
+                    await follow_schedule(self.session, claimable, game.game_pk, game.start)
                     outcome = (claimable.id, False)
                 else:
                     outcome = (
@@ -200,7 +200,7 @@ class OddsWriter:
                 event_id=held.id,
                 duplicate_id=claimable_id,
             )
-            await self._follow_schedule(held, game)
+            await follow_schedule(self.session, held, game.game_pk, game.start)
             return held.id, False
         return outcome
 
@@ -226,26 +226,6 @@ class OddsWriter:
         if any(gap(nearest, start) < nearest_gap for start in game.sibling_starts):
             return None
         return nearest
-
-    async def _follow_schedule(self, event: Event, game: ResolvedGame) -> None:
-        """Move the event to the game's scheduled start and re-time its stored snapshots."""
-        if game.start is None or ensure_utc(event.commence_time) == ensure_utc(game.start):
-            return
-        event_id = event.id
-        moved_from = ensure_utc(event.commence_time)
-        event.commence_time = game.start
-        event.updated_at = datetime.now(UTC)
-        if event.status == EventStatus.POSTPONED:
-            event.status = EventStatus.SCHEDULED
-        retimed = await retime_snapshots(self.session, event_id, game.start)
-        logger.info(
-            "mlb_event_rescheduled",
-            event_id=event_id,
-            game_pk=game.game_pk,
-            commence_time=moved_from.isoformat(),
-            scheduled_start=ensure_utc(game.start).isoformat(),
-            snapshots_retimed=retimed,
-        )
 
     async def _create_game_event(
         self, home_team: str, away_team: str, start: datetime, sport_title: str, game_pk: int
@@ -650,8 +630,8 @@ class OddsWriter:
 
         events_table = Event.__table__
         result_columns = {"status", "home_score", "away_score", "completed_at"}
-        # A discovery record carries no gamePk, so a stored one is kept.
-        kept_columns = {"created_at", "mlb_game_pk", *result_columns}
+        # A discovery record carries no gamePk or mark, so stored ones are kept.
+        kept_columns = {"created_at", "mlb_game_pk", "no_game_pk_reason", *result_columns}
         set_ = {
             col.name: stmt.excluded[col.name]
             for col in events_table.columns

@@ -24,7 +24,7 @@ status: stable
 
 # OddsWriter
 
-`odds_lambda.storage.writers.OddsWriter` owns an `AsyncSession` and an `odds_lambda.storage.validators.OddsValidator` (its vig floor skips zero-margin books, `odds_core.bookmakers.ZERO_MARGIN_BOOKMAKERS`). It never commits, and flushes only in the MLB savepoint below; callers commit ([Commit contract](storage-layer.md#commit-contract)). The tables it writes are on [Odds snapshot and odds tables](odds-tables.md) and [Events table](events.md).
+`odds_lambda.storage.writers.OddsWriter` owns an `AsyncSession` and an `odds_lambda.storage.validators.OddsValidator` (its vig floor skips zero-margin books, `odds_core.bookmakers.ZERO_MARGIN_BOOKMAKERS`). It never commits, and flushes only for MLB events, in the savepoint below and when an event moving to its game's scheduled start has its snapshots re-timed; callers commit ([Commit contract](storage-layer.md#commit-contract)). The tables it writes are on [Odds snapshot and odds tables](odds-tables.md) and [Events table](events.md).
 
 ## store_odds_snapshot
 
@@ -46,7 +46,7 @@ Event upserts (`odds_lambda.storage.writers.OddsWriter.upsert_event`, `odds_lamb
 `odds_lambda.storage.writers.OddsWriter.find_or_create_event(home, away, match_date, sport_key, sport_title, *, mlb_game=None)` normalizes team names and returns `(event_id, was_created)`. It never merges or deletes ([Event merge](../storage/event-merge.md)).
 
 - **Other sports** look for same-sport events within `odds_lambda.storage.event_merge.EVENT_MATCH_WINDOW` (±2 hours) with `odds_lambda.storage.event_merge.find_match_id`. With several events in the window it returns the canonical one (`odds_core.event_source.canonical_event_id`: the Odds API event, else the best scraper source) and never creates another.
-- **MLB** requires `mlb_game` (an `odds_lambda.mlb_game_resolver.ResolvedGame`) and raises `ValueError` without it. It returns the event holding the `gamePk`, else claims the nearest event within ±2 h that holds none, else creates the event with it; the event's `commence_time` follows the game's scheduled start. The claim rules, the id used on a collision and the timing are on [live MLB events](event-matching.md#live-mlb-events). The write runs in a savepoint (`begin_nested`), so when a concurrent run has taken the `gamePk` meanwhile the unique-index violation rolls back only this row, which then lands on the holder and logs `mlb_game_pk_duplicate`.
+- **MLB** requires `mlb_game` (an `odds_lambda.mlb_game_resolver.ResolvedGame`) and raises `ValueError` without it. It returns the event holding the `gamePk`, else claims the nearest event within ±2 h that holds none, else creates the event with it; the event's `commence_time` follows the game's scheduled start (`odds_lambda.storage.event_merge.follow_schedule`). The claim rules, the id used on a collision and the timing are on [live MLB events](event-matching.md#live-mlb-events). The write runs in a savepoint (`begin_nested`), so when a concurrent run has taken the `gamePk` meanwhile the unique-index violation rolls back only this row, which then lands on the holder and logs `mlb_game_pk_duplicate`.
 
 `odds_lambda.storage.writers.OddsWriter.find_unscheduled_mlb_event` is the lookup the live jobs use for MLB when the MLB schedule is unavailable; it creates nothing.
 

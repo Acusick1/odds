@@ -117,6 +117,19 @@ def dates_for_window(now: datetime, lookahead_hours: float) -> list[date]:
     return days
 
 
+def _results_from_schedule(data: dict[str, Any]) -> list[MlbGameResult]:
+    if not isinstance(data.get("dates"), list):
+        raise ValueError("MLB schedule response has no dates list")
+    results: list[MlbGameResult] = []
+    for day in data["dates"]:
+        schedule_date = date.fromisoformat(day["date"]) if day.get("date") else None
+        for game in day.get("games", []):
+            result = _result_from_game(game, schedule_date)
+            if result is not None:
+                results.append(result)
+    return results
+
+
 class MlbStatsFetcher:
     """Async fetcher for MLB Stats API probable-pitcher snapshots.
 
@@ -243,16 +256,20 @@ class MlbStatsFetcher:
                     "hydrate": "linescore",
                 },
             )
-            if not isinstance(data.get("dates"), list):
-                raise ValueError("MLB schedule response has no dates list")
-            for day in data["dates"]:
-                schedule_date = date.fromisoformat(day["date"]) if day.get("date") else None
-                for game in day.get("games", []):
-                    result = _result_from_game(game, schedule_date)
-                    if result is not None:
-                        results.append(result)
+            results.extend(_results_from_schedule(data))
             chunk_start = chunk_end + timedelta(days=1)
         return results
+
+    async def fetch_game(self, game_pk: int) -> list[MlbGameResult]:
+        """Every schedule slot of one game, postponed ones included; empty for an unknown ``gamePk``.
+
+        A response without a ``dates`` list raises ``ValueError``.
+        """
+        data = await self._fetch_json(
+            f"{BASE_URL}/schedule",
+            {"sportId": str(_SPORT_ID), "gamePk": str(game_pk), "hydrate": "linescore"},
+        )
+        return _results_from_schedule(data)
 
     async def fetch_dates(
         self,

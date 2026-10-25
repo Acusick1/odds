@@ -12,6 +12,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     Index,
+    Text,
     text,
 )
 from sqlmodel import Field, SQLModel
@@ -79,10 +80,19 @@ class Event(SQLModel, table=True):
     mlb_game_pk: int | None = Field(
         default=None, sa_column=Column(BigInteger), description="MLB Stats API gamePk"
     )
+    no_game_pk_reason: str | None = Field(
+        default=None,
+        sa_column=Column(Text),
+        description="Why an MLB event was marked as having no gamePk",
+    )
 
     def model_post_init(self, __context: Any) -> None:
         self.home_team = normalize_team_name(self.home_team)
         self.away_team = normalize_team_name(self.away_team)
+
+    def assign_game_pk(self, game_pk: int) -> None:
+        self.mlb_game_pk = game_pk
+        self.no_game_pk_reason = None
 
     # Results (populated after game completion)
     home_score: int | None = Field(default=None, description="Final home team score")
@@ -109,6 +119,10 @@ class Event(SQLModel, table=True):
             "mlb_game_pk",
             unique=True,
             postgresql_where=text("mlb_game_pk IS NOT NULL"),
+        ),
+        CheckConstraint(
+            "mlb_game_pk IS NULL OR no_game_pk_reason IS NULL",
+            name="ck_events_game_pk_or_no_game_pk_reason",
         ),
     )
 

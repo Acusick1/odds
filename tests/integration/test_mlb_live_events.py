@@ -585,6 +585,19 @@ class TestDiscoveryKeepsGamePk:
         stored = await session.get(Event, "zz9hexapi", populate_existing=True)
         assert stored.mlb_game_pk == 824101
 
+    async def test_re_discovered_event_keeps_its_no_game_pk_reason(
+        self, pglite_async_session: AsyncSession
+    ) -> None:
+        session = pglite_async_session
+        session.add(_mlb_event("zz9hexapi", AFTERNOON, None, no_game_pk_reason="no game"))
+        await session.commit()
+
+        await OddsWriter(session).bulk_upsert_events([_mlb_event("zz9hexapi", AFTERNOON, None)])
+        await session.commit()
+
+        stored = await session.get(Event, "zz9hexapi", populate_existing=True)
+        assert stored.no_game_pk_reason == "no game"
+
 
 def _null_event(
     event_id: str, commence: datetime, home: str = CUBS, away: str = CARDINALS, **fields: Any

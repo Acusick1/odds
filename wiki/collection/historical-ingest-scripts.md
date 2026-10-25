@@ -12,6 +12,8 @@ sources:
   - odds_lambda.oddsportal_common.build_raw_data
   - odds_lambda.oddsportal_common.fix_odds_timestamp
   - odds_lambda.oddsportal_common.hours_to_tier
+mentions:
+  - odds_core.models.Event
 status: stable
 ---
 
