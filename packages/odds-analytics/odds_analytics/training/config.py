@@ -998,25 +998,6 @@ class TrainingConfig(BaseModel):
         description="Feature selection settings for pre-HPO reduction",
     )
 
-    # Strategy-specific parameters
-    min_predicted_movement: float = Field(
-        default=0.02,
-        ge=0.0,
-        le=1.0,
-        description="Minimum predicted movement to trigger bet",
-    )
-    movement_confidence_scale: float = Field(
-        default=5.0,
-        gt=0.0,
-        description="Scale factor for converting movement to confidence",
-    )
-    base_confidence: float = Field(
-        default=0.52,
-        ge=0.5,
-        le=1.0,
-        description="Base confidence at minimum movement threshold",
-    )
-
     # Output settings
     output_path: str = Field(
         default="models",

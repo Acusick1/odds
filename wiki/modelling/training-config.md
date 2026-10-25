@@ -29,7 +29,7 @@ Every model forbids unknown keys (`extra="forbid"`). A file has `experiment` (na
 - `data_source`: `oddsportal` (`op_` ids), `football_data_uk` (`fduk_`), `oddsapi` (everything else), `all` or null (no filter). The filter is on event-id prefix ([events](../storage/events.md)). `sport_key`, `start_date`/`end_date` (required), `min_snapshots`.
 - CV: `cv_method` (`walk_forward`, `timeseries` default, `kfold`), `window_type` (`expanding` default or `sliding`), `min_train_events`, `max_train_events`, `val_step_events`, `n_folds` ([cross-validation](cross-validation.md)). `use_kfold` defaults true and `test_split` to 0.2.
 - The code defaults are `cv_method: timeseries` and `test_split: 0.2`, so a walk-forward protocol (for example `experiments/configs/xgboost_epl_retail_ev.yaml`: `cv_method: walk_forward`, `window_type: expanding`, `min_train_events: 380`, `val_step_events: 50`, `test_split: 0.0`) exists only where a YAML sets it ([cross-validation](cross-validation.md)).
-- `strategy_type` is `xgboost_line_movement` (`odds_analytics.training.config.StrategyType`), the key of `odds_cli.commands.train.STRATEGY_CLASSES`; any other value fails validation.
+- `strategy_type` is `xgboost_line_movement` (`odds_analytics.training.config.StrategyType`), the key of `odds_cli.commands.train.STRATEGY_CLASSES`; any other value fails validation. The config carries no betting parameters: the model predicts and places no bets.
 - `n_folds` is ignored for `walk_forward` and is required (checked at run time by `odds_analytics.training.cross_validation.run_cv`, not by the schema) for `kfold` and `timeseries`.
 
 **`training.features`**

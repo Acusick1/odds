@@ -24,4 +24,3 @@ packages = ["odds_core"]
 
 [tool.deptry.per_rule_ignores]
 DEP002 = ["asyncpg"]
-DEP003 = ["odds_analytics"]

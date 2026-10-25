@@ -32,7 +32,7 @@ Paper trades are the simulated bets the [betting agent](betting-agent.md) places
 
 Table `paper_trades` (`odds_core.paper_trade_models.PaperTrade`); service `odds_lambda.paper_trading`.
 
-Columns: `event_id` (FK), `market`, `selection` (`home`/`draw`/`away`), `bookmaker` (default `best_available` from the MCP tool), `price_decimal` (float above 1.0, the decimal price taken, exact for a UK decimal quote), `stake`, `reasoning`, `confidence` (0-1, optional), `bankroll_before`, `bankroll_after` (both null for a flat-stake candidate trade), `placed_at`, `settled_at`, `result` (`odds_core.paper_trade_models.TradeResult`: win, loss, push, void), `pnl`, and the candidate fields below. A partial index `ix_paper_trades_unsettled` covers `settled_at IS NULL`. Bankroll columns are per-trade snapshots: `bankroll_after` is `bankroll_before + pnl`, not a running balance. A check constraint requires a bankroll unless the trade has a candidate. `odds_core.paper_trade_models.PaperTrade.to_bet_record` converts a trade to an `odds_analytics.backtesting.models.BetRecord` for backtest analysis tools ([backtest engine](../evaluation/backtest-engine.md)), turning the decimal price into the nearest integer American price with `odds_core.odds_math.decimal_to_american`. This makes odds-core depend on odds-analytics ([workspace packages](../foundations/workspace-packages.md)).
+Columns: `event_id` (FK), `market`, `selection` (`home`/`draw`/`away`), `bookmaker` (default `best_available` from the MCP tool), `price_decimal` (float above 1.0, the decimal price taken, exact for a UK decimal quote), `stake`, `reasoning`, `confidence` (0-1, optional), `bankroll_before`, `bankroll_after` (both null for a flat-stake candidate trade), `placed_at`, `settled_at`, `result` (`odds_core.paper_trade_models.TradeResult`: win, loss, push, void), `pnl`, and the candidate fields below. A partial index `ix_paper_trades_unsettled` covers `settled_at IS NULL`. Bankroll columns are per-trade snapshots: `bankroll_after` is `bankroll_before + pnl`, not a running balance. A check constraint requires a bankroll unless the trade has a candidate.
 
 ### Candidate fields
 
@@ -60,4 +60,4 @@ Columns: `event_id` (FK), `market`, `selection` (`home`/`draw`/`away`), `bookmak
 
 - [Match briefs](match-briefs.md)
 - [Agent prompts](agent-prompts.md)
-- [Backtest engine](../evaluation/backtest-engine.md), where `odds_analytics.backtesting.models.BetRecord` is consumed
+- [Parity check](../evaluation/candidate-parity.md), which compares a candidate decision's trades with a replay

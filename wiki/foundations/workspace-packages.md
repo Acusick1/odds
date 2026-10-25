@@ -18,7 +18,9 @@ sources:
   - odds_analytics
   - odds_analytics.targets.calculate_regression_target
   - odds_analytics.quality_metrics
-  - odds_analytics.ml_strategy_example
+  - odds_analytics.candidate_report
+  - odds_analytics.candidate_backtest
+  - odds_analytics.candidate_parity
   - odds_analytics.utils.per_book_market_holds
   - packages/odds-analytics/pyproject.toml
   - packages/odds-cli/pyproject.toml
@@ -73,7 +75,7 @@ Python 3.12+ (`pyproject.toml`), a uv workspace. Per package dependencies are in
 
 | Module | Holds |
 |---|---|
-| `models.py` | `odds_core.models.Event`, `odds_core.models.OddsSnapshot`, `odds_core.models.Odds`, `odds_core.models.FetchLog`, `odds_core.models.DataQualityLog`, `odds_core.models.AlertHistory` and `odds_core.models.utc_now` (tables: [events](../storage/events.md), [odds tables](../storage/odds-tables.md#odds_snapshots)) |
+| `odds_core.models` | `odds_core.models.Event`, `odds_core.models.OddsSnapshot`, `odds_core.models.Odds`, `odds_core.models.FetchLog`, `odds_core.models.DataQualityLog`, `odds_core.models.AlertHistory` and `odds_core.models.utc_now` (tables: [events](../storage/events.md), [odds tables](../storage/odds-tables.md#odds_snapshots)) |
 | `odds_core.match_brief_models`, `odds_core.paper_trade_models`, `odds_core.agent_wakeup_models` | Agent tables ([match briefs](../agent/match-briefs.md), [paper trading](../agent/paper-trading.md)); `odds_core.paper_trade_models` also holds the candidate decision table |
 | `odds_core.epl_data_models`, `odds_core.mlb_data_models`, `odds_core.injury_models`, `odds_core.game_log_models`, `odds_core.player_stats_models`, `odds_core.polymarket_models` | Sport-context and Polymarket tables (Polymarket price snapshots are unique per market and time; the MLB schedule table also feeds the MLB fixture calendar) |
 | `config.py` | Pydantic Settings, see [Configuration](configuration.md) |
@@ -111,14 +113,14 @@ Importing any `odds_core` submodule runs `odds_core.database`, which builds the 
 
 ## odds-analytics
 
-`packages/odds-analytics/odds_analytics/` holds backtesting, strategies, feature extraction, model training and the backfill planner. It depends on core and odds-lambda (storage readers, `odds_lambda.fetch_tier.FetchTier`). Heavy dependencies (mlflow, scikit-learn, optuna) sit behind the `training` extra; `odds_analytics` lazy-loads the modules that need them via `odds_analytics.__getattr__`.
+`packages/odds-analytics/odds_analytics/` holds candidate scoring, replay and parity, feature extraction, model training and the backfill planner. It depends on core and odds-lambda (storage readers, `odds_lambda.fetch_tier.FetchTier`). Heavy dependencies (mlflow, scikit-learn, optuna) sit behind the `training` extra; `odds_analytics` lazy-loads the modules that need them via `odds_analytics.__getattr__`.
 
 | Area | Modules | Page |
 |---|---|---|
-| Backtesting | `backtesting/` (`config.py`, `models.py`, `odds_analytics.backtesting.services`), `odds_analytics.strategies` | [Backtest engine](../evaluation/backtest-engine.md), [Backtest strategies](../evaluation/backtest-strategies.md) |
+| Candidate evaluation | `odds_analytics.candidate_report` (scoring and the checkpoint verdict), `odds_analytics.candidate_backtest` (replay of a rule over completed events), `odds_analytics.candidate_parity` (replay of recorded decisions) | [Candidate registry](../evaluation/candidate-registry.md#odds-candidates-report), [Replay backtest](../evaluation/candidate-backtest.md), [Parity check](../evaluation/candidate-parity.md) |
 | Features | `odds_analytics.feature_extraction`, `odds_analytics.feature_groups` (snapshot samplers and the training-array orchestrator), `odds_analytics.retail_ev` (retail-EV event selection, among events that have kicked off, by close, decision rows, their horizon and season labels, loss weights (scaled by the fixed `odds_analytics.retail_ev.LOSS_WEIGHT_SCALE`), kick-off times, drop counts and feature matrix), `odds_analytics.retail_ev_metrics` (keep-bar and candidate-report bootstrap metrics, from rows or from per-event totals), `odds_analytics.retail_ev_evaluation` (the one-look retail-EV evaluation: spec, window-end and readiness guards, refit blocks, verdict, coverage, accidental-rerun check and manifest), `odds_analytics.as_of_team_features` (schedule and standings from the matches played by a retail-EV decision time, optionally only up to a given kick-off), `odds_analytics.standings_features`, `odds_analytics.epl_schedule_features`, `odds_analytics.schedule_features`, `odds_analytics.injury_features`, `odds_analytics.polymarket_features` (Polymarket order-book features from the home side's view) | [Feature pipeline](../modelling/feature-pipeline.md) |
 | Training | `training/` (`odds_analytics.training.config`, `odds_analytics.training.data_preparation` (config-driven event selection by status and id-prefix source, and training-data preparation), `odds_analytics.training.cross_validation`, `odds_analytics.training.tuner` (Optuna wrapper with a seedable sampler; its objective takes sample weights), `odds_analytics.training.feature_selection` (variance filter), `odds_analytics.training.tracking`) | [Training pipeline](../modelling/training-pipeline.md) |
-| Line-movement models | `odds_analytics.xgboost_line_movement` (accepts sample weights and a base-margin feature column) | [Line-movement strategy](../modelling/line-movement-models.md) |
+| Line-movement models | `odds_analytics.xgboost_line_movement` (accepts sample weights and a base-margin feature column) | [Line-movement model](../modelling/line-movement-models.md) |
 | Backfill | `odds_analytics.gap_backfill_planner`, `odds_analytics.game_selector`, `odds_analytics.backfill_executor` | [Odds API historical backfill](../collection/odds-api-backfill.md) |
 | Targets | `odds_analytics.targets` (the `raw` closing-line movement target function) | [Target functions](../modelling/clv-target-functions.md) |
 | Coverage reporting | `odds_analytics.quality_metrics` | [Coverage checks](../storage/coverage-checks.md) |
@@ -127,12 +129,10 @@ Importing any `odds_core` submodule runs `odds_core.database`, which builds the 
 ### Names that mislead
 
 - `odds_analytics.quality_metrics` never touches `odds_core.models.DataQualityLog`; it counts game and odds coverage. Data-quality rows are a separate system ([Odds validation](../storage/odds-validator.md), [Coverage checks](../storage/coverage-checks.md)).
-- `odds_analytics.ml_strategy_example` (329 lines) is tested infrastructure for an XGBoost win-probability classifier, not the regression the training pipeline fits ([Line-movement strategy](../modelling/line-movement-models.md)).
 - `odds_analytics.utils.per_book_market_holds` is the hold maths the MCP screener calls, over decimal prices ([retail edges](../agent/mcp-market-tools.md#retail-edges)); it is the only reason `odds-mcp` imports analytics ([odds-mcp server](../agent/mcp-server.md)).
 
 ## Dependency exceptions
 
-- `odds_core.paper_trade_models.PaperTrade` imports `odds_analytics.backtesting.models` (type-checking plus a lazy import inside `odds_core.paper_trade_models.PaperTrade.to_bet_record`, which converts the stored decimal price to American and needs a bankroll), so odds-core depends on odds-analytics in practice (#459).
 - Every package declares each third-party library its code imports, even when a workspace dependency already brings it in; `deptry` checks this per package in CI ([Code conventions](code-conventions.md#dependency-checks)). The ignores that remain in each package's `[tool.deptry.per_rule_ignores]` are `odds_analytics` (odds-core and odds-lambda, the two undeclared imports above), `botocore` (odds-lambda; installed with boto3), `optuna` (odds-cli; behind analytics' `training` extra), `asyncpg` (odds-core; the driver named in `DATABASE_URL`) and `optuna-integration` (odds-analytics; loaded by Optuna as a plugin).
 
 ## Related

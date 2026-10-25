@@ -3,8 +3,7 @@
 from datetime import UTC, datetime
 
 import pytest
-from odds_analytics.backtesting import BacktestEvent
-from odds_analytics.feature_extraction import TabularFeatureExtractor
+from odds_analytics.feature_extraction import FeatureEvent, TabularFeatureExtractor
 from odds_core.models import Event, EventStatus, Odds
 from odds_core.odds_math import american_to_decimal
 from odds_lambda.storage.readers import OddsReader
@@ -92,7 +91,7 @@ class TestFeatureExtractionIntegration:
         queried_odds = await reader.get_odds_at_time(event.id, odds_time, tolerance_minutes=5)
 
         # Extract features
-        backtest_event = BacktestEvent(
+        feature_event = FeatureEvent(
             id=event.id,
             commence_time=event.commence_time,
             home_team=event.home_team,
@@ -104,7 +103,7 @@ class TestFeatureExtractionIntegration:
 
         extractor = TabularFeatureExtractor()
         features = extractor.extract_features(
-            backtest_event, queried_odds, outcome=event.home_team, market="h2h"
+            feature_event, queried_odds, outcome=event.home_team, market="h2h"
         )
 
         # Verify features were extracted

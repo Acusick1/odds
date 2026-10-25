@@ -12,8 +12,6 @@ sources:
   - odds_cli.commands.polymarket
   - odds_cli.commands.quality
   - odds_cli.commands.discover
-  - odds_cli.commands.backtest
-  - odds_cli.commands.backtest.STRATEGIES
   - odds_cli.commands.scheduler.run_once
   - odds_cli.commands.scheduler.info
   - odds_cli.commands.validate
@@ -37,7 +35,6 @@ status: stable
 | `odds fetch` | [Odds API ingestion service](../collection/odds-ingestion-service.md), [Results and status jobs](../collection/results-jobs.md) |
 | `scrape` | [OddsPortal scraper](../collection/oddsportal-scraper.md) |
 | `odds_cli.commands.discover`, `odds_cli.commands.backfill` | [Odds API historical backfill](../collection/odds-api-backfill.md) |
-| `backtest` | [Backtest engine](../evaluation/backtest-engine.md), [Backtest strategies](../evaluation/backtest-strategies.md) |
 | `odds train` | [Training pipeline](../modelling/training-pipeline.md) (`tune` stores a new timestamped study in a local SQLite file unless `--in-memory`; both subcommands pass the split's sample weights and kick-off times on, [sample weights](../modelling/training-pipeline.md#sample-weights)), [Hyperparameter tuner](../modelling/hyperparameter-tuner.md) |
 | `odds evaluate` | [Retail-EV evaluation](../evaluation/retail-ev-evaluation.md) (`--allow-incomplete <event ID>`, repeatable, and `--force` are recorded in the manifest) |
 | `odds status` | [odds status](../operations/health-monitor.md#odds-status), [Odds API quota](../collection/odds-api-quota.md) |
@@ -47,7 +44,7 @@ status: stable
 | `polymarket` | [Polymarket pipeline and tables](../collection/polymarket.md) (`odds_cli.commands.polymarket.link` matches an event from its ticker), [Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md#backfill-command) |
 | `injuries`, `nba-stats`, `pbpstats` | [NBA feeds](../collection/nba-injuries-and-stats.md) |
 | `paper` | [Paper trading](../agent/paper-trading.md) |
-| `candidates` | [Candidate registry](../evaluation/candidate-registry.md#odds-candidates-list) |
+| `candidates` | [Candidate registry](../evaluation/candidate-registry.md#odds-candidates-list), [Replay backtest](../evaluation/candidate-backtest.md), [Parity check](../evaluation/candidate-parity.md) |
 | `agent` | [Agent runtime and the agent-run job](../agent/agent-run-job.md) |
 
 ## Sport defaults
@@ -61,7 +58,7 @@ status: stable
 | `odds_cli.commands.quality` | `basketball_nba` |
 | `odds_cli.commands.polymarket.discover` | `basketball_nba` |
 | `odds_cli.commands.copy_from_prod` | `soccer_epl` |
-| `odds_cli.commands.backtest`, `odds_cli.commands.train` | optional filter |
+| `odds_cli.commands.train` | optional filter |
 | `odds_cli.commands.agent.run` | required |
 
 Pass `--sport` explicitly. [About the system and its pivots](project-overview.md#nba-era-defaults-still-in-live-code) lists the other NBA-era defaults.

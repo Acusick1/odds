@@ -21,7 +21,7 @@ These steps add a static group for the `raw` target. Group names are dispatched 
 
 1. **Write the extractor.** Create a dataclass with array and feature-name methods (as `odds_analytics.schedule_features.RestScheduleFeatures` does), and an extractor that takes only data before the snapshot.
    - The look-ahead rule per layer is on [Decision time and look-ahead bias](look-ahead-bias.md).
-2. **Register the name.** Add it to `odds_analytics.training.config.FeatureGroupName` (which `odds_analytics.feature_groups._STATIC_FEATURE_GROUPS` derives from), `odds_analytics.feature_groups._static_feature_group_names` (choose a prefix) and `odds_analytics.feature_groups._extract_static_feature_parts`.
+2. **Register the name.** Add it to `odds_analytics.training.config.FeatureGroupName` (which `odds_analytics.feature_groups._STATIC_FEATURE_GROUPS` derives from), `odds_analytics.feature_groups._static_feature_group_names` (choose a prefix) and `odds_analytics.feature_groups._extract_static_feature_parts`, which gives the extractors the event as the `odds_analytics.feature_extraction.FeatureEvent` that `odds_analytics.feature_groups.make_feature_event` builds.
    - The dispatch functions branch on the group name, so a name missed in one of them is dropped without an error.
 3. **Load its data.** Add the loading in `odds_analytics.feature_groups.collect_event_data` (which drops reference-only Polymarket snapshots) and the field, with a default, in `odds_analytics.feature_groups.EventDataBundle`.
 4. **Describe it in the config.** Mention it in the `feature_groups` description of `odds_analytics.training.config.FeatureConfig`.

@@ -4,8 +4,8 @@ from datetime import UTC, datetime
 
 import numpy as np
 import pytest
-from odds_analytics.backtesting import BacktestEvent
 from odds_analytics.feature_extraction import (
+    FeatureEvent,
     FeatureExtractor,
     TabularFeatureExtractor,
     calculate_sharp_retail_metrics,
@@ -17,8 +17,8 @@ from odds_core.odds_math import american_to_decimal, calculate_implied_probabili
 
 @pytest.fixture
 def sample_event():
-    """Create a sample BacktestEvent for testing."""
-    return BacktestEvent(
+    """Create a sample FeatureEvent for testing."""
+    return FeatureEvent(
         id="test_event_1",
         commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),
         home_team="Los Angeles Lakers",
@@ -238,7 +238,7 @@ class TestTabularFeatureExtractor:
         extractor = TabularFeatureExtractor()
 
         # Saturday game
-        saturday_event = BacktestEvent(
+        saturday_event = FeatureEvent(
             id="sat_event",
             commence_time=datetime(2024, 11, 2, 19, 0, 0, tzinfo=UTC),  # Saturday
             home_team="Los Angeles Lakers",
@@ -252,7 +252,7 @@ class TestTabularFeatureExtractor:
         assert features.is_weekend == 1.0
 
         # Sunday game
-        sunday_event = BacktestEvent(
+        sunday_event = FeatureEvent(
             id="sun_event",
             commence_time=datetime(2024, 11, 3, 19, 0, 0, tzinfo=UTC),  # Sunday
             home_team="Los Angeles Lakers",
@@ -268,7 +268,7 @@ class TestTabularFeatureExtractor:
     def test_calendar_friday_evening_stored_as_saturday_utc(self):
         """Friday 8pm ET (Sat 1am UTC) should yield day_of_week=4, is_weekend=0."""
         extractor = TabularFeatureExtractor()
-        event = BacktestEvent(
+        event = FeatureEvent(
             id="fri_utc_sat",
             commence_time=datetime(2025, 1, 4, 1, 0, 0, tzinfo=UTC),  # Sat 1am UTC = Fri 8pm ET
             home_team="Los Angeles Lakers",
@@ -284,7 +284,7 @@ class TestTabularFeatureExtractor:
     def test_calendar_saturday_late_stored_as_sunday_utc(self):
         """Saturday 10pm ET (Sun 3am UTC) should yield day_of_week=5, is_weekend=1."""
         extractor = TabularFeatureExtractor()
-        event = BacktestEvent(
+        event = FeatureEvent(
             id="sat_utc_sun",
             commence_time=datetime(2025, 1, 5, 3, 0, 0, tzinfo=UTC),  # Sun 3am UTC = Sat 10pm ET
             home_team="Los Angeles Lakers",
@@ -300,7 +300,7 @@ class TestTabularFeatureExtractor:
     def test_calendar_sunday_afternoon_no_rollover(self):
         """Sunday 3pm ET (Sun 8pm UTC) — no rollover, sanity check."""
         extractor = TabularFeatureExtractor()
-        event = BacktestEvent(
+        event = FeatureEvent(
             id="sun_no_roll",
             commence_time=datetime(2025, 1, 5, 20, 0, 0, tzinfo=UTC),  # Sun 8pm UTC = Sun 3pm ET
             home_team="Los Angeles Lakers",
@@ -672,8 +672,8 @@ class TestTabularExtractorPriorityFallback:
     """Test priority-ordered fallback in TabularFeatureExtractor."""
 
     @pytest.fixture
-    def event(self) -> BacktestEvent:
-        return BacktestEvent(
+    def event(self) -> FeatureEvent:
+        return FeatureEvent(
             id="fallback_test",
             commence_time=datetime(2025, 1, 15, 15, 0, 0, tzinfo=UTC),
             home_team="Arsenal",
@@ -683,7 +683,7 @@ class TestTabularExtractorPriorityFallback:
             status=EventStatus.FINAL,
         )
 
-    def _odds_for(self, bookmaker_keys: list[str], event: BacktestEvent) -> list[Odds]:
+    def _odds_for(self, bookmaker_keys: list[str], event: FeatureEvent) -> list[Odds]:
         prices = {"pinnacle": -120, "betfair_exchange": -125, "bet365": -115}
         odds = []
         for bm in bookmaker_keys:
@@ -692,7 +692,7 @@ class TestTabularExtractorPriorityFallback:
             odds.append(_make_odds(bm, event.away_team, p + 10, event_id=event.id))
         return odds
 
-    def test_uses_primary_sharp_when_available(self, event: BacktestEvent) -> None:
+    def test_uses_primary_sharp_when_available(self, event: FeatureEvent) -> None:
         odds = self._odds_for(["pinnacle", "betfair_exchange", "bet365"], event)
         extractor = TabularFeatureExtractor(
             sharp_bookmakers=["pinnacle", "betfair_exchange"],
@@ -708,7 +708,7 @@ class TestTabularExtractorPriorityFallback:
         )
         assert features.sharp_prob == pinnacle_features.sharp_prob
 
-    def test_falls_back_when_primary_absent(self, event: BacktestEvent) -> None:
+    def test_falls_back_when_primary_absent(self, event: FeatureEvent) -> None:
         odds = self._odds_for(["betfair_exchange", "bet365"], event)
         extractor = TabularFeatureExtractor(
             sharp_bookmakers=["pinnacle", "betfair_exchange"],
@@ -719,7 +719,7 @@ class TestTabularExtractorPriorityFallback:
         assert features.sharp_prob is not None
         assert features.retail_sharp_diff is not None
 
-    def test_no_sharp_yields_none(self, event: BacktestEvent) -> None:
+    def test_no_sharp_yields_none(self, event: FeatureEvent) -> None:
         odds = self._odds_for(["bet365"], event)
         extractor = TabularFeatureExtractor(
             sharp_bookmakers=["pinnacle", "betfair_exchange"],
@@ -735,8 +735,8 @@ class TestTabularExtractorOutcomeAwareSharpFallthrough:
     """The sharp book is the first in priority order that quotes the requested outcome."""
 
     @pytest.fixture
-    def event(self) -> BacktestEvent:
-        return BacktestEvent(
+    def event(self) -> FeatureEvent:
+        return FeatureEvent(
             id="fallthrough_test",
             commence_time=datetime(2025, 1, 15, 15, 0, 0, tzinfo=UTC),
             home_team="A",
@@ -746,7 +746,7 @@ class TestTabularExtractorOutcomeAwareSharpFallthrough:
             status=EventStatus.FINAL,
         )
 
-    def test_skips_sharp_book_missing_requested_outcome(self, event: BacktestEvent) -> None:
+    def test_skips_sharp_book_missing_requested_outcome(self, event: FeatureEvent) -> None:
         odds = [
             _make_odds("pinnacle", "B", -150, event_id=event.id),
             _make_odds("betfair_exchange", "A", 130, event_id=event.id),
@@ -765,7 +765,7 @@ class TestTabularExtractorOutcomeAwareSharpFallthrough:
             calculate_implied_probability(120) - expected_sharp
         )
 
-    def test_none_when_no_sharp_book_quotes_requested_outcome(self, event: BacktestEvent) -> None:
+    def test_none_when_no_sharp_book_quotes_requested_outcome(self, event: FeatureEvent) -> None:
         odds = [
             _make_odds("pinnacle", "B", -150, event_id=event.id),
             _make_odds("betfair_exchange", "B", -140, event_id=event.id),

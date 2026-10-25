@@ -1,38 +1,7 @@
-"""
-XGBoost Line Movement Predictor Strategy.
+"""XGBoost line-movement regressor: trains on opening-odds features to predict the closing
+move, and saves, loads and scores that model.
 
-This module implements an XGBoost-based regression model that predicts betting line
-movement deltas (closing - opening) to identify value betting opportunities.
-
-Key Features:
-- XGBoost regressor for predicting continuous line movement values
-- Uses TabularFeatureExtractor for feature engineering from opening odds
-- Converts predicted movements to betting confidence for Kelly sizing
-- Model persistence (save/load weights)
-- Integration with backtesting framework
-
-The core insight is that if a line is predicted to move significantly in one
-direction (e.g., probability increasing for home team), it suggests the opening
-line undervalues that outcome, creating a potential +EV betting opportunity.
-
-Dependencies (install with uv):
-    uv add xgboost scikit-learn numpy
-
-Example:
-    ```python
-    # Load pre-trained model
-    strategy = XGBoostLineMovementStrategy(model_path="models/xgb_line_movement.pkl")
-
-    # Train a new model
-    strategy = XGBoostLineMovementStrategy()
-    strategy.train(X_train, y_train, feature_names)
-    strategy.save_model("models/xgb_line_movement.pkl")
-
-    # Use in backtesting
-    from odds_analytics.backtesting import BacktestEngine, BacktestConfig
-    engine = BacktestEngine(strategy, config, reader)
-    result = await engine.run()
-    ```
+The retail-EV training and evaluation paths use it as their model wrapper.
 """
 
 from __future__ import annotations
@@ -45,20 +14,12 @@ import joblib
 import numpy as np
 import structlog
 import yaml
-from odds_core.models import Odds
-from sqlalchemy.ext.asyncio import AsyncSession
 
 if TYPE_CHECKING:
     from odds_analytics.training.config import MLTrainingConfig
     from odds_analytics.training.cross_validation import CVResult
     from odds_analytics.training.tracking import ExperimentTracker
 
-from odds_analytics.backtesting import (
-    BacktestConfig,
-    BacktestEvent,
-    BetOpportunity,
-    BettingStrategy,
-)
 from odds_analytics.feature_extraction import TabularFeatureExtractor
 
 logger = structlog.get_logger()
@@ -68,87 +29,15 @@ __all__ = [
 ]
 
 
-class XGBoostLineMovementStrategy(BettingStrategy):
-    """
-    ML-based betting strategy using XGBoost regressor for line movement prediction.
-
-    This strategy predicts how betting lines will move from opening to closing,
-    then bets on outcomes where the predicted movement suggests undervaluation.
-
-    The model predicts:
-    - For h2h: Probability delta (closing_prob - opening_prob)
-    - For spreads/totals: Point delta (closing_point - opening_point)
-
-    A positive predicted delta for an outcome indicates the market is expected
-    to move in favor of that outcome, suggesting it's currently undervalued.
-
-    Key Parameters:
-    - min_predicted_movement: Minimum absolute predicted delta to trigger a bet
-    - movement_confidence_scale: Scaling factor to convert delta to confidence
-
-    Example:
-        ```python
-        # Load pre-trained model
-        strategy = XGBoostLineMovementStrategy(
-            model_path="models/xgb_line_movement.pkl",
-            min_predicted_movement=0.02,  # 2% probability movement
-        )
-
-        # Use in backtesting
-        engine = BacktestEngine(strategy, config, reader)
-        result = await engine.run()
-        ```
-    """
+class XGBoostLineMovementStrategy:
+    """XGBoost regressor of the closing line move from opening-odds features."""
 
     def __init__(
         self,
         model_path: str | None = None,
-        market: str = "h2h",
-        min_predicted_movement: float = 0.02,
-        movement_confidence_scale: float = 5.0,
-        base_confidence: float = 0.52,
-        bookmakers: list[str] | None = None,
         feature_names: list[str] | None = None,
         feature_extractor: TabularFeatureExtractor | None = None,
     ):
-        """
-        Initialize XGBoost Line Movement strategy.
-
-        Args:
-            model_path: Path to saved model file (loads on init if provided)
-            market: Market to bet on (h2h, spreads, totals)
-            min_predicted_movement: Minimum predicted movement to trigger bet
-                For h2h: probability delta (e.g., 0.02 = 2%)
-                For spreads/totals: point delta (e.g., 0.5 points)
-            movement_confidence_scale: Scale factor to convert predicted movement
-                to confidence. confidence = base + movement * scale (clamped 0.5-0.95)
-            base_confidence: Base confidence when movement equals threshold
-            bookmakers: List of bookmakers to consider (default: all major books)
-            feature_names: List of feature names used by model (auto-set on load)
-            feature_extractor: Feature extractor to use (default: TabularFeatureExtractor)
-        """
-        if bookmakers is None:
-            bookmakers = [
-                "pinnacle",
-                "fanduel",
-                "draftkings",
-                "betmgm",
-                "williamhill_us",
-                "betrivers",
-                "bovada",
-                "circasports",
-            ]
-
-        super().__init__(
-            name="XGBoostLineMovement",
-            model_path=model_path,
-            market=market,
-            min_predicted_movement=min_predicted_movement,
-            movement_confidence_scale=movement_confidence_scale,
-            base_confidence=base_confidence,
-            bookmakers=bookmakers,
-        )
-
         self.model: Any = None  # XGBoost regressor
         self.feature_names: list[str] = feature_names or []
         self.margin_feature: str | None = None
@@ -156,100 +45,6 @@ class XGBoostLineMovementStrategy(BettingStrategy):
 
         if model_path:
             self.load_model(model_path)
-
-    async def evaluate_opportunity(
-        self,
-        event: BacktestEvent,
-        odds_snapshot: list[Odds],
-        config: BacktestConfig,
-        session: AsyncSession | None = None,
-    ) -> list[BetOpportunity]:
-        """
-        Evaluate betting opportunities using line movement predictions.
-
-        The strategy:
-        1. Extract features for both home and away outcomes
-        2. Predict line movement delta for each
-        3. Bet on outcomes with significant predicted positive movement
-
-        Args:
-            event: Event with final scores
-            odds_snapshot: Odds at decision time (opening line)
-            config: Backtest configuration
-            session: Database session (optional)
-
-        Returns:
-            List of BetOpportunity objects
-        """
-        if self.model is None:
-            raise ValueError("Model not loaded. Call load_model() or train() first.")
-
-        opportunities = []
-        market = self.params["market"]
-        bookmakers = self.params["bookmakers"]
-        min_movement = self.params["min_predicted_movement"]
-        movement_scale = self.params["movement_confidence_scale"]
-        base_conf = self.params["base_confidence"]
-
-        # Filter for target market and bookmakers
-        market_odds = [
-            o for o in odds_snapshot if o.market_key == market and o.bookmaker_key in bookmakers
-        ]
-
-        if not market_odds:
-            return []
-
-        # Evaluate both home and away team
-        for outcome in [event.home_team, event.away_team]:
-            # Extract features for this outcome
-            features = self.feature_extractor.extract_features(
-                event, odds_snapshot, market=market, outcome=outcome
-            )
-
-            if not features:
-                continue
-
-            # Convert to feature vector
-            feature_vector = self.feature_extractor.create_feature_vector(
-                features, self.feature_names if self.feature_names else None
-            )
-
-            # Predict line movement delta
-            predicted_movement = self._predict_movement(feature_vector)
-
-            # Only bet if significant positive movement is predicted
-            # Positive movement = line expected to move in favor of this outcome
-            if predicted_movement < min_movement:
-                continue
-
-            # Find best available odds for this outcome
-            outcome_odds = [o for o in market_odds if o.outcome_name == outcome]
-            if not outcome_odds:
-                continue
-
-            best_odd = max(outcome_odds, key=lambda o: o.price_decimal)
-
-            # Convert predicted movement to confidence for Kelly sizing
-            # Higher predicted movement = higher confidence
-            confidence = base_conf + (predicted_movement - min_movement) * movement_scale
-            confidence = min(max(confidence, 0.5), 0.95)  # Clamp to reasonable range
-
-            opportunities.append(
-                BetOpportunity(
-                    event_id=event.id,
-                    market=market,
-                    outcome=outcome,
-                    bookmaker=best_odd.bookmaker_key,
-                    odds=best_odd.american_price,
-                    line=best_odd.point,
-                    confidence=confidence,
-                    rationale=f"Predicted movement: {predicted_movement:+.3f} "
-                    f"({'prob' if market == 'h2h' else 'points'}) "
-                    f"at {best_odd.bookmaker_key}",
-                )
-            )
-
-        return opportunities
 
     def _predict_movement(self, feature_vector: np.ndarray) -> float:
         """
@@ -620,7 +415,6 @@ class XGBoostLineMovementStrategy(BettingStrategy):
             "model": self.model,
             "feature_names": self.feature_names,
             "margin_feature": self.margin_feature,
-            "params": self.params,
         }
 
         joblib.dump(model_data, filepath)
@@ -630,7 +424,6 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         config_data = {
             "model_type": "XGBoostLineMovement",
             "saved_at": datetime.now(UTC).isoformat(),
-            "params": self.params,
             "feature_names": self.feature_names,
             "margin_feature": self.margin_feature,
             "n_features": len(self.feature_names),
@@ -672,10 +465,6 @@ class XGBoostLineMovementStrategy(BettingStrategy):
         self.model = model_data["model"]
         self.feature_names = model_data["feature_names"]
         self.margin_feature = model_data.get("margin_feature")
-
-        # Update params if saved (for backward compatibility)
-        if "params" in model_data:
-            self.params.update(model_data["params"])
 
         # Try to load config file if it exists
         config_filepath = filepath.with_suffix(".yaml")

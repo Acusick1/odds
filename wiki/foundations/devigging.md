@@ -30,7 +30,6 @@ These use raw implied probabilities (`odds_core.models.Odds.implied_probability`
 - `target_type="raw"`: mean implied-probability delta across books, snapshot to close (`odds_analytics.feature_groups._compute_target`).
 - `odds_mcp.server.find_retail_edges`: `divergence = retail_implied_prob - sharp_implied_prob`, both vig-inclusive: the sharp probability comes from a book in the sharp list, and only the rows are retail books (the sharp list, Pinnacle and Polymarket are never rows), so a sharp book's own margin is part of every divergence ([retail edges](../agent/mcp-market-tools.md#retail-edges)).
 - The `sharp_prob` and `retail_sharp_diff` model features ([Sharp benchmark](../modelling/sharp-benchmark.md)).
-- `basic_ev` backtests use the vig-inclusive sharp probability as truth ([Backtest strategies](../evaluation/backtest-strategies.md)).
 - Hold measurement (`odds_analytics.utils.per_book_market_holds`, over decimal prices) measures the vig rather than removing it.
 
 Comparing a vig-inclusive probability with a devigged one mixes two scales; the vig-inclusive consumers above are the places where that can happen `(inferred)`.

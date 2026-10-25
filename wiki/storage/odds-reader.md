@@ -16,7 +16,6 @@ sources:
   - odds_core.snapshot_utils.extract_odds_from_snapshot
   - odds_core.utils.raw_data_has_market
   - odds_core.match_brief_models.SharpPriceResult
-  - odds_analytics.backtesting.services
 status: stable
 ---
 
@@ -36,7 +35,7 @@ status: stable
 
 ## Odds at a point in time
 
-`odds_lambda.storage.readers.OddsReader.get_odds_at_time(event_id, timestamp, tolerance_minutes=5)` returns the `odds_timestamp` closest to the target within ± `tolerance_minutes`, so a snapshot after the target can win (#435); it returns all rows at that timestamp, or an empty list if none. The backtester calls it with `tolerance_minutes=30` around a 1 h decision time (`odds_analytics.backtesting.services`), so post-decision odds can win ([Look-ahead bias](../modelling/look-ahead-bias.md#where-the-rule-breaks)). Events from historical OddsPortal/FDUK ingests have no normalized rows, so it returns nothing for them.
+`odds_lambda.storage.readers.OddsReader.get_odds_at_time(event_id, timestamp, tolerance_minutes=5)` returns the `odds_timestamp` closest to the target within ± `tolerance_minutes`, so a snapshot after the target can win (#435); it returns all rows at that timestamp, or an empty list if none. It can therefore return odds after the target ([Look-ahead bias](../modelling/look-ahead-bias.md#where-the-rule-breaks)). Events from historical OddsPortal/FDUK ingests have no normalized rows, so it returns nothing for them.
 
 ## Other behaviour
 
@@ -56,4 +55,4 @@ status: stable
 - [Storage layer](storage-layer.md)
 - [How odds are stored](odds-storage-model.md)
 - [Event matching across sources](event-matching.md)
-- [CLV and the training target](../modelling/clv-target.md) and [Backtest strategies](../evaluation/backtest-strategies.md) consume these queries
+- [CLV and the training target](../modelling/clv-target.md) and [Replay backtest](../evaluation/candidate-backtest.md) consume these queries

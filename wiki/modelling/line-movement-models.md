@@ -1,31 +1,25 @@
 ---
 type: reference
-title: Line-movement strategy (XGBoost)
-description: The XGBoost strategy class, its confidence mapping, defaults, save and load, and ml_strategy_example.
+title: Line-movement model (XGBoost)
+description: The XGBoost regressor wrapper behind odds train, covering fitting, base margin, config-driven training, and saving and loading.
 sources:
   - odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy
-  - odds_analytics.ml_strategy_example.XGBoostStrategy
   - odds_analytics.training.config.TrainingConfig
 status: stable
 ---
 
-# Line-movement strategy (XGBoost)
+# Line-movement model (XGBoost)
 
-An `odds_analytics.backtesting.services.BettingStrategy` subclass wraps a trained line-movement regressor so the [backtest engine](../evaluation/backtest-engine.md) can bet on it; it is also the trainer behind `odds train` ([training pipeline](training-pipeline.md)). The registry name is `xgb_line_movement` ([backtest strategies](../evaluation/backtest-strategies.md)); config `strategy_type` accepts only `xgboost_line_movement`.
+`odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy` wraps an XGBoost regressor of the closing line move. It is the trainer behind `odds train` ([training pipeline](training-pipeline.md)) and the model of the [retail-EV evaluation](../evaluation/retail-ev-evaluation.md); it places no bets. Config `strategy_type` accepts only `xgboost_line_movement`.
 
 ## Behaviour
 
-`odds_analytics.backtesting.services.BettingStrategy.evaluate_opportunity` predicts a movement delta for the home and away outcome, skips any below `min_predicted_movement` (0.02), takes the best price among its bookmakers (highest `odds_core.models.Odds.price_decimal`, recorded as its American quote), and sets `confidence = base_confidence + (predicted - min) * movement_confidence_scale`, clamped to 0.5-0.95 (defaults 0.52 and 5.0). The engine passes `confidence` to Kelly sizing as the win probability, and zero or negative Kelly is floored to `min_bet_size` ([backtest engine](../evaluation/backtest-engine.md)). Draws are never bet.
+`odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy.train` fits an `XGBRegressor` with the train set and validation set as `eval_set` (metrics and pruning only; there is no early stopping, so all `n_estimators` trees are built), with optional `sample_weight_train` and `sample_weight_val` passed to the fit, the evaluation set and the metrics ([sample weights](training-pipeline.md#sample-weights)). Its optional `margin_feature` names a feature column that XGBoost takes as each row's base margin, in the fit and the evaluation set; `odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy.predict` adds that column back, and the train and validation metrics go through it. `odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy.train_from_config` requires `strategy_type == "xgboost_line_movement"` and an `odds_analytics.training.config.XGBoostConfig`, sets `margin_feature` to `baseline_ev` for the `retail_ev` residual arm ([retail-EV arm](training-config.md#retail-ev-arm)), and adds an Optuna pruning callback when given a trial. `odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy.save_model` writes joblib `{model, feature_names, margin_feature}` plus a `.yaml` of metadata beside it; `odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy.load_model` falls back to pickle when joblib fails.
 
-`odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy.train` fits an `XGBRegressor` with the train set and validation set as `eval_set` (metrics and pruning only; there is no early stopping, so all `n_estimators` trees are built), with optional `sample_weight_train` and `sample_weight_val` passed to the fit, the evaluation set and the metrics ([sample weights](training-pipeline.md#sample-weights)). Its optional `margin_feature` names a feature column that XGBoost takes as each row's base margin, in the fit and the evaluation set; `odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy.predict` adds that column back, and the train and validation metrics and the backtest's movement prediction go through it. `odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy.train_from_config` requires `strategy_type == "xgboost_line_movement"` and an `odds_analytics.training.config.XGBoostConfig`, sets `margin_feature` to `baseline_ev` for the `retail_ev` residual arm ([retail-EV arm](training-config.md#retail-ev-arm)), and adds an Optuna pruning callback when given a trial. `odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy.save_model` writes joblib `{model, feature_names, margin_feature, params}` plus a `.yaml` of metadata beside it; `odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy.load_model` falls back to pickle when joblib fails.
-**`odds_analytics.ml_strategy_example`.** `odds_analytics.ml_strategy_example.XGBoostStrategy` is an XGBoost win-probability classifier kept as a reference implementation, with no config-driven training entry point; it is not in any registry and is referenced only by tests, so it is not the model strategy.
+## Feature vector
 
-## Backtest behaviour
-
-- **Feature vector.** The XGBoost strategy builds `odds_analytics.feature_extraction.TabularFeatures.to_array` (6 values). Models trained from the arrays that `odds_analytics.feature_groups.prepare_training_data` builds add `hours_until_event` (from the XGBoost adapter) and any other configured groups, so a model trained through it receives a different width (#476; read from code, not run). Model strategies need `--model-path`.
-- **Market and bookmakers.** The strategy defaults to `market="h2h"`, while EPL odds use `1x2`; the CLI constructs it with defaults and cannot override ([market keys](../collection/sport-and-market-keys.md#market-key-dialects), #465). XGBoost defaults to eight bookmakers (Pinnacle plus seven US books); the extractor's sharp and retail rosters default to `pinnacle` and `fanduel/draftkings/betmgm`, ignoring the hybrid sharp reference (#465; [sharp benchmark](sharp-benchmark.md#code-copies)).
-- **Decision time.** The model learns from 3-24 h snapshots while backtests decide 1 h out, so a model-driven backtest feeds it inputs unlike its training rows (same page).
+`odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy` builds `odds_analytics.feature_extraction.TabularFeatures.to_array` (6 values) when it extracts features itself. Models trained from the arrays that `odds_analytics.feature_groups.prepare_training_data` builds add `hours_until_event` (from the XGBoost adapter) and any other configured groups, so a model trained through it receives a different width (#476; read from code, not run).
 
 ## Related
 
-- [CLV target](clv-target.md), [Add a backtest strategy](../evaluation/howto-add-backtest-strategy.md)
+- [CLV target](clv-target.md)

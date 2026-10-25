@@ -28,7 +28,7 @@ Row order matters: `event_ids` follow the input event order (`odds_lambda.storag
 
 ## NaN-fill and variance policy
 
-- When optional data is missing the block is NaN and the row is kept (`odds_analytics.feature_groups._extract_static_feature_parts`); only a tabular failure drops a row. XGBoost handles NaN natively.
+- When optional data is missing the block is NaN and the row is kept (`odds_analytics.feature_groups._extract_static_feature_parts`); only a tabular failure drops a row. The tabular extractor takes each event as an `odds_analytics.feature_extraction.FeatureEvent`, made by `odds_analytics.feature_groups.make_feature_event`. XGBoost handles NaN natively.
 - Extraction exceptions inside a group are caught and logged at debug level and the block becomes NaN, so a per-group failure is silent.
 - Strictly constant columns of the 2D feature matrix are then dropped by `odds_analytics.training.feature_selection.apply_variance_filter` (`variance_threshold` 0.0), which is why the feature names can be shorter than the configured groups (`rest` adds 0 EPL features).
 

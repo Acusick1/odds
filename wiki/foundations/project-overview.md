@@ -10,7 +10,6 @@ sources:
   - odds_cli.commands.backfill
   - odds_analytics.backfill_executor.BackfillExecutor
   - odds_lambda.storage.tier_validator.TierCoverageValidator
-  - odds_analytics.strategies.BasicEVStrategy
   - odds_lambda.polymarket_fetcher.PolymarketClient
 status: stable
 ---
@@ -50,7 +49,6 @@ Each fails quietly on EPL and MLB data: the symptom is an empty result (no event
 - CLI `--sport` defaults to `basketball_nba` in several commands ([Sport defaults](odds-cli.md#sport-defaults)); the root banner describes the tool as NBA (`odds_cli.main.app`).
 - `backfill plan` and `backfill scores` hardcode `sport_key="basketball_nba"` (`odds_cli.commands.backfill`), as does `odds_analytics.backfill_executor.BackfillExecutor` ([Odds API historical backfill](../collection/odds-api-backfill.md)).
 - Completeness checks discover NBA games only, and `odds_lambda.storage.readers.OddsReader.get_games_by_date` buckets days noon-to-noon UTC "to capture a full NBA game day" and has no sport filter, so it serves all sports (`odds_lambda.storage.tier_validator.TierCoverageValidator`; [Coverage and completeness checks](../storage/coverage-checks.md), [OddsReader](../storage/odds-reader.md)).
-- `odds_analytics.strategies.BasicEVStrategy` defaults to NBA-style markets and US retail books, which match nothing in OddsPortal EPL data (`1x2`, UK books, decimal prices) ([Backtest strategies](../evaluation/backtest-strategies.md)).
 - The Polymarket price and order-book tables and the job target NBA (`odds_lambda.jobs.fetch_polymarket.main`, not in the default bootstrap jobs); EPL match prices (fetched with `odds_lambda.polymarket_fetcher.PolymarketClient`) are stored as odds snapshots ([Polymarket pipeline and tables](../collection/polymarket.md), [Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md)).
 - `.env.example` sets `SPORTS=basketball_nba` ([Configuration](configuration.md)); alert intervals are `odds_core.config.AlertConfig` fields with no template variable ([Alerts](../operations/alerts.md#alert-history)).
 
