@@ -51,7 +51,7 @@ A result is the strongest evidence, so every status but FINAL can reach FINAL, a
 | POSTPONED → SCHEDULED | `odds_lambda.storage.writers.OddsWriter.bulk_upsert_events` | the re-discovered event's `commence_time` differs from the stored one |
 | POSTPONED → SCHEDULED | `odds_lambda.storage.event_merge.follow_schedule`, from the live OddsPortal and Betfair jobs, `fetch-mlb-results` and `odds events assign-game-pks` / `set-game-pk` | an MLB event moves to its game's scheduled start ([Event matching](../storage/event-matching.md#live-mlb-events)) |
 | LIVE → SCHEDULED | `odds_lambda.storage.writers.OddsWriter.bulk_upsert_events` | the re-discovered event's `commence_time` is after the clock passed to the call (a delayed kick-off) |
-| → FINAL | `scripts/ingest_football_data_uk.py` | an existing event with no scores gets FDUK's full-time score and FINAL ([historical-ingest-scripts](historical-ingest-scripts.md)) |
+| → FINAL | `scripts/ingest_football_data_uk.py` | an existing event with no scores, whatever its status, gets FDUK's full-time score and FINAL ([historical-ingest-scripts](historical-ingest-scripts.md)) |
 | → FINAL | `odds fetch scores` (`odds_cli.commands.fetch.fetch_scores`), `odds backfill scores` | manual; `backfill scores` sets FINAL from NBA game logs ([odds-api-backfill](odds-api-backfill.md)) |
 
 Re-discovery changes a status in exactly two cases, both back to SCHEDULED: a POSTPONED event whose `commence_time` differs, and a LIVE event whose incoming `commence_time` is in the future. Every other status, and every score and `completed_at`, is left alone: `odds_lambda.storage.writers.OddsWriter.bulk_upsert_events` ([events](../storage/events.md#upsert-verbs)).

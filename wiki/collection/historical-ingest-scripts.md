@@ -21,7 +21,7 @@ status: stable
 
 Three scripts under `scripts/` load OddsPortal scrapes and football-data.co.uk (FDUK) CSVs for EPL as `odds_core.models.Event` plus `odds_core.models.OddsSnapshot` ([columns and constraints](../storage/odds-tables.md#odds_snapshots)) rows in the live `raw_data` format. This is the history that models train and are evaluated on ([data-sources](data-sources.md)). None is scheduled. The steps to run them are in [howto-load-historical-epl-odds](howto-load-historical-epl-odds.md).
 
-The scripts write `odds_core.models.Event` and `odds_core.models.OddsSnapshot` rows only and no `odds_core.models.Odds` rows, so backtests and `odds_lambda.storage.readers.OddsReader.get_odds_at_time` skip these events (#435; [odds-tables](../storage/odds-tables.md)).
+The scripts write `odds_core.models.Event` and `odds_core.models.OddsSnapshot` rows only and no `odds_core.models.Odds` rows, so backtests and `odds_lambda.storage.readers.OddsReader.get_odds_at_time` skip these events (#435; [odds-tables](../storage/odds-tables.md)). Some OddsPortal history events hold two snapshots at one time with different prices; [same-time pairs](../storage/odds-tables.md#same-time-pairs) reports them and leaves them.
 
 ## Inputs
 
@@ -35,7 +35,7 @@ The scripts write `odds_core.models.Event` and `odds_core.models.OddsSnapshot` r
 - Both ingesters first call `odds_lambda.oddsportal_common.find_existing_event` (±24 h, same sport, exact names, no normalization; several candidates match only through those within ±2 h), so a game seen by one source attaches to the other's event ([event-matching](../storage/event-matching.md)).
 - New ids are `op_<season>_<HOME>_<AWAY>_<date>` and `fduk_<season>_<HOME>_<AWAY>_<date>`.
 - All scripts support `--dry-run`. Idempotency: a snapshot is skipped if one with the same `api_request_id` exists (`oddsportal` for h2h, `oddsportal_<market>` otherwise, `football_data_uk`).
-- FDUK events matched to existing `op_` events get no new event of their own. Each row runs in a savepoint. A rerun compares the event's `football_data_uk` snapshots with those the CSV now yields and, only if they differ, deletes and rewrites them (`snapshots_updated` counts the replaced rows), so a changed CSV or changed timing rules reach existing events. A rerun also corrects `commence_time` and `completed_at` on `fduk_` events; matched `op_` events keep their own times. Any matched event with no scores, whatever its status, gets FDUK's full-time score, FINAL and `completed_at` two hours after kick-off (`results_filled`); an event that already has scores keeps them.
+- FDUK events matched to existing `op_` events get no new event of their own. Each row runs in a savepoint. A rerun compares the event's `football_data_uk` snapshots with those the CSV now yields and, only if they differ, deletes them with any odds rows linked to them and rewrites them (`snapshots_updated` counts the replaced snapshots), so a changed CSV or changed timing rules reach existing events. A rerun also corrects `commence_time` and `completed_at` on `fduk_` events; matched `op_` events keep their own times. Any matched event with no scores, whatever its status, gets FDUK's full-time score, FINAL and `completed_at` two hours after kick-off (`results_filled`); an event that already has scores keeps them.
 
 ## Snapshot shape
 

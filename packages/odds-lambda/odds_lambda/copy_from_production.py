@@ -21,7 +21,7 @@ from rich.progress import (
     TextColumn,
     TimeElapsedColumn,
 )
-from sqlalchemy import delete, insert, select
+from sqlalchemy import delete, insert, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from odds_lambda.storage.event_merge import EventMerger
@@ -159,7 +159,17 @@ class ProductionDataCopier:
                 return
 
             prod_odds = list(
-                (await prod_session.execute(select(Odds).where(Odds.event_id == event.id)))
+                (
+                    await prod_session.execute(
+                        select(Odds).where(
+                            Odds.event_id == event.id,
+                            or_(
+                                Odds.snapshot_id.in_([s.id for s in prod_snapshots]),
+                                Odds.snapshot_id.is_(None),
+                            ),
+                        )
+                    )
+                )
                 .scalars()
                 .all()
             )
@@ -177,9 +187,22 @@ class ProductionDataCopier:
             local_session.add_all(local_snapshots)
             await local_session.flush()
 
+            local_snapshot_ids = {
+                prod.id: local.id
+                for prod, local in zip(prod_snapshots, local_snapshots, strict=True)
+            }
             if prod_odds:
                 await local_session.execute(
-                    insert(Odds), [row.model_dump(exclude={"id"}) for row in prod_odds]
+                    insert(Odds),
+                    [
+                        row.model_dump(exclude={"id"})
+                        | {
+                            "snapshot_id": None
+                            if row.snapshot_id is None
+                            else local_snapshot_ids[row.snapshot_id]
+                        }
+                        for row in prod_odds
+                    ],
                 )
 
             await local_session.commit()

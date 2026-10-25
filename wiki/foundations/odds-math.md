@@ -9,7 +9,7 @@ sources:
   - odds_analytics.utils.calculate_market_hold
   - odds_lambda.oddsportal_common.build_raw_data
   - odds_lambda.betfair.adapter.betfair_book_to_bookmaker_entry
-  - odds_lambda.oddsportal_adapter
+  - odds_lambda.oddsportal_adapter.convert_market
   - scripts/ingest_football_data_uk.py
 status: stable
 ---
@@ -42,7 +42,7 @@ The docstring examples show rounded values (`1.909`, `0.524`), so a doctest runn
 
 `raw_data` outcomes carry one of two encodings, named by `odds_core.odds_math.PRICE_DECIMAL_KEY` (`price_decimal`) and `odds_core.odds_math.PRICE_AMERICAN_KEY` (`price`):
 
-- Snapshots written by the current ingest code store the source decimal under `price_decimal` and have no `price` key: Betfair (`odds_lambda.betfair.adapter.betfair_book_to_bookmaker_entry`), OddsPortal live (`odds_lambda.oddsportal_adapter`), OddsPortal historical (`odds_lambda.oddsportal_common.build_raw_data`) and `scripts/ingest_football_data_uk.py` (tagged `odds_core.snapshot_sources.SnapshotSource.FOOTBALL_DATA_UK`).
+- Snapshots written by the current ingest code store the source decimal under `price_decimal` and have no `price` key: Betfair (`odds_lambda.betfair.adapter.betfair_book_to_bookmaker_entry`), OddsPortal live (`odds_lambda.oddsportal_adapter.convert_market`), OddsPortal historical (`odds_lambda.oddsportal_common.build_raw_data`) and `scripts/ingest_football_data_uk.py` (tagged `odds_core.snapshot_sources.SnapshotSource.FOOTBALL_DATA_UK`).
 - The Odds API's responses keep their integer American `price` unchanged, which `odds_core.odds_math.american_to_decimal` converts exactly.
 
 Snapshots stored before the decimal price migration keep `price` where the migration could not recover the original: `betfair_api` outcomes whose `betfair_meta` runner did not truncate to the stored price, the OddsPortal `-10000` outcomes in a market the migration kept (decoded as 1.01 in `odds.price_decimal` only), and every `football_data_uk` snapshot until `scripts/ingest_football_data_uk.py` is re-run (the script is idempotent). That `price` is the old integer American quote (truncated for Betfair, rounded for OddsPortal and FDUK), so its decimal is exact only for the Odds API. The migration also removed OddsPortal markets that contain `-10000` and whose implied probabilities sum above 1.3 (source garbage), from `raw_data` and from `odds`.

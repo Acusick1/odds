@@ -342,10 +342,13 @@ class OddsWriter:
             hours_until_commence=hours_until,
         )
         self.session.add(snapshot)
+        await self.session.flush()
+        assert snapshot.id is not None
 
         # Parse and store normalized odds
         odds_records = await self._parse_and_store_odds(
             event_id=event_id,
+            snapshot_id=snapshot.id,
             bookmakers=bookmakers,
             snapshot_time=snapshot_time,
         )
@@ -364,6 +367,7 @@ class OddsWriter:
     async def _parse_and_store_odds(
         self,
         event_id: str,
+        snapshot_id: int,
         bookmakers: list[dict],
         snapshot_time: datetime,
     ) -> list[Odds]:
@@ -372,6 +376,7 @@ class OddsWriter:
 
         Args:
             event_id: Event identifier
+            snapshot_id: Snapshot the bookmaker data came from
             bookmakers: List of bookmaker data from API
             snapshot_time: Time of snapshot
 
@@ -404,6 +409,7 @@ class OddsWriter:
                 for outcome in market.get("outcomes", []):
                     odds = Odds(
                         event_id=event_id,
+                        snapshot_id=snapshot_id,
                         bookmaker_key=bookmaker_key,
                         bookmaker_title=bookmaker_title,
                         market_key=market_key,
@@ -537,41 +543,6 @@ class OddsWriter:
         )
 
         return quality_log
-
-    async def bulk_insert_odds(self, odds_records: list[Odds]) -> int:
-        """
-        Bulk insert odds records for efficient backfill.
-
-        Args:
-            odds_records: List of Odds instances
-
-        Returns:
-            Number of records inserted
-
-        Note:
-            Uses PostgreSQL INSERT ... ON CONFLICT DO NOTHING for efficiency
-
-        Example:
-            odds = [
-                Odds(event_id="abc", bookmaker_key="fanduel", ...),
-                Odds(event_id="abc", bookmaker_key="draftkings", ...),
-            ]
-            count = await writer.bulk_insert_odds(odds)
-        """
-        if not odds_records:
-            return 0
-
-        # Convert Odds instances to dicts for bulk insert
-        odds_dicts = [odd.model_dump(exclude_unset=True) for odd in odds_records]
-
-        stmt = insert(Odds).values(odds_dicts)
-        stmt = stmt.on_conflict_do_nothing()
-
-        result = await self.session.execute(stmt)
-        count = result.rowcount
-
-        logger.info("bulk_odds_inserted", count=count)
-        return count
 
     async def bulk_upsert_events(
         self, events: list[Event], now: datetime | None = None

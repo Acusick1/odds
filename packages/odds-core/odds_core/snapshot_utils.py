@@ -61,6 +61,7 @@ def extract_odds_from_snapshot(
                 odds_list.append(
                     Odds(
                         event_id=event_id,
+                        snapshot_id=snapshot.id,
                         bookmaker_key=bookmaker_key,
                         bookmaker_title=bookmaker_title,
                         market_key=market_key,

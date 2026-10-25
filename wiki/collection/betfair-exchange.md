@@ -33,7 +33,7 @@ Package `packages/odds-lambda/odds_lambda/betfair/`, driven by the fetch-betfair
 
 ## The fetch-betfair-exchange job
 
-`odds_lambda.jobs.fetch_betfair_exchange.main(ctx)` logs in, lists upcoming Match Odds markets, converts each book to a `betfair_exchange` bookmaker entry and writes snapshots via `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` ([odds-writer](../storage/odds-writer.md)). It does nothing unless `settings.betfair.enabled` (`BETFAIR_ENABLED`).
+`odds_lambda.jobs.fetch_betfair_exchange.main(ctx)` logs in, lists upcoming Match Odds markets, converts each book to a `betfair_exchange` bookmaker entry and writes snapshots, with their odds rows, via `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` ([odds-writer](../storage/odds-writer.md)). It does nothing unless `settings.betfair.enabled` (`BETFAIR_ENABLED`).
 
 ### Where it runs
 

@@ -43,7 +43,7 @@ Every table is a SQLModel class in `packages/odds-core/odds_core/`; migrations a
 - [Event merge](event-merge.md) — How events for one match are merged into one canonical event, which event is kept, who merges, how twins and rescheduled duplicates are detected, how stored MLB events get their gamePk, and the odds events merge-twins, repair-names, assign-game-pks, set-game-pk and mark-unassignable commands.
 - [Events table](events.md) — The events columns and statuses, id prefixes by source, team-name normalizers, and the upsert verbs that write events.
 - [Fetch tier](fetch-tier.md) — The FetchTier enum and bounds, where tiers are written and read, and the boundary encodings.
-- [Odds snapshot and odds tables](odds-tables.md) — The odds_snapshots and odds columns and indexes, the raw_data format, and the provenance tags.
+- [Odds snapshot and odds tables](odds-tables.md) — The odds_snapshots and odds columns and indexes, how an odds row links to its snapshot, the raw_data format, the provenance tags, and same-time snapshot pairs.
 - [Odds validation](odds-validator.md) — OddsValidator checks, the data_quality_logs rows it produces, and DataQualityConfig.
 - [OddsReader](odds-reader.md) — Every OddsReader query, which read normalized rows and which re-parse raw_data, and the time-window semantics.
 - [OddsWriter](odds-writer.md) — store_odds_snapshot, event upserts, find_or_create_event, logging helpers, and their edge cases.
@@ -56,4 +56,5 @@ Every table is a SQLModel class in `packages/odds-core/odds_core/`; migrations a
 ### How-to guides
 
 - [Assign MLB events their gamePk](howto-assign-mlb-game-pks.md) — Steps to give stored MLB events without a gamePk their MLB Stats API gamePk, merge the events of one game, and settle the events the backfill cannot resolve.
+- [Delete same-time snapshot pairs](howto-delete-same-time-pairs.md) — Steps to delete the MLB snapshot pairs that hold two games' prices and the duplicate snapshots of one fetch, with their odds rows, and to check that every odds row then names its snapshot.
 <!-- pages:end -->

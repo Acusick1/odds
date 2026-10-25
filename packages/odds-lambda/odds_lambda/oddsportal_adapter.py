@@ -112,6 +112,10 @@ def convert_market(
         match_date=event.start_time,
         match_link=event.url,
         scraped_date=scraped_at,
-        raw_data={"bookmakers": entries, "source": "oddsportal_live"},
+        raw_data={
+            "bookmakers": entries,
+            "source": "oddsportal_live",
+            "oddsportal_event_id": event.event_id,
+        },
         bookmaker_count=len(entries),
     )
