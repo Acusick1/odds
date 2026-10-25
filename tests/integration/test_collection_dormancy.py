@@ -228,6 +228,7 @@ class TestBetfairKickoff:
             overnight=None,
             now=now,
             stored_kickoff=next_betfair_kickoff if betfair else None,
+            leads=[fetch_betfair_exchange.CLOSE_LEAD],
         )
         return decision.next_execution
 

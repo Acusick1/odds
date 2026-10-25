@@ -75,6 +75,12 @@ class TestCandidateScrapeLeads:
 class TestProximityScheduling:
     """Verify proximity-based scheduling in main()."""
 
+    @pytest.fixture(autouse=True)
+    def no_candidate_leads(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "odds_lambda.jobs.fetch_oddsportal.candidate_scrape_leads", lambda sport_key: []
+        )
+
     @staticmethod
     @asynccontextmanager
     async def _noop_alert_context(name: str) -> AsyncIterator[None]:
