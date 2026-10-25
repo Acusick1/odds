@@ -19,7 +19,7 @@ status: stable
 
 # Odds validation
 
-`odds_lambda.storage.validators.OddsValidator` checks one payload for plausibility as it is written and logs findings to `data_quality_logs` (`odds_core.models.DataQualityLog`); it never blocks a write. It is called by [OddsWriter](odds-writer.md#store_odds_snapshot) inside `odds_lambda.storage.writers.OddsWriter.store_envelope`, before the snapshot, its odds rows and any price rows are added; a price no price row can take is logged separately, as an `invalid_price` row ([Writing price rows](price-tables.md#reading-an-envelope)). The completeness checks that share the word "quality" are separate ([Coverage and completeness checks](coverage-checks.md)).
+`odds_lambda.storage.validators.OddsValidator` checks one payload for plausibility as it is written and logs findings to `data_quality_logs` (`odds_core.models.DataQualityLog`); it never blocks a write. It is called by [OddsWriter](odds-writer.md#store_odds_snapshot) inside `odds_lambda.storage.writers.OddsWriter.store_envelope`, before the snapshot (one per market for a multi-market envelope), its odds rows and any price rows are added; a price no price row can take is logged separately, as an `invalid_price` row ([Writing price rows](price-tables.md#reading-an-envelope)). The completeness checks that share the word "quality" are separate ([Coverage and completeness checks](coverage-checks.md)).
 
 ## Checks
 
@@ -41,7 +41,7 @@ If there are any warnings, `odds_lambda.storage.writers.OddsWriter.store_envelop
 
 ## Configuration
 
-`odds_core.config.DataQualityConfig` has env `ENABLE_VALIDATION` (default true) and `REJECT_INVALID_ODDS` (default false) ([Configuration](../foundations/configuration.md)). `odds_lambda.ingestion.OddsIngestionService.ingest_sport` is the only reader of `enable_validation`, as the default for its `validate` argument, which it passes to `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` for every event it stores. `reject_invalid_odds` is read by nothing, so invalid odds are always stored (#448).
+`odds_core.config.DataQualityConfig` has env `ENABLE_VALIDATION` (default true) and `REJECT_INVALID_ODDS` (default false) ([Configuration](../foundations/configuration.md)). `odds_lambda.ingestion.OddsIngestionService.ingest_sport` is the only reader of `enable_validation`, as the default for its `validate` argument, which it passes to `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` for every event it stores, a game resolved through the event resolver. `reject_invalid_odds` is read by nothing, so invalid odds are always stored (#448).
 
 ## Related
 

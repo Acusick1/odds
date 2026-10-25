@@ -14,7 +14,6 @@ sources:
   - odds_lambda.storage.writers.OddsWriter.update_event_status
   - odds_lambda.odds_api_events.resolve_odds_api_events
   - odds_lambda.odds_api_events.find_event_by_odds_api_id
-  - odds_lambda.storage.event_merge.EventMerger.adopt_twins
   - odds_lambda.live_events.live_event_id
   - odds_lambda.event_sync.EventSyncService.sync_sport
   - odds_analytics.training.data_preparation

@@ -232,7 +232,7 @@ class TierCoverageValidator:
             commence_time=event.commence_time,
             tiers_present=frozenset(tiers_present),
             tiers_missing=frozenset(tiers_missing),
-            total_snapshots=len(all_snapshots),
+            total_snapshots=len({s.snapshot_time for s in all_snapshots}),
             snapshots_by_tier=snapshots_by_tier_dict,
             has_final_scores=has_final_scores,
             home_score=event.home_score,

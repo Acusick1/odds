@@ -272,8 +272,7 @@ async def _find(
     if game.external_id is not None:
         held = await _by_external_id(session, game.source, game.external_id)
         if held is None and game.source is Source.ODDS_API:
-            # Events stored before the external-id table existed are keyed by the API's own id.
-            held = await session.get(Event, game.external_id)
+            held = await event_keyed_by_odds_api_id(session, game.external_id)
         if held is not None and (game.mlb_game is None or not await holds_game_pk(session, held)):
             return ResolvedEvent(held, Resolution.BY_EXTERNAL_ID)
     matched = await _match(session, game, home_team, away_team)
@@ -287,6 +286,11 @@ async def _by_external_id(session: AsyncSession, source: Source, external_id: st
         .where(EventExternalId.source == source, EventExternalId.external_id == external_id)
     )
     return result.scalar_one_or_none()
+
+
+async def event_keyed_by_odds_api_id(session: AsyncSession, odds_api_id: str) -> Event | None:
+    # Events stored before the external-id table existed are keyed by the API's own id.
+    return await session.get(Event, odds_api_id)
 
 
 async def _by_game_pk(session: AsyncSession, game_pk: int) -> Event | None:
@@ -443,7 +447,20 @@ async def _record_external_id(
         )
     )
     current = result.scalar_one_or_none()
-    if current is not None:
+    if current is not None and source is Source.ODDS_API:
+        # The API reissues ids; the event's current one replaces the old.
+        stale = await session.get(EventExternalId, (source, current))
+        assert stale is not None
+        await session.delete(stale)
+        await session.flush()
+        record_issue(
+            session,
+            event.id,
+            "external_id_replaced",
+            f"{source.value} id {current} replaced by {external_id}",
+            {"source": source.value, "old_external_id": current, "external_id": external_id},
+        )
+    elif current is not None:
         await _refuse(
             session,
             event,

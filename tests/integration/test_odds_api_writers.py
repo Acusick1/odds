@@ -16,9 +16,11 @@ from odds_core.api_models import (
     create_scheduled_event,
 )
 from odds_core.models import (
+    DataQualityLog,
     Event,
     EventExternalId,
     EventStatus,
+    FetchLog,
     Odds,
     OddsSnapshot,
     Price,
@@ -380,8 +382,9 @@ class TestIngestion:
         prices = (await session.execute(select(Price))).scalars().all()
         assert sorted(p.snapshot_id for p in prices) == sorted([first.id] * 6 + [second.id] * 4)
         odds = (await session.execute(select(Odds))).scalars().all()
-        assert {o.snapshot_id for o in odds} == {first.id}
-        assert len(odds) == 10
+        assert sorted(o.snapshot_id for o in odds) == sorted([first.id] * 6 + [second.id] * 4)
+        for o in odds:
+            assert o.market_key == ("1x2" if o.snapshot_id == first.id else "totals")
         payload = await session.get(SnapshotPayload, first.payload_id)
         assert payload is not None and payload.payload[0]["id"] == "apihex1"
 
@@ -399,6 +402,78 @@ class TestIngestion:
         snapshots = (await session.execute(select(OddsSnapshot))).scalars().all()
         assert {s.event_id for s in snapshots} == {"op_live_ARS_CHE_x"}
         assert await _odds_api_ids(session) == {events[0].surrogate_id: "apihex1"}
+
+    async def test_dropped_mlb_game_is_not_a_failure_and_writes_no_payload(
+        self,
+        pglite_async_session: AsyncSession,
+        mock_settings: Any,
+        mlb_schedule: list[MlbGameResult],
+    ) -> None:
+        session = pglite_async_session
+        start = KICKOFF.replace(hour=23)
+        listed = _listed(
+            "apimlb3",
+            start,
+            "New York Yankees",
+            "Boston Red Sox",
+            sport_key=MLB,
+            sport_title="MLB",
+        )
+        mlb_schedule.append(_mlb_game(900, start, "Chicago Cubs", "St. Louis Cardinals"))
+        mock_settings.data_collection.bookmakers[MLB] = ["bet365"]
+        response = OddsResponse(
+            events=[create_scheduled_event(listed)],
+            raw_events_data=[{**listed, "bookmakers": [_book("bet365")]}],
+            response_time_ms=10,
+            quota_remaining=100,
+            timestamp=datetime.now(UTC),
+        )
+        service = OddsIngestionService(
+            client=StubOddsClient(response),  # type: ignore[arg-type]
+            settings=mock_settings,
+            session_factory=_Factory(session),
+        )
+
+        result = await service.ingest_sport(MLB)
+
+        assert result.failures == []
+        assert len(result.dropped_games) == 1
+        assert result.success
+        assert (await session.execute(select(SnapshotPayload))).scalars().all() == []
+        log = (await session.execute(select(FetchLog))).scalar_one()
+        assert log.success is True
+
+    async def test_payload_is_written_once_for_a_run_of_events(
+        self, pglite_async_session: AsyncSession, mock_settings: Any
+    ) -> None:
+        session = pglite_async_session
+        listed = [
+            _listed("apihex1"),
+            _listed("apihex2", KICKOFF + timedelta(days=1), "Fulham", "Leeds"),
+        ]
+        response = OddsResponse(
+            events=[create_scheduled_event(item) for item in listed],
+            raw_events_data=[
+                {**item, "bookmakers": [_book("bet365", item["home_team"], item["away_team"])]}
+                for item in listed
+            ],
+            response_time_ms=10,
+            quota_remaining=100,
+            timestamp=datetime.now(UTC),
+        )
+        mock_settings.data_collection.bookmakers["soccer_epl"] = ["bet365"]
+        service = OddsIngestionService(
+            client=StubOddsClient(response),  # type: ignore[arg-type]
+            settings=mock_settings,
+            session_factory=_Factory(session),
+        )
+
+        await service.ingest_sport("soccer_epl")
+
+        assert len((await session.execute(select(SnapshotPayload))).scalars().all()) == 1
+        snapshots = (await session.execute(select(OddsSnapshot))).scalars().all()
+        assert len(snapshots) == 4
+        assert len({s.payload_id for s in snapshots}) == 1
 
     async def test_repeated_fetch_at_one_time_stores_each_market_once(
         self, pglite_async_session: AsyncSession, mock_settings: Any
@@ -443,6 +518,32 @@ class TestScores:
 
         assert found is not None and found.id == "op_live_ARS_CHE_y"
         assert await odds_api_id_of(session, "op_live_ARS_CHE_y") == "apihex2"
+        assert await odds_api_id_of(session, "op_live_NOPE") is None
+
+    async def test_reissued_api_id_replaces_the_recorded_one_and_is_logged(
+        self, pglite_async_session: AsyncSession
+    ) -> None:
+        session = pglite_async_session
+        await _sync(session, [_listed("oldid")])
+
+        await _sync(session, [_listed("newid")])
+
+        (event,) = await _events(session)
+        assert await _odds_api_ids(session) == {event.surrogate_id: "newid"}
+        found = await find_event_by_odds_api_id(session, "newid")
+        assert found is not None and found.id == event.id
+        replaced = (
+            (
+                await session.execute(
+                    select(DataQualityLog).where(
+                        DataQualityLog.issue_type == "external_id_replaced"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert [log.raw_data["old_external_id"] for log in replaced] == ["oldid"]
 
     async def test_event_stored_before_ids_were_recorded_is_found_by_its_key(
         self, pglite_async_session: AsyncSession

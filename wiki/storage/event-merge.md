@@ -40,11 +40,10 @@ Events holding different MLB `gamePk`s (`events.mlb_game_pk`, [Event matching](e
 
 The finders only read. `odds_lambda.storage.event_merge.find_match_id` (±2 h, used by `odds_lambda.live_events.LiveEventFinder.fixture_key`) returns the canonical candidate; `odds_lambda.storage.event_merge.find_match_candidates` returns every candidate, for the [event resolver](event-resolver.md#steps) and the MLB claim rules ([live MLB events](event-matching.md#live-mlb-events)). `odds_lambda.storage.event_merge.find_historical_candidates` (±24 h, same sport) returns every candidate for the historical loaders, which the resolver reduces to a lone candidate or the nearest within ±2 h ([Event resolver](event-resolver.md#steps)), so neighbouring fixtures of the same teams (an NBA back-to-back) are never conflated. No finder merges or deletes.
 
-Merging happens in four places only:
+Merging happens in three places only:
 
 | Caller | Entry point |
 |---|---|
-| Odds API event sync ([fetch-odds](../collection/fetch-odds-job.md)) | `odds_lambda.storage.event_merge.EventMerger.adopt_twins`: every non-Odds-API event with the same sport and teams within ±2 h of each synced event |
 | `odds events repair-names --apply` | `odds_lambda.storage.event_name_repair.repair_team_names`: fixes annotated, cut-off and `Game N` team names of live-scraped events, then merges each resulting twin group into its best-sourced event that was never renamed |
 | `odds events merge-twins --apply` | `odds_lambda.storage.event_merge.EventMerger.merge_group` for every twin group |
 | `odds events assign-game-pks --apply`, `odds events set-game-pk --merge --apply` | `odds_lambda.storage.game_pk_backfill.apply_assignment`: the events of one MLB `gamePk` ([Assigning gamePks](#assigning-gamepks)) |

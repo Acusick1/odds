@@ -2,14 +2,14 @@
 
 import asyncio
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import structlog
 from odds_core.database import async_session_maker
 from odds_core.time import parse_api_datetime
 from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.data_fetcher import TheOddsAPIClient
-from odds_lambda.live_events import DroppedGame
+from odds_lambda.live_events import DroppedGame, LiveEventFinder, alert_dropped_games
 from odds_lambda.odds_api_events import (
     odds_api_finder,
     resolve_odds_api_event,
@@ -30,6 +30,7 @@ class BackfillResult:
     failed_snapshots: int
     skipped_snapshots: int
     total_quota_used: int
+    dropped_games: list[DroppedGame] = field(default_factory=list)
 
 
 @dataclass
@@ -73,6 +74,9 @@ class BackfillExecutor:
         self.skip_existing = skip_existing
         self.dry_run = dry_run
         self.rate_limit_seconds = rate_limit_seconds
+        # NBA only, so the finder reads no MLB schedule and one serves the whole run
+        self._finder: LiveEventFinder | None = None
+        self._dropped_games: list[DroppedGame] = []
 
     async def __aenter__(self):
         """Context manager entry."""
@@ -188,7 +192,10 @@ class BackfillExecutor:
             if game_success:
                 successful_games += 1
 
+        await alert_dropped_games("odds-backfill", self._dropped_games)
+
         return BackfillResult(
+            dropped_games=list(self._dropped_games),
             successful_games=successful_games,
             successful_snapshots=successful_snapshots,
             failed_snapshots=failed_snapshots,
@@ -199,7 +206,7 @@ class BackfillExecutor:
     async def _process_snapshot(
         self,
         event_id: str,
-        odds_api_id: str,
+        odds_api_id: str | None,
         home_team: str,
         away_team: str,
         snapshot_time: str,
@@ -246,6 +253,16 @@ class BackfillExecutor:
                         message="Already exists",
                     )
 
+        if odds_api_id is None:
+            return BackfillProgress(
+                event_id=event_id,
+                home_team=home_team,
+                away_team=away_team,
+                snapshot_time=snapshot_time,
+                status="skipped",
+                message="Event has no Odds API id",
+            )
+
         # Fetch historical odds - API client returns parsed Event instances
         client = self._client
         if client is None:
@@ -281,10 +298,19 @@ class BackfillExecutor:
         async with self._session_factory() as session:
             writer = OddsWriter(session)
 
-            finder = await odds_api_finder(event.sport_key, [event])
-            found = await resolve_odds_api_event(finder, session, event)
+            if self._finder is None:
+                self._finder = await odds_api_finder(event.sport_key, [event])
+            found = await resolve_odds_api_event(self._finder, session, event)
             if isinstance(found, DroppedGame):
-                raise ValueError(f"game dropped: {found.describe()}")
+                self._dropped_games.append(found)
+                return BackfillProgress(
+                    event_id=event_id,
+                    home_team=home_team,
+                    away_team=away_team,
+                    snapshot_time=snapshot_time,
+                    status="skipped",
+                    message=f"Game dropped: {found.describe()}",
+                )
             payload_id = await store_payload(session, [event_data])
             await writer.store_odds_snapshot(
                 event_id=found.event.id,

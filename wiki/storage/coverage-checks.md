@@ -28,7 +28,7 @@ These checks confirm that every game was collected across the [fetch tiers](fetc
 
 ## TierCoverageValidator
 
-`odds_lambda.storage.tier_validator.TierCoverageValidator` is driven by `odds_cli.commands.validate.validate_game` (`odds_lambda.storage.tier_validator.TierCoverageValidator.validate_game`), `odds_cli.commands.validate.validate_daily` (`odds_lambda.storage.tier_validator.TierCoverageValidator.validate_date`) and `odds_cli.commands.validate.validate_tier_coverage` (`odds_lambda.storage.tier_validator.TierCoverageValidator.validate_date_range`). Per game it reads tier counts from [OddsReader](odds-reader.md) and builds a `odds_lambda.storage.tier_validator.TierCoverageReport`; per date a `odds_lambda.storage.tier_validator.DailyValidationReport`.
+`odds_lambda.storage.tier_validator.TierCoverageValidator` is driven by `odds_cli.commands.validate.validate_game` (`odds_lambda.storage.tier_validator.TierCoverageValidator.validate_game`), `odds_cli.commands.validate.validate_daily` (`odds_lambda.storage.tier_validator.TierCoverageValidator.validate_date`) and `odds_cli.commands.validate.validate_tier_coverage` (`odds_lambda.storage.tier_validator.TierCoverageValidator.validate_date_range`). Per game it reads tier counts, counted as distinct snapshot times, from [OddsReader](odds-reader.md) and builds a `odds_lambda.storage.tier_validator.TierCoverageReport`; per date a `odds_lambda.storage.tier_validator.DailyValidationReport`.
 
 - `odds_lambda.storage.tier_validator.CRITICAL_TIERS` = PREGAME, CLOSING: missing makes a game incomplete (`is_complete`). They depend on tiers stored with `<=` boundaries ([Boundary encodings](fetch-tier.md#boundary-encodings)). `odds_lambda.storage.tier_validator.WARNING_TIERS` = OPENING, EARLY, SHARP: counted in `games_with_warnings`. `odds_lambda.storage.tier_validator.TierCoverageValidator.DEFAULT_REQUIRED_TIERS` is all five.
 - FINAL games without both scores get the issue `"Missing final scores for completed game"`.
@@ -41,7 +41,7 @@ These checks confirm that every game was collected across the [fetch tiers](fetc
 
 ## odds quality
 
-`odds quality coverage` (`odds_cli.commands.quality`): `--start`, `--end`, `--sport` (default `basketball_nba`). Uses `odds_analytics.quality_metrics.QualityMetrics` for game counts, odds/score presence, per-tier and per-bookmaker coverage.
+`odds quality coverage` (`odds_cli.commands.quality`): `--start`, `--end`, `--sport` (default `basketball_nba`). Uses `odds_analytics.quality_metrics.QualityMetrics` for game counts, snapshot counts as distinct snapshot times, odds/score presence, per-tier and per-bookmaker coverage.
 
 - `odds_analytics.quality_metrics.QualityMetrics.get_games_missing_scores` has no status filter, so unplayed games in the range count as missing scores (#467).
 - `odds_analytics.quality_metrics.QualityMetrics._get_tier_hours_range` hardcodes tier hour ranges as display strings rather than deriving them from `odds_lambda.fetch_tier.FetchTier.max_hours` (#467).

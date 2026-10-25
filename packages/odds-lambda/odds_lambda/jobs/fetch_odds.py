@@ -11,13 +11,14 @@ This job:
 from datetime import timedelta
 
 import structlog
-from odds_core.alerts import job_alert_context, send_scheduling_failure
+from odds_core.alerts import job_alert_context, send_outage_warning, send_scheduling_failure
 from odds_core.config import Settings, get_settings
 
 from odds_lambda.collection_calendar import CollectionSource, require_rows_for_fixtures
 from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.event_sync import EventSyncService
 from odds_lambda.ingestion import OddsIngestionService
+from odds_lambda.live_events import alert_dropped_games
 from odds_lambda.scheduling.decision import (
     CadenceConfig,
     ScheduleDecision,
@@ -81,6 +82,9 @@ async def main(ctx: JobContext) -> None:
         sports=sports,
     )
 
+    # Self-scheduling uses the sport-suffixed job name to match Terraform rules
+    schedule_job_name = make_compound_job_name("fetch-odds", sport)
+
     # Sync upcoming events first (free, 0 quota units).
     # Failures here should not block odds ingestion.
     try:
@@ -96,10 +100,13 @@ async def main(ctx: JobContext) -> None:
                 updated=sync_result.updated,
             )
     except Exception as e:
-        logger.warning("event_sync_failed", error=str(e), exc_info=True)
-
-    # Self-scheduling uses the sport-suffixed job name to match Terraform rules
-    schedule_job_name = make_compound_job_name("fetch-odds", sport)
+        logger.error("event_sync_failed", error=str(e), exc_info=True)
+        await send_outage_warning(
+            schedule_job_name,
+            f"event_sync_failed:{schedule_job_name}",
+            f"🚨 {schedule_job_name} event sync failed: {type(e).__name__}: {e}",
+            severity="critical",
+        )
 
     async def _schedule(decision: ScheduleDecision, *, label: str, final: bool = False) -> bool:
         if not decision.next_execution:
@@ -161,6 +168,8 @@ async def main(ctx: JobContext) -> None:
                         event_id=failure.event_id,
                         error=failure.error,
                     )
+
+                await alert_dropped_games(schedule_job_name, sport_result.dropped_games)
 
                 logger.info(
                     "sport_fetch_completed",

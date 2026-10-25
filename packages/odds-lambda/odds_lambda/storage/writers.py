@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_shaped_snapshot
+from odds_lambda.storage.snapshot_store import SnapshotWriteOutcome
 from odds_lambda.storage.validators import OddsValidator
 from odds_lambda.tier_utils import calculate_hours_until_commence, calculate_tier_from_timestamps
 
@@ -110,28 +111,37 @@ class OddsWriter:
         if shape is None:
             self.session.add(snapshot)
             await self.session.flush()
+            new_snapshots = [snapshot]
         else:
             if event is None:
                 raise ValueError(f"event {event_id} is not stored")
             written = await store_shaped_snapshot(self.session, snapshot, event, shape)
-            if not written.inserted:
+            new_snapshots = [
+                w.snapshot
+                for w in ([written.first] if written.first else []) + list(written.others)
+                if w.outcome is SnapshotWriteOutcome.INSERTED
+            ]
+            if written.first is None:
+                new_snapshots = [written.snapshot]
+            if not new_snapshots:
                 logger.info(
                     "odds_snapshot_already_stored",
                     event_id=event_id,
                     snapshot_id=written.snapshot.id,
-                    outcome=written.first.outcome if written.first else None,
                 )
                 return StoredEnvelope(written.snapshot, [], inserted=False)
             snapshot = written.snapshot
-        assert snapshot.id is not None
 
-        # Parse and store normalized odds
-        odds_records = await self._parse_and_store_odds(
-            event_id=event_id,
-            snapshot_id=snapshot.id,
-            bookmakers=bookmakers,
-            snapshot_time=snapshot_time,
-        )
+        # Each odds row sits on the snapshot whose raw_data holds it
+        odds_records: list[Odds] = []
+        for stored in new_snapshots:
+            assert stored.id is not None
+            odds_records += await self._parse_and_store_odds(
+                event_id=event_id,
+                snapshot_id=stored.id,
+                bookmakers=stored.raw_data.get("bookmakers", []),
+                snapshot_time=snapshot_time,
+            )
 
         logger.info(
             "odds_snapshot_stored",

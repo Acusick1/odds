@@ -192,7 +192,7 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str):
                     total_updated += resolved.matched
                     total_dropped += len(resolved.dropped)
                     for error in resolved.errors:
-                        console.print(f"[yellow]Warning: {error}[/yellow]")
+                        console.print(f"[yellow]Warning: {error.describe()}[/yellow]")
                     for dropped in resolved.dropped:
                         console.print(f"[yellow]Warning: dropped {dropped.describe()}[/yellow]")
                     progress.update(store_task, advance=len(batch))

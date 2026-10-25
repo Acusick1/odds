@@ -10,7 +10,6 @@ from odds_core.database import async_session_maker
 
 from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.odds_api_events import odds_api_finder, resolve_odds_api_events
-from odds_lambda.storage.event_merge import EventMerger
 
 logger = structlog.get_logger(__name__)
 
@@ -58,7 +57,6 @@ class EventSyncService:
         finder = await odds_api_finder(sport_key, events)
         async with self._session_factory() as session:
             resolved = await resolve_odds_api_events(session, finder, events)
-            await EventMerger(session).adopt_twins(events)
             await session.commit()
 
         logger.info(
@@ -73,7 +71,7 @@ class EventSyncService:
         if resolved.errors:
             raise RuntimeError(
                 f"{len(resolved.errors)} {sport_key} events failed to sync: "
-                + "; ".join(resolved.errors)
+                + "; ".join(e.describe() for e in resolved.errors)
             )
 
         return EventSyncResult(

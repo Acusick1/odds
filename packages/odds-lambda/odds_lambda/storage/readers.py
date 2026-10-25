@@ -95,7 +95,7 @@ class OddsReader:
             sport_key: Filter by sport (optional)
             status: Filter by status (optional)
             event_id_pattern: SQL LIKE pattern for event IDs (e.g. 'op_%')
-            min_snapshots: Minimum number of snapshots required per event
+            min_snapshots: Minimum number of distinct snapshot times required per event
 
         Returns:
             Event records ordered by commence time, then event ID
@@ -122,7 +122,7 @@ class OddsReader:
                 .where(OddsSnapshot.event_id == Event.id)
                 .correlate(Event)
                 .group_by(OddsSnapshot.event_id)
-                .having(func.count(OddsSnapshot.id) >= min_snapshots)
+                .having(func.count(func.distinct(OddsSnapshot.snapshot_time)) >= min_snapshots)
                 .exists()
             )
             query = query.where(snapshot_count)
@@ -335,7 +335,7 @@ class OddsReader:
         query = (
             select(OddsSnapshot)
             .where(OddsSnapshot.event_id == event_id)
-            .order_by(OddsSnapshot.snapshot_time.desc())
+            .order_by(OddsSnapshot.snapshot_time.desc(), OddsSnapshot.id)
         )
 
         if market is None:
@@ -464,8 +464,10 @@ class OddsReader:
         odds_result = await self.session.execute(odds_count_query)
         total_odds = odds_result.scalar_one()
 
-        # Total snapshots
-        snapshots_count_query = select(func.count(OddsSnapshot.id))
+        # Total snapshot times per event: a time holds one snapshot per market
+        snapshots_count_query = select(func.count()).select_from(
+            select(OddsSnapshot.event_id, OddsSnapshot.snapshot_time).distinct().subquery()
+        )
         snapshots_result = await self.session.execute(snapshots_count_query)
         total_snapshots = snapshots_result.scalar_one()
 
@@ -601,7 +603,7 @@ class OddsReader:
             print(f"CLOSING snapshots: {coverage.get('closing', 0)}")
         """
         query = (
-            select(OddsSnapshot.fetch_tier, func.count(OddsSnapshot.id))
+            select(OddsSnapshot.fetch_tier, func.count(func.distinct(OddsSnapshot.snapshot_time)))
             .where(OddsSnapshot.event_id == event_id)
             .where(OddsSnapshot.fetch_tier.isnot(None))
             .group_by(OddsSnapshot.fetch_tier)
@@ -620,14 +622,16 @@ class OddsReader:
             event_id: Event identifier
 
         Returns:
-            Total number of snapshots for this event
+            Number of distinct snapshot times for this event (a time holds one snapshot per market)
 
         Example:
             reader = OddsReader(session)
             count = await reader.get_snapshot_count_for_event("abc123")
             print(f"Total snapshots: {count}")
         """
-        query = select(func.count(OddsSnapshot.id)).where(OddsSnapshot.event_id == event_id)
+        query = select(func.count(func.distinct(OddsSnapshot.snapshot_time))).where(
+            OddsSnapshot.event_id == event_id
+        )
 
         result = await self.session.execute(query)
         return result.scalar() or 0
@@ -649,7 +653,7 @@ class OddsReader:
         query = (
             select(OddsSnapshot)
             .where(OddsSnapshot.event_id == event_id)
-            .order_by(OddsSnapshot.snapshot_time)
+            .order_by(OddsSnapshot.snapshot_time, OddsSnapshot.id)
         )
 
         result = await self.session.execute(query)

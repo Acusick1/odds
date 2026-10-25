@@ -38,11 +38,14 @@ class SportIngestionResult:
     quota_remaining: int | None
     response_time_ms: int
     failures: list[EventIngestionFailure] = field(default_factory=list)
+    dropped_games: list[DroppedGame] = field(default_factory=list)
 
     @property
     def success(self) -> bool:
         """Return True when no failures occurred."""
-        return not self.failures and self.processed_events == self.total_events
+        return not self.failures and self.processed_events + len(self.dropped_games) == (
+            self.total_events
+        )
 
     @property
     def error_count(self) -> int:
@@ -134,27 +137,30 @@ class OddsIngestionService:
         failures: list[EventIngestionFailure] = []
         processed = 0
 
+        dropped_games: list[DroppedGame] = []
+
         finder = await odds_api_finder(sport_key, response.events)
-        async with self._session_factory() as session:
-            payload_id = (
-                await store_payload(session, response.raw_events_data) if response.events else None
-            )
-            await session.commit()
-        shape = SnapshotShape(Source.ODDS_API, TimeBasis.OBSERVED, payload_id)
+        # The run's payload is written with the first event that stores a snapshot
+        payload_id: int | None = None
 
         for event, event_data in zip(response.events, response.raw_events_data, strict=True):
+            payload_written = False
             try:
                 async with self._session_factory() as session:
                     writer = OddsWriter(session)
                     found = await resolve_odds_api_event(finder, session, event)
                     if isinstance(found, DroppedGame):
-                        raise ValueError(f"game dropped: {found.describe()}")
+                        dropped_games.append(found)
+                        continue
+                    if payload_id is None:
+                        payload_id = await store_payload(session, response.raw_events_data)
+                        payload_written = True
                     await writer.store_odds_snapshot(
                         event_id=found.event.id,
                         raw_data=event_data,
                         snapshot_time=response.timestamp,
                         validate=validation_enabled,
-                        shape=shape,
+                        shape=SnapshotShape(Source.ODDS_API, TimeBasis.OBSERVED, payload_id),
                     )
                     await session.commit()
 
@@ -163,6 +169,8 @@ class OddsIngestionService:
                     callback_bundle.on_event_processed(event.id)
 
             except Exception as exc:  # pragma: no cover - defensive logging
+                if payload_written:
+                    payload_id = None
                 event_id = getattr(event, "id", None)
                 logger.warning(
                     "ingestion_event_failed",
@@ -210,6 +218,7 @@ class OddsIngestionService:
             quota_remaining=response.quota_remaining,
             response_time_ms=response.response_time_ms,
             failures=failures,
+            dropped_games=dropped_games,
         )
 
     async def ingest_sports(

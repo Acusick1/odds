@@ -179,7 +179,7 @@ class QualityMetrics:
                 Event.home_team,
                 Event.away_team,
                 Event.commence_time,
-                func.count(OddsSnapshot.id).label("snapshot_count"),
+                func.count(func.distinct(OddsSnapshot.snapshot_time)).label("snapshot_count"),
             )
             .join(OddsSnapshot, Event.id == OddsSnapshot.event_id)
             .where(
@@ -401,7 +401,7 @@ class QualityMetrics:
             snapshot_query = (
                 select(
                     OddsSnapshot.event_id,
-                    func.count(OddsSnapshot.id).label("snapshot_count"),
+                    func.count(func.distinct(OddsSnapshot.snapshot_time)).label("snapshot_count"),
                 )
                 .join(Event, Event.id == OddsSnapshot.event_id)
                 .where(

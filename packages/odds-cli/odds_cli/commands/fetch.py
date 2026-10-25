@@ -3,6 +3,7 @@
 import asyncio
 from datetime import timedelta
 
+import structlog
 import typer
 from odds_core.api_models import parse_scores_from_api_dict
 from odds_core.config import get_settings
@@ -16,6 +17,7 @@ from odds_lambda.storage.writers import OddsWriter
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
+logger = structlog.get_logger()
 app = typer.Typer()
 console = Console()
 
@@ -163,6 +165,9 @@ async def _fetch_scores(sport: str, days: int):
 
                                     event = await find_event_by_odds_api_id(session, odds_api_id)
                                     if event is None:
+                                        logger.warning(
+                                            "score_event_not_found", odds_api_id=odds_api_id
+                                        )
                                         continue
                                     await writer.update_event_status(
                                         event_id=event.id,

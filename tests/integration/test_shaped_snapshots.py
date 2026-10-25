@@ -108,7 +108,7 @@ class TestMultiMarketEnvelope:
         assert {s.api_request_id for s in (first, spreads, totals)} == {"req"}
         assert {s.fetch_tier for s in (first, spreads, totals)} == {first.fetch_tier}
 
-    async def test_odds_rows_stay_on_the_first_snapshot_and_prices_go_to_each_market(
+    async def test_odds_rows_and_prices_go_to_the_snapshot_of_their_market(
         self, pglite_async_session: AsyncSession, event: Event
     ) -> None:
         session = pglite_async_session
@@ -117,8 +117,11 @@ class TestMultiMarketEnvelope:
 
         first, spreads, totals = await _snapshots(session)
         odds = (await session.execute(select(Odds.snapshot_id, Odds.market_key))).all()
-        assert {snapshot_id for snapshot_id, _ in odds} == {first.id}
-        assert {market for _, market in odds} == {"1x2", "spreads", "totals"}
+        assert {(snapshot_id, market) for snapshot_id, market in odds} == {
+            (first.id, "1x2"),
+            (spreads.id, "spreads"),
+            (totals.id, "totals"),
+        }
         per_snapshot = dict(
             (
                 await session.execute(

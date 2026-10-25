@@ -70,8 +70,10 @@ The fixture lock is released only when the caller's transaction commits or rolls
 
 An id is recorded only when neither the event nor the id is already taken. The resolver refuses it, logging `external_id_refused` and adding a `data_quality_logs` row through `odds_lambda.storage.data_quality.record_issue`, when:
 
-- the event already holds a different id from that source, or
+- the event already holds a different id from that source (except the Odds API, below), or
 - another event holds the id.
+
+The Odds API reissues ids, so a different `odds_api` id for an event replaces the stored one: the old row is deleted and `external_id_replaced` is logged with `old_external_id` in the `data_quality_logs` row.
 
 The resolved event is returned either way. The table's unique keys enforce the same rules for any other writer ([Events table](events.md#external-ids)).
 

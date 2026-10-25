@@ -349,22 +349,20 @@ class TestMergeGuard:
         assert (await session.get(Event, "zz9hexapi")).mlb_game_pk == 824101
         assert await session.get(Event, "op_live_x") is None
 
-    async def test_adopt_twins_refuses_twins_of_different_games(
+    async def test_merge_refuses_twins_of_different_games(
         self, pglite_async_session: AsyncSession
     ) -> None:
         session = pglite_async_session
         api_event = _mlb_event("zz9hexapi", AFTERNOON, None)
-        session.add_all(
-            [
-                api_event,
-                _mlb_event("op_live_a", AFTERNOON, 824101),
-                _mlb_event("op_live_b", AFTERNOON + timedelta(minutes=40), 824102),
-            ]
-        )
+        twins = [
+            _mlb_event("op_live_a", AFTERNOON, 824101),
+            _mlb_event("op_live_b", AFTERNOON + timedelta(minutes=40), 824102),
+        ]
+        session.add_all([api_event, *twins])
         await session.flush()
 
         with pytest.raises(ConflictingGamePks):
-            await EventMerger(session).adopt_twins([api_event])
+            await EventMerger(session).merge(api_event, twins)
 
     async def test_twin_groups_leave_out_events_of_different_games(
         self, pglite_async_session: AsyncSession

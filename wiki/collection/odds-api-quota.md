@@ -28,11 +28,11 @@ Quota is a per-key monthly balance that only [the client](odds-api-client.md#cos
 
 | Place | What it reads | Reminded | Recorded in `alert_history` |
 |---|---|---|---|
-| `odds_core.models.FetchLog.api_quota_remaining` | written once per sport and run by `odds_lambda.ingestion.OddsIngestionService.ingest_sport`, after its events are stored ([fetch logs](odds-ingestion-service.md#fetch-logs)) | n/a | n/a |
+| `odds_core.models.FetchLog.api_quota_remaining` | written once per sport and run by `odds_lambda.ingestion.OddsIngestionService.ingest_sport`, after its events are stored, each resolved through the event resolver ([fetch logs](odds-ingestion-service.md#fetch-logs)) | n/a | n/a |
 | `odds_lambda.health_monitor.HealthMonitor.check_api_quota` | newest `fetch_logs` row with a non-null quota, same fraction | yes | yes |
 | `odds status quota` (`odds_cli.commands.status._show_quota`) | newest 10 `fetch_logs` rows with a non-null quota; the per-fetch Used column is the next-older row's remaining minus this row's, `reset` when negative, blank for the oldest | n/a | n/a |
 
-- Quota views skip rows with a null quota, such as Betfair rows ([betfair-exchange](betfair-exchange.md)): `odds_lambda.storage.readers.OddsReader.get_fetch_logs` with `with_quota=True` and `odds_lambda.storage.readers.OddsReader.get_database_stats` both filter in the query. `fetch_logs` has no source column, so Odds API rows are inferred from the nullable quota (#441).
+- Quota views skip rows with a null quota, such as Betfair rows ([betfair-exchange](betfair-exchange.md)): `odds_lambda.storage.readers.OddsReader.get_fetch_logs` with `with_quota=True` and `odds_lambda.storage.readers.OddsReader.get_database_stats` both filter in the query; the latter counts snapshots as distinct event and snapshot-time pairs. `fetch_logs` has no source column, so Odds API rows are inferred from the nullable quota (#441).
 - `fetch-odds` sends no quota alert; a failed run or a failed booking alerts as in [fetch-odds-job](fetch-odds-job.md).
 - The health monitor applies the thresholds as `quota_low` and `quota_critical`, sent once per condition and reminded every `stale_reminder_minutes` through `alert_history` ([health-monitor](../operations/health-monitor.md)).
 - Both thresholds divide the active key's balance (the key chosen by [rotation](odds-api-client.md#retry-and-rotation)) by `odds_core.config.APIConfig.quota`, so with a larger paid key they are meaningless until it is set (#441).
