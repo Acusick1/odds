@@ -153,7 +153,7 @@ def backfill_odds(
     for name, value in (
         ("Polymarket matches", report.matches_considered),
         ("Attached to an event", report.matches_attached),
-        ("Skipped (event not finished)", report.matches_not_final),
+        ("Skipped (event not final, or before --since)", report.matches_out_of_scope),
         ("Skipped (already backfilled)", report.events_skipped_existing),
         ("Events written", report.events_written),
         ("Events with no usable points", report.events_without_points),
@@ -162,6 +162,7 @@ def backfill_odds(
         ("Grid points dropped, prices off sum", report.points_off_sum),
         ("Events without a Polymarket match", len(report.unmatched_event_ids)),
         ("Polymarket matches without an event", len(report.unmatched_pm_tickers)),
+        ("Matches that failed", len(report.errors)),
     ):
         table.add_row(name, str(value))
     console.print(table)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import structlog
@@ -19,6 +20,15 @@ from odds_lambda.storage.validators import OddsValidator
 from odds_lambda.tier_utils import calculate_hours_until_commence, calculate_tier_from_timestamps
 
 logger = structlog.get_logger()
+
+
+@dataclass(frozen=True)
+class StoredEnvelope:
+    """``snapshot`` is the stored one; ``inserted`` is false when it already held the key."""
+
+    snapshot: OddsSnapshot
+    odds: list[Odds]
+    inserted: bool
 
 
 class OddsWriter:
@@ -64,7 +74,7 @@ class OddsWriter:
             logger.info("event_created", event_id=event.id)
             return event
 
-    async def store_odds_snapshot(
+    async def store_envelope(
         self,
         event_id: str,
         raw_data: dict,
@@ -73,7 +83,7 @@ class OddsWriter:
         *,
         shape: SnapshotShape | None = None,
         api_request_id: str | None = None,
-    ) -> tuple[OddsSnapshot, list[Odds]]:
+    ) -> StoredEnvelope:
         """Store an envelope as a snapshot with its ``odds`` rows.
 
         With ``shape``, the snapshot also takes its new-shape columns and price rows, and the
@@ -91,7 +101,7 @@ class OddsWriter:
             api_request_id: The fetch's request id
 
         Returns:
-            Tuple of (OddsSnapshot, list of normalized Odds records)
+            The stored snapshot, its normalized Odds records, and whether it was inserted
         """
         snapshot_time = ensure_utc(snapshot_time or datetime.now(UTC))
 
@@ -144,7 +154,7 @@ class OddsWriter:
                     snapshot_id=written.snapshot.id,
                     outcome=written.first.outcome if written.first else None,
                 )
-                return written.snapshot, []
+                return StoredEnvelope(written.snapshot, [], inserted=False)
             snapshot = written.snapshot
         assert snapshot.id is not None
 
@@ -165,7 +175,28 @@ class OddsWriter:
             hours_until_commence=hours_until,
         )
 
-        return snapshot, odds_records
+        return StoredEnvelope(snapshot, odds_records, inserted=True)
+
+    async def store_odds_snapshot(
+        self,
+        event_id: str,
+        raw_data: dict,
+        snapshot_time: datetime | None = None,
+        validate: bool = True,
+        *,
+        shape: SnapshotShape | None = None,
+        api_request_id: str | None = None,
+    ) -> tuple[OddsSnapshot, list[Odds]]:
+        """``store_envelope`` returning the snapshot and its ``odds`` rows."""
+        stored = await self.store_envelope(
+            event_id,
+            raw_data,
+            snapshot_time,
+            validate,
+            shape=shape,
+            api_request_id=api_request_id,
+        )
+        return stored.snapshot, stored.odds
 
     async def _parse_and_store_odds(
         self,

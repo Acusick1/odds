@@ -8,6 +8,7 @@ sources:
   - odds_lambda.storage.validators.OddsValidator.validate_line_movement
   - odds_lambda.storage.validators.OddsValidator.validate_event_data
   - odds_lambda.storage.writers.OddsWriter.store_odds_snapshot
+  - odds_lambda.storage.writers.OddsWriter.store_envelope
   - odds_lambda.storage.readers.OddsReader.get_data_quality_logs
   - odds_lambda.ingestion.OddsIngestionService.ingest_sport
   - odds_core.models.DataQualityLog
@@ -18,7 +19,7 @@ status: stable
 
 # Odds validation
 
-`odds_lambda.storage.validators.OddsValidator` checks one payload for plausibility as it is written and logs findings to `data_quality_logs` (`odds_core.models.DataQualityLog`); it never blocks a write. It is called by [OddsWriter](odds-writer.md#store_odds_snapshot) inside `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot`, before the snapshot, its odds rows and any price rows are added; a price no price row can take is logged separately, as an `invalid_price` row ([Writing price rows](price-tables.md#reading-an-envelope)). The completeness checks that share the word "quality" are separate ([Coverage and completeness checks](coverage-checks.md)).
+`odds_lambda.storage.validators.OddsValidator` checks one payload for plausibility as it is written and logs findings to `data_quality_logs` (`odds_core.models.DataQualityLog`); it never blocks a write. It is called by [OddsWriter](odds-writer.md#store_odds_snapshot) inside `odds_lambda.storage.writers.OddsWriter.store_envelope`, before the snapshot, its odds rows and any price rows are added; a price no price row can take is logged separately, as an `invalid_price` row ([Writing price rows](price-tables.md#reading-an-envelope)). The completeness checks that share the word "quality" are separate ([Coverage and completeness checks](coverage-checks.md)).
 
 ## Checks
 
@@ -34,7 +35,7 @@ status: stable
 
 ## What gets logged
 
-If there are any warnings, `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` writes one `odds_core.models.DataQualityLog`: `issue_type="validation_warnings"`, `severity` `"warning"` when `is_valid` else `"error"`, `description` with the count, and `raw_data={"warnings": first 10}`. Columns: `event_id` (FK, nullable), `severity`, `issue_type`, `description`, JSON `raw_data`, indexed `created_at`. No other severity or issue type is written, so `critical` never occurs.
+If there are any warnings, `odds_lambda.storage.writers.OddsWriter.store_envelope` writes one `odds_core.models.DataQualityLog`: `issue_type="validation_warnings"`, `severity` `"warning"` when `is_valid` else `"error"`, `description` with the count, and `raw_data={"warnings": first 10}`. Columns: `event_id` (FK, nullable), `severity`, `issue_type`, `description`, JSON `raw_data`, indexed `created_at`. No other severity or issue type is written, so `critical` never occurs.
 
 `odds_lambda.storage.readers.OddsReader.get_data_quality_logs` feeds `odds status` and the [health monitor](../operations/health-monitor.md), which alerts when `error` plus `critical` rows in 24 h reach `odds_core.config.AlertConfig.data_quality_error_threshold` (10). Validation results are not propagated to `odds` rows: `is_valid` is always true ([Odds snapshot and odds tables](odds-tables.md)).
 

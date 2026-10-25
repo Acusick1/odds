@@ -24,6 +24,8 @@ status: stable
 
 ## store_odds_snapshot
 
+`odds_lambda.storage.writers.OddsWriter.store_envelope` does the work and returns an `odds_lambda.storage.writers.StoredEnvelope` (the snapshot, its `odds` rows and whether it was inserted); `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` calls it and returns the snapshot and rows.
+
 `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot(event_id, raw_data, snapshot_time=None, validate=True, *, shape=None, api_request_id=None)` stores one event's envelope (`raw_data`). `shape` (`odds_lambda.storage.shaped_snapshots.SnapshotShape`) names the snapshot's source, its [time basis](odds-tables.md#odds_snapshots) and the payload it came in; the OddsPortal live, Betfair and live Polymarket jobs pass it, and the other writers pass none. Steps:
 
 1. Loads the event and computes `hours_until_commence` and the fetch tier from `snapshot_time` and the event's own `commence_time` (`odds_lambda.tier_utils.calculate_tier_from_timestamps`). The tier is per event, not per job run. If the event row is missing, both `fetch_tier` and `hours_until_commence` are stored as NULL ([Fetch tier](fetch-tier.md)); with `shape`, a missing event raises `ValueError`, since outcomes are matched to its teams.

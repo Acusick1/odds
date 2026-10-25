@@ -13,6 +13,7 @@ from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.sports import SportKey
 from odds_core.vocabulary import Source, TimeBasis
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.polymarket_fetcher import MAX_CONCURRENT_REQUESTS, PolymarketClient
 from odds_lambda.polymarket_odds import (
@@ -23,16 +24,21 @@ from odds_lambda.polymarket_odds import (
     GridPoint,
     Observation,
     PolymarketMatch,
+    Resampled,
     Side,
     build_raw_data,
     listed_game,
-    lock_order,
     parse_match_event,
     resample,
 )
-from odds_lambda.polymarket_sports import POLYMARKET_SPORTS
+from odds_lambda.polymarket_sports import POLYMARKET_SPORTS, PolymarketSportConfig
 from odds_lambda.storage.event_resolver import attach_event
-from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_shaped_snapshot
+from odds_lambda.storage.shaped_snapshots import (
+    SnapshotShape,
+    discard_payload,
+    store_payload,
+    store_shaped_snapshot,
+)
 from odds_lambda.tier_utils import calculate_hours_until_commence, calculate_tier
 
 logger = structlog.get_logger()
@@ -42,7 +48,7 @@ logger = structlog.get_logger()
 class BackfillReport:
     matches_considered: int = 0
     matches_attached: int = 0
-    matches_not_final: int = 0
+    matches_out_of_scope: int = 0
     events_skipped_existing: int = 0
     events_written: int = 0
     events_without_points: int = 0
@@ -51,6 +57,7 @@ class BackfillReport:
     points_off_sum: int = 0
     unmatched_event_ids: list[str] = field(default_factory=list)
     unmatched_pm_tickers: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
 
 async def _fetch_series(
@@ -98,11 +105,7 @@ async def backfill_sport(
 
     async with PolymarketClient() as client, async_session_maker() as session:
         raw_events = await client.get_all_events(sport_key, active=None, closed=True)
-        matches = [
-            m
-            for raw in raw_events
-            if (m := parse_match_event(raw, sport)) and m.start_time >= since
-        ]
+        matches = [m for raw in raw_events if (m := parse_match_event(raw, sport))]
 
         final_event_ids = list(
             (
@@ -134,60 +137,87 @@ async def backfill_sport(
 
         attached_ids: set[str] = set()
         written = 0
-        for match in sorted(matches, key=lambda m: lock_order(m, sport)):
-            found = await attach_event(session, listed_game(match, sport))
-            if not dry_run:
-                await session.commit()
-            if found is None:
-                report.unmatched_pm_tickers.append(match.ticker)
-                continue
-            event = found.event
-            report.matches_attached += 1
-            if event.status != EventStatus.FINAL or event.commence_time < since:
-                report.matches_not_final += 1
-                continue
-            attached_ids.add(event.id)
-            if event.id in existing:
-                report.events_skipped_existing += 1
-                continue
-            if limit is not None and written >= limit:
-                continue
-            written += 1
+        for match in matches:
+            try:
+                async with session.begin_nested():
+                    found = await attach_event(session, listed_game(match, sport))
+                if not dry_run:
+                    await session.commit()
+                if found is None:
+                    report.unmatched_pm_tickers.append(match.ticker)
+                    continue
+                event = found.event
+                report.matches_attached += 1
+                if event.status != EventStatus.FINAL or event.commence_time < since:
+                    report.matches_out_of_scope += 1
+                    continue
+                attached_ids.add(event.id)
+                if event.id in existing:
+                    report.events_skipped_existing += 1
+                    continue
+                if limit is not None and written >= limit:
+                    continue
+                written += 1
 
-            kickoff = event.commence_time
-            cutoff = min(kickoff, match.start_time)
-            series = await _fetch_series(
-                client, match, kickoff - MAX_HORIZON - MAX_STALENESS, cutoff, semaphore
-            )
-            resampled = resample(series, kickoff, cutoff)
-            report.points_missing += resampled.missing
-            report.points_off_sum += resampled.off_sum
-            if not resampled.points:
-                report.events_without_points += 1
-                logger.warning("polymarket_no_grid_points", event_id=event.id, ticker=match.ticker)
-                continue
-
-            envelopes = [
-                build_raw_data(match, sport, point.prices, point.time) for point in resampled.points
-            ]
-            report.snapshots_written += len(envelopes)
-            report.events_written += 1
-            if not dry_run:
-                shape = SnapshotShape(Source.POLYMARKET, TimeBasis.OBSERVED, None)
-                for point, envelope in zip(resampled.points, envelopes, strict=True):
-                    await store_shaped_snapshot(
-                        session, _snapshot(event, envelope, point), event, shape
+                kickoff = event.commence_time
+                cutoff = min(kickoff, match.start_time)
+                series = await _fetch_series(
+                    client, match, kickoff - MAX_HORIZON - MAX_STALENESS, cutoff, semaphore
+                )
+                resampled = resample(series, kickoff, cutoff)
+                report.points_missing += resampled.missing
+                report.points_off_sum += resampled.off_sum
+                if not resampled.points:
+                    report.events_without_points += 1
+                    logger.warning(
+                        "polymarket_no_grid_points", event_id=event.id, ticker=match.ticker
                     )
-                await session.commit()
-            logger.info(
-                "polymarket_event_backfilled",
-                event_id=event.id,
-                ticker=match.ticker,
-                snapshots=len(envelopes),
-                missing=resampled.missing,
-                off_sum=resampled.off_sum,
-            )
+                    continue
+
+                stored = len(resampled.points)
+                if not dry_run:
+                    async with session.begin_nested():
+                        stored = await _store_history(session, event, match, sport, resampled)
+                    await session.commit()
+                report.snapshots_written += stored
+                report.events_written += 1
+                logger.info(
+                    "polymarket_event_backfilled",
+                    event_id=event.id,
+                    ticker=match.ticker,
+                    snapshots=stored,
+                    missing=resampled.missing,
+                    off_sum=resampled.off_sum,
+                )
+            except Exception as e:
+                await session.rollback()
+                report.errors.append(f"{match.ticker}: {type(e).__name__}: {e}")
+                logger.error("polymarket_backfill_match_failed", ticker=match.ticker, exc_info=True)
         if dry_run:
             await session.rollback()
         report.unmatched_event_ids = [i for i in final_event_ids if i not in attached_ids]
     return report
+
+
+async def _store_history(
+    session: AsyncSession,
+    event: Event,
+    match: PolymarketMatch,
+    sport: PolymarketSportConfig,
+    resampled: Resampled,
+) -> int:
+    """Store one snapshot per grid point, each with its own payload; the snapshots already
+    stored are skipped. Returns the number inserted."""
+    inserted = 0
+    for point in resampled.points:
+        envelope = build_raw_data(match, sport, point.prices, point.time)
+        payload_id = await store_payload(session, envelope)
+        shape = SnapshotShape(Source.POLYMARKET, TimeBasis.OBSERVED, payload_id)
+        written = await store_shaped_snapshot(
+            session, _snapshot(event, envelope, point), event, shape
+        )
+        if written.inserted:
+            inserted += 1
+        else:
+            await discard_payload(session, payload_id)
+    return inserted

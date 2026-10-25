@@ -17,7 +17,7 @@ from odds_core.vocabulary import Source
 
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.polymarket_sports import PolymarketSportConfig
-from odds_lambda.storage.event_resolver import ListedGame, event_lock_key
+from odds_lambda.storage.event_resolver import ListedGame
 
 logger = structlog.get_logger()
 
@@ -179,8 +179,7 @@ def parse_match_event(
 
 
 def listed_game(match: PolymarketMatch, sport: PolymarketSportConfig) -> ListedGame:
-    """The game a match lists, for attaching to its event. Polymarket creates no events, so the
-    ``legacy_id`` an event created for it would take is never used."""
+    """The game a match lists, for attaching to its event; Polymarket creates none."""
     return ListedGame(
         source=Source.POLYMARKET,
         sport_key=sport.sport_key,
@@ -188,14 +187,8 @@ def listed_game(match: PolymarketMatch, sport: PolymarketSportConfig) -> ListedG
         home_team=match.home_team,
         away_team=match.away_team,
         commence_time=match.start_time,
-        legacy_id=match.ticker,
         external_id=match.pm_event_id,
     )
-
-
-def lock_order(match: PolymarketMatch, sport: PolymarketSportConfig) -> int:
-    """Sort key that attaches a run's matches in fixture-lock order within one transaction."""
-    return event_lock_key(sport.sport_key, match.home_team, match.away_team)
 
 
 def grid_offsets() -> list[timedelta]:

@@ -34,7 +34,6 @@ from odds_lambda.polymarket_odds import (
     PolymarketMatch,
     build_raw_data,
     listed_game,
-    lock_order,
     parse_match_event,
     sum_is_valid,
 )
@@ -46,8 +45,8 @@ from odds_lambda.scheduling.decision import (
 )
 from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
-from odds_lambda.storage.event_resolver import attach_event
-from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload
+from odds_lambda.storage.event_resolver import attach_events
+from odds_lambda.storage.shaped_snapshots import SnapshotShape, discard_payload, store_payload
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
@@ -88,7 +87,7 @@ class EmptyListingError(RuntimeError):
 class IngestionStats:
     sport: SportKey
     matches_seen: int = 0
-    matches_unpaired: int = 0
+    matches_unattached: int = 0
     prices_missing: int = 0
     wide_spread: int = 0
     sum_rejected: int = 0
@@ -137,17 +136,11 @@ async def ingest_sport(sport_key: SportKey, snapshot_time: datetime) -> Ingestio
                 )
                 stats.errors.append(str(listing_error))
 
+        resolved = await attach_events(session, [listed_game(m, sport) for m in matches])
         attached: list[tuple[PolymarketMatch, Event]] = []
-        for match in sorted(matches, key=lambda m: lock_order(m, sport)):
-            try:
-                async with session.begin_nested():
-                    found = await attach_event(session, listed_game(match, sport))
-            except Exception as e:
-                stats.errors.append(f"{match.ticker}: {type(e).__name__}: {e}")
-                logger.error("polymarket_odds_ingestion_failed", ticker=match.ticker, exc_info=True)
-                continue
+        for match, found in zip(matches, resolved, strict=True):
             if found is None:
-                stats.matches_unpaired += 1
+                stats.matches_unattached += 1
             else:
                 attached.append((match, found.event))
 
@@ -177,19 +170,21 @@ async def ingest_sport(sport_key: SportKey, snapshot_time: datetime) -> Ingestio
             for match, event, envelope in quoted:
                 try:
                     async with session.begin_nested():
-                        await writer.store_odds_snapshot(
+                        stored = await writer.store_envelope(
                             event_id=event.id,
                             raw_data=envelope,
                             snapshot_time=snapshot_time,
                             shape=shape,
                             api_request_id=f"{LIVE_REQUEST_ID_PREFIX}{snapshot_time.isoformat()}",
                         )
-                    stats.snapshots_stored += 1
+                    stats.snapshots_stored += int(stored.inserted)
                 except Exception as e:
                     stats.errors.append(f"{match.ticker}: {type(e).__name__}: {e}")
                     logger.error(
                         "polymarket_odds_ingestion_failed", ticker=match.ticker, exc_info=True
                     )
+            if stats.snapshots_stored == 0:
+                await discard_payload(session, payload_id)
 
         if stats.matches_seen or stats.errors:
             session.add(
@@ -208,7 +203,7 @@ async def ingest_sport(sport_key: SportKey, snapshot_time: datetime) -> Ingestio
         "polymarket_odds_sport_ingestion_complete",
         sport=sport_key,
         matches_seen=stats.matches_seen,
-        matches_unpaired=stats.matches_unpaired,
+        matches_unattached=stats.matches_unattached,
         prices_missing=stats.prices_missing,
         wide_spread=stats.wide_spread,
         sum_rejected=stats.sum_rejected,

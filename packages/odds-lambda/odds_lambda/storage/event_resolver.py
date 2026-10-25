@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
 import structlog
-from odds_core.models import Event, EventExternalId, EventStatus
+from odds_core.models import DataQualityLog, Event, EventExternalId, EventStatus
 from odds_core.team import normalize_team_name
 from odds_core.time import ensure_utc
 from odds_core.vocabulary import EXTERNAL_ID_SOURCES, Source
@@ -23,6 +23,8 @@ from odds_lambda.storage.event_merge import find_match_candidates
 
 logger = structlog.get_logger()
 
+REFUSED_ID_ISSUE = "external_id_refused"
+
 
 @dataclass(frozen=True)
 class ListedGame:
@@ -30,7 +32,8 @@ class ListedGame:
 
     ``external_id`` is the id the source issued for the game, if it issues one. An MLB game comes
     resolved to its ``gamePk`` (``mlb_game``). ``legacy_id`` is the string id an event created for
-    the game takes while ``events.id`` is still a string.
+    the game takes while ``events.id`` is still a string; only a game that may create an event
+    needs it.
     """
 
     source: Source
@@ -39,7 +42,7 @@ class ListedGame:
     home_team: str
     away_team: str
     commence_time: datetime
-    legacy_id: str
+    legacy_id: str | None = None
     external_id: str | None = None
     mlb_game: ResolvedGame | None = None
     earliest_created_start: datetime | None = None
@@ -118,8 +121,7 @@ async def resolve_event(session: AsyncSession, game: ListedGame) -> ResolvedEven
     """
     home_team = normalize_team_name(game.home_team)
     away_team = normalize_team_name(game.away_team)
-    await _lock(session, _lock_key(game))
-    resolved = await _find(session, game, home_team, away_team)
+    resolved = await _lock_and_find(session, game, home_team, away_team)
     if resolved is None:
         resolved = ResolvedEvent(
             await _create(session, game, home_team, away_team), Resolution.CREATED
@@ -138,20 +140,38 @@ async def resolve_event(session: AsyncSession, game: ListedGame) -> ResolvedEven
 
 async def attach_event(session: AsyncSession, game: ListedGame) -> ResolvedEvent | None:
     """The existing event of ``game``, recording the source's id on it; ``None`` when none
-    matches, and no event is created. The lookup, lock and id recording are ``resolve_event``'s;
-    the listed start is not offered to ``move_kickoff``, for a source that is not a schedule
-    authority. Flushes; the caller commits.
+    matches, and no event is created. The lock and lookup are ``resolve_event``'s; the listed
+    start is not offered to ``move_kickoff``, for a source that is not a schedule authority.
+
+    Also ``None`` when the event already holds another id from the source (or another event
+    holds this one): the id is refused, so the game is not the event's to write prices for. The
+    refusal is logged once per refused id and event. Flushes; the caller commits.
 
     Raises:
         LockOrderError: as ``resolve_event``.
     """
-    home_team = normalize_team_name(game.home_team)
-    away_team = normalize_team_name(game.away_team)
-    await _lock(session, _lock_key(game))
-    resolved = await _find(session, game, home_team, away_team)
-    if resolved is not None and game.external_id is not None:
-        await _record_external_id(session, resolved.event, game.source, game.external_id)
+    resolved = await _lock_and_find(
+        session, game, normalize_team_name(game.home_team), normalize_team_name(game.away_team)
+    )
+    if resolved is None:
+        return None
+    if game.external_id is not None and not await _record_external_id(
+        session, resolved.event, game.source, game.external_id, log_repeats=False
+    ):
+        return None
     return resolved
+
+
+async def attach_events(
+    session: AsyncSession, games: Sequence[ListedGame]
+) -> list[ResolvedEvent | None]:
+    """``attach_event`` for each game, in lock-key order so that a batch holds fixture locks in
+    ascending order; results come back in the order of ``games``."""
+    order = sorted(range(len(games)), key=lambda i: _lock_key(games[i]))
+    attached: dict[int, ResolvedEvent | None] = {}
+    for i in order:
+        attached[i] = await attach_event(session, games[i])
+    return [attached[i] for i in range(len(games))]
 
 
 async def resolve_unscheduled_mlb_event(
@@ -210,6 +230,13 @@ async def _lock(session: AsyncSession, key: int) -> None:
         )
     await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": key})
     held.keys.add(key)
+
+
+async def _lock_and_find(
+    session: AsyncSession, game: ListedGame, home_team: str, away_team: str
+) -> ResolvedEvent | None:
+    await _lock(session, _lock_key(game))
+    return await _find(session, game, home_team, away_team)
 
 
 async def _find(
@@ -303,6 +330,10 @@ async def _create(session: AsyncSession, game: ListedGame, home_team: str, away_
             f"{game.source.value} lists {home_team} v {away_team} at {start.isoformat()}, which "
             "matches no event and is too far past to create one"
         )
+    if game.legacy_id is None:
+        raise ValueError(
+            f"a game that creates an event needs a legacy_id: {home_team} v {away_team}"
+        )
     suffix = game.mlb_game.game_pk if game.mlb_game is not None else game.external_id
     choices = [game.legacy_id] + ([f"{game.legacy_id}_{suffix}"] if suffix is not None else [])
     event_id = None
@@ -337,14 +368,22 @@ async def _record_game_pk(session: AsyncSession, event: Event, game_pk: int) -> 
 
 
 async def _record_external_id(
-    session: AsyncSession, event: Event, source: Source, external_id: str
+    session: AsyncSession,
+    event: Event,
+    source: Source,
+    external_id: str,
+    *,
+    log_repeats: bool = True,
 ) -> bool:
-    """Record ``external_id`` as ``source``'s id for ``event``; whether the event now holds it."""
+    """Record ``external_id`` as ``source``'s id for ``event``; whether the event now holds it.
+    A refusal already logged for the event is logged again only with ``log_repeats``."""
     held = await session.get(EventExternalId, (source, external_id))
     if held is not None:
         if held.event_id == event.surrogate_id:
             return True
-        _refuse(session, event, source, external_id, f"held by event key {held.event_id}")
+        await _refuse(
+            session, event, source, external_id, f"held by event key {held.event_id}", log_repeats
+        )
         return False
     result = await session.execute(
         select(EventExternalId.external_id).where(
@@ -353,7 +392,14 @@ async def _record_external_id(
     )
     current = result.scalar_one_or_none()
     if current is not None:
-        _refuse(session, event, source, external_id, f"the event holds {source.value} id {current}")
+        await _refuse(
+            session,
+            event,
+            source,
+            external_id,
+            f"the event holds {source.value} id {current}",
+            log_repeats,
+        )
         return False
     assert event.surrogate_id is not None
     session.add(
@@ -363,13 +409,29 @@ async def _record_external_id(
     return True
 
 
-def _refuse(
-    session: AsyncSession, event: Event, source: Source, external_id: str, reason: str
+async def _refuse(
+    session: AsyncSession,
+    event: Event,
+    source: Source,
+    external_id: str,
+    reason: str,
+    log_repeats: bool,
 ) -> None:
+    description = f"{source.value} id {external_id} refused: {reason}"
+    if not log_repeats:
+        logged = await session.execute(
+            select(DataQualityLog.id).where(
+                DataQualityLog.event_id == event.id,
+                DataQualityLog.issue_type == REFUSED_ID_ISSUE,
+                DataQualityLog.description == description,
+            )
+        )
+        if logged.first() is not None:
+            return
     record_issue(
         session,
         event.id,
-        "external_id_refused",
-        f"{source.value} id {external_id} refused: {reason}",
+        REFUSED_ID_ISSUE,
+        description,
         {"source": source.value, "external_id": external_id, "reason": reason},
     )

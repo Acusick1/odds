@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from odds_core.models import (
+    DataQualityLog,
     Event,
     EventExternalId,
     EventStatus,
@@ -60,6 +61,8 @@ class FakeClient:
         self, token_id: str, start: datetime, end: datetime, fidelity: int = 1
     ) -> list[Observation]:
         self.history_calls += 1
+        if token_id.startswith("boom-"):
+            raise RuntimeError("history unavailable")
         return [(t, p) for t, p in self.series[token_id] if start <= t <= end]
 
 
@@ -148,11 +151,11 @@ class TestBackfill:
 
         report = await backfill_sport("soccer_epl", since=KICKOFF - timedelta(days=1))
 
-        assert report.events_skipped_existing == 1
-        assert report.snapshots_written == 0
+        assert (report.events_skipped_existing, report.snapshots_written) == (1, 0)
         assert patch_backfill.history_calls == calls
         count = len((await pglite_async_session.execute(select(OddsSnapshot))).scalars().all())
-        assert count == len(grid_offsets())
+        payloads = (await pglite_async_session.execute(select(SnapshotPayload))).scalars().all()
+        assert count == len(payloads) == len(grid_offsets())
 
     async def test_dry_run_writes_nothing(
         self, pglite_async_session: Any, finished_event: Any, patch_backfill: FakeClient
@@ -196,7 +199,7 @@ class TestBackfill:
         assert report.events_written == 1
         assert max(times) == early_event.commence_time
 
-    async def test_snapshots_take_the_new_shape(
+    async def test_snapshots_carry_source_market_basis_and_mid_prices(
         self, pglite_async_session: Any, finished_event: Any, patch_backfill: FakeClient
     ) -> None:
         await backfill_sport("soccer_epl", since=KICKOFF - timedelta(days=1))
@@ -206,7 +209,10 @@ class TestBackfill:
         assert {(s.source, s.market, s.time_basis) for s in snapshots} == {
             (Source.POLYMARKET, Market.ONE_X_TWO, TimeBasis.OBSERVED)
         }
-        assert {s.payload_id for s in snapshots} == {None}
+        payloads = (await pglite_async_session.execute(select(SnapshotPayload))).scalars().all()
+        assert all(s.payload_id is not None for s in snapshots)
+        assert {s.payload_id for s in snapshots} == {p.id for p in payloads}
+        assert len(payloads) == len(snapshots)
         assert len(prices) == 3 * len(snapshots)
         assert {(p.bookmaker, p.side) for p in prices} == {("polymarket", Side.MID)}
         home = [p for p in prices if p.outcome is PriceOutcome.HOME]
@@ -238,10 +244,50 @@ class TestBackfill:
 
         report = await backfill_sport("soccer_epl", since=KICKOFF - timedelta(days=1))
 
-        assert (report.matches_not_final, report.events_written) == (1, 0)
+        assert (report.matches_out_of_scope, report.events_written) == (1, 0)
         assert (await pglite_async_session.execute(select(OddsSnapshot))).first() is None
 
-    async def test_unpaired_event_is_reported(
+    async def test_a_failing_match_leaves_the_others_written(
+        self,
+        pglite_async_session: Any,
+        finished_event: Any,
+        patch_backfill: FakeClient,
+        gamma_event: Any,
+    ) -> None:
+        other_kickoff = KICKOFF + timedelta(days=1)
+        pglite_async_session.add(
+            make_epl_event("e2", other_kickoff, "Arsenal", "Everton", status=EventStatus.FINAL)
+        )
+        await pglite_async_session.commit()
+        second = gamma_event(
+            slug="epl-ars-eve-2025-12-07",
+            home="Arsenal FC",
+            away="Everton FC",
+            start="2025-12-07T15:00:00Z",
+            quotes={"eve": (0.20, 0.22), "draw": (0.24, 0.26), "ars": (0.52, 0.54)},
+        )
+        second["id"] = "901"
+        for market in second["markets"]:
+            market["clobTokenIds"] = market["clobTokenIds"].replace("yes-", "boom-")
+        patch_backfill.events = [gamma_event(), second]
+
+        report = await backfill_sport("soccer_epl", since=KICKOFF - timedelta(days=1))
+
+        owners = set(
+            (await pglite_async_session.execute(select(OddsSnapshot.event_id))).scalars().all()
+        )
+        assert owners == {"e1"}
+        assert (report.events_written, len(report.errors)) == (1, 1)
+        assert report.errors[0].startswith("epl-ars-eve-2025-12-07:")
+
+    async def test_event_before_since_is_out_of_scope(
+        self, pglite_async_session: Any, finished_event: Any, patch_backfill: FakeClient
+    ) -> None:
+        report = await backfill_sport("soccer_epl", since=KICKOFF + timedelta(days=1))
+
+        assert (report.matches_out_of_scope, report.events_written) == (1, 0)
+
+    async def test_event_without_a_match_is_reported(
         self, pglite_async_session: Any, finished_event: Any, patch_backfill: FakeClient
     ) -> None:
         patch_backfill.events = []
@@ -302,7 +348,7 @@ class TestLiveIngestion:
     ) -> None:
         stats = await fetch_polymarket_odds.ingest_sport("soccer_epl", KICKOFF - timedelta(hours=5))
 
-        assert (stats.matches_seen, stats.matches_unpaired, stats.snapshots_stored) == (1, 1, 0)
+        assert (stats.matches_seen, stats.matches_unattached, stats.snapshots_stored) == (1, 1, 0)
         assert (await pglite_async_session.execute(select(Event))).first() is None
 
     async def test_rejects_prices_off_sum(
@@ -367,7 +413,7 @@ class TestLiveIngestion:
 
         assert (stats.already_started, stats.snapshots_stored) == (1, 0)
 
-    async def test_snapshot_takes_the_new_shape(
+    async def test_snapshot_carries_source_market_basis_payload_and_prices(
         self, pglite_async_session: Any, patch_live: FakeClient
     ) -> None:
         pglite_async_session.add(make_epl_event("e1", KICKOFF, "Bournemouth", "Chelsea"))
@@ -424,17 +470,48 @@ class TestLiveIngestion:
 
         assert stats.snapshots_stored == 1
 
-    async def test_second_run_at_the_same_time_stores_nothing_new(
+    async def test_a_second_match_for_a_fixture_is_refused_and_logged_once(
+        self, pglite_async_session: Any, patch_live: FakeClient, gamma_event: Any
+    ) -> None:
+        pglite_async_session.add(make_epl_event("e1", KICKOFF, "Bournemouth", "Chelsea"))
+        await pglite_async_session.commit()
+        duplicate = gamma_event()
+        duplicate["id"] = "901"
+        patch_live.events = [gamma_event(), duplicate]
+        now = KICKOFF - timedelta(hours=5)
+
+        first = await fetch_polymarket_odds.ingest_sport("soccer_epl", now)
+        second = await fetch_polymarket_odds.ingest_sport("soccer_epl", now + timedelta(minutes=15))
+
+        refusals = (
+            (
+                await pglite_async_session.execute(
+                    select(DataQualityLog).where(DataQualityLog.issue_type == "external_id_refused")
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert (first.snapshots_stored, first.matches_unattached) == (1, 1)
+        assert (second.snapshots_stored, second.matches_unattached) == (1, 1)
+        assert len(refusals) == 1
+        assert len((await pglite_async_session.execute(select(Price))).scalars().all()) == 18
+
+    async def test_second_run_at_the_same_time_stores_and_archives_nothing_new(
         self, pglite_async_session: Any, patch_live: FakeClient
     ) -> None:
         pglite_async_session.add(make_epl_event("e1", KICKOFF, "Bournemouth", "Chelsea"))
         await pglite_async_session.commit()
         now = KICKOFF - timedelta(hours=5)
 
-        await fetch_polymarket_odds.ingest_sport("soccer_epl", now)
-        await fetch_polymarket_odds.ingest_sport("soccer_epl", now)
+        first = await fetch_polymarket_odds.ingest_sport("soccer_epl", now)
+        second = await fetch_polymarket_odds.ingest_sport("soccer_epl", now)
 
+        assert (first.snapshots_stored, second.snapshots_stored) == (1, 0)
         assert len((await pglite_async_session.execute(select(OddsSnapshot))).scalars().all()) == 1
+        assert (
+            len((await pglite_async_session.execute(select(SnapshotPayload))).scalars().all()) == 1
+        )
         assert len((await pglite_async_session.execute(select(Price))).scalars().all()) == 9
 
     async def test_logs_a_successful_fetch(

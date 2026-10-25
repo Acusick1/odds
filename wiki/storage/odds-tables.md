@@ -77,7 +77,7 @@ Rows written before the column existed were linked by `migrations/versions/b6e3d
 - **Shared copies:** several snapshots quote the key. Each is one copy of a [same-time pair](#same-time-pairs), and `odds events delete-same-time-pairs` links or deletes it.
 - **Orphans:** no snapshot at that event and time quotes the key, because the snapshot the row was parsed from is missing. The largest group is EPL OddsPortal live rows from March to August 2026 whose market's snapshot is missing while the other market's snapshot at that time survived. Orphans are kept with a NULL `snapshot_id`; nothing resolves them.
 
-The column is therefore nullable, with no database constraint, while every writer links each new row; `tests/integration/test_odds_snapshot_link.py` fails if code outside the known writers builds odds rows, or if `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` leaves one unlinked. `ix_odds_snapshot_id` makes `SELECT count(*) FROM odds WHERE snapshot_id IS NULL` cheap, and the command prints that count split into orphans and shared copies.
+The column is therefore nullable, with no database constraint, while every writer links each new row; `tests/integration/test_odds_snapshot_link.py` fails if code outside the known writers builds odds rows, or if `odds_lambda.storage.writers.OddsWriter.store_envelope` leaves one unlinked. `ix_odds_snapshot_id` makes `SELECT count(*) FROM odds WHERE snapshot_id IS NULL` cheap, and the command prints that count split into orphans and shared copies.
 
 ## Same-time pairs
 
