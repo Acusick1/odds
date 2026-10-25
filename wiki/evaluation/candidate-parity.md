@@ -1,11 +1,15 @@
 ---
 type: reference
 title: Parity check
-description: What odds candidates parity replays, which inputs it takes from each decision, how a difference is classified as a match, storage lag or mismatch, and its exit code.
+description: What odds candidates parity replays, how it rebuilds each decision from its recorded input snapshots, how it reports data differences from the current database, and its exit code.
 sources:
   - odds_analytics.candidate_parity
   - odds_cli.commands.candidates.parity
   - odds_core.paper_trade_models.CandidateDecision
+mentions:
+  - odds_lambda.candidate_rules.rules.apply_rule
+  - odds_lambda.candidate_rules.rules.run_rule
+  - odds_lambda.candidate_rules.market_state.build_market_state
 status: stable
 ---
 
@@ -17,24 +21,19 @@ status: stable
 
 `odds_cli.commands.candidates.parity` finds the candidate in the registry, which `odds_cli.commands.candidates._load_registry` validates, so a rule whose code changed without a new version fails there. `--version` defaults to the registry's version. `odds_analytics.candidate_parity.check_parity` raises `ValueError` for another version, because the rule and params of an earlier version are only in git history.
 
-The output is the counts of decisions checked, matched, storage lag and mismatches, then each storage-lag and mismatched decision with its live and replayed bets. The exit code is 1 when any decision is a mismatch, and 0 otherwise.
+The output is the counts of decisions checked, matched, mismatched and data differences, then each mismatched decision with its live and replayed bets and each data difference with both replays. The exit code is 1 when any decision is a mismatch, and 0 otherwise, including when no decision was checked, which prints a "no decisions to check" warning.
+
+Run it on the production host: `odds copy from-prod` copies no trades or decisions, so a development database holds none.
 
 ## Replay of a decision
 
-`odds_analytics.candidate_parity.check_parity` takes every `odds_core.paper_trade_models.CandidateDecision` of the candidate version that is not missed, and replays each through `odds_lambda.candidate_rules.rules.run_rule` with the inputs the decision recorded:
+`odds_analytics.candidate_parity.check_parity` takes every `odds_core.paper_trade_models.CandidateDecision` of the candidate version that is not missed and makes two comparisons.
 
-- the decision's `odds_core.paper_trade_models.CandidateDecision.decision_time`;
-- its `kickoff_at_decision`, which replaces the event's current kick-off, since the event may have moved;
-- its `known_at`, so only snapshots stored by then count ([known_at](candidate-rules.md#known_at)), and not the paper trade's `placed_at`, because a decision that placed nothing has no trade.
+**Parity, from the recorded inputs.** The decision's `input_snapshot_ids` are loaded by id, whatever event they now belong to. `odds_lambda.candidate_rules.market_state.build_market_state` builds the state from exactly those snapshots at the decision's recorded decision time, `odds_lambda.candidate_rules.rules.apply_rule` runs the rule with the decision's `kickoff_at_decision` in place of the event's current kick-off, and the bets are compared with the decision's paper trades as a sorted set of outcome, bookmaker, price and stake. A zero-bet decision matches a zero-bet replay. Any difference is a `mismatch`: a bug in the rule or the state, or a recorded snapshot missing from the database (listed on the mismatch). Nothing in this comparison depends on the database's current content beyond the recorded snapshots and the event's teams, so a later twin merge or a commit lag cannot change it. A decision recorded before `input_snapshot_ids` existed has none, and a replay from none places no bet.
 
-The replayed bets are compared with the decision's paper trades as a sorted set of outcome, bookmaker, price and stake. A zero-bet decision matches a zero-bet replay. Twins need no handling: decisions are recorded on canonical events.
-
-## Classification
+**Data differences, from the database now.** `odds_lambda.candidate_rules.rules.run_rule` replays the decision with `known_at` the decision's, loading the snapshots from the database as it is now ([known_at](candidate-rules.md#known_at)). When its bets differ from the recorded-input replay, the decision is listed as a data difference: snapshots stored after the run but stamped before the decision, a twin merged since, or rows committed after the run built its row objects (`odds_core.models.OddsSnapshot.created_at` is set when the row is built, not committed). It is informational and never affects the exit code, and it says the backtest, which loads from the database, would not reproduce the live bets.
 
 | Status | Meaning |
 |---|---|
-| `match` | The replay reproduces the live bets |
-| `storage_lag` | It does not, but moving `known_at` back to just before a snapshot reproduces them |
-| `mismatch` | Neither; a bug in the rule, the state or the recorded inputs |
-
-`odds_core.models.OddsSnapshot.created_at` is set when the row object is built, not when it is committed. A snapshot built just before `known_at` and committed after it was invisible to the live run, yet a replay at `known_at` sees it. `odds_analytics.candidate_parity.check_parity` tries a replay at one microsecond before the `created_at` of each distinct snapshot stored in the `odds_analytics.candidate_parity.STORAGE_LAG_WINDOW` (5 minutes) before `known_at` and stamped at or before the decision time, newest first. The first that reproduces the live bets makes the decision `storage_lag`, with that `known_at` reported. A difference with no such snapshot is a mismatch, whatever its cause.
+| `match` | The recorded-input replay reproduces the live bets |
+| `mismatch` | It does not |

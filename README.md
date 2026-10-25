@@ -21,7 +21,7 @@ consumes pipeline data through MCP tools, and places paper trades with explicit 
 packages/
 ├── odds-core/      # Shared models, config, database, alerts
 ├── odds-lambda/    # Data fetching, storage, scheduling, scheduled jobs
-├── odds-analytics/ # Backtesting, strategies, ML / feature extraction
+├── odds-analytics/ # Candidate replay backtest and report, ML training / feature extraction
 ├── odds-mcp/       # MCP server — the betting agent's tool interface
 └── odds-cli/       # CLI commands
 ```

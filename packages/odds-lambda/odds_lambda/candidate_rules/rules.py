@@ -88,8 +88,16 @@ async def run_rule(
 
     The live runner, the replay backtest and the parity check all decide through this.
     ``kickoff`` overrides the event's current kick-off with the one a recorded decision saw.
+    The returned state's ``snapshot_ids`` are the decision's inputs.
     """
     state = await load_market_state(session, event, at, known_at)
+    return apply_rule(spec, params, state, kickoff)
+
+
+def apply_rule(
+    spec: RuleSpec, params: RuleParams, state: MarketState, kickoff: datetime | None = None
+) -> tuple[MarketState, list[BetIntent]]:
+    """The rule's bets on ``state``, whose kick-off ``kickoff`` replaces when given."""
     if kickoff is not None:
         state = replace(state, kickoff=kickoff)
     return state, spec.function(state, params)

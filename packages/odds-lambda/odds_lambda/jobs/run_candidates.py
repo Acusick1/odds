@@ -187,6 +187,7 @@ async def _decide(
             decision_id=decision.id,
         )
     decision.bets_placed = len(intents)
+    decision.input_snapshot_ids = list(state.snapshot_ids)
     return decision
 
 

@@ -141,6 +141,7 @@ class TestDecisions:
         assert decision.kickoff_at_decision == DUE
         assert decision.known_at == NOW
         assert (decision.bets_placed, decision.missed) == (1, False)
+        assert len(decision.input_snapshot_ids) == 1
         [trade] = await all_of(pglite_async_session, PaperTrade)
         assert (trade.candidate_name, trade.candidate_version) == ("cand", 1)
         assert trade.decision_id == decision.id
@@ -162,6 +163,7 @@ class TestDecisions:
         assert await all_of(pglite_async_session, PaperTrade) == []
         [decision] = await all_of(pglite_async_session, CandidateDecision)
         assert (decision.missed, decision.bets_placed) == (True, 0)
+        assert decision.input_snapshot_ids == []
         [missed] = [log for log in logs if log["event"] == "candidate_decision_missed"]
         assert missed["log_level"] == "warning"
         assert (missed["candidate"], missed["event_id"]) == ("cand", "e1")

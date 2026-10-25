@@ -6,12 +6,14 @@ from datetime import datetime
 from enum import Enum
 
 from sqlalchemy import (
+    ARRAY,
     Boolean,
     CheckConstraint,
     Column,
     DateTime,
     Float,
     Index,
+    Integer,
     UniqueConstraint,
     text,
 )
@@ -33,7 +35,8 @@ class CandidateDecision(SQLModel, table=True):
     """One run of a mechanical candidate's rule on one event, with the inputs it used.
 
     Written even when the rule places no bet, so a decision is never taken twice and a replay
-    can compare a zero-bet decision. A missed decision (the run came too late) is recorded
+    can compare a zero-bet decision, and records the snapshots it used so a replay needs no
+    guess at what the run saw. A missed decision (the run came too late) is recorded
     with ``missed`` set and places nothing.
     """
 
@@ -54,6 +57,11 @@ class CandidateDecision(SQLModel, table=True):
     known_at: datetime = Field(
         sa_column=Column(DateTime(timezone=True), nullable=False),
         description="Run time: only snapshots stored by then were visible to the rule",
+    )
+    input_snapshot_ids: list[int] = Field(
+        default_factory=list,
+        sa_column=Column(ARRAY(Integer), nullable=False, server_default=text("'{}'")),
+        description="Ids of every snapshot the rule's market state was built from; empty when missed",
     )
     bets_placed: int = Field(default=0)
     missed: bool = Field(

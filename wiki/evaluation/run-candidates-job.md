@@ -12,6 +12,8 @@ mentions:
   - odds_lambda.scheduling.jobs._CANDIDATE_JOBS
   - odds_lambda.storage.event_merge.canonical_events
   - odds_lambda.candidate_rules.rules.run_rule
+  - odds_lambda.candidate_rules.market_state.MarketState.snapshot_ids
+  - odds_lambda.candidate_rules.market_state.build_market_state
 status: stable
 ---
 
@@ -43,7 +45,7 @@ A decision whose rule returns no bet is recorded with zero bets, so it is not re
 
 ### The decision record
 
-`odds_core.paper_trade_models.CandidateDecision` is table `candidate_decisions`, unique on candidate name, version and event. It holds the decision time and the kick-off the decision used, `known_at` (the run time), `bets_placed` and `missed`. A trade placed by the job references its decision through `odds_core.paper_trade_models.PaperTrade.decision_id`. A parity check replays the decision with the recorded kick-off and `known_at` (not the trade's `placed_at`), so a kick-off rescheduled afterwards does not change the replay's decision time.
+`odds_core.paper_trade_models.CandidateDecision` is table `candidate_decisions`, unique on candidate name, version and event. It holds the decision time and the kick-off the decision used, `known_at` (the run time), `input_snapshot_ids`, `bets_placed` and `missed`. `input_snapshot_ids` is every snapshot `odds_lambda.candidate_rules.market_state.build_market_state` was given for the decision (`odds_lambda.candidate_rules.market_state.MarketState.snapshot_ids`), not only the ones that set a price; a missed decision records none. A trade placed by the job references its decision through `odds_core.paper_trade_models.PaperTrade.decision_id`. A parity check replays the decision from those snapshots and the recorded kick-off ([parity check](candidate-parity.md#replay-of-a-decision)), so neither a kick-off rescheduled afterwards nor a later twin merge changes the replay.
 
 A unique index on a runner trade's candidate, version, event, selection and bookmaker, for trades with a decision, rejects a rule that returns the same bet twice. The agent's trades have no decision and may repeat a bet ([paper trading](../agent/paper-trading.md#candidate-fields)).
 

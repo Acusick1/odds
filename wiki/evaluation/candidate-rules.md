@@ -41,7 +41,7 @@ As-of-t rules:
 
 ### known_at
 
-`odds_lambda.candidate_rules.market_state.load_market_state` takes an optional `known_at`. When given, it also drops snapshots whose `created_at` is later than `known_at`: the data the system had stored by then. The [run-candidates job](run-candidates-job.md#decisions) passes its run time and the parity check passes the decision's recorded `known_at`, so neither sees a snapshot stamped before t but stored afterwards. The replay backtest passes `None`, because backfilled rows were created long after their snapshot times.
+`odds_lambda.candidate_rules.market_state.load_market_state` takes an optional `known_at`. When given, it also drops snapshots whose `created_at` is later than `known_at`: the data the system had stored by then. The [run-candidates job](run-candidates-job.md#decisions) passes its run time and the parity check's data comparison passes the decision's recorded `known_at`, so neither sees a snapshot stamped before t but stored afterwards. The replay backtest passes `None`, because backfilled rows were created long after their snapshot times.
 
 ## Rule interface
 

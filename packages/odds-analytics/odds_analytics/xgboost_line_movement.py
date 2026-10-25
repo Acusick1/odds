@@ -20,8 +20,6 @@ if TYPE_CHECKING:
     from odds_analytics.training.cross_validation import CVResult
     from odds_analytics.training.tracking import ExperimentTracker
 
-from odds_analytics.feature_extraction import TabularFeatureExtractor
-
 logger = structlog.get_logger()
 
 __all__ = [
@@ -36,27 +34,13 @@ class XGBoostLineMovementStrategy:
         self,
         model_path: str | None = None,
         feature_names: list[str] | None = None,
-        feature_extractor: TabularFeatureExtractor | None = None,
     ):
         self.model: Any = None  # XGBoost regressor
         self.feature_names: list[str] = feature_names or []
         self.margin_feature: str | None = None
-        self.feature_extractor = feature_extractor or TabularFeatureExtractor()
 
         if model_path:
             self.load_model(model_path)
-
-    def _predict_movement(self, feature_vector: np.ndarray) -> float:
-        """
-        Predict line movement delta using trained model.
-
-        Args:
-            feature_vector: Feature array for single prediction
-
-        Returns:
-            Predicted movement delta (positive = favorable movement expected)
-        """
-        return float(self.predict(feature_vector.reshape(1, -1))[0])
 
     def _margin(self, X: np.ndarray) -> np.ndarray | None:
         if self.margin_feature is None:

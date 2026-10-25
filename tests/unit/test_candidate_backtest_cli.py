@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime
@@ -12,6 +13,7 @@ import pytest
 import yaml
 from odds_analytics.candidate_backtest import Coverage, HashStatus, score
 from odds_analytics.candidate_parity import DecisionParity, ParityReport, ParityStatus
+from odds_analytics.candidate_report import Verdict
 from odds_cli.main import app
 from odds_core.candidates import MechanicalCandidate
 from typer.testing import CliRunner
@@ -76,6 +78,7 @@ class TestBacktestCommand:
         assert result.exit_code == 0, result.stdout
         assert seen[0].name == "back-longest"
         assert "With exchange" in result.stdout and "not_yet" in result.stdout
+        assert "promote" not in result.stdout
         summary = json.loads(out.read_text())
         assert summary["coverage"]["events"] == 10
         assert summary["hash_status"] == HashStatus.MATCH
@@ -111,12 +114,14 @@ class TestBacktestCommand:
         assert RUNNER.invoke(app, ["candidates", "backtest", *args]).exit_code == 1
 
 
-def parity_report(*statuses: ParityStatus) -> ParityReport:
+def parity_report(*statuses: ParityStatus, db_replayed: tuple = (("home", "bet365", 2.2, 1.0),)):
     return ParityReport(
         "back-longest",
         1,
         [
-            DecisionParity(i, f"e{i}", NOW, status, (), (("home", "bet365", 2.2, 1.0),))
+            DecisionParity(
+                i, f"e{i}", NOW, status, (), (("home", "bet365", 2.2, 1.0),), db_replayed
+            )
             for i, status in enumerate(statuses)
         ],
     )
@@ -131,12 +136,20 @@ class TestParityCommand:
         return RUNNER.invoke(app, ["candidates", "parity", "back-longest"])
 
     def test_clean_report_exits_0(self, registry: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        result = self.invoke(
-            monkeypatch, parity_report(ParityStatus.MATCH, ParityStatus.STORAGE_LAG)
-        )
+        result = self.invoke(monkeypatch, parity_report(ParityStatus.MATCH, ParityStatus.MATCH))
 
         assert result.exit_code == 0, result.stdout
-        assert "2 decisions checked, 1 matched, 1 storage lag, 0 mismatches" in result.stdout
+        assert "2 decisions checked, 2 matched, 0 mismatches, 0 data differences" in result.stdout
+
+    def test_data_difference_is_informational(
+        self, registry: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        result = self.invoke(monkeypatch, parity_report(ParityStatus.MATCH, db_replayed=()))
+
+        assert result.exit_code == 0, result.stdout
+        assert (
+            "1 data differences" in result.stdout and "data difference decision 0" in result.stdout
+        )
 
     def test_mismatch_exits_1_with_details(
         self, registry: Path, monkeypatch: pytest.MonkeyPatch
@@ -146,5 +159,51 @@ class TestParityCommand:
         assert result.exit_code == 1
         assert "mismatch decision 0" in result.stdout and "replayed" in result.stdout
 
+    def test_no_decisions_warns_and_exits_0(
+        self, registry: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        result = self.invoke(monkeypatch, parity_report())
+
+        assert result.exit_code == 0, result.stdout
+        assert "no decisions to check" in result.stdout
+
     def test_unknown_candidate_exits_1(self, registry: Path) -> None:
         assert RUNNER.invoke(app, ["candidates", "parity", "nope"]).exit_code == 1
+
+
+class TestBacktestVerdictWording:
+    def tables(self, verdict: Verdict) -> str:
+        from io import StringIO
+
+        from odds_cli.commands.candidates import _backtest_tables
+        from rich.console import Console
+
+        cov = Coverage(
+            events=1, with_exchange=1, with_retail=1, with_bet=0, bets=0, bets_with_close=0
+        )
+        result = score(
+            MechanicalCandidate.model_validate(MECHANICAL),
+            date(2025, 8, 1),
+            date(2025, 9, 1),
+            [],
+            cov,
+            NOW,
+            N_BOOT,
+            0,
+        )
+        result = dataclasses.replace(
+            result, summary=dataclasses.replace(result.summary, verdict=verdict)
+        )
+        out = StringIO()
+        for table in _backtest_tables(result):
+            Console(file=out, width=250).print(table)
+        return out.getvalue()
+
+    def test_promote_bar_is_not_a_promotion(self) -> None:
+        text = self.tables(Verdict.PROMOTE)
+        assert "meets_promote_bar (development data, not a promotion)" in text
+        assert "promote " not in text.replace("promote bar", "")
+
+    @pytest.mark.parametrize("verdict", [Verdict.KILL, Verdict.CONTINUE, Verdict.NOT_YET])
+    def test_other_verdicts_are_shown_as_is(self, verdict: Verdict) -> None:
+        assert verdict.value in self.tables(verdict)

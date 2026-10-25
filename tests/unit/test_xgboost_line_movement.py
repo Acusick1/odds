@@ -104,7 +104,7 @@ class TestXGBoostLineMovementStrategy:
 
         # Make prediction
         test_features = np.random.rand(5)
-        movement = strategy._predict_movement(test_features)
+        movement = float(strategy.predict(test_features.reshape(1, -1))[0])
 
         assert isinstance(movement, float)
         # Movement should be in reasonable range for probability deltas
@@ -141,8 +141,8 @@ class TestXGBoostLineMovementStrategy:
 
             # Predictions should be identical
             test_features = np.random.rand(5)
-            original_movement = strategy._predict_movement(test_features)
-            loaded_movement = loaded_strategy._predict_movement(test_features)
+            original_movement = float(strategy.predict(test_features.reshape(1, -1))[0])
+            loaded_movement = float(loaded_strategy.predict(test_features.reshape(1, -1))[0])
 
             assert abs(original_movement - loaded_movement) < 1e-6
 
@@ -210,8 +210,8 @@ class TestModelPersistence:
 
             # Verify model works
             test_vec = np.random.rand(15)
-            movement1 = strategy._predict_movement(test_vec)
-            movement2 = new_strategy._predict_movement(test_vec)
+            movement1 = float(strategy.predict(test_vec.reshape(1, -1))[0])
+            movement2 = float(new_strategy.predict(test_vec.reshape(1, -1))[0])
 
             assert abs(movement1 - movement2) < 1e-6
 

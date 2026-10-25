@@ -98,6 +98,11 @@ _VERDICT_STYLE = {
 }
 
 
+def _backtest_verdict(verdict: Verdict) -> str:
+    """Development data never promotes, so the promote bar is reported as met, not as a verdict."""
+    return "meets_promote_bar" if verdict is Verdict.PROMOTE else verdict.value
+
+
 def _interval(low_high: tuple[float, float]) -> str:
     return f"[{low_high[0]:+.3f}, {low_high[1]:+.3f}]"
 
@@ -230,8 +235,11 @@ def _backtest_tables(result: BacktestResult) -> list[Table]:
     _checkpoint_row(verdict, "Checkpoint", summary.checkpoint)
     _checkpoint_row(verdict, "All bets with close", result.overall)
     style = _VERDICT_STYLE[summary.verdict]
+    label = _backtest_verdict(summary.verdict)
+    if summary.verdict is Verdict.PROMOTE:
+        label += " (development data, not a promotion)"
     verdict.caption = (
-        f"[{style}]{summary.verdict}[/{style}]  staked {summary.total_stake:.2f}  "
+        f"[{style}]{label}[/{style}]  staked {summary.total_stake:.2f}  "
         f"P&L {summary.pnl:+.2f}  ROI {summary.roi:+.1%}"
     )
     return [coverage, verdict]
@@ -274,7 +282,9 @@ def backtest(
     for table in _backtest_tables(result):
         console.print(table)
     if json_path is not None:
-        json_path.write_text(json.dumps(dataclasses.asdict(result), indent=2, default=str) + "\n")
+        payload = dataclasses.asdict(result)
+        payload["summary"]["verdict"] = _backtest_verdict(result.summary.verdict)
+        json_path.write_text(json.dumps(payload, indent=2, default=str) + "\n")
 
 
 @app.command("parity")
@@ -284,9 +294,11 @@ def parity(
         int | None, typer.Option("--version", help="Candidate version; default the registry's")
     ] = None,
 ) -> None:
-    """Replay each recorded decision and compare with the paper trades it placed.
+    """Replay each recorded decision from its recorded input snapshots and compare the bets.
 
-    Exits 1 when a decision differs for a reason other than storage lag.
+    Run on the production host: decisions and trades are not copied by `odds copy from-prod`.
+    Exits 1 when a replay differs from the bets placed. Decisions whose replay from the
+    database as it is now differs are listed as data differences and never affect the exit code.
     """
     resolved = _mechanical(
         next((c for c in _load_registry() if c.name == name), None) or _missing(name)
@@ -301,26 +313,39 @@ def parity(
     except ValueError as exc:
         raise _fail(str(exc)) from exc
 
+    if report.checked == 0:
+        console.print(
+            f"[yellow]{report.name} v{report.version}: no decisions to check "
+            f"(this database holds none; run on the production host)[/yellow]",
+            soft_wrap=True,
+        )
+        return
     console.print(
         f"{report.name} v{report.version}: {report.checked} decisions checked, "
         f"{len(report.of(ParityStatus.MATCH))} matched, "
-        f"{len(report.of(ParityStatus.STORAGE_LAG))} storage lag, "
-        f"{len(report.of(ParityStatus.MISMATCH))} mismatches",
+        f"{len(report.of(ParityStatus.MISMATCH))} mismatches, "
+        f"{len(report.data_differences)} data differences",
         soft_wrap=True,
     )
-    for status, style in ((ParityStatus.STORAGE_LAG, "yellow"), (ParityStatus.MISMATCH, "red")):
-        for d in report.of(status):
-            console.print(
-                f"[{style}]{status} decision {d.decision_id} ({d.event_id}, "
-                f"{d.decision_time.isoformat()})[/{style}]\n  live:     {list(d.live)}\n"
-                f"  replayed: {list(d.replayed)}"
-                + (
-                    f"\n  reproduced with known_at {d.lag_known_at.isoformat()}"
-                    if d.lag_known_at
-                    else ""
-                ),
-                soft_wrap=True,
-            )
+    for d in report.of(ParityStatus.MISMATCH):
+        console.print(
+            f"[red]mismatch decision {d.decision_id} ({d.event_id}, "
+            f"{d.decision_time.isoformat()})[/red]\n  live:     {list(d.live)}\n"
+            f"  replayed: {list(d.replayed)}"
+            + (
+                f"\n  recorded snapshots not in the database: {list(d.missing_snapshot_ids)}"
+                if d.missing_snapshot_ids
+                else ""
+            ),
+            soft_wrap=True,
+        )
+    for d in report.data_differences:
+        console.print(
+            f"[yellow]data difference decision {d.decision_id} ({d.event_id}, "
+            f"{d.decision_time.isoformat()})[/yellow]\n  recorded inputs: {list(d.replayed)}\n"
+            f"  database now:    {list(d.db_replayed)}",
+            soft_wrap=True,
+        )
     if not report.ok:
         raise typer.Exit(1)
 

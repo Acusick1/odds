@@ -1,37 +1,40 @@
 """Check that replaying a mechanical candidate reproduces the bets it placed live.
 
-Each recorded decision is replayed with the inputs it recorded: its decision time, its
-kick-off and ``known_at``, so only snapshots stored by then count. A replay that differs
-is storage lag when moving ``known_at`` back to just before a snapshot stored in the
-``STORAGE_LAG_WINDOW`` before it reproduces the live bets: ``OddsSnapshot.created_at`` is set
-when the row is built, not committed, so such a snapshot can be stamped before ``known_at``
-yet have been invisible to the live run. Any other difference is a bug.
+Two comparisons per recorded decision. The parity comparison rebuilds the market state from
+exactly the snapshots the decision recorded (``input_snapshot_ids``), with its decision time
+and kick-off, runs the rule and compares the bets with the decision's trades; any difference
+is a mismatch. The data comparison replays from the database as it is now, with
+``known_at`` the decision's, and reports where that differs from the recorded-input replay
+(a later twin merge, commit lag): informational, never a failure.
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import StrEnum
 
 from odds_core.candidates import MechanicalCandidate
 from odds_core.models import Event, OddsSnapshot
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
-from odds_lambda.candidate_rules import BetIntent, RuleParams, RuleSpec, resolve_rule, run_rule
+from odds_lambda.candidate_rules import (
+    BetIntent,
+    RuleParams,
+    RuleSpec,
+    apply_rule,
+    build_market_state,
+    resolve_rule,
+    run_rule,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-STORAGE_LAG_WINDOW = timedelta(minutes=5)
-# The smallest step of a stored timestamp, to place a replay just before a snapshot.
-_JUST_BEFORE = timedelta(microseconds=1)
 
 BetKey = tuple[str, str, float, float]
 
 
 class ParityStatus(StrEnum):
     MATCH = "match"
-    STORAGE_LAG = "storage_lag"
     MISMATCH = "mismatch"
 
 
@@ -42,9 +45,16 @@ class DecisionParity:
     decision_time: datetime
     status: ParityStatus
     live: tuple[BetKey, ...]
+    # The bets from the recorded input snapshots.
     replayed: tuple[BetKey, ...]
-    # The ``known_at`` that reproduced the live bets, for storage lag.
-    lag_known_at: datetime | None = None
+    # The bets from the database as it is now, as of the decision's ``known_at``.
+    db_replayed: tuple[BetKey, ...]
+    # Recorded input ids absent from the database; the recorded-input replay cannot be exact.
+    missing_snapshot_ids: tuple[int, ...] = ()
+
+    @property
+    def data_difference(self) -> bool:
+        return self.db_replayed != self.replayed
 
 
 @dataclass(frozen=True)
@@ -55,6 +65,10 @@ class ParityReport:
 
     def of(self, status: ParityStatus) -> list[DecisionParity]:
         return [d for d in self.decisions if d.status == status]
+
+    @property
+    def data_differences(self) -> list[DecisionParity]:
+        return [d for d in self.decisions if d.data_difference]
 
     @property
     def checked(self) -> int:
@@ -75,13 +89,33 @@ def intent_keys(intents: list[BetIntent]) -> tuple[BetKey, ...]:
     )
 
 
-async def _replayed(
+async def _recorded_inputs(
     session: AsyncSession,
     spec: RuleSpec,
     params: RuleParams,
     event: Event,
     decision: CandidateDecision,
-    known_at: datetime,
+) -> tuple[tuple[BetKey, ...], tuple[int, ...]]:
+    """The bets from the decision's recorded snapshots, and the recorded ids not found."""
+    ids = list(decision.input_snapshot_ids)
+    snapshots: list[OddsSnapshot] = []
+    if ids:
+        rows = await session.execute(
+            select(OddsSnapshot).where(OddsSnapshot.id.in_(ids))  # type: ignore[union-attr]
+        )
+        snapshots = list(rows.scalars().all())
+    missing = tuple(sorted(set(ids) - {s.id for s in snapshots}))
+    state = build_market_state(event, snapshots, decision.decision_time)
+    _, intents = apply_rule(spec, params, state, decision.kickoff_at_decision)
+    return intent_keys(intents), missing
+
+
+async def _db_replayed(
+    session: AsyncSession,
+    spec: RuleSpec,
+    params: RuleParams,
+    event: Event,
+    decision: CandidateDecision,
 ) -> tuple[BetKey, ...]:
     _, intents = await run_rule(
         session,
@@ -89,38 +123,10 @@ async def _replayed(
         params,
         event,
         decision.decision_time,
-        known_at,
+        decision.known_at,
         kickoff=decision.kickoff_at_decision,
     )
     return intent_keys(intents)
-
-
-async def _lag_known_at(
-    session: AsyncSession,
-    spec: RuleSpec,
-    params: RuleParams,
-    event: Event,
-    decision: CandidateDecision,
-    live: tuple[BetKey, ...],
-) -> datetime | None:
-    """A ``known_at`` just before a snapshot stored shortly before the decision's, at which
-    the replay reproduces ``live``; None when there is none."""
-    stored = await session.execute(
-        select(OddsSnapshot.created_at)
-        .where(
-            OddsSnapshot.event_id == event.id,
-            OddsSnapshot.snapshot_time <= decision.decision_time,
-            OddsSnapshot.created_at > decision.known_at - STORAGE_LAG_WINDOW,
-            OddsSnapshot.created_at <= decision.known_at,
-        )
-        .distinct()
-        .order_by(OddsSnapshot.created_at.desc())  # type: ignore[attr-defined]
-    )
-    for created_at in stored.scalars():
-        known_at = created_at - _JUST_BEFORE
-        if await _replayed(session, spec, params, event, decision, known_at) == live:
-            return known_at
-    return None
 
 
 async def check_parity(
@@ -176,25 +182,22 @@ async def check_parity(
                 for t in trades[decision.id]
             )
         )
-        replayed = await _replayed(session, spec, params, event, decision, decision.known_at)
-        lag_known_at: datetime | None = None
-        if replayed == live:
-            status = ParityStatus.MATCH
-        elif (
-            lag_known_at := await _lag_known_at(session, spec, params, event, decision, live)
-        ) is not None:
-            status = ParityStatus.STORAGE_LAG
-        else:
-            status = ParityStatus.MISMATCH
+        replayed, missing = await _recorded_inputs(session, spec, params, event, decision)
+        db_replayed = await _db_replayed(session, spec, params, event, decision)
         results.append(
             DecisionParity(
                 decision_id=decision.id,
                 event_id=decision.event_id,
                 decision_time=decision.decision_time,
-                status=status,
+                status=(
+                    ParityStatus.MATCH
+                    if replayed == live and not missing
+                    else ParityStatus.MISMATCH
+                ),
                 live=live,
                 replayed=replayed,
-                lag_known_at=lag_known_at,
+                db_replayed=db_replayed,
+                missing_snapshot_ids=missing,
             )
         )
     return ParityReport(candidate.name, version, results)

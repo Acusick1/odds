@@ -16,18 +16,38 @@ What a candidate is and when it is promoted or killed is on [Goal and strategy](
    - State the rule, the reason it might earn EV and the pre-registered grid: the parameter values, the data range and how a cell is selected. Fix these before any backtest runs, as [#626](https://github.com/Acusick1/odds/issues/626) does.
    - A rule that is not in `odds_lambda.candidate_rules.rules.RULES` needs a rule function first ([candidate rules](candidate-rules.md#rule-interface)).
 2. **Backtest a draft on development data.**
-   - Write a candidate file outside `candidates/`, with the rule, params and sport. `odds_core.candidates.MechanicalCandidate.rule_sha256` may be missing.
+   - Write a draft file outside `candidates/` with every required field of `odds_core.candidates.MechanicalCandidate` except its hash: name, description, kind (`mechanical`), sport, version, issue, start date, status, rule and the rule's params, which include `minutes_before_kickoff`.
+   - For example:
+
+     ```yaml
+     name: back-longest
+     description: Back the longest retail price when it beats the exchange fair price by 2%.
+     kind: mechanical
+     sport: soccer_epl
+     version: 1
+     issue: 626
+     start_date: 2026-11-01
+     status: active
+     rule: exchange_gap
+     params:
+       threshold: 0.02
+       minutes_before_kickoff: 60
+     ```
+
    - Run `uv run odds candidates backtest <path> --from 2024-08-01 --to 2026-07-31`, with `--json <file>` to keep the result ([replay backtest](candidate-backtest.md)).
    - Read the coverage first: events with an exchange price and a retail quote at the decision time, and bets with a close. Then read the checkpoint and overall estimates.
-   - Development data can kill an idea and never promotes one; the range has been examined many times.
+   - Development data can kill an idea and never promotes one: the output says `meets_promote_bar`, not `promote`, and the range has been examined many times.
 3. **Register it** with a pull request that adds `candidates/<name>.yaml`.
    - Take the hash from `uv run odds candidates rule-hash <rule>`, and set `version: 1`, the issue, a `start_date` and `status: active` ([file format](candidate-registry.md#file-format)).
    - `uv run odds candidates list` validates the file, and the `candidate-versions` hook checks that a later change carries a new version ([version check](candidate-registry.md#version-check)). A rule's code change reaches the file as a new hash, so it needs a new version.
 4. **Deploy.** The [run-candidates job](run-candidates-job.md) places the candidate's paper trades from its start date and records every decision. Nothing else is needed.
-5. **Read the report.** `uv run odds candidates report` on the production host, or on a [local copy](../foundations/howto-copy-production-data.md) of its data ([report](candidate-registry.md#odds-candidates-report)).
+5. **Read the report on the production host.** `odds copy from-prod` copies no trades or decisions, so a local database cannot show them ([report](candidate-registry.md#odds-candidates-report)).
+   - `ssh` to the production host, `cd ~/odds`, then run `uv run odds candidates report`.
    - The verdict is read only at 100, 200, … bets with a close. Below 100 it is `not_yet`; do not act on a running mean.
-6. **Run the parity check** with `uv run odds candidates parity <name>` on the same data ([parity check](candidate-parity.md)).
-   - A mismatch means the backtest and the forward test disagree, which is a bug to fix before trusting either. Storage lag is reported and does not fail.
+6. **Run the parity check on the production host**: `ssh` to it, `cd ~/odds`, then `uv run odds candidates parity <name>` ([parity check](candidate-parity.md)).
+   - It replays each decision from the snapshots it recorded. A mismatch means the rule or state code does not reproduce the live bets, which is a bug to fix before trusting either result; it exits 1.
+   - A data difference (the database now yields other bets than the recorded inputs did) is informational: the backtest, which loads from the database, would not reproduce that decision.
+   - "No decisions to check" means the candidate has not decided yet.
 7. **Promote or kill** by changing the status in a pull request, which needs no version bump.
    - Promote when the report says `promote`, then the stake-capacity gate before real money (not yet defined).
    - Kill when it says `kill`, or by choice. Record the result on the idea issue and close it. Never delete the file.

@@ -38,7 +38,7 @@ Events are processed in batches of `odds_analytics.candidate_backtest.EVENT_BATC
 
 `odds_analytics.candidate_backtest.score` passes the bets, as `odds_analytics.candidate_report.ScoredBet`, to `odds_analytics.candidate_report.summarize_candidate`: the type, EV, prefix, checkpoint and verdict code that [the report](candidate-registry.md#odds-candidates-report) applies to paper trades. All backtest bets are settled. The no-close grace (`odds_analytics.candidate_report.CLOSE_GRACE`) is measured from the run time, so a range ending within 7 days of today leaves its last bets pending. The bootstrap uses the same seed, so a replay gives the same numbers every time.
 
-The checkpoint is the verdict's: the first 100, 200, … 500 bets with a close, which stop at the first promote or kill. `odds_analytics.candidate_backtest.BacktestResult.overall` is a further estimate over every bet with a close in the scoreable prefix, for a range with more bets than the verdict looks at.
+The checkpoint is the verdict's: the first 100, 200, … 500 bets with a close, which stop at the first time the verdict code reports the promote bar met or a kill. `odds_analytics.candidate_backtest.BacktestResult.overall` is a further estimate over every bet with a close in the scoreable prefix, for a range with more bets than the verdict looks at.
 
 ## Coverage
 
@@ -52,7 +52,7 @@ The checkpoint is the verdict's: the first 100, 200, … 500 bets with a close, 
 | `with_bet` | Events where the rule took at least one bet |
 | `bets`, `bets_with_close` | Bets, and those with a close |
 
-The command prints these beside the no-close and pending counts, the checkpoint and overall estimates with their 95% and 99% intervals, stake, P&L and ROI. A low `with_exchange` or `with_retail` count says the range lacks the data for the rule's decision time, which no verdict can repair.
+The command prints the verdict as `meets_promote_bar` (with "development data, not a promotion"), `kill`, `continue` or `not_yet`, never `promote`, and `--json` writes the same strings (`odds_cli.commands.candidates._backtest_verdict`). It prints these beside the no-close and pending counts, the checkpoint and overall estimates with their 95% and 99% intervals, stake, P&L and ROI. A low `with_exchange` or `with_retail` count says the range lacks the data for the rule's decision time, which no verdict can repair.
 
 ## JSON output
 

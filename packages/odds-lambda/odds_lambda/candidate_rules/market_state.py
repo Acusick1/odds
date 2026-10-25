@@ -52,6 +52,8 @@ class MarketState:
     decision_time: datetime
     retail: dict[str, RetailQuote]
     exchange: ExchangePrice | None
+    # Ids of every snapshot the state was built from, so a decision can record its inputs.
+    snapshot_ids: tuple[int, ...] = ()
 
 
 def sport_market(sport_key: str) -> str:
@@ -126,6 +128,7 @@ def build_market_state(
         decision_time=decision_time,
         retail=retail,
         exchange=exchange,
+        snapshot_ids=tuple(sorted(s.id for s in snapshots if s.id is not None)),
     )
 
 
