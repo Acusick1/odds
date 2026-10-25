@@ -57,7 +57,7 @@ class TestCandidateScrapeLeads:
             "rule_sha256": "0" * 64,
             "params": {
                 "threshold": 0.01,
-                "minutes_before_kickoff": 60,
+                "minutes_before_kickoff": [60],
                 "max_input_age_minutes": 10,
             },
         }

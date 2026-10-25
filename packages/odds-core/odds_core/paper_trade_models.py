@@ -32,12 +32,15 @@ class TradeResult(str, Enum):
 
 
 class CandidateDecision(SQLModel, table=True):
-    """One run of a mechanical candidate's rule on one event, with the inputs it used.
+    """One run of a mechanical candidate's rule on one event at one of its decision times,
+    with the inputs it used.
 
     Written even when the rule places no bet, so a decision is never taken twice and a replay
     can compare a zero-bet decision, and records the snapshots it used so a replay needs no
     guess at what the run saw. A missed decision (the run came too late, or no snapshot was
-    recent enough to decide from) is recorded with ``missed`` set and places nothing.
+    recent enough to decide from) is recorded with ``missed`` set and places nothing. Keyed
+    by the decision's minutes before kick-off rather than its time, so a kick-off that moves
+    after the decision does not open a second decision for the same entry.
     """
 
     __tablename__ = "candidate_decisions"
@@ -46,9 +49,13 @@ class CandidateDecision(SQLModel, table=True):
     candidate_name: str = Field(index=True)
     candidate_version: int
     event_id: str = Field(foreign_key="events.id", index=True)
+    minutes_before_kickoff: int = Field(
+        sa_column=Column(Integer, nullable=False),
+        description="The entry of the rule's minutes_before_kickoff this decision is for",
+    )
     decision_time: datetime = Field(
         sa_column=Column(DateTime(timezone=True), nullable=False),
-        description="Kick-off at decision minus the rule's minutes_before_kickoff",
+        description="Kick-off at decision minus minutes_before_kickoff",
     )
     kickoff_at_decision: datetime = Field(
         sa_column=Column(DateTime(timezone=True), nullable=False),
@@ -78,7 +85,8 @@ class CandidateDecision(SQLModel, table=True):
             "candidate_name",
             "candidate_version",
             "event_id",
-            name="uq_candidate_decisions_candidate_event",
+            "minutes_before_kickoff",
+            name="uq_candidate_decisions_candidate_event_lead",
         ),
         CheckConstraint("NOT missed OR bets_placed = 0", name="ck_candidate_decisions_missed"),
     )
@@ -153,7 +161,6 @@ class PaperTrade(SQLModel, table=True):
             "candidate_version",
             "event_id",
             "selection",
-            "bookmaker",
             unique=True,
             postgresql_where=text("decision_id IS NOT NULL"),
         ),

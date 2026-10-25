@@ -3,9 +3,12 @@
 Two comparisons per recorded decision. The parity comparison rebuilds the market state from
 exactly the snapshots the decision recorded (``input_snapshot_ids``), with its decision time
 and kick-off, runs the rule and compares the bets with the decision's trades; any difference
-is a mismatch. The data comparison replays from the database as it is now, with
-``known_at`` the decision's, and reports where that differs from the recorded-input replay
-(a later twin merge, commit lag): informational, never a failure.
+is a mismatch. Decisions are taken earliest first, and each outcome of a match is bet once:
+the parity comparison drops the outcomes the match's earlier decisions placed trades on, as
+the live run did. The data comparison replays from the database as it is now, with
+``known_at`` the decision's, dropping the outcomes its own replays of the earlier decisions
+bet, as the backtest does, and reports where that differs from the recorded-input replay (a
+later twin merge, commit lag): informational, never a failure.
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ from datetime import datetime
 from enum import StrEnum
 
 from odds_core.candidates import MechanicalCandidate
+from odds_core.market_prices import Outcome
 from odds_core.models import Event, OddsSnapshot
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from odds_lambda.candidate_rules import (
@@ -96,7 +100,8 @@ async def _recorded_inputs(
     params: RuleParams,
     event: Event,
     decision: CandidateDecision,
-) -> tuple[tuple[BetKey, ...], tuple[int, ...]]:
+    bet_outcomes: set[Outcome],
+) -> tuple[list[BetIntent], tuple[int, ...]]:
     """The bets from the decision's recorded snapshots, and the recorded ids not found."""
     ids = list(decision.input_snapshot_ids)
     snapshots: list[OddsSnapshot] = []
@@ -107,8 +112,8 @@ async def _recorded_inputs(
         snapshots = list(rows.scalars().all())
     missing = tuple(sorted(set(ids) - {s.id for s in snapshots}))
     state = build_market_state(event, snapshots, decision.decision_time, max_input_age(params))
-    _, intents = apply_rule(spec, params, state, decision.kickoff_at_decision)
-    return intent_keys(intents), missing
+    _, intents = apply_rule(spec, params, state, decision.kickoff_at_decision, bet_outcomes)
+    return intents, missing
 
 
 async def _db_replayed(
@@ -117,7 +122,8 @@ async def _db_replayed(
     params: RuleParams,
     event: Event,
     decision: CandidateDecision,
-) -> tuple[BetKey, ...]:
+    bet_outcomes: set[Outcome],
+) -> list[BetIntent]:
     _, intents = await run_rule(
         session,
         spec,
@@ -126,14 +132,16 @@ async def _db_replayed(
         decision.decision_time,
         decision.known_at,
         kickoff=decision.kickoff_at_decision,
+        bet_outcomes=bet_outcomes,
     )
-    return intent_keys(intents)
+    return intents
 
 
 async def check_parity(
     session: AsyncSession, candidate: MechanicalCandidate, version: int | None = None
 ) -> ParityReport:
-    """Replay every non-missed decision of ``candidate``'s ``version`` (default its own).
+    """Replay every non-missed decision of ``candidate``'s ``version`` (default its own),
+    earliest first.
 
     The rule and params are the candidate's, so ``version`` must be the one the file holds;
     ``ValueError`` otherwise.
@@ -172,6 +180,10 @@ async def check_parity(
             assert trade.decision_id is not None  # noqa: S101
             trades[trade.decision_id].append(trade)
 
+    # Outcomes bet so far per event, live and by the database replay; decisions come
+    # earliest first.
+    live_outcomes: dict[str, set[Outcome]] = defaultdict(set)
+    db_replayed_outcomes: dict[str, set[Outcome]] = defaultdict(set)
     results: list[DecisionParity] = []
     for decision in decisions:
         assert decision.id is not None  # noqa: S101
@@ -183,8 +195,15 @@ async def check_parity(
                 for t in trades[decision.id]
             )
         )
-        replayed, missing = await _recorded_inputs(session, spec, params, event, decision)
-        db_replayed = await _db_replayed(session, spec, params, event, decision)
+        replayed_bets, missing = await _recorded_inputs(
+            session, spec, params, event, decision, live_outcomes[decision.event_id]
+        )
+        db_replayed_bets = await _db_replayed(
+            session, spec, params, event, decision, db_replayed_outcomes[decision.event_id]
+        )
+        live_outcomes[decision.event_id].update(Outcome(t.selection) for t in trades[decision.id])
+        db_replayed_outcomes[decision.event_id].update(b.outcome for b in db_replayed_bets)
+        replayed, db_replayed = intent_keys(replayed_bets), intent_keys(db_replayed_bets)
         results.append(
             DecisionParity(
                 decision_id=decision.id,

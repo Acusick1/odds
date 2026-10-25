@@ -55,6 +55,7 @@ def _decision(event_id: str, candidate: str) -> CandidateDecision:
         candidate_name=candidate,
         candidate_version=1,
         event_id=event_id,
+        minutes_before_kickoff=60,
         decision_time=TWIN_KICKOFF,
         kickoff_at_decision=TWIN_KICKOFF,
         known_at=TWIN_KICKOFF,

@@ -286,10 +286,12 @@ class EventMerger:
     async def _drop_clashing_decisions(self, duplicate: Event, keep: Event) -> dict[str, int]:
         """Delete the duplicate's decisions, and their trades, that the kept event has too.
 
-        A candidate version decides an event once (``uq_candidate_decisions_candidate_event``),
-        so a decision the kept event already holds wins. The other decisions and trades move
-        with the foreign keys: a trade only clashes with the kept event's trades through a
-        decision of the same candidate version, and those are the ones deleted here.
+        A candidate version decides a match once per decision time and bets each outcome once
+        (``uq_candidate_decisions_candidate_event_time``, ``uq_paper_trades_candidate_bet``),
+        so when the kept event holds any decision of a candidate version, that version's
+        decisions on the duplicate are dropped. The other decisions and trades move with the
+        foreign keys: a trade only clashes with the kept event's trades through a decision of
+        the same candidate version, and those are the ones deleted here.
         """
         kept = {
             (name, version)

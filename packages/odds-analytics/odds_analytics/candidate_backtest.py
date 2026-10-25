@@ -1,8 +1,9 @@
 """Replay a mechanical candidate over completed events and score it like the forward test.
 
-Each event is decided at its rule's decision time, from the snapshots stamped at or before
-it, and the bets are scored by ``odds_analytics.candidate_report``: the same close lookup,
-EV, checkpoint and verdict code as the paper trades. Development data can kill an idea but
+Each event is decided at each of its rule's decision times, from the snapshots stamped at or
+before it, betting each outcome at most once per event, and the bets are scored by
+``odds_analytics.candidate_report``: the same close lookup, EV, checkpoint and verdict code
+as the paper trades. Development data can kill an idea but
 never promote one.
 """
 
@@ -15,10 +16,10 @@ from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
 
 from odds_core.candidates import MechanicalCandidate
-from odds_core.market_prices import THREE_WAY_MARKET
+from odds_core.market_prices import THREE_WAY_MARKET, Outcome
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.odds_math import calculate_profit_from_decimal, determine_h2h_winner
-from odds_lambda.candidate_rules import decision_time, resolve_rule, rule_sha256, run_rule
+from odds_lambda.candidate_rules import decision_times, resolve_rule, rule_sha256, run_rule
 from odds_lambda.storage.event_merge import canonical_events
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,9 +49,11 @@ class HashStatus(StrEnum):
 
 @dataclass(frozen=True)
 class Coverage:
-    """How much of the range the rule could act on."""
+    """How much of the range the rule could act on. ``events`` counts events; the other
+    fields count decisions, one per event and decision time, and bets."""
 
     events: int
+    decisions: int
     with_input: int
     with_exchange: int
     with_retail: int
@@ -122,34 +125,40 @@ async def replay(
 ) -> BacktestResult:
     """Replay ``candidate`` over the events kicked off from ``start`` to ``end`` inclusive.
 
-    The decision time is the rule's lead before the event's final kick-off, which is the
-    only kick-off a completed event has; a live run saw the kick-off as it was then. State
-    is built with ``known_at=None`` because backfilled rows were created long after their
-    snapshot time. Bets are scored in kick-off order, all settled.
+    The decision times are the rule's leads before the event's final kick-off, which is the
+    only kick-off a completed event has; a live run saw the kick-off as it was then. An
+    event's times are decided earliest first, and an outcome bet at one is not bet again.
+    State is built with ``known_at=None`` because backfilled rows were created long after
+    their snapshot time. Bets are scored in decision-time order, as the live report orders
+    trades by placement, all settled.
     """
     spec, params = resolve_rule(candidate)
     events = await final_events(session, candidate.sport, start, end)
 
     bets: list[ScoredBet] = []
-    events_with_input = events_with_exchange = events_with_retail = events_with_bet = 0
+    decisions = with_input = with_exchange = with_retail = with_bet = 0
     for offset in range(0, len(events), EVENT_BATCH_SIZE):
         batch = events[offset : offset + EVENT_BATCH_SIZE]
         decided = []
         for event in batch:
-            state, intents = await run_rule(
-                session, spec, params, event, decision_time(event.commence_time, params), None
-            )
-            events_with_input += state.has_input
-            events_with_exchange += state.exchange is not None
-            events_with_retail += bool(state.retail)
-            events_with_bet += bool(intents)
-            decided.append((event, state.market, intents))
+            bet_outcomes: set[Outcome] = set()
+            for _, t in decision_times(event.commence_time, params):
+                state, intents = await run_rule(
+                    session, spec, params, event, t, None, bet_outcomes=bet_outcomes
+                )
+                bet_outcomes.update(intent.outcome for intent in intents)
+                decisions += 1
+                with_input += state.has_input
+                with_exchange += state.exchange is not None
+                with_retail += bool(state.retail)
+                with_bet += bool(intents)
+                decided.append((event, t, state.market, intents))
 
         has_close = {
-            e.id for e, market, intents in decided if intents and market == THREE_WAY_MARKET
+            e.id for e, _, market, intents in decided if intents and market == THREE_WAY_MARKET
         }
         snapshots = await _close_snapshots(session, has_close) if has_close else {}
-        for event, market, intents in decided:
+        for event, t, market, intents in decided:
             assert event.home_score is not None and event.away_score is not None  # noqa: S101
             winner = determine_h2h_winner(event.home_score, event.away_score)
             for intent in intents:
@@ -168,18 +177,21 @@ async def replay(
                         p_close=selection_close_probability(
                             market, selection, event, snapshots.get(event.id, [])
                         ),
-                        placed_at=decision_time(event.commence_time, params),
+                        placed_at=t,
                     )
                 )
         # Read-only session: drop the loaded snapshots rather than hold the whole range.
         session.expunge_all()
+    # Stable, so bets placed at one time keep kick-off and rule order.
+    bets.sort(key=lambda bet: bet.placed_at)
 
     coverage = Coverage(
         events=len(events),
-        with_input=events_with_input,
-        with_exchange=events_with_exchange,
-        with_retail=events_with_retail,
-        with_bet=events_with_bet,
+        decisions=decisions,
+        with_input=with_input,
+        with_exchange=with_exchange,
+        with_retail=with_retail,
+        with_bet=with_bet,
         bets=len(bets),
         bets_with_close=sum(b.p_close is not None for b in bets),
     )

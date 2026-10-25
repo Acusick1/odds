@@ -2,7 +2,8 @@
 
 Each run takes every decision that is due, then settles paper trades, and books the next
 run at the earliest future decision time (at most ``MAX_WAIT`` away, to pick up new
-fixtures and registrations).
+fixtures and registrations). A candidate version bets each outcome of a match at most once,
+at the first of its decision times that qualifies.
 """
 
 from __future__ import annotations
@@ -23,8 +24,9 @@ from odds_core.candidates import (
 )
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
+from odds_core.market_prices import Outcome
 from odds_core.models import Event, EventStatus
-from odds_core.paper_trade_models import CandidateDecision
+from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from odds_core.sports import SportKey
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -33,7 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from odds_lambda.candidate_rules import (
     RULES,
     RuleParams,
-    decision_time,
+    decision_times,
     run_rule,
     validate_candidate_rules,
 )
@@ -130,10 +132,23 @@ async def candidate_events(session: AsyncSession, sport: SportKey, now: datetime
     return await canonical_events(session, result.scalars().all())
 
 
-def due_event_ids(item: RunnableCandidate, events: Sequence[Event], now: datetime) -> list[str]:
-    """Events whose decision time is at or before ``now`` and not before the candidate's start."""
+# An event id and the minutes before kick-off of one of the candidate's decision times.
+DecisionKey = tuple[str, int]
+
+
+def due_decisions(
+    item: RunnableCandidate, events: Sequence[Event], now: datetime
+) -> list[DecisionKey]:
+    """Decisions whose time is at or before ``now`` and not before the candidate's start,
+    earliest first."""
     start = datetime.combine(item.candidate.start_date, time.min, tzinfo=UTC)
-    return [e.id for e in events if start <= decision_time(e.commence_time, item.params) <= now]
+    due = [
+        (t, event.id, minutes)
+        for event in events
+        for minutes, t in decision_times(event.commence_time, item.params)
+        if start <= t <= now
+    ]
+    return [(event_id, minutes) for _, event_id, minutes in sorted(due)]
 
 
 def next_decision_wakeup(
@@ -144,31 +159,51 @@ def next_decision_wakeup(
         t
         for item in runnable
         for event in events
-        if (t := decision_time(event.commence_time, item.params)) > now
+        for _, t in decision_times(event.commence_time, item.params)
+        if t > now
     ]
     return min([now + MAX_WAIT, *times])
 
 
 async def _alert_no_input(decision: CandidateDecision) -> None:
+    # Keyed per decision lead: a collection gap before one decision time would otherwise
+    # be silenced by an alert for another.
+    lead = decision.minutes_before_kickoff
     await send_recorded_alert(
-        f"candidate_no_input:{decision.candidate_name}",
+        f"candidate_no_input:{decision.candidate_name}:{lead}",
         "warning",
         f"⚠️ Candidate {decision.candidate_name} missed the decision on {decision.event_id} at "
-        f"{decision.decision_time:%Y-%m-%d %H:%M} UTC: no snapshot with UK retail and Betfair "
-        f"Exchange prices within its maximum input age",
+        f"{decision.decision_time:%Y-%m-%d %H:%M} UTC ({lead} minutes before kick-off): no "
+        f"snapshot with UK retail and Betfair Exchange prices within its maximum input age",
         every=stale_reminder_interval(),
     )
 
 
+async def _bet_outcomes(
+    session: AsyncSession, candidate: MechanicalCandidate, event_id: str
+) -> frozenset[Outcome]:
+    """Outcomes the candidate version has already bet on the event at a decision."""
+    rows = await session.execute(
+        select(PaperTrade.selection).where(
+            PaperTrade.candidate_name == candidate.name,
+            PaperTrade.candidate_version == candidate.version,
+            PaperTrade.event_id == event_id,
+            PaperTrade.decision_id.is_not(None),  # type: ignore[union-attr]
+        )
+    )
+    return frozenset(Outcome(selection) for selection in rows.scalars())
+
+
 async def _decide(
-    session: AsyncSession, item: RunnableCandidate, event: Event, now: datetime
+    session: AsyncSession, item: RunnableCandidate, event: Event, minutes: int, now: datetime
 ) -> tuple[CandidateDecision, MissReason | None]:
     candidate = item.candidate
-    t = decision_time(event.commence_time, item.params)
+    t = event.commence_time - timedelta(minutes=minutes)
     decision = CandidateDecision(
         candidate_name=candidate.name,
         candidate_version=candidate.version,
         event_id=event.id,
+        minutes_before_kickoff=minutes,
         decision_time=t,
         kickoff_at_decision=event.commence_time,
         known_at=now,
@@ -181,7 +216,13 @@ async def _decide(
         return decision, MissReason.LATE
 
     state, intents = await run_rule(
-        session, RULES[candidate.rule], item.params, event, t, known_at=now
+        session,
+        RULES[candidate.rule],
+        item.params,
+        event,
+        t,
+        known_at=now,
+        bet_outcomes=await _bet_outcomes(session, candidate, event.id),
     )
     if not state.has_input:
         decision.missed = True
@@ -218,14 +259,16 @@ def _log_missed(decision: CandidateDecision, reason: MissReason, now: datetime) 
     )
 
 
-async def _is_decided(session: AsyncSession, item: RunnableCandidate, event_id: str) -> bool:
+async def _is_decided(session: AsyncSession, item: RunnableCandidate, key: DecisionKey) -> bool:
     """Whether another run committed the decision, which is what a unique violation on the
     decision row means; one from a trade of this decision is a failure."""
+    event_id, minutes = key
     found = await session.execute(
         select(CandidateDecision.id).where(
             CandidateDecision.candidate_name == item.candidate.name,
             CandidateDecision.candidate_version == item.candidate.version,
             CandidateDecision.event_id == event_id,
+            CandidateDecision.minutes_before_kickoff == minutes,
         )
     )
     return found.first() is not None
@@ -237,42 +280,50 @@ async def run_decisions(
     events: Sequence[Event],
     now: datetime,
 ) -> RunSummary:
-    """Take every decision due at ``now`` that has no record yet; each commits on its own."""
+    """Take every decision due at ``now`` that has no record yet, earliest first so a
+    match's earlier decisions are taken before its later ones; each commits on its own."""
     summary = RunSummary()
     # Ids are read up front: a rollback after a failed decision expires every loaded instance.
-    plan = [(item, due_event_ids(item, events, now)) for item in runnable]
-    for item, due_ids in plan:
+    plan = [(item, due_decisions(item, events, now)) for item in runnable]
+    for item, due in plan:
         candidate = item.candidate
-        if not due_ids:
+        if not due:
             continue
         decided = set(
             (
                 await session.execute(
-                    select(CandidateDecision.event_id).where(
+                    select(
+                        CandidateDecision.event_id, CandidateDecision.minutes_before_kickoff
+                    ).where(
                         CandidateDecision.candidate_name == candidate.name,
                         CandidateDecision.candidate_version == candidate.version,
-                        CandidateDecision.event_id.in_(due_ids),  # type: ignore[attr-defined]
+                        CandidateDecision.event_id.in_({event_id for event_id, _ in due}),  # type: ignore[attr-defined]
                     )
                 )
             )
-            .scalars()
+            .tuples()
             .all()
         )
-        for event_id in due_ids:
-            if event_id in decided:
+        # A failed decision leaves the event's later decisions to the retry, so each outcome is
+        # still bet at the first time it qualifies.
+        failed: set[str] = set()
+        for key in due:
+            event_id, minutes = key
+            if key in decided or event_id in failed:
                 continue
             try:
                 event = await session.get(Event, event_id, populate_existing=True)
                 assert event is not None  # noqa: S101
-                decision, miss = await _decide(session, item, event, now)
+                decision, miss = await _decide(session, item, event, minutes, now)
                 await session.commit()
             except IntegrityError:
                 await session.rollback()
-                if await _is_decided(session, item, event_id):
+                if await _is_decided(session, item, key):
                     logger.info(
                         "candidate_decision_already_taken",
                         candidate=candidate.name,
                         event_id=event_id,
+                        minutes_before_kickoff=minutes,
                     )
                     summary.already_decided += 1
                     continue
@@ -280,9 +331,11 @@ async def run_decisions(
                     "candidate_decision_failed",
                     candidate=candidate.name,
                     event_id=event_id,
+                    minutes_before_kickoff=minutes,
                     exc_info=True,
                 )
                 summary.failed += 1
+                failed.add(event_id)
                 continue
             except Exception:
                 await session.rollback()
@@ -290,9 +343,11 @@ async def run_decisions(
                     "candidate_decision_failed",
                     candidate=candidate.name,
                     event_id=event_id,
+                    minutes_before_kickoff=minutes,
                     exc_info=True,
                 )
                 summary.failed += 1
+                failed.add(event_id)
                 continue
             if miss is MissReason.NO_INPUT:
                 await _alert_no_input(decision)

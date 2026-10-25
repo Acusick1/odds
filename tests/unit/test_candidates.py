@@ -26,7 +26,7 @@ MECHANICAL: dict[str, object] = {
     "status": "active",
     "rule": "exchange_gap",
     "rule_sha256": rule_sha256("exchange_gap"),
-    "params": {"threshold": 0.02, "minutes_before_kickoff": 60, "max_input_age_minutes": 10},
+    "params": {"threshold": 0.02, "minutes_before_kickoff": [60], "max_input_age_minutes": 10},
 }
 
 AGENT: dict[str, object] = {
@@ -57,7 +57,7 @@ class TestLoadCandidates:
         assert isinstance(loaded[0], MechanicalCandidate)
         assert loaded[0].params == {
             "threshold": 0.02,
-            "minutes_before_kickoff": 60,
+            "minutes_before_kickoff": [60],
             "max_input_age_minutes": 10,
         }
         assert isinstance(loaded[1], AgentCandidate)

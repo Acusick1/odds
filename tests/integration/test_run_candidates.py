@@ -58,9 +58,20 @@ def _twice(state: MarketState, params: _Params) -> list[BetIntent]:
     return _bet_home(state, params) * 2
 
 
+def _bet_longest(state: MarketState, params: _Params) -> list[BetIntent]:
+    prices = state.retail["bet365"]
+    outcome = max(prices, key=lambda o: prices[o])
+    return [BetIntent(outcome, "bet365", prices[outcome], 1.0)]
+
+
 @pytest.fixture(autouse=True)
 def rules(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name, function in (("bet_home", _bet_home), ("no_bet", _no_bet), ("twice", _twice)):
+    for name, function in (
+        ("bet_home", _bet_home),
+        ("no_bet", _no_bet),
+        ("twice", _twice),
+        ("bet_longest", _bet_longest),
+    ):
         monkeypatch.setitem(RULES, name, RuleSpec(function, _Params))
 
 
@@ -84,7 +95,7 @@ def write_candidate(directory: Path, name: str = "cand", **fields: Any) -> None:
         "status": "active",
         "rule": rule,
         "rule_sha256": rule_sha256(rule) if rule in RULES else "0" * 64,
-        "params": {"minutes_before_kickoff": 60, "max_input_age_minutes": 120},
+        "params": {"minutes_before_kickoff": [60], "max_input_age_minutes": 120},
         **fields,
     }
     (directory / f"{name}.yaml").write_text(yaml.safe_dump(data))
@@ -178,7 +189,7 @@ class TestDecisions:
         alert = AsyncMock()
         monkeypatch.setattr(run_candidates, "send_recorded_alert", alert)
         write_candidate(
-            registry, params={"minutes_before_kickoff": 60, "max_input_age_minutes": 10}
+            registry, params={"minutes_before_kickoff": [60], "max_input_age_minutes": 10}
         )
         await add_event(pglite_async_session, "e1", DUE)
 
@@ -195,8 +206,8 @@ class TestDecisions:
         [missed] = [log for log in logs if log["event"] == "candidate_decision_missed"]
         assert missed["reason"] == "no_input"
         [call] = alert.await_args_list
-        assert call.args[:2] == ("candidate_no_input:cand", "warning")
-        assert "e1" in call.args[2]
+        assert call.args[:2] == ("candidate_no_input:cand:60", "warning")
+        assert "e1" in call.args[2] and "60 minutes before kick-off" in call.args[2]
         assert call.kwargs["every"] == run_candidates.stale_reminder_interval()
 
     async def test_rerun_places_nothing_new(self, pglite_async_session, registry) -> None:
@@ -207,7 +218,7 @@ class TestDecisions:
         await run(pglite_async_session)
         again = await run(pglite_async_session, NOW + timedelta(minutes=1))
 
-        assert (again.placed, again.missed) == (0, 0)
+        assert (again.placed, again.missed, again.already_decided) == (0, 0, 0)
         assert len(await all_of(pglite_async_session, PaperTrade)) == 1
         assert len(await all_of(pglite_async_session, CandidateDecision)) == 2
 
@@ -286,20 +297,21 @@ class TestDecisions:
         await add_event(pglite_async_session, "e1", DUE)
         real_decide = run_candidates._decide
 
-        async def racing(session: Any, item: Any, event: Any, now: datetime) -> Any:
+        async def racing(session: Any, item: Any, event: Any, minutes: int, now: datetime) -> Any:
             # The other run's decision is committed between our check and our insert.
             session.add(
                 CandidateDecision(
                     candidate_name="cand",
                     candidate_version=1,
                     event_id="e1",
-                    decision_time=DUE,
+                    minutes_before_kickoff=60,
+                    decision_time=DUE - timedelta(minutes=60),
                     kickoff_at_decision=DUE,
                     known_at=now,
                 )
             )
             await session.commit()
-            return await real_decide(session, item, event, now)
+            return await real_decide(session, item, event, minutes, now)
 
         monkeypatch.setattr(run_candidates, "_decide", racing)
 
@@ -336,6 +348,111 @@ class TestDecisions:
         assert decision.candidate_name == "b-good"
 
 
+class TestSeveralDecisionTimes:
+    """A candidate deciding at 90 and 60 minutes before a kick-off 59 minutes away."""
+
+    TIMES = {"minutes_before_kickoff": [60, 90], "max_input_age_minutes": 120}
+    EARLY_RUN = DUE - timedelta(minutes=89)
+
+    async def test_each_time_is_decided_and_an_outcome_is_bet_once(
+        self, pglite_async_session, registry
+    ) -> None:
+        write_candidate(registry, params=self.TIMES)
+        await add_event(pglite_async_session, "e1", DUE)
+
+        early = await run(pglite_async_session, self.EARLY_RUN)
+        late = await run(pglite_async_session)
+
+        assert (early.placed, late.placed, late.skipped_zero_bet) == (1, 0, 1)
+        decisions = sorted(
+            await all_of(pglite_async_session, CandidateDecision), key=lambda d: d.decision_time
+        )
+        assert [d.decision_time for d in decisions] == [
+            DUE - timedelta(minutes=90),
+            DUE - timedelta(minutes=60),
+        ]
+        assert [(d.bets_placed, d.missed) for d in decisions] == [(1, False), (0, False)]
+        assert len(decisions[1].input_snapshot_ids) == 1
+        [trade] = await all_of(pglite_async_session, PaperTrade)
+        assert (trade.selection, trade.decision_id) == ("home", decisions[0].id)
+
+    async def test_a_later_time_may_bet_a_different_outcome(
+        self, pglite_async_session, registry
+    ) -> None:
+        write_candidate(registry, rule="bet_longest", params=self.TIMES)
+        await add_event(pglite_async_session, "e1", DUE)
+        # Away is longest at the early time; this later snapshot makes the draw longest.
+        later = make_tagged_snapshot(
+            "e1",
+            NOW - timedelta(minutes=5),
+            [three_way_bookmaker("bet365", (1.5, 9.0, 3.0)), EXCHANGE_ROW],
+            "oddsportal_live",
+        )
+        later.created_at = NOW - timedelta(minutes=5)
+        pglite_async_session.add(later)
+        await pglite_async_session.commit()
+
+        await run(pglite_async_session, self.EARLY_RUN)
+        await run(pglite_async_session)
+
+        trades = await all_of(pglite_async_session, PaperTrade)
+        assert sorted(t.selection for t in trades) == ["away", "draw"]
+
+    async def test_a_kickoff_moved_after_a_decision_does_not_reopen_it(
+        self, pglite_async_session, registry
+    ) -> None:
+        write_candidate(registry)
+        await add_event(pglite_async_session, "e1", DUE)
+        await run(pglite_async_session)
+        event = await pglite_async_session.get(Event, "e1")
+        assert event is not None
+        event.commence_time = DUE + timedelta(minutes=20)
+        await pglite_async_session.commit()
+
+        again = await run(pglite_async_session, NOW + timedelta(minutes=20))
+
+        assert (again.placed, again.missed, again.skipped_zero_bet) == (0, 0, 0)
+        [decision] = await all_of(pglite_async_session, CandidateDecision)
+        assert decision.minutes_before_kickoff == 60
+
+    async def test_a_failed_earlier_decision_holds_back_the_later_one(
+        self, pglite_async_session, registry, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Both times due and on time in one run: 12 and 5 minutes before a kick-off 4 minutes
+        # away.
+        write_candidate(
+            registry, params={"minutes_before_kickoff": [12, 5], "max_input_age_minutes": 120}
+        )
+        await add_event(pglite_async_session, "e1", NOW + timedelta(minutes=4))
+        real_decide = run_candidates._decide
+
+        async def fail_early(session: Any, item: Any, event: Any, minutes: int, now: Any) -> Any:
+            if minutes == 12:
+                raise RuntimeError("boom")
+            return await real_decide(session, item, event, minutes, now)
+
+        monkeypatch.setattr(run_candidates, "_decide", fail_early)
+
+        summary = await run(pglite_async_session)
+
+        assert (summary.failed, summary.placed) == (1, 0)
+        assert await all_of(pglite_async_session, CandidateDecision) == []
+
+    async def test_a_missed_earlier_time_leaves_the_later_one_to_decide(
+        self, pglite_async_session, registry
+    ) -> None:
+        write_candidate(registry, params=self.TIMES)
+        await add_event(pglite_async_session, "e1", DUE)
+
+        summary = await run(pglite_async_session)
+
+        assert (summary.missed, summary.placed) == (1, 1)
+        decisions = sorted(
+            await all_of(pglite_async_session, CandidateDecision), key=lambda d: d.decision_time
+        )
+        assert [(d.missed, d.bets_placed) for d in decisions] == [(True, 0), (False, 1)]
+
+
 class TestCandidateSelection:
     async def test_inactive_unstarted_and_other_sport_candidates_are_ignored(
         self, registry
@@ -356,7 +473,7 @@ class TestCandidateSelection:
         alert = AsyncMock()
         monkeypatch.setattr(run_candidates, "send_recorded_alert", alert)
         write_candidate(registry, "good")
-        write_candidate(registry, "bad-params", params={"minutes_before_kickoff": -1})
+        write_candidate(registry, "bad-params", params={"minutes_before_kickoff": [-1]})
         write_candidate(registry, "bad-hash", rule_sha256="0" * 64)
         write_candidate(registry, "bad-rule", rule="nonexistent", rule_sha256="0" * 64)
 
@@ -385,7 +502,7 @@ def _event(kickoff: datetime) -> Any:
     return SimpleNamespace(commence_time=kickoff)
 
 
-def _runnable(minutes: int) -> Any:
+def _runnable(*minutes: int) -> Any:
     return SimpleNamespace(params=_Params(minutes_before_kickoff=minutes, max_input_age_minutes=10))
 
 
@@ -401,6 +518,14 @@ class TestNextRunTime:
         events = [_event(NOW + timedelta(minutes=30)), _event(NOW + timedelta(minutes=80))]
 
         assert next_decision_wakeup([_runnable(60)], events, NOW) == NOW + timedelta(minutes=20)
+
+    def test_counts_every_decision_time_of_a_candidate(self) -> None:
+        events = [_event(NOW + timedelta(minutes=80))]
+
+        assert next_decision_wakeup([_runnable(120, 60)], events, NOW) == NOW + timedelta(
+            minutes=20
+        )
+        assert next_decision_wakeup([_runnable(70, 30)], events, NOW) == NOW + timedelta(minutes=10)
 
     def test_is_capped(self) -> None:
         events = [_event(NOW + timedelta(days=2))]
@@ -556,13 +681,16 @@ class TestFlatStakeTrades:
                 bankroll=None,
             )
 
-    async def test_unique_index_rejects_a_duplicate_runner_bet(self, pglite_async_session) -> None:
+    async def test_unique_index_rejects_a_second_runner_bet_on_an_outcome(
+        self, pglite_async_session
+    ) -> None:
         session = pglite_async_session
         await add_event(session, "e1", DUE)
         decision = CandidateDecision(
             candidate_name="cand",
             candidate_version=1,
             event_id="e1",
+            minutes_before_kickoff=60,
             decision_time=NOW,
             kickoff_at_decision=DUE,
             known_at=NOW,
@@ -570,12 +698,12 @@ class TestFlatStakeTrades:
         session.add(decision)
         await session.flush()
 
-        def trade(decision_id: int | None) -> PaperTrade:
+        def trade(decision_id: int | None, bookmaker: str = "bet365") -> PaperTrade:
             return PaperTrade(
                 event_id="e1",
                 market="1x2",
                 selection="home",
-                bookmaker="bet365",
+                bookmaker=bookmaker,
                 price_decimal=2.0,
                 stake=1.0,
                 bankroll_before=None if decision_id else 1000.0,
@@ -588,6 +716,6 @@ class TestFlatStakeTrades:
         session.add_all([trade(None), trade(None), trade(decision.id)])
         await session.commit()
 
-        session.add(trade(decision.id))
+        session.add(trade(decision.id, bookmaker="betway"))
         with pytest.raises(IntegrityError):
             await session.commit()

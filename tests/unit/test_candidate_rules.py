@@ -20,7 +20,7 @@ from odds_lambda.candidate_rules import (
     apply_rule,
     build_market_state,
     decision_leads,
-    decision_time,
+    decision_times,
     exchange_gap,
     max_input_age,
     rule_sha256,
@@ -213,7 +213,7 @@ def _rule_state(
     )
 
 
-PARAMS = ExchangeGapParams(threshold=0.02, minutes_before_kickoff=60, max_input_age_minutes=10)
+PARAMS = ExchangeGapParams(threshold=0.02, minutes_before_kickoff=(60,), max_input_age_minutes=10)
 
 
 class TestExchangeGap:
@@ -223,9 +223,11 @@ class TestExchangeGap:
     def test_threshold_is_strict(self) -> None:
         # 0.5 * 2.5 - 1 = 0.25, clearly above; edge exactly at threshold is not a bet.
         state = _rule_state({"bet365": {HOME: 2.5}}, _exchange(0.5, 0.25, 0.25))
-        at = ExchangeGapParams(threshold=0.25, minutes_before_kickoff=60, max_input_age_minutes=10)
+        at = ExchangeGapParams(
+            threshold=0.25, minutes_before_kickoff=(60,), max_input_age_minutes=10
+        )
         below = ExchangeGapParams(
-            threshold=0.2499, minutes_before_kickoff=60, max_input_age_minutes=10
+            threshold=0.2499, minutes_before_kickoff=(60,), max_input_age_minutes=10
         )
         assert exchange_gap(state, at) == []
         assert exchange_gap(state, below) == [BetIntent(HOME, "bet365", 2.5, 1.0)]
@@ -262,9 +264,7 @@ class TestExchangeGap:
     def test_no_retail_no_bets(self) -> None:
         assert exchange_gap(_rule_state({}, _exchange(0.5, 0.25, 0.25)), PARAMS) == []
 
-    @pytest.mark.parametrize(
-        "field", ["threshold", "stake", "minutes_before_kickoff", "max_input_age_minutes"]
-    )
+    @pytest.mark.parametrize("field", ["threshold", "stake", "max_input_age_minutes"])
     @pytest.mark.parametrize("value", [0, -1])
     def test_params_must_be_positive(self, field: str, value: float) -> None:
         raw: dict[str, Any] = {**PARAMS.model_dump(), field: value}
@@ -273,7 +273,20 @@ class TestExchangeGap:
 
     def test_max_input_age_is_required(self) -> None:
         with pytest.raises(ValidationError):
-            ExchangeGapParams(threshold=0.02, minutes_before_kickoff=60)  # type: ignore[call-arg]
+            ExchangeGapParams(threshold=0.02, minutes_before_kickoff=(60,))  # type: ignore[call-arg]
+
+    @pytest.mark.parametrize("minutes", [[], [0], [60, -1], [60, 60]])
+    def test_decision_times_are_distinct_positive_and_at_least_one(
+        self, minutes: list[int]
+    ) -> None:
+        with pytest.raises(ValidationError):
+            ExchangeGapParams(**{**PARAMS.model_dump(), "minutes_before_kickoff": minutes})
+
+    def test_decision_times_are_held_earliest_first(self) -> None:
+        params = ExchangeGapParams(
+            **{**PARAMS.model_dump(), "minutes_before_kickoff": [30, 180, 60]}
+        )
+        assert params.minutes_before_kickoff == (180, 60, 30)
 
     def test_params_reject_unknown_fields(self) -> None:
         with pytest.raises(ValidationError):
@@ -289,11 +302,28 @@ class TestApplyRule:
         assert apply_rule(always, PARAMS, empty)[1] == []
         assert apply_rule(always, PARAMS, _rule_state({}, None))[1] != []
 
+    def test_outcomes_already_bet_are_dropped(self) -> None:
+        both = RuleSpec(
+            lambda state, params: [
+                BetIntent(HOME, "bet365", 2.0, 1.0),
+                BetIntent(AWAY, "bet365", 4.0, 1.0),
+            ],
+            ExchangeGapParams,
+        )
+        state = _rule_state({}, None)
+        assert apply_rule(both, PARAMS, state, bet_outcomes={HOME})[1] == [
+            BetIntent(AWAY, "bet365", 4.0, 1.0)
+        ]
+        assert apply_rule(both, PARAMS, state, bet_outcomes={HOME, AWAY})[1] == []
 
-class TestDecisionTime:
-    def test_is_kickoff_minus_minutes(self) -> None:
-        params = PARAMS.model_copy(update={"minutes_before_kickoff": 1440})
-        assert decision_time(KICKOFF, params) == KICKOFF - timedelta(days=1)
+
+class TestDecisionTimes:
+    def test_are_kickoff_minus_each_lead_earliest_first(self) -> None:
+        params = ExchangeGapParams(**{**PARAMS.model_dump(), "minutes_before_kickoff": [60, 1440]})
+        assert decision_times(KICKOFF, params) == [
+            (1440, KICKOFF - timedelta(days=1)),
+            (60, KICKOFF - timedelta(hours=1)),
+        ]
 
     def test_max_input_age_is_in_minutes(self) -> None:
         assert max_input_age(PARAMS) == timedelta(minutes=10)
@@ -311,7 +341,7 @@ def _candidate(**overrides: Any) -> MechanicalCandidate:
         "status": "active",
         "rule": "exchange_gap",
         "rule_sha256": rule_sha256("exchange_gap"),
-        "params": {"threshold": 0.02, "minutes_before_kickoff": 60, "max_input_age_minutes": 10},
+        "params": {"threshold": 0.02, "minutes_before_kickoff": [60], "max_input_age_minutes": 10},
         **overrides,
     }
     return MechanicalCandidate.model_validate(fields)
@@ -341,7 +371,9 @@ class TestDecisionLeads:
     def test_active_mechanical_candidates_of_the_sport(self) -> None:
         candidates = [
             _candidate(),
-            _candidate(name="later", params={**PARAMS.model_dump(), "minutes_before_kickoff": 30}),
+            _candidate(
+                name="later", params={**PARAMS.model_dump(), "minutes_before_kickoff": [30, 15]}
+            ),
             _candidate(name="mlb", sport="baseball_mlb"),
             _candidate(name="killed", status="killed"),
             _candidate(name="broken", params={"threshold": -1}),
@@ -349,6 +381,7 @@ class TestDecisionLeads:
         assert decision_leads(candidates, "soccer_epl") == [
             timedelta(minutes=60),
             timedelta(minutes=30),
+            timedelta(minutes=15),
         ]
 
 

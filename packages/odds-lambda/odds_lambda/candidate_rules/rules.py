@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any
@@ -13,7 +13,15 @@ from odds_core import as_of, betfair_close, bookmakers, market_prices
 from odds_core.candidates import Candidate, CandidateStatus, MechanicalCandidate
 from odds_core.market_prices import Outcome, market_outcomes
 from odds_core.models import Event
-from pydantic import BaseModel, ConfigDict, PositiveFloat, PositiveInt, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PositiveFloat,
+    PositiveInt,
+    ValidationError,
+    field_validator,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.candidate_rules import market_state
@@ -31,18 +39,28 @@ class BetIntent:
 class RuleParams(BaseModel):
     """Params every rule takes.
 
-    ``minutes_before_kickoff`` sets the decision time, and a decision whose latest snapshot
-    is older than ``max_input_age_minutes`` at it has no inputs.
+    ``minutes_before_kickoff`` lists the decision times, held earliest first, and a decision
+    whose latest snapshot is older than ``max_input_age_minutes`` at it has no inputs.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    minutes_before_kickoff: PositiveInt
+    minutes_before_kickoff: tuple[PositiveInt, ...] = Field(min_length=1)
     max_input_age_minutes: PositiveInt
 
+    @field_validator("minutes_before_kickoff")
+    @classmethod
+    def _distinct_earliest_first(cls, minutes: tuple[int, ...]) -> tuple[int, ...]:
+        if len(set(minutes)) != len(minutes):
+            raise ValueError(f"decision times must be distinct, got {list(minutes)}")
+        return tuple(sorted(minutes, reverse=True))
 
-def decision_time(kickoff: datetime, params: RuleParams) -> datetime:
-    return kickoff - timedelta(minutes=params.minutes_before_kickoff)
+
+def decision_times(kickoff: datetime, params: RuleParams) -> list[tuple[int, datetime]]:
+    """Each decision's minutes before kick-off and its time, earliest first."""
+    return [
+        (minutes, kickoff - timedelta(minutes=minutes)) for minutes in params.minutes_before_kickoff
+    ]
 
 
 def max_input_age(params: RuleParams) -> timedelta:
@@ -114,6 +132,7 @@ async def run_rule(
     at: datetime,
     known_at: datetime | None,
     kickoff: datetime | None = None,
+    bet_outcomes: Collection[Outcome] = frozenset(),
 ) -> tuple[MarketState, list[BetIntent]]:
     """The state of ``event`` at ``at`` as known at ``known_at``, and the bets the rule takes.
 
@@ -122,29 +141,36 @@ async def run_rule(
     The returned state's ``snapshot_id`` is the decision's input.
     """
     state = await load_market_state(session, event, at, max_input_age(params), known_at)
-    return apply_rule(spec, params, state, kickoff)
+    return apply_rule(spec, params, state, kickoff, bet_outcomes)
 
 
 def apply_rule(
-    spec: RuleSpec, params: RuleParams, state: MarketState, kickoff: datetime | None = None
+    spec: RuleSpec,
+    params: RuleParams,
+    state: MarketState,
+    kickoff: datetime | None = None,
+    bet_outcomes: Collection[Outcome] = frozenset(),
 ) -> tuple[MarketState, list[BetIntent]]:
     """The rule's bets on ``state``, whose kick-off ``kickoff`` replaces when given.
 
-    A state without inputs gives no bets, whatever the rule.
+    A state without inputs gives no bets, whatever the rule. ``bet_outcomes`` are the
+    outcomes the candidate version bet on this match at an earlier decision time; each
+    outcome is bet at most once per match, so the rule's bets on them are dropped.
     """
     if kickoff is not None:
         state = replace(state, kickoff=kickoff)
     if not state.has_input:
         return state, []
-    return state, spec.function(state, params)
+    return state, [b for b in spec.function(state, params) if b.outcome not in bet_outcomes]
 
 
 def rule_sha256(rule_name: str) -> str:
     """Hash of the code and values a rule's bets depend on, in a fixed order.
 
-    The source of the rule function, its params model, the params every rule takes, the
-    market state module, the as-of module and the functions that read a snapshot's prices
-    (``RULE_INPUT_FUNCTIONS``), then the values of ``rule_input_constants``.
+    The source of the rule function, its params model, the params every rule takes,
+    ``apply_rule`` (which drops outcomes already bet), the market state module, the as-of
+    module and the functions that read a snapshot's prices (``RULE_INPUT_FUNCTIONS``), then
+    the values of ``rule_input_constants``.
     """
     spec = RULES[rule_name]
     digest = hashlib.sha256()
@@ -152,6 +178,7 @@ def rule_sha256(rule_name: str) -> str:
         inspect.getsource(spec.function),
         inspect.getsource(spec.params_model),
         inspect.getsource(RuleParams),
+        inspect.getsource(apply_rule),
         inspect.getsource(market_state),
         inspect.getsource(as_of),
         *(inspect.getsource(function) for function in RULE_INPUT_FUNCTIONS),
@@ -203,7 +230,8 @@ def validate_candidate_rules(candidates: Sequence[Candidate]) -> None:
 
 
 def decision_leads(candidates: Sequence[Candidate], sport: str) -> list[timedelta]:
-    """How long before kick-off each active mechanical candidate of ``sport`` decides.
+    """How long before kick-off the active mechanical candidates of ``sport`` decide, one
+    lead per decision time.
 
     A candidate whose rule or params do not resolve is left out; the run-candidates job
     alerts on it.
@@ -220,5 +248,5 @@ def decision_leads(candidates: Sequence[Candidate], sport: str) -> list[timedelt
             _, params = resolve_rule(candidate)
         except ValueError:
             continue
-        leads.append(timedelta(minutes=params.minutes_before_kickoff))
+        leads.extend(timedelta(minutes=minutes) for minutes in params.minutes_before_kickoff)
     return leads
