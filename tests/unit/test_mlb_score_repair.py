@@ -22,6 +22,7 @@ def _event(
     scores: tuple[int | None, int | None] = (3, 2),
     status: EventStatus = EventStatus.FINAL,
     sport_key: str = "baseball_mlb",
+    game_pk: int | None = 1,
 ) -> Event:
     return Event(
         id=event_id,
@@ -33,6 +34,7 @@ def _event(
         status=status,
         home_score=scores[0],
         away_score=scores[1],
+        mlb_game_pk=game_pk,
     )
 
 
@@ -54,7 +56,10 @@ def _outcomes(checks) -> dict[str, ScoreOutcome]:
 
 class TestCheckScores:
     def test_detects_mismatch_and_accepts_correct_score(self) -> None:
-        events = [_event("wrong", T0, (1, 0)), _event("right", T0 + timedelta(days=1))]
+        events = [
+            _event("wrong", T0, (1, 0), game_pk=1),
+            _event("right", T0 + timedelta(days=1), game_pk=2),
+        ]
         games = [_game(1, T0), _game(2, T0 + timedelta(days=1))]
 
         assert _outcomes(check_scores(events, games)) == {
@@ -67,45 +72,23 @@ class TestCheckScores:
 
         assert _outcomes(checks) == {"e": ScoreOutcome.MISMATCH}
 
-    def test_doubleheader_pairs_by_order_despite_placeholder_start_of_game_two(self) -> None:
-        # Mets-Rockies 2026-04-26: game 2 carries startTimeTBD and a start 5 min after game 1.
-        day = date(2026, 4, 26)
-        g1 = datetime(2026, 4, 26, 17, 40, tzinfo=UTC)
+    def test_swapped_doubleheader_scores_pair_by_game_pk(self) -> None:
+        # op_live_PITPIR_MILBRE_2026-07-11T1605 stored 3-2 while its game, 823357, ended 7-6.
+        g1 = datetime(2026, 7, 11, 16, 5, tzinfo=UTC)
         games = [
-            _game(823635, g1, (1, 3), game_number=1, official_date=day),
-            _game(
-                823637,
-                g1 + timedelta(minutes=5),
-                (0, 3),
-                game_number=2,
-                start_time_tbd=True,
-                official_date=day,
-            ),
+            _game(823357, g1, (7, 6), game_number=1),
+            _game(823358, g1 + timedelta(minutes=6), (3, 2), game_number=2, start_time_tbd=True),
         ]
         events = [
-            _event("late", g1 + timedelta(hours=4), (1, 3)),
-            _event("early", g1, (0, 3)),
+            _event("op_live_PITPIR_MILBRE_2026-07-11T1605", g1, (3, 2), game_pk=823357),
+            _event("game_two", g1 + timedelta(hours=4), (7, 6), game_pk=823358),
         ]
 
         checks = {c.event.id: c for c in check_scores(events, games)}
 
-        assert checks["early"].game.game_pk == 823635
-        assert checks["late"].game.game_pk == 823637
-        assert (checks["early"].outcome, checks["late"].outcome) == (
-            ScoreOutcome.MISMATCH,
-            ScoreOutcome.MISMATCH,
-        )
-
-    def test_doubleheader_with_unequal_counts_is_ambiguous(self) -> None:
-        day = date(2026, 4, 26)
-        games = [
-            _game(1, T0, game_number=1, official_date=day),
-            _game(2, T0 + timedelta(minutes=5), game_number=2, official_date=day),
-        ]
-
-        checks = check_scores([_event("only", T0)], games)
-
-        assert _outcomes(checks) == {"only": ScoreOutcome.AMBIGUOUS}
+        assert checks["op_live_PITPIR_MILBRE_2026-07-11T1605"].mlb_score == (7, 6)
+        assert checks["game_two"].mlb_score == (3, 2)
+        assert {c.outcome for c in checks.values()} == {ScoreOutcome.MISMATCH}
 
     def test_postponed_entry_of_a_rescheduled_game_is_ignored(self) -> None:
         postponed = MlbGameResult(
@@ -119,35 +102,29 @@ class TestCheckScores:
             official_date=date(2026, 4, 30),
         )
 
-        checks = check_scores([_event("e", scores=(1, 1))], [postponed, _game(9)])
+        checks = check_scores([_event("e", scores=(1, 1), game_pk=9)], [postponed, _game(9)])
 
         assert _outcomes(checks) == {"e": ScoreOutcome.MISMATCH}
 
-    def test_start_gap_over_six_hours_is_ambiguous(self) -> None:
-        checks = check_scores([_event("e", T0 + timedelta(hours=7), (1, 0))], [_game(1, T0)])
+    def test_unmatched_without_a_game_pk_or_a_final_game(self) -> None:
+        events = [_event("allstar", game_pk=None), _event("pending", game_pk=2)]
+        games = [_game(2, is_final=False)]
 
-        assert _outcomes(checks) == {"e": ScoreOutcome.AMBIGUOUS}
+        checks = {c.event.id: c for c in check_scores(events, games)}
 
-    def test_two_events_claiming_one_game_are_ambiguous(self) -> None:
-        events = [_event("a", T0), _event("b", T0 + timedelta(minutes=30))]
-
-        assert set(_outcomes(check_scores(events, [_game(1)])).values()) == {ScoreOutcome.AMBIGUOUS}
-
-    def test_unmatched_when_no_game_in_window_or_teams_differ_or_not_final(self) -> None:
-        events = [
-            _event("far", T0 + timedelta(days=3)),
-            _event("allstar", T0),
-            _event("pending", T0 + timedelta(days=1)),
-        ]
-        events[1].home_team = "National League All-Stars"
-        games = [_game(1, T0), _game(2, T0 + timedelta(days=1), is_final=False)]
-
-        assert set(_outcomes(check_scores(events, games)).values()) == {ScoreOutcome.UNMATCHED}
+        assert {c.outcome for c in checks.values()} == {ScoreOutcome.UNMATCHED}
+        assert (checks["allstar"].reason, checks["pending"].reason) == (
+            "no gamePk",
+            "game not final",
+        )
 
 
-def _fetcher(games: list[MlbGameResult]) -> MagicMock:
+def _fetcher(
+    games: list[MlbGameResult], by_pk: dict[int, list[MlbGameResult]] | None = None
+) -> MagicMock:
     fetcher = MagicMock()
-    fetcher.fetch_results = AsyncMock(return_value=games)
+    fetcher.fetch_results = AsyncMock(return_value=list(games))
+    fetcher.fetch_game = AsyncMock(side_effect=lambda pk: (by_pk or {}).get(pk, []))
     fetcher.__aenter__ = AsyncMock(return_value=fetcher)
     fetcher.__aexit__ = AsyncMock(return_value=None)
     return fetcher
@@ -168,8 +145,8 @@ class TestRepairScores:
         test_session.add_all(
             [
                 event,
-                _event("scheduled", status=EventStatus.SCHEDULED, scores=(None, None)),
-                _event("epl", sport_key="soccer_epl", scores=(9, 9)),
+                _event("scheduled", status=EventStatus.SCHEDULED, scores=(None, None), game_pk=2),
+                _event("epl", sport_key="soccer_epl", scores=(9, 9), game_pk=None),
             ]
         )
         await test_session.commit()
@@ -186,6 +163,19 @@ class TestRepairScores:
         assert (event.status, event.completed_at) == (EventStatus.FINAL, T0)
         assert (await test_session.get(Event, "epl")).home_score == 9
         assert (await test_session.get(Event, "scheduled")).home_score is None
+
+    @pytest.mark.asyncio
+    async def test_game_played_away_from_the_event_date_is_fetched_by_game_pk(
+        self, test_session
+    ) -> None:
+        test_session.add(_event("moved", scores=(0, 0), game_pk=5))
+        await test_session.commit()
+        fetcher = _fetcher([], {5: [_game(5, T0 + timedelta(days=20), (4, 1))]})
+
+        checks = await repair_scores(test_session, fetcher, apply=False)
+
+        fetcher.fetch_game.assert_awaited_once_with(5)
+        assert checks[0].mlb_score == (4, 1)
 
     @pytest.mark.asyncio
     async def test_dry_run_command_writes_nothing(self, test_session, monkeypatch, capsys) -> None:

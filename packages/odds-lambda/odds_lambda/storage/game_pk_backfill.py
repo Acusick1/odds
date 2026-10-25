@@ -23,14 +23,18 @@ from odds_lambda.mlb_game_resolver import (
     MLB_SPORT_KEY,
     START_MATCH_WINDOW,
     GameRow,
+    PlayedSlot,
     ResolutionRule,
     ResolvedGame,
+    Score,
     UnresolvedGame,
     UnresolvedReason,
+    final_scores,
     mlb_date,
+    played_slots,
     resolve_game_pks,
 )
-from odds_lambda.mlb_stats_fetcher import MlbGameResult, MlbGameState, MlbStatsFetcher
+from odds_lambda.mlb_stats_fetcher import MlbStatsFetcher
 from odds_lambda.storage.event_merge import EventMerger, follow_schedule
 from odds_lambda.storage.writers import OddsWriter
 
@@ -87,9 +91,6 @@ class MergeClash(Exception):
         self.rows_deleted = rows_deleted
 
 
-Score = tuple[int, int]
-
-
 @dataclass(frozen=True)
 class GamePkAssignment:
     """Events of one game: ``kept`` takes ``game_pk`` and ``merged`` are merged into it.
@@ -107,26 +108,10 @@ class GamePkAssignment:
     final_score: Score | None = None
 
     def target_start(self) -> datetime | None:
-        """Where ``kept`` moves: the scheduled start; for a TBD start, MLB's placeholder start
-        only when ``kept`` is not on the played date already, since its listed time there is
-        a better estimate than the placeholder; otherwise nowhere."""
+        """Where ``kept`` moves (``PlayedSlot.start_for``); nowhere without a played slot."""
         if self.played is None:
             return None
-        if not self.played.tbd:
-            return self.played.start
-        if mlb_date(ensure_utc(self.kept.commence_time)) == self.played.day:
-            return None
-        return self.played.start
-
-
-@dataclass(frozen=True)
-class PlayedSlot:
-    """A game's slot that is neither postponed, cancelled nor a resumed continuation. ``day`` is
-    its MLB date; ``start`` is MLB's placeholder when ``tbd``."""
-
-    day: date
-    start: datetime
-    tbd: bool
+        return self.played.start_for(self.kept.commence_time)
 
 
 @dataclass(frozen=True)
@@ -186,32 +171,6 @@ class AssignmentOutcome:
                 if table in READ_ONLY_TABLES:
                     touched[table] = touched.get(table, 0) + count
         return dict(sorted(touched.items()))
-
-
-def played_slots(schedule: Sequence[MlbGameResult]) -> dict[int, PlayedSlot]:
-    """Each game's played slot, preferring one with a set start over a TBD one."""
-    slots: dict[int, PlayedSlot] = {}
-    for slot in schedule:
-        if slot.resumed or slot.state in (MlbGameState.POSTPONED, MlbGameState.CANCELLED):
-            continue
-        held = slots.get(slot.game_pk)
-        if held is None or (held.tbd and not slot.start_time_tbd):
-            slots[slot.game_pk] = PlayedSlot(
-                slot.schedule_date or slot.day, slot.start_time, slot.start_time_tbd
-            )
-    return slots
-
-
-def final_scores(schedule: Sequence[MlbGameResult]) -> dict[int, Score]:
-    """Each Final game's (home, away) score."""
-    return {
-        slot.game_pk: (slot.home_score, slot.away_score)
-        for slot in schedule
-        if slot.is_final
-        and not slot.resumed
-        and slot.home_score is not None
-        and slot.away_score is not None
-    }
 
 
 def _score(event: Event) -> Score | None:

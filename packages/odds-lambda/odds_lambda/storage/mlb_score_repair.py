@@ -1,134 +1,74 @@
-"""Compare FINAL MLB events' scores with the MLB Stats API and correct the wrong ones (#578)."""
+"""Compare FINAL MLB events' scores with the MLB Stats API by ``gamePk`` and correct the wrong
+ones (#578, #612)."""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import timedelta
 from enum import StrEnum
 
 import structlog
 from odds_core.models import Event, EventStatus
-from odds_core.team import normalize_team_name
+from odds_core.time import ensure_utc
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from odds_lambda.mlb_game_resolver import MLB_SPORT_KEY, Score, final_scores, mlb_date
 from odds_lambda.mlb_stats_fetcher import MlbGameResult, MlbStatsFetcher
 
 logger = structlog.get_logger()
-
-SPORT_KEY = "baseball_mlb"
-MATCH_WINDOW = timedelta(hours=36)
-MAX_START_GAP = timedelta(hours=6)
 
 
 class ScoreOutcome(StrEnum):
     CORRECT = "correct"
     MISMATCH = "mismatch"
     UNMATCHED = "unmatched"
-    AMBIGUOUS = "ambiguous"
 
 
 @dataclass(frozen=True)
 class ScoreCheck:
+    """``mlb_score`` is the (home, away) score of the event's game when it is Final."""
+
     event: Event
     outcome: ScoreOutcome
-    game: MlbGameResult | None = None
+    mlb_score: Score | None = None
     reason: str = ""
 
 
-def _dedupe(games: Sequence[MlbGameResult]) -> list[MlbGameResult]:
-    """One entry per ``game_pk``: a postponed game reappears under its new date, preferring the played one."""
-    best: dict[int, MlbGameResult] = {}
-    for game in games:
-        held = best.get(game.game_pk)
-        if held is None or (game.is_final and not held.is_final):
-            best[game.game_pk] = game
-    return list(best.values())
-
-
 def check_scores(events: Sequence[Event], games: Sequence[MlbGameResult]) -> list[ScoreCheck]:
-    """Match each event to the game of the same teams nearest its kick-off within ``MATCH_WINDOW``.
+    """Compare each event's score with the Final score of the game its ``gamePk`` names.
 
-    Games of a doubleheader (several games of one team pair on one date) are paired with the
-    date's events by order, because the second game often carries a placeholder start time;
-    the pairing is ambiguous unless the counts match. A match is also ambiguous when the
-    start times are more than ``MAX_START_GAP`` apart, two games are equally near, or another
-    event claims the same game. An event with no game, or whose game is not Final, is unmatched.
+    An event without a ``gamePk``, or whose game is not Final in ``games``, is unmatched.
     """
-    by_teams: dict[tuple[str, str], list[MlbGameResult]] = {}
-    for game in _dedupe(games):
-        key = (normalize_team_name(game.home_team), normalize_team_name(game.away_team))
-        by_teams.setdefault(key, []).append(game)
-
-    checks: dict[str, ScoreCheck] = {}
-    single: dict[str, MlbGameResult] = {}
-    grouped: dict[tuple[tuple[str, str], date], list[Event]] = {}
+    finals = final_scores(games)
+    checks: list[ScoreCheck] = []
     for event in events:
-        key = (normalize_team_name(event.home_team), normalize_team_name(event.away_team))
-        near = sorted(
-            (
-                g
-                for g in by_teams.get(key, [])
-                if abs(g.start_time - event.commence_time) <= MATCH_WINDOW
-            ),
-            key=lambda g: abs(g.start_time - event.commence_time),
-        )
-        if not near:
-            checks[event.id] = ScoreCheck(event, ScoreOutcome.UNMATCHED, reason="no game found")
+        if event.mlb_game_pk is None:
+            checks.append(ScoreCheck(event, ScoreOutcome.UNMATCHED, reason="no gamePk"))
             continue
-        day_games = [g for g in by_teams[key] if g.day == near[0].day]
-        if len(day_games) > 1:
-            grouped.setdefault((key, near[0].day), []).append(event)
-        elif len(near) > 1 and abs(near[0].start_time - event.commence_time) == abs(
-            near[1].start_time - event.commence_time
-        ):
-            checks[event.id] = ScoreCheck(
-                event, ScoreOutcome.AMBIGUOUS, reason="two games equally near"
-            )
-        else:
-            single[event.id] = near[0]
+        final = finals.get(event.mlb_game_pk)
+        if final is None:
+            checks.append(ScoreCheck(event, ScoreOutcome.UNMATCHED, reason="game not final"))
+            continue
+        correct = (event.home_score, event.away_score) == final
+        outcome = ScoreOutcome.CORRECT if correct else ScoreOutcome.MISMATCH
+        checks.append(ScoreCheck(event, outcome, final))
+    return checks
 
-    paired: dict[str, MlbGameResult] = dict(single)
-    for (key, day), day_events in grouped.items():
-        day_games = sorted((g for g in by_teams[key] if g.day == day), key=lambda g: g.game_number)
-        if len(day_events) != len(day_games):
-            for event in day_events:
-                checks[event.id] = ScoreCheck(
-                    event,
-                    ScoreOutcome.AMBIGUOUS,
-                    reason=f"doubleheader: {len(day_events)} events, {len(day_games)} games",
-                )
-            continue
-        for event, game in zip(
-            sorted(day_events, key=lambda e: e.commence_time), day_games, strict=True
-        ):
-            paired[event.id] = game
 
-    claimed: dict[int, int] = {}
-    for game in paired.values():
-        claimed[game.game_pk] = claimed.get(game.game_pk, 0) + 1
-    for event in events:
-        if event.id in checks:
-            continue
-        game = paired[event.id]
-        gap = abs(game.start_time - event.commence_time)
-        if claimed[game.game_pk] > 1:
-            checks[event.id] = ScoreCheck(
-                event, ScoreOutcome.AMBIGUOUS, game, "game claimed by several events"
-            )
-        elif gap > MAX_START_GAP:
-            checks[event.id] = ScoreCheck(
-                event, ScoreOutcome.AMBIGUOUS, game, f"start times {gap} apart"
-            )
-        elif not game.is_final:
-            checks[event.id] = ScoreCheck(event, ScoreOutcome.UNMATCHED, game, "game not final")
-        else:
-            correct = (event.home_score, event.away_score) == (game.home_score, game.away_score)
-            checks[event.id] = ScoreCheck(
-                event, ScoreOutcome.CORRECT if correct else ScoreOutcome.MISMATCH, game
-            )
-    return [checks[event.id] for event in events]
+async def _fetch_games(fetcher: MlbStatsFetcher, events: Sequence[Event]) -> list[MlbGameResult]:
+    """The schedule over the events' MLB dates, plus each game not Final in it fetched by
+    ``gamePk``, which finds a game played away from the event's date."""
+    days = [mlb_date(ensure_utc(event.commence_time)) for event in events]
+    games = await fetcher.fetch_results(
+        min(days) - timedelta(days=1), max(days) + timedelta(days=1)
+    )
+    finals = final_scores(games)
+    held = {event.mlb_game_pk for event in events if event.mlb_game_pk is not None}
+    for game_pk in sorted(held - finals.keys()):
+        games.extend(await fetcher.fetch_game(game_pk))
+    return games
 
 
 async def repair_scores(
@@ -144,27 +84,23 @@ async def repair_scores(
         (
             await session.execute(
                 select(Event)
-                .where(Event.sport_key == SPORT_KEY, Event.status == EventStatus.FINAL)
+                .where(Event.sport_key == MLB_SPORT_KEY, Event.status == EventStatus.FINAL)
                 .order_by(Event.commence_time)
             )
         ).scalars()
     )
-    if not events:
-        return []
-    start = events[0].commence_time - MATCH_WINDOW
-    end = events[-1].commence_time + MATCH_WINDOW
-    games = await fetcher.fetch_results(start.date(), end.date())
+    keyed = [event for event in events if event.mlb_game_pk is not None]
+    games = await _fetch_games(fetcher, keyed) if keyed else []
     checks = check_scores(events, games)
     if apply:
         for check in checks:
-            if check.outcome is ScoreOutcome.MISMATCH and check.game is not None:
+            if check.outcome is ScoreOutcome.MISMATCH and check.mlb_score is not None:
                 logger.info(
                     "mlb_score_repaired",
                     event_id=check.event.id,
-                    game_pk=check.game.game_pk,
+                    game_pk=check.event.mlb_game_pk,
                     old=(check.event.home_score, check.event.away_score),
-                    new=(check.game.home_score, check.game.away_score),
+                    new=check.mlb_score,
                 )
-                check.event.home_score = check.game.home_score
-                check.event.away_score = check.game.away_score
+                check.event.home_score, check.event.away_score = check.mlb_score
     return checks

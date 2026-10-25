@@ -60,6 +60,7 @@ _JOB_MODULE_MAP: dict[str, tuple[str, str]] = {
     "backfill-polymarket": ("odds_lambda.jobs.backfill_polymarket", "main"),
     "fetch-oddsportal": ("odds_lambda.jobs.fetch_oddsportal", "main"),
     "fetch-oddsportal-results": ("odds_lambda.jobs.fetch_oddsportal_results", "main"),
+    "fetch-mlb-results": ("odds_lambda.jobs.fetch_mlb_results", "main"),
     "agent-run": ("odds_lambda.jobs.agent_run", "main"),
     "fetch-espn-fixtures": ("odds_lambda.jobs.fetch_espn_fixtures", "main"),
     "fetch-betfair-exchange": ("odds_lambda.jobs.fetch_betfair_exchange", "main"),
@@ -138,6 +139,8 @@ _JOB_SPORTS: dict[str, tuple[SportKey, ...]] = {
     "fetch-betfair-exchange": tuple(BETFAIR_SPORT_CONFIG),
     "fetch-polymarket-odds": MATCH_ODDS_SPORTS,
     "fetch-mlb-probables": ("baseball_mlb",),
+    # MLB is settled from the MLB Stats API by fetch-mlb-results.
+    "fetch-oddsportal-results": ("soccer_epl",),
     # Odds API quota is spent on EPL only.
     "fetch-odds": ("soccer_epl",),
     "fetch-scores": ("soccer_epl",),

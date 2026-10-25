@@ -154,14 +154,13 @@ async def _repair_scores(apply: bool) -> None:
         for check in checks:
             event = check.event
             label = f"{event.id} {event.commence_time:%Y-%m-%d %H:%M} {event.away_team} @ {event.home_team}"
-            if check.outcome is ScoreOutcome.MISMATCH and check.game is not None:
+            if check.outcome is ScoreOutcome.MISMATCH and check.mlb_score is not None:
                 console.print(
                     f"  MISMATCH {label}: stored {event.home_score}-{event.away_score}, "
-                    f"MLB {check.game.home_score}-{check.game.away_score} (game {check.game.game_pk}, "
-                    f"start gap {abs(check.game.start_time - event.commence_time)})"
+                    f"MLB {check.mlb_score[0]}-{check.mlb_score[1]} (game {event.mlb_game_pk})"
                 )
-            elif check.outcome in (ScoreOutcome.UNMATCHED, ScoreOutcome.AMBIGUOUS):
-                console.print(f"  {check.outcome.value.upper()} {label}: {check.reason}")
+            elif check.outcome is ScoreOutcome.UNMATCHED:
+                console.print(f"  UNMATCHED {label}: {check.reason}")
         if not apply:
             await session.rollback()
             console.print("Dry run: nothing written. Re-run with --apply.")
@@ -176,9 +175,9 @@ def repair_scores_command(
 ) -> None:
     """Compare FINAL MLB events' scores with the MLB Stats API and correct the wrong ones.
 
-    Matches each event to the game of the same teams nearest its kick-off (within 36 h) and
-    reports mismatches, plus events it cannot match or that are ambiguous, which it never
-    changes. --apply writes home_score and away_score only, in one transaction. Safe to re-run.
+    Pairs each event with the game its gamePk names and reports mismatches, plus events
+    without a gamePk or whose game is not Final, which it never changes. --apply writes
+    home_score and away_score only, in one transaction. Safe to re-run.
 
     Example:
         odds events repair-scores --apply

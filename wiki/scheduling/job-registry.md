@@ -28,7 +28,7 @@ status: stable
 
 ## Registry
 
-- `_JOB_MODULE_MAP`: job name to `(module path, "main")` for 14 jobs: `fetch-odds`, `fetch-scores`, `update-status`, `check-health`, `fetch-polymarket`, `backfill-polymarket`, `fetch-oddsportal`, `fetch-oddsportal-results`, `agent-run`, `fetch-espn-fixtures`, `fetch-betfair-exchange`, `fetch-polymarket-odds`, `fetch-mlb-probables`, `run-candidates`.
+- `_JOB_MODULE_MAP`: job name to `(module path, "main")` for 15 jobs: `fetch-odds`, `fetch-scores`, `update-status`, `check-health`, `fetch-polymarket`, `backfill-polymarket`, `fetch-oddsportal`, `fetch-oddsportal-results`, `fetch-mlb-results`, `agent-run`, `fetch-espn-fixtures`, `fetch-betfair-exchange`, `fetch-polymarket-odds`, `fetch-mlb-probables`, `run-candidates`.
 - `odds_lambda.scheduling.jobs.get_job_function` imports the module on first use and caches it.
 - `_JOB_BOOTSTRAP_MAP`: jobs whose local bootstrap uses a different function; only `agent-run` (`odds_lambda.jobs.agent_run.schedule_next`). `odds_lambda.scheduling.jobs.get_bootstrap_function` wraps it to the `(JobContext)` signature. As a result `odds scheduler start` never launches the agent run itself; it only books its next wake-up.
 - `_SMOKE_UNSAFE_JOBS` (`agent-run`), `_CANDIDATE_JOBS` (`run-candidates`) and `_PAID_API_JOBS` (`fetch-odds`, `fetch-scores`) drive [`odds scheduler smoke`](local-scheduler.md#cli); smoke skips them unless `--include-agent`, `--include-candidates` and `--include-paid-api` respectively.
@@ -37,7 +37,7 @@ status: stable
 
 ## Compound job names
 
-`_PER_SPORT_JOBS` lists the jobs that take a sport: `fetch-odds`, `fetch-scores`, `fetch-oddsportal`, `fetch-oddsportal-results`, `agent-run`, `fetch-espn-fixtures`, `fetch-betfair-exchange`, `fetch-polymarket-odds`, `fetch-mlb-probables`, `run-candidates`. `update-status`, `check-health`, `fetch-polymarket` and `backfill-polymarket` are global.
+`_PER_SPORT_JOBS` lists the jobs that take a sport: `fetch-odds`, `fetch-scores`, `fetch-oddsportal`, `fetch-oddsportal-results`, `agent-run`, `fetch-espn-fixtures`, `fetch-betfair-exchange`, `fetch-polymarket-odds`, `fetch-mlb-probables`, `run-candidates`. `update-status`, `check-health`, `fetch-mlb-results`, `fetch-polymarket` and `backfill-polymarket` are global.
 
 `_SPORT_SUFFIX_MAP` knows only `epl` (`soccer_epl`) and `mlb` (`baseball_mlb`). `odds_lambda.scheduling.jobs.make_compound_job_name("fetch-odds", "soccer_epl")` returns `fetch-odds-epl`, which is the EventBridge rule suffix and the APScheduler schedule id; `odds_lambda.scheduling.jobs.resolve_job_name` reverses it. A sport with no suffix, such as NBA, yields the bare job name, but a per-sport job given no sport raises `ValueError`, because the bare name matches no schedule. The compound name must equal the rule name, or a reschedule goes nowhere ([Add a scheduler job](howto-add-scheduler-job.md)). Adding a sport touches several tables, listed in [Adding a sport](../collection/howto-add-sport.md).
 

@@ -54,7 +54,7 @@ class TestUnsettledEvents:
         assert kwargs["context"]["event_ids"] == ["stuck-scheduled", "stuck-live"]
 
     @pytest.mark.asyncio
-    async def test_ignores_settled_recent_other_season_and_non_league_events(
+    async def test_ignores_settled_recent_other_season_and_unchecked_sport_events(
         self, pglite_async_session
     ) -> None:
         session = pglite_async_session
@@ -65,9 +65,45 @@ class TestUnsettledEvents:
                 _event("cancelled", NOW - timedelta(days=3), EventStatus.CANCELLED),
                 _event("just-kicked-off", NOW - timedelta(hours=3)),
                 _event("last-season", NOW - timedelta(days=200)),
-                _event("mlb", NOW - timedelta(days=3), sport_key="baseball_mlb"),
+                _event("nba", NOW - timedelta(days=3), sport_key="basketball_nba"),
             ]
         )
+        await session.flush()
+
+        issues, send = await _check(session)
+
+        assert issues == []
+        send.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_alerts_on_stuck_mlb_events_of_the_calendar_year(
+        self, pglite_async_session
+    ) -> None:
+        session = pglite_async_session
+        stuck = _event("mlb-april", datetime(2026, 4, 10, 23, 5, tzinfo=UTC), EventStatus.LIVE)
+        stuck.sport_key = "baseball_mlb"
+        last_year = _event("mlb-2025", datetime(2025, 9, 10, 23, 5, tzinfo=UTC))
+        last_year.sport_key = "baseball_mlb"
+        session.add_all([stuck, last_year])
+        await session.flush()
+
+        issues, send = await _check(session)
+
+        assert len(issues) == 1 and "mlb-april" in issues[0]
+        assert send.await_args.kwargs["alert_type"] == "unsettled_events:baseball_mlb"
+        assert send.await_args.kwargs["context"]["event_ids"] == ["mlb-april"]
+
+    @pytest.mark.asyncio
+    async def test_ignores_unassignable_and_postponed_mlb_events(
+        self, pglite_async_session
+    ) -> None:
+        session = pglite_async_session
+        unassignable = _event("op_live_BOSSOX_TAMRAY_2026-05-17T1735", NOW - timedelta(days=150))
+        unassignable.sport_key = "baseball_mlb"
+        unassignable.no_game_pk_reason = "MLB has BOS at ATL that day"
+        postponed = _event("mlb-postponed", NOW - timedelta(days=3), EventStatus.POSTPONED)
+        postponed.sport_key = "baseball_mlb"
+        session.add_all([unassignable, postponed])
         await session.flush()
 
         issues, send = await _check(session)

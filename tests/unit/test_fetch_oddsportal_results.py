@@ -8,19 +8,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from odds_core.models import Event, EventStatus
-from odds_lambda.jobs.fetch_oddsportal_results import (
-    DEFAULT_SPORT_KEY,
-    ResultsStats,
-    get_pending_events,
-    process_results,
-    record_run_outcome,
-)
+from odds_lambda.jobs.fetch_oddsportal_results import DEFAULT_SPORT_KEY, process_results
 from odds_lambda.oddsportal_client import (
     CancelledMatch,
     FetchedResults,
     FinishedMatch,
     OddsPortalError,
 )
+from odds_lambda.results_run import ResultsStats, get_pending_events, record_run_outcome
 from sqlalchemy import select
 
 KICKOFF = datetime.now(UTC).replace(minute=0, second=0, microsecond=0) - timedelta(days=3)
@@ -75,7 +70,7 @@ class TestGetPendingEvents:
         test_session.add(event)
         await test_session.commit()
 
-        result = await get_pending_events(test_session)
+        result = await get_pending_events(test_session, "soccer_epl")
         assert [p.id for p in result] == [event.id]
 
     @pytest.mark.asyncio
@@ -84,7 +79,7 @@ class TestGetPendingEvents:
         test_session.add(event)
         await test_session.commit()
 
-        result = await get_pending_events(test_session)
+        result = await get_pending_events(test_session, "soccer_epl")
         assert [p.id for p in result] == [event.id]
 
     @pytest.mark.asyncio
@@ -92,14 +87,14 @@ class TestGetPendingEvents:
         test_session.add(_make_event(status=EventStatus.FINAL, scores=(1, 0)))
         await test_session.commit()
 
-        assert await get_pending_events(test_session) == []
+        assert await get_pending_events(test_session, "soccer_epl") == []
 
     @pytest.mark.asyncio
     async def test_excludes_future_events(self, test_session) -> None:
         test_session.add(_make_event(commence_time=datetime.now(UTC) + timedelta(days=30)))
         await test_session.commit()
 
-        assert await get_pending_events(test_session) == []
+        assert await get_pending_events(test_session, "soccer_epl") == []
 
     @pytest.mark.asyncio
     async def test_excludes_other_sports(self, test_session) -> None:
@@ -172,44 +167,6 @@ class TestProcessResults:
         assert (scoreless.home_score, scoreless.away_score) == (0, 0)
         unresolved = await _stored(test_session, "no_result")
         assert (unresolved.status, unresolved.home_score) == (EventStatus.SCHEDULED, None)
-
-    @pytest.mark.asyncio
-    async def test_series_listed_newest_first_settles_each_game_with_its_own_score(
-        self, test_session
-    ) -> None:
-        days = [KICKOFF + timedelta(days=i) for i in range(3)]
-        for i, day in enumerate(days):
-            test_session.add(
-                _make_event(
-                    event_id=f"game_{i}",
-                    home_team="Boston Red Sox",
-                    away_team="New York Yankees",
-                    commence_time=day,
-                    sport_key="baseball_mlb",
-                )
-            )
-        await test_session.commit()
-
-        newest_first = [
-            _make_match(
-                home_team="Boston Red Sox",
-                away_team="New York Yankees",
-                start_time=day,
-                home_score=i + 1,
-                away_score=0,
-            )
-            for i, day in reversed(list(enumerate(days)))
-        ]
-        with patch(
-            "odds_lambda.jobs.fetch_oddsportal_results.async_session_maker",
-            _session_maker(test_session),
-        ):
-            stats = await process_results(sport="baseball_mlb", fetched=_fetched(*newest_first))
-
-        assert (stats.events_updated, stats.events_unresolved) == (3, 0)
-        for i in range(3):
-            stored = await _stored(test_session, f"game_{i}")
-            assert (stored.home_score, stored.away_score) == (i + 1, 0)
 
     @pytest.mark.asyncio
     async def test_postponed_event_that_is_played_reaches_final(self, test_session) -> None:
@@ -335,38 +292,6 @@ class TestProcessResults:
         assert (await _stored(test_session, "second")).status == EventStatus.FINAL
 
     @pytest.mark.asyncio
-    async def test_series_games_hours_apart_each_get_their_own_result(self, test_session) -> None:
-        test_session.add(
-            _make_event(
-                event_id="game_one",
-                status=EventStatus.FINAL,
-                scores=(5, 4),
-                sport_key="baseball_mlb",
-            )
-        )
-        test_session.add(
-            _make_event(
-                event_id="game_two",
-                commence_time=KICKOFF + timedelta(hours=20),
-                sport_key="baseball_mlb",
-            )
-        )
-        await test_session.commit()
-        matches = [
-            _make_match(start_time=KICKOFF, home_score=5, away_score=4),
-            _make_match(start_time=KICKOFF + timedelta(hours=20), home_score=1, away_score=0),
-        ]
-
-        with patch(
-            "odds_lambda.jobs.fetch_oddsportal_results.async_session_maker",
-            _session_maker(test_session),
-        ):
-            await process_results(sport="baseball_mlb", fetched=_fetched(*matches))
-
-        game_two = await _stored(test_session, "game_two")
-        assert (game_two.home_score, game_two.away_score) == (1, 0)
-
-    @pytest.mark.asyncio
     async def test_a_result_more_than_the_match_window_away_is_not_applied(
         self, test_session
     ) -> None:
@@ -450,6 +375,11 @@ class TestProcessResults:
         assert stats.matches_fetched == 0
         assert stats.events_updated == 0
 
+    @pytest.mark.asyncio
+    async def test_mlb_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="MLB Stats API"):
+            await process_results(sport="baseball_mlb", fetched=_fetched())
+
     def test_default_sport_key_is_epl(self) -> None:
         assert DEFAULT_SPORT_KEY == "soccer_epl"
 
@@ -501,6 +431,7 @@ class TestMainSelfSchedules:
     async def test_failed_booking_is_final_unless_the_chain_re_books(
         self, run_raises: bool, final: bool
     ) -> None:
+        from odds_lambda import results_run
         from odds_lambda.jobs import fetch_oddsportal_results
         from odds_lambda.scheduling.jobs import JobContext
 
@@ -511,10 +442,8 @@ class TestMainSelfSchedules:
 
         with (
             patch.object(fetch_oddsportal_results, "process_results", process_results),
-            patch.object(fetch_oddsportal_results, "record_run_outcome", AsyncMock()),
-            patch.object(
-                fetch_oddsportal_results, "self_schedule", side_effect=RuntimeError("no backend")
-            ),
+            patch.object(results_run, "record_run_outcome", AsyncMock()),
+            patch.object(results_run, "self_schedule", side_effect=RuntimeError("no backend")),
             patch("odds_core.alerts.send_scheduling_failure", new_callable=AsyncMock) as failure,
             patch("odds_core.alerts.record_to_alert_history", new_callable=AsyncMock),
             patch("odds_core.alerts.alert_manager", MagicMock(enabled=False)),
@@ -541,11 +470,13 @@ class TestRecordRunOutcome:
             patch("odds_core.alerts.record_to_alert_history", record),
             patch("odds_core.alerts.send_job_warning", warn),
             patch(
-                "odds_lambda.jobs.fetch_oddsportal_results._last_settled_at",
+                "odds_lambda.results_run._last_settled_at",
                 AsyncMock(return_value=last_settled),
             ),
         ):
-            await record_run_outcome("soccer_epl", stats, TestRecordRunOutcome.NOW)
+            await record_run_outcome(
+                "fetch-oddsportal-results-epl", "soccer_epl", stats, TestRecordRunOutcome.NOW
+            )
         return record, warn
 
     @pytest.mark.asyncio

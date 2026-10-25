@@ -20,7 +20,7 @@ Each external source has a fetcher, a job (or manual script) that runs it, and a
 - [OddsPortal scraper](oddsportal-scraper.md) — The OddsPortal HTTP feed client, the adapter that converts its prices, the shared oddsportal_common helpers, the results page archive reader, and odds scrape upcoming.
 - [Polymarket match prices as odds snapshots](polymarket-odds-snapshots.md) — How Polymarket's three-way match markets become polymarket odds snapshots, the history grid and its drop rules, event pairing, the backfill command and the fetch-polymarket-odds job.
 - [Polymarket pipeline and tables](polymarket.md) — Client, classifier, ingestion, fetch and backfill jobs, manual linking, CLI, AWS gate, the five tables and order-book metrics.
-- [Results and status jobs](results-jobs.md) — update-status, fetch-scores, fetch-oddsportal-results and odds fetch scores: cadence, flow, heartbeats, failure handling.
+- [Results and status jobs](results-jobs.md) — update-status, fetch-scores, fetch-oddsportal-results, fetch-mlb-results and odds fetch scores: cadence, flow, heartbeats, failure handling.
 - [Sport, market and bookmaker keys](sport-and-market-keys.md) — SportKey, job-name suffixes, the market-key dialects per writer, bookmaker key maps, and DataCollectionConfig defaults.
 - [The fetch-odds job](fetch-odds-job.md) — Event sync, gate, pre/post-schedule and log events of odds_lambda.jobs.fetch_odds.
 - [The fetch-oddsportal job](fetch-oddsportal-job.md) — LEAGUE_SPECS, flow, cadence, alerts, heartbeats of odds_lambda.jobs.fetch_oddsportal.

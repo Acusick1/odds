@@ -57,6 +57,7 @@ class TestSettings:
                 "check-health",
                 "fetch-oddsportal",
                 "fetch-oddsportal-results",
+                "fetch-mlb-results",
                 "fetch-espn-fixtures",
                 "fetch-betfair-exchange",
                 "fetch-polymarket-odds",
