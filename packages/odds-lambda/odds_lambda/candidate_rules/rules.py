@@ -186,6 +186,8 @@ RULES: dict[str, RuleSpec | ModelRuleSpec] = {
             "odds_analytics.candidate_model",
             "odds_analytics.retail_ev",
             "odds_analytics.xgboost_line_movement",
+            # The close every training target is measured against.
+            "odds_core.betfair_close",
         ),
     ),
 }

@@ -370,7 +370,7 @@ class TestModelReplay:
         gap = await run(pglite_async_session, candidate(), only_events=model.decided_event_ids)
 
         assert model.coverage.bets == gap.coverage.bets == 2
-        assert gap.coverage.events == 2
+        assert gap.coverage.events == 2 and gap.range_events == 5
         assert model.overall is not None and gap.overall is not None
         assert model.overall.mean_ev == pytest.approx(gap.overall.mean_ev)
         assert gap.decided_event_ids is None and set(ids[3:]) == set(model.decided_event_ids)

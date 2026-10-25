@@ -539,6 +539,7 @@ class TestRuleSha256:
             "odds_analytics.candidate_model",
             "odds_analytics.retail_ev",
             "odds_analytics.xgboost_line_movement",
+            "odds_core.betfair_close",
         ],
     )
     def test_model_rule_covers_the_code_that_fits_and_queries_the_model(

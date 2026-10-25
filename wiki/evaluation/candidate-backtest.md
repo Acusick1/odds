@@ -62,7 +62,7 @@ The checkpoint is the verdict's: the first 100, 200, … 500 bets with a close, 
 
 | Field | Counts |
 |---|---|
-| `events` | Canonical events decided: those in range, or for a model rule its scored matches (`odds_analytics.candidate_backtest.BacktestResult.range_events` counts the range) |
+| `events` | Canonical events decided: those in range, or for a model rule its scored matches (`odds_analytics.candidate_backtest.BacktestResult.range_events` counts the range, before any `only_events` filter) |
 | `decisions` | Decisions: each event once per decision time |
 | `with_input` | Decisions with a snapshot within the maximum input age at the decision time |
 | `with_exchange` | Decisions with an exchange price at the decision time |

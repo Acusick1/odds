@@ -230,6 +230,7 @@ async def replay(
     """
     spec, params = resolve_rule(candidate)
     events = await final_events(session, candidate.sport, start, end)
+    range_events = len(events)
     counts = _Counts()
     refits: list[Refit] = []
     if isinstance(spec, ModelRuleSpec):
@@ -273,7 +274,7 @@ async def replay(
         n_boot,
         seed,
     )
-    return replace(result, range_events=len(events), refits=tuple(refits))
+    return replace(result, range_events=range_events, refits=tuple(refits))
 
 
 def score(
