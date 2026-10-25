@@ -8,6 +8,7 @@ from typing import Any
 
 from odds_core.models import Event, OddsSnapshot, Price, SnapshotPayload
 from odds_core.vocabulary import Source, TimeBasis
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.price_rows import MarketSnapshot, PriceSpec, expand_envelope, market_envelope
@@ -47,6 +48,11 @@ async def store_payload(session: AsyncSession, payload: dict[str, Any] | list[An
     await session.flush()
     assert row.id is not None
     return row.id
+
+
+async def discard_payload(session: AsyncSession, payload_id: int) -> None:
+    """Remove a payload no snapshot references, for a fetch whose snapshots were all skipped."""
+    await session.execute(delete(SnapshotPayload).where(SnapshotPayload.id == payload_id))  # type: ignore[arg-type]
 
 
 async def store_shaped_snapshot(

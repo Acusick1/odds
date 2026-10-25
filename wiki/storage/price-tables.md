@@ -86,7 +86,7 @@ A single-market envelope (OddsPortal, Betfair, FDUK, Polymarket) is one snapshot
 | OddsPortal live (`odds_lambda.jobs.fetch_oddsportal.ingest_league`) | `observed` | the run's envelopes, one payload per league run |
 | Betfair (`odds_lambda.jobs.fetch_betfair_exchange.ingest_sport`) | `observed` | the run's envelopes, one payload per sport run |
 
-`odds_lambda.storage.shaped_snapshots.store_payload` adds the payload in the writer's transaction before its snapshots. A payload is the envelopes as the writer stored them, so `odds_lambda.price_rows.expand_envelope` re-reads it.
+`odds_lambda.storage.shaped_snapshots.store_payload` adds the payload in the writer's transaction before its snapshots. A payload is the envelopes as the writer stored them, so `odds_lambda.price_rows.expand_envelope` re-reads it. A writer whose snapshots were all skipped as already stored removes the payload with `odds_lambda.storage.shaped_snapshots.discard_payload`.
 
 ## Storing a snapshot under its key
 

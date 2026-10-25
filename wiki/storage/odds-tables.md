@@ -53,7 +53,7 @@ Two free-text fields tag where a snapshot came from. Each producer sets them as 
 | `oddsportal_live` | live feed adapter (`odds_lambda.oddsportal_adapter.convert_market`; also stores the feed's encoded event id as `oddsportal_event_id`) |
 | `betfair_api` | Betfair Exchange job (also adds `betfair_event_id`) |
 | `football_data_uk` | `scripts/ingest_football_data_uk.py` (attaches to an existing event of the same sport when one matches and fills its scores when it has none); market key `1x2`; snapshot times are approximations recorded in `raw_data.timing` ([Historical ingest scripts](../collection/historical-ingest-scripts.md#snapshot-shape)) |
-| `polymarket` | `odds_lambda.polymarket_odds.build_raw_data` (price is the reciprocal of the Yes probability as `price_decimal`; exact probabilities in `polymarket_meta`, bid and ask only on live rows), from the backfill and the fetch-polymarket-odds job ([Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md)) |
+| `polymarket` | `odds_lambda.polymarket_odds.build_raw_data` (price is the reciprocal of the Yes probability as `price_decimal`; exact probabilities in `polymarket_meta`, bid and ask only on live rows; its snapshots have `source` `polymarket`, market `1x2`, time basis `observed`), from the backfill and the fetch-polymarket-odds job ([Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md)) |
 
 Training's `data_source` filter matches event-ID prefixes (`op_`, `fduk_`; `odds_core.event_ids.SCRAPED_EVENT_ID_PREFIXES`), not `api_request_id` (`odds_analytics.training.data_preparation.filter_events_by_date_range`, #468) ([Training config](../modelling/training-config.md)). The `api_request_id` values are `oddsportal` (or `oddsportal_<market>`), `football_data_uk`, `betfair_api_<iso time>`, `polymarket_history` and `polymarket_live_<iso time>`; null for Odds API rows.
 
@@ -77,7 +77,7 @@ Rows written before the column existed were linked by `migrations/versions/b6e3d
 - **Shared copies:** several snapshots quote the key. Each is one copy of a [same-time pair](#same-time-pairs), and `odds events delete-same-time-pairs` links or deletes it.
 - **Orphans:** no snapshot at that event and time quotes the key, because the snapshot the row was parsed from is missing. The largest group is EPL OddsPortal live rows from March to August 2026 whose market's snapshot is missing while the other market's snapshot at that time survived. Orphans are kept with a NULL `snapshot_id`; nothing resolves them.
 
-The column is therefore nullable, with no database constraint, while every writer links each new row; `tests/integration/test_odds_snapshot_link.py` fails if code outside the known writers builds odds rows, or if `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` leaves one unlinked. `ix_odds_snapshot_id` makes `SELECT count(*) FROM odds WHERE snapshot_id IS NULL` cheap, and the command prints that count split into orphans and shared copies.
+The column is therefore nullable, with no database constraint, while every writer links each new row; `tests/integration/test_odds_snapshot_link.py` fails if code outside the known writers builds odds rows, or if `odds_lambda.storage.writers.OddsWriter.store_envelope` leaves one unlinked. `ix_odds_snapshot_id` makes `SELECT count(*) FROM odds WHERE snapshot_id IS NULL` cheap, and the command prints that count split into orphans and shared copies.
 
 ## Same-time pairs
 

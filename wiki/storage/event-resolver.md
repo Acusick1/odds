@@ -22,7 +22,7 @@ status: stable
 - `source` (`odds_core.vocabulary.Source`), `sport_key`, `sport_title`, both teams and `commence_time`.
 - `external_id`: the id the source issued for the game. Constructing a game with one from a source outside `odds_core.vocabulary.EXTERNAL_ID_SOURCES` (football-data.co.uk) raises `ValueError`.
 - `mlb_game`: an MLB game's `odds_lambda.mlb_game_resolver.ResolvedGame`, required for `baseball_mlb` (`ValueError` without it).
-- `legacy_id`: the string id a created event takes while `events.id` is a string.
+- `legacy_id`: the string id a created event takes while `events.id` is a string; only needed to create.
 - `earliest_created_start`: set by a live listing. A game starting before it matches an event but creates none: `odds_lambda.storage.event_resolver.StaleListing` is raised instead, before anything is written. The live jobs set it an hour (`odds_lambda.live_events.LIVE_EVENT_STALE_THRESHOLD`) before the run.
 
 The result is an `odds_lambda.storage.event_resolver.ResolvedEvent`: the event and an `odds_lambda.storage.event_resolver.Resolution` saying how it was found (`by_external_id`, `by_game_pk`, `matched` or `created`).
@@ -44,6 +44,10 @@ Then it records the ids and moves the kick-off:
 - `odds_lambda.storage.event_kickoff.move_kickoff` once, with the current time as the clock (the MLB Stats API may move an event to a past start): for MLB with the MLB Stats API and the schedule's start; for other sports with the source and its listed start. `odds_lambda.storage.event_kickoff.move_kickoff` alone decides whether it moves: only a sport's schedule authority moves the event, and an in-play start after the stored kick-off is refused ([Kick-off authority](kickoff-authority.md)).
 
 It flushes and never commits ([Commit contract](storage-layer.md#commit-contract)).
+
+## Attaching without creating
+
+`odds_lambda.storage.event_resolver.attach_event(session, game)` is for a source that creates no events (Polymarket, through `odds_lambda.polymarket_odds.listed_game`). It takes the fixture lock and looks the game up as `odds_lambda.storage.event_resolver.resolve_event` does (steps 1 to 4), then records the source's id on the event it found. It returns `None`, creating nothing, when no event matches and when the id is [refused](#refused-ids): the caller writes nothing for that game. A refusal is logged once per event and description, not on every run. It does not offer the listed start to `odds_lambda.storage.event_kickoff.move_kickoff`, since such a source is not a schedule authority. `odds_lambda.storage.event_resolver.attach_events` attaches a batch in lock-key order and answers in input order, as `odds_lambda.storage.event_resolver.resolve_events` does. A game needs `legacy_id` (`odds_lambda.storage.event_resolver.ListedGame`) only for `odds_lambda.storage.event_resolver.resolve_event` to create an event; without one that raises `ValueError`. Both flush and never commit, and the [lock order](#locks-and-transactions) applies.
 
 ## MLB without the schedule
 

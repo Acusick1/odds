@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Polymarket match prices as odds snapshots
-description: How Polymarket's three-way match markets become polymarket odds snapshots, the history grid and its drop rules, event pairing, the backfill command and the fetch-polymarket-odds job.
+description: How Polymarket's three-way match markets become polymarket odds snapshots, the history grid and its drop rules, attaching matches to events, the backfill command and the fetch-polymarket-odds job.
 sources:
   - odds_lambda.polymarket_sports.POLYMARKET_SPORTS
   - odds_lambda.polymarket_sports.PolymarketSportConfig
@@ -11,9 +11,10 @@ sources:
   - odds_lambda.polymarket_odds.MAX_HORIZON
   - odds_lambda.polymarket_odds.MAX_STALENESS
   - odds_lambda.polymarket_odds.SUM_TOLERANCE
-  - odds_lambda.polymarket_odds.EVENT_MATCH_WINDOW
   - odds_lambda.polymarket_odds.parse_match_event
-  - odds_lambda.polymarket_odds.pair_events
+  - odds_lambda.polymarket_odds.listed_game
+  - odds_lambda.storage.event_resolver.attach_event
+  - odds_lambda.storage.event_resolver.attach_events
   - odds_lambda.polymarket_odds.grid_offsets
   - odds_lambda.polymarket_odds.resample
   - odds_lambda.polymarket_odds.build_raw_data
@@ -29,7 +30,6 @@ sources:
   - odds_cli.commands.polymarket.backfill_odds
   - odds_core.odds_math.PRICE_DECIMAL_KEY
   - odds_core.bookmakers
-  - odds_lambda.polymarket_odds.preferred_event
   - odds_lambda.polymarket_odds.MAX_QUOTE_SPREAD
   - odds_lambda.jobs.fetch_polymarket_odds.EmptyListingError
 mentions:
@@ -49,7 +49,7 @@ Polymarket's EPL match markets are stored as `odds_core.models.OddsSnapshot` ([c
 
 ## Snapshot shape
 
-`odds_lambda.polymarket_odds.build_raw_data` emits one bookmaker entry, key `polymarket`, one market under the sport's market key, with outcomes home team, `Draw`, away team. Prices are the reciprocals of the three Yes probabilities, stored as `price_decimal` (`odds_core.odds_math.PRICE_DECIMAL_KEY`) with no `price` key; the exact probabilities and their sum also sit in `polymarket_meta`, which odds parsers ignore. Live snapshots also keep each outcome's best bid and ask there. The Yes prices carry no overround, so the pipeline's proportional devig only removes the small residual from the sum. `raw_data["source"]` is `polymarket` ([provenance](../storage/odds-tables.md#provenance)). The market key `1x2` matches the other EPL three-way writers for exchange data ([market-key dialects](sport-and-market-keys.md#market-key-dialects)).
+`odds_lambda.polymarket_odds.build_raw_data` emits one bookmaker entry, key `polymarket`, one market under the sport's market key, with outcomes home team, `Draw`, away team. Prices are the reciprocals of the three Yes probabilities, stored as `price_decimal` (`odds_core.odds_math.PRICE_DECIMAL_KEY`) with no `price` key; the exact probabilities and their sum also sit in `polymarket_meta`, which odds parsers ignore. Live snapshots also keep each outcome's best bid and ask there. The Yes prices carry no overround, so the pipeline's proportional devig only removes the small residual from the sum. `raw_data["source"]` is `polymarket` ([provenance](../storage/odds-tables.md#provenance)). The snapshot's `source` column is `polymarket`. The market key `1x2` matches the other EPL three-way writers for exchange data ([market-key dialects](sport-and-market-keys.md#market-key-dialects)).
 
 A snapshot holds only `polymarket`, so it carries no retail prices to build a decision row from, and `polymarket` is not in `odds_core.bookmakers.UK_RETAIL_BOOKMAKERS`, the book set of `retail_ev` rows. `odds_analytics.feature_groups.collect_event_data` leaves such snapshots out of an event's bundle (`odds_core.bookmakers.is_reference_only_snapshot`), so neither the samplers nor the closing-snapshot choice see them. The retail-EV row builder merges sources per decision time and takes its baseline and close only from Betfair; `polymarket` enters a row only as the optional `polymarket_at_t` features, from the latest snapshot at or before t ([retail-EV features](../modelling/clv-target-functions.md#retail-ev-features)). `odds_core.bookmakers.NON_BETTABLE_BOOKMAKERS` lists `polymarket` with Pinnacle, so retail screening never reports it as a retail book ([retail edges](../agent/mcp-market-tools.md#retail-edges)), and `odds_core.bookmakers.ZERO_MARGIN_BOOKMAKERS` skips the validator's vig floor for it. Its key has no alias in the Polymarket entry of `odds_core.bookmakers.BOOKMAKER_ALIASES_BY_SOURCE`.
 
@@ -69,33 +69,33 @@ A grid time is dropped, and counted, when:
 
 No grid time after the earlier of the event's `commence_time` and Polymarket's start time is used, so a differing kick-off cannot leak in-play prices. Hours until commence and the tier on each snapshot use the event's `commence_time`.
 
-## Pairing with events
+## Attaching to events
 
-`odds_lambda.polymarket_odds.pair_events` pairs a Polymarket match with an `events` row when home and away canonical names are equal and the kick-offs differ by at most `odds_lambda.polymarket_odds.EVENT_MATCH_WINDOW` (3 hours). One fixture can exist as several event rows from different sources (twins, a data defect). Only the Odds API event, the one without an `op_` or `fduk_` id prefix, is paired (`odds_lambda.polymarket_odds.preferred_event`, the preference of `odds_core.event_source.canonical_event_id`), the twins are logged, and the backfill counts them as skipped. With no Odds API twin the lowest id wins. An event with several candidate matches is skipped as ambiguous. Unpaired events and matches are counted. This matcher is separate from the NBA-only `odds_lambda.polymarket_matching.match_polymarket_event`, which matches from the ticker alone ([event matching](../storage/event-matching.md)). Neither path writes `polymarket_events`.
+Polymarket creates no events. `odds_lambda.storage.event_resolver.attach_event` finds the existing event of a match (`odds_lambda.polymarket_odds.listed_game` builds the listing from the Polymarket event id, the canonical teams and Polymarket's start time) and records the Polymarket event id (`pm_event_id`) as the event's `polymarket` external id ([Event resolver](../storage/event-resolver.md#attaching-without-creating)). It takes the fixture lock, then matches by that id, else by sport and teams within ±2 h, the nearest event winning. The job attaches its matches as one batch (`odds_lambda.storage.event_resolver.attach_events`); the backfill attaches one at a time. A match with no event, or whose id is refused (a second Gamma match for a fixture whose event holds another Polymarket id), is counted as unattached and writes nothing; the refusal is logged once per event and id. An event for a match with none is created later by a source that creates events. This is separate from the NBA-only `odds_lambda.polymarket_matching.match_polymarket_event`, which matches from the ticker alone ([event matching](../storage/event-matching.md)). Neither path writes `polymarket_events`.
 
 ## Backfill command
 
 `odds polymarket backfill-odds` (`odds_cli.commands.polymarket.backfill_odds`, which calls `odds_lambda.polymarket_odds_backfill.backfill_sport`) takes `--sport` (default `soccer_epl`), `--since` (default 2025-08-01, the first EPL market), `--limit` and `--dry-run`.
 
-- It lists closed events from Gamma and pairs them with `FINAL` events of the sport at or after `--since` in the database `DATABASE_URL` points at.
-- It skips an event that already has a snapshot with `api_request_id` `polymarket_history` (`odds_lambda.polymarket_odds.HISTORY_REQUEST_ID`), so a rerun adds nothing, and commits per event, flushing rows in batches of `odds_lambda.polymarket_odds_backfill.INSERT_BATCH_SIZE`.
-- It writes only `odds_core.models.OddsSnapshot` rows, with `fetch_tier` and `hours_until_commence` and with every redesigned snapshot column (`source`, `market`, `time_basis` and the market metadata) NULL, no normalized `odds` or `prices` rows, like the other historical writers ([how odds are stored](../storage/odds-storage-model.md#the-normalized-half-is-not-universal)).
-- It prints the counts: finished events, paired, skipped, written, snapshots, dropped points by reason, and unpaired events and matches. `--dry-run` fetches and resamples but writes nothing.
+- It lists closed events from Gamma and attaches each to an event of the database `DATABASE_URL` points at ([attaching](#attaching-to-events)). It uses the event only when it is `FINAL` and its kick-off is at or after `--since`.
+- It skips an event that already has a snapshot with `api_request_id` `polymarket_history` (`odds_lambda.polymarket_odds.HISTORY_REQUEST_ID`), so a rerun adds nothing. It commits after each attachment and each event, and runs each attachment and each event's writes in a savepoint, so a match that fails is rolled back, recorded in the report's errors, and the others stand.
+- It writes `odds_core.models.OddsSnapshot` rows through `odds_lambda.storage.shaped_snapshots.store_shaped_snapshot`: source `polymarket`, market `1x2`, time basis `observed` (the history is an as-of resample at our grid times), one `mid` price row per outcome, and its own payload holding its envelope ([writing price rows](../storage/price-tables.md#writing-price-rows)). A snapshot already stored is skipped and its payload discarded; the counts are of snapshots inserted. It writes no `odds` rows ([how odds are stored](../storage/odds-storage-model.md#the-normalized-half-is-not-universal)).
+- It prints the counts: matches, attached, skipped, written, snapshots, dropped points by reason, finished events without a match, matches without an event, and matches that failed. `--dry-run` fetches and resamples but writes nothing, not even the external ids.
 
 > [!WARNING]
 > The command writes to whatever `DATABASE_URL` points at. Production is loaded only from the production host ([databases](../foundations/databases-and-environments.md#environments)).
 
 ## The fetch-polymarket-odds job
 
-`odds_lambda.jobs.fetch_polymarket_odds.main` stores the current midpoint of every open match within `odds_lambda.polymarket_odds.MAX_HORIZON` that pairs with an event. It is per sport (`fetch-polymarket-odds-epl`; `ctx.sport` is required and must be in the allowlist), allowlisted to `odds_lambda.polymarket_sports.MATCH_ODDS_SPORTS`, one of the default bootstrap jobs ([ADR-0013](../../docs/adr/0013-collect-polymarket-epl-as-sharp-reference.md)); it self-schedules, and a scheduler restart keeps its pending run ([where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs)). It does nothing when `odds_core.config.PolymarketConfig.enabled` is false.
+`odds_lambda.jobs.fetch_polymarket_odds.main` stores the current midpoint of every open match within `odds_lambda.polymarket_odds.MAX_HORIZON` that attaches to an event. It is per sport (`fetch-polymarket-odds-epl`; `ctx.sport` is required and must be in the allowlist), allowlisted to `odds_lambda.polymarket_sports.MATCH_ODDS_SPORTS`, one of the default bootstrap jobs ([ADR-0013](../../docs/adr/0013-collect-polymarket-epl-as-sharp-reference.md)); it self-schedules, and a scheduler restart keeps its pending run ([where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs)). It does nothing when `odds_core.config.PolymarketConfig.enabled` is false.
 
 1. Pre-schedule with `odds_lambda.collection_calendar.decide_collection_run` (`stored_only`, timed from the events' `commence_time`) and `odds_lambda.jobs.fetch_polymarket_odds.CADENCE`, derived from `odds_lambda.polymarket_odds.TIER_STEPS`: 5 min closing, 15 min pregame and sharp, 30 min early, 1 h opening ([decision engine](../scheduling/decision-engine.md#cadence)). With no stored SCHEDULED event within 28 days the run is dormant: a 6 h check-in and its heartbeat, no Gamma call ([dormancy](../scheduling/decision-engine.md#dormancy)). The sport's overnight window applies, and the job passes no [leads](../scheduling/decision-engine.md#lead-runs).
-2. Inside `odds_core.alerts.job_alert_context`, `odds_lambda.jobs.fetch_polymarket_odds.ingest_sport` lists open events, keeps matches that have not started, pairs them with events, and stores a snapshot through `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` (the raw snapshot and its linked normalized rows; it passes no snapshot shape, so it writes no price rows), tagged `polymarket_live_<time>`.
-3. The price is the midpoint of Gamma's `bestBid` and `bestAsk` (a match with any midpoint outside (0, 1) has no prices), the same quantity as the history series (observed: `/midpoint` equals the last history point). A pair is skipped and counted when its event has started (`snapshot_time >= commence_time`), when a bid or ask is missing, when any outcome's spread exceeds `odds_lambda.polymarket_odds.MAX_QUOTE_SPREAD` (0.03, an empty book), or when the prices are off the sum tolerance.
+2. Inside `odds_core.alerts.job_alert_context`, `odds_lambda.jobs.fetch_polymarket_odds.ingest_sport` lists open events, keeps matches that have not started, attaches them to events ([attaching](#attaching-to-events)), and stores a snapshot through `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` (the raw snapshot and its linked normalized rows) with source `polymarket`, market `1x2` and time basis `observed`, tagged `polymarket_live_<time>`. Its price rows are `mid` (the midpoint), `back` (the ask) and `lay` (the bid) per outcome, all as decimal odds 1/p, and the run's envelopes are archived as one payload ([writing price rows](../storage/price-tables.md#writing-price-rows)). Each snapshot is written in its own savepoint, so a failing match is recorded in the run's errors and the others stand. A snapshot already stored for that time is skipped, and when nothing was inserted the run's payload is discarded; `snapshots_stored` counts inserts.
+3. The price is the midpoint of Gamma's `bestBid` and `bestAsk` (a match with any midpoint outside (0, 1) has no prices), the same quantity as the history series (observed: `/midpoint` equals the last history point). A match is skipped and counted when its event has started (`snapshot_time >= commence_time`), when a bid or ask is missing, when any outcome's spread exceeds `odds_lambda.polymarket_odds.MAX_QUOTE_SPREAD` (0.03, an empty book), or when the prices are off the sum tolerance.
 4. Each sport's run writes an `odds_core.models.FetchLog` row (`success` is whether a snapshot was stored), ([fetch logs](odds-ingestion-service.md#fetch-logs)).
 5. Failures alert: a sport that raises, or that Gamma lists no upcoming match for while our database has SCHEDULED events within 5 days (`odds_lambda.jobs.fetch_polymarket_odds.LISTING_CHECK_HORIZON`, `odds_lambda.jobs.fetch_polymarket_odds.EmptyListingError`), is logged as a failed fetch, the job reschedules, and then it raises inside `odds_core.alerts.job_alert_context`, which sends the critical alert (once per outage), and skips the heartbeat. If matches were seen but none stored, `send_job_warning("job_empty:<job>")`. On the local scheduler a run past `odds_lambda.scheduling.runner.JOB_TIMEOUT` is cancelled and alerted, and a failed run that booked nothing is re-booked ([Local scheduler](../scheduling/local-scheduler.md#scheduling-primitives)).
 
-Its `odds_lambda.jobs.fetch_polymarket_odds.SOURCE` feeds the per-source [stale-data check](../operations/health-monitor.md#stale-data-check), which ignores it until the job is in `bootstrap_jobs` and has stored a first snapshot. The job writes a heartbeat, expected every 11 hours (`fetch-polymarket-odds-epl` in `odds_core.config.AlertConfig.heartbeat_expectations`) to cover the 22:00-06:00 UTC overnight pause. The job pairs against existing events and never creates one, so a match the Odds API or OddsPortal has not yet synced is skipped until its event exists.
+Its `odds_lambda.jobs.fetch_polymarket_odds.SOURCE` feeds the per-source [stale-data check](../operations/health-monitor.md#stale-data-check), which ignores it until the job is in `bootstrap_jobs` and has stored a first snapshot. The job writes a heartbeat, expected every 11 hours (`fetch-polymarket-odds-epl` in `odds_core.config.AlertConfig.heartbeat_expectations`) to cover the 22:00-06:00 UTC overnight pause. The job attaches to existing events and never creates one, so a match the Odds API or OddsPortal has not yet synced is skipped until its event exists.
 
 ## Related
 

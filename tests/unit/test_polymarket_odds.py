@@ -10,6 +10,7 @@ import pytest
 from odds_core.models import OddsSnapshot
 from odds_core.odds_math import devig_probabilities
 from odds_core.snapshot_utils import extract_odds_from_snapshot
+from odds_core.vocabulary import Source
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.polymarket_fetcher import MAX_HISTORY_WINDOW, PolymarketClient
 from odds_lambda.polymarket_odds import (
@@ -22,14 +23,12 @@ from odds_lambda.polymarket_odds import (
     build_raw_data,
     canonical_team,
     grid_offsets,
-    pair_events,
+    listed_game,
     parse_match_event,
     resample,
 )
 from odds_lambda.polymarket_sports import MATCH_ODDS_SPORTS, POLYMARKET_SPORTS
 from odds_lambda.tier_utils import calculate_tier
-
-from tests.test_helpers import make_epl_event
 
 EPL = POLYMARKET_SPORTS["soccer_epl"]
 KICKOFF = datetime(2025, 12, 6, 15, 0, tzinfo=UTC)
@@ -227,78 +226,28 @@ class TestResample:
         assert result.off_sum == 0
 
 
-class TestPairEvents:
-    def test_pairs_by_teams_and_kickoff(self, gamma_event) -> None:
+class TestListedGame:
+    def test_lists_the_match_under_its_polymarket_id(self, gamma_event) -> None:
         match = parse_match_event(gamma_event(), EPL)
         assert match is not None
-        event = make_epl_event("e1", KICKOFF, "Bournemouth", "Chelsea")
 
-        pairing = pair_events([event], [match])
+        game = listed_game(match, EPL)
 
-        assert pairing.pairs == [(event, match)]
-        assert pairing.unmatched_matches == []
-
-    def test_twins_pair_only_the_api_event(self, gamma_event) -> None:
-        match = parse_match_event(gamma_event(), EPL)
-        assert match is not None
-        events = [
-            make_epl_event("op_2025-2026_BOU_CHE_2025-12-06", KICKOFF, "Bournemouth", "Chelsea"),
-            make_epl_event("fduk_1", KICKOFF, "Bournemouth", "Chelsea"),
-            make_epl_event("hex1", KICKOFF, "Bournemouth", "Chelsea"),
-        ]
-
-        pairing = pair_events(events, [match])
-
-        assert [(e.id, m) for e, m in pairing.pairs] == [("hex1", match)]
-        assert [(m, sorted(e.id for e in evs)) for m, evs in pairing.twins] == [
-            (match, ["fduk_1", "hex1", "op_2025-2026_BOU_CHE_2025-12-06"])
-        ]
-
-    def test_twins_without_an_api_event_pair_the_lowest_id(self, gamma_event) -> None:
-        match = parse_match_event(gamma_event(), EPL)
-        assert match is not None
-        events = [
-            make_epl_event("op_b", KICKOFF, "Bournemouth", "Chelsea"),
-            make_epl_event("op_a", KICKOFF, "Bournemouth", "Chelsea"),
-        ]
-
-        assert [e.id for e, _ in pair_events(events, [match]).pairs] == ["op_a"]
-
-    def test_reversed_fixture_does_not_pair(self, gamma_event) -> None:
-        match = parse_match_event(gamma_event(), EPL)
-        assert match is not None
-        event = make_epl_event("e1", KICKOFF, "Chelsea", "Bournemouth")
-
-        pairing = pair_events([event], [match])
-
-        assert pairing.pairs == []
-        assert pairing.unmatched_events == [event]
-        assert pairing.unmatched_matches == [match]
-
-    def test_kickoff_beyond_window_does_not_pair(self, gamma_event) -> None:
-        match = parse_match_event(gamma_event(), EPL)
-        assert match is not None
-        event = make_epl_event("e1", KICKOFF + timedelta(hours=5), "Bournemouth", "Chelsea")
-
-        assert pair_events([event], [match]).unmatched_events == [event]
-
-    def test_two_matches_in_window_are_ambiguous(self, gamma_event) -> None:
-        match = parse_match_event(gamma_event(), EPL)
-        assert match is not None
-        duplicate = parse_match_event(gamma_event(), EPL)
-        assert duplicate is not None
-        event = make_epl_event("e1", KICKOFF, "Bournemouth", "Chelsea")
-
-        assert pair_events([event], [match, duplicate]).ambiguous_events == [event]
+        assert (game.source, game.external_id) == (Source.POLYMARKET, "900")
+        assert (game.sport_key, game.home_team, game.away_team, game.commence_time) == (
+            "soccer_epl",
+            "Bournemouth",
+            "Chelsea",
+            KICKOFF,
+        )
 
 
 class TestBuildRawData:
     def test_pipeline_extracts_devigged_polymarket_probs(self, gamma_event) -> None:
         match = parse_match_event(gamma_event(), EPL)
         assert match is not None
-        event = make_epl_event("e1", KICKOFF, "Bournemouth", "Chelsea")
         prices = Prices(0.53, 0.25, 0.22)
-        raw_data = build_raw_data(match, EPL, event, prices, KICKOFF - timedelta(hours=1))
+        raw_data = build_raw_data(match, EPL, prices, KICKOFF - timedelta(hours=1))
         snapshot = OddsSnapshot(
             event_id="e1",
             snapshot_time=KICKOFF - timedelta(hours=1),
@@ -316,11 +265,10 @@ class TestBuildRawData:
     def test_outcomes_carry_the_reciprocal_decimal_price(self, gamma_event) -> None:
         match = parse_match_event(gamma_event(), EPL)
         assert match is not None
-        event = make_epl_event("e1", KICKOFF, "Bournemouth", "Chelsea")
 
-        outcomes = build_raw_data(match, EPL, event, Prices(0.53, 0.25, 0.22), KICKOFF)[
-            "bookmakers"
-        ][0]["markets"][0]["outcomes"]
+        outcomes = build_raw_data(match, EPL, Prices(0.53, 0.25, 0.22), KICKOFF)["bookmakers"][0][
+            "markets"
+        ][0]["outcomes"]
 
         assert all("price" not in o for o in outcomes)
         assert sorted(o["price_decimal"] for o in outcomes) == pytest.approx(
@@ -330,11 +278,10 @@ class TestBuildRawData:
     def test_meta_keeps_exact_probabilities(self, gamma_event) -> None:
         match = parse_match_event(gamma_event(), EPL)
         assert match is not None
-        event = make_epl_event("e1", KICKOFF, "Bournemouth", "Chelsea")
 
-        meta = build_raw_data(match, EPL, event, Prices(0.53, 0.25, 0.22), KICKOFF)["bookmakers"][
-            0
-        ]["polymarket_meta"]
+        meta = build_raw_data(match, EPL, Prices(0.53, 0.25, 0.22), KICKOFF)["bookmakers"][0][
+            "polymarket_meta"
+        ]
 
         assert meta["yes_probabilities"] == {"home": 0.53, "draw": 0.25, "away": 0.22}
         assert meta["pm_event_id"] == "900"
@@ -343,11 +290,10 @@ class TestBuildRawData:
     def test_live_snapshot_keeps_quotes(self, gamma_event) -> None:
         match = parse_match_event(gamma_event(), EPL)
         assert match is not None
-        event = make_epl_event("e1", KICKOFF, "Bournemouth", "Chelsea")
 
-        meta = build_raw_data(
-            match, EPL, event, Prices(0.53, 0.25, 0.22), KICKOFF, include_quotes=True
-        )["bookmakers"][0]["polymarket_meta"]
+        meta = build_raw_data(match, EPL, Prices(0.53, 0.25, 0.22), KICKOFF, include_quotes=True)[
+            "bookmakers"
+        ][0]["polymarket_meta"]
 
         assert meta["best_bid"] == {"home": 0.52, "draw": 0.24, "away": 0.20}
         assert meta["best_ask"] == {"home": 0.54, "draw": 0.26, "away": 0.22}

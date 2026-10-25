@@ -15,6 +15,8 @@ from odds_lambda.storage.event_resolver import (
     LockOrderError,
     Resolution,
     StaleListing,
+    attach_event,
+    attach_events,
     event_lock_key,
     resolve_event,
     resolve_events,
@@ -536,3 +538,132 @@ class TestResolveMlbEvent:
         assert resolved.event.id == "g_1002"
         count = await pglite_async_session.execute(select(func.count()).select_from(Event))
         assert count.scalar_one() == 2
+
+
+def polymarket_listing(
+    external_id: str | None = "900",
+    commence_time: datetime = TWIN_KICKOFF,
+    home: str = "Arsenal",
+    away: str = "Chelsea",
+) -> ListedGame:
+    return ListedGame(
+        source=Source.POLYMARKET,
+        sport_key="soccer_epl",
+        sport_title="EPL",
+        home_team=home,
+        away_team=away,
+        commence_time=commence_time,
+        external_id=external_id,
+    )
+
+
+class TestAttachEvent:
+    @pytest.mark.asyncio
+    async def test_attaches_by_teams_and_records_the_source_id(
+        self, pglite_async_session, stored_epl_event
+    ) -> None:
+        attached = await attach_event(pglite_async_session, polymarket_listing())
+
+        assert attached is not None
+        assert (attached.event.id, attached.resolution) == (
+            stored_epl_event.id,
+            Resolution.MATCHED,
+        )
+        assert await external_ids(pglite_async_session, stored_epl_event) == {
+            Source.POLYMARKET: "900"
+        }
+
+    @pytest.mark.asyncio
+    async def test_creates_nothing_when_no_event_matches(
+        self, pglite_async_session, stored_epl_event
+    ) -> None:
+        far = polymarket_listing(commence_time=TWIN_KICKOFF + timedelta(days=7))
+
+        assert await attach_event(pglite_async_session, far) is None
+
+        count = await pglite_async_session.execute(select(func.count()).select_from(Event))
+        assert count.scalar_one() == 1
+        assert await external_ids(pglite_async_session, stored_epl_event) == {}
+
+    @pytest.mark.asyncio
+    async def test_a_recorded_id_attaches_across_a_moved_kickoff(
+        self, pglite_async_session, stored_epl_event
+    ) -> None:
+        await attach_event(pglite_async_session, polymarket_listing())
+
+        moved = polymarket_listing(commence_time=TWIN_KICKOFF + timedelta(days=3))
+        attached = await attach_event(pglite_async_session, moved)
+
+        assert attached is not None
+        assert attached.resolution is Resolution.BY_EXTERNAL_ID
+
+    @pytest.mark.asyncio
+    async def test_does_not_move_the_kickoff(self, pglite_async_session, stored_epl_event) -> None:
+        later = TWIN_KICKOFF + timedelta(minutes=90)
+        listing = epl_listing(commence_time=later)
+
+        await attach_event(pglite_async_session, listing)
+
+        assert stored_epl_event.commence_time == TWIN_KICKOFF
+
+    @pytest.mark.asyncio
+    async def test_a_second_id_for_the_event_is_refused_and_logged_once(
+        self, pglite_async_session, stored_epl_event
+    ) -> None:
+        await attach_event(pglite_async_session, polymarket_listing("900"))
+
+        first = await attach_event(pglite_async_session, polymarket_listing("901"))
+        again = await attach_event(pglite_async_session, polymarket_listing("901"))
+
+        assert (first, again) == (None, None)
+        assert await external_ids(pglite_async_session, stored_epl_event) == {
+            Source.POLYMARKET: "900"
+        }
+        assert len(await refusals(pglite_async_session)) == 1
+
+    @pytest.mark.asyncio
+    async def test_a_held_id_wins_over_a_nearer_event_of_the_fixture(
+        self, pglite_async_session
+    ) -> None:
+        pglite_async_session.add(make_epl_event("e1", TWIN_KICKOFF, "Arsenal", "Chelsea"))
+        pglite_async_session.add(
+            make_epl_event("e2", TWIN_KICKOFF + timedelta(days=30), "Arsenal", "Chelsea")
+        )
+        await pglite_async_session.commit()
+        await attach_event(pglite_async_session, polymarket_listing("900"))
+
+        later = polymarket_listing("900", commence_time=TWIN_KICKOFF + timedelta(days=30))
+        attached = await attach_event(pglite_async_session, later)
+
+        assert attached is not None
+        assert attached.event.id == "e1"
+
+    @pytest.mark.asyncio
+    async def test_creating_an_event_needs_a_legacy_id(self, pglite_async_session) -> None:
+        with pytest.raises(ValueError, match="legacy_id"):
+            await resolve_event(pglite_async_session, polymarket_listing())
+
+
+class TestAttachEvents:
+    @pytest.mark.asyncio
+    async def test_a_mixed_batch_attaches_in_key_order_and_answers_in_input_order(
+        self, pglite_async_session
+    ) -> None:
+        fixtures = [("Arsenal", "Chelsea"), ("Liverpool", "Everton"), ("Fulham", "Brentford")]
+        for i, (home, away) in enumerate(fixtures):
+            pglite_async_session.add(make_epl_event(f"e{i}", TWIN_KICKOFF, home, away))
+        pglite_async_session.add(
+            make_epl_event("elsewhere", TWIN_KICKOFF + timedelta(days=9), "Spurs", "Wolves")
+        )
+        await pglite_async_session.commit()
+        games = [
+            polymarket_listing(str(i), home=home, away=away)
+            for i, (home, away) in enumerate(fixtures)
+        ]
+        games.append(polymarket_listing("99", home="Spurs", away="Wolves"))
+        keys = [event_lock_key(g.sport_key, g.home_team, g.away_team) for g in games]
+        assert keys != sorted(keys)
+
+        attached = await attach_events(pglite_async_session, games)
+
+        assert [a.event.id if a else None for a in attached] == ["e0", "e1", "e2", None]
