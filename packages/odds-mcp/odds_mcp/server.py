@@ -606,8 +606,10 @@ def _candidate_summary_to_dict(summary: CandidateSummary) -> dict[str, Any]:
             "n": checkpoint.n,
             "mean_ev": checkpoint.mean_ev,
             "ci95": list(checkpoint.ci95),
-            "ci99": list(checkpoint.ci99),
+            "promote_level": checkpoint.promote_level,
+            "promote_ci": list(checkpoint.promote_ci),
         },
+        "family_versions": summary.family_versions,
         "verdict": summary.verdict.value,
     }
 

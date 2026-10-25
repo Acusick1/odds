@@ -35,7 +35,7 @@ What a candidate is and when it is promoted or killed is on [Goal and strategy](
      ```
 
    - Run `uv run odds candidates backtest <path> --from 2024-08-01 --to 2026-07-31`, with `--json <file>` to keep the result ([replay backtest](candidate-backtest.md)).
-   - Read the coverage first: events with an exchange price and a retail quote at the decision time, and bets with a close. Then read the checkpoint and overall estimates.
+   - Read the coverage first: events with an exchange price and a retail quote at the decision time, and bets with a close. Then read k, the number of versions in the rule's family that count against this draft, and the checkpoint and overall estimates, whose promote interval widens as k grows.
    - Development data can kill an idea and never promotes one: the output says `meets_promote_bar`, not `promote`, and the range has been examined many times.
 3. **Register it** with a pull request that adds `candidates/<name>.yaml`.
    - Take the hash from `uv run odds candidates rule-hash <rule>`, and set `version: 1`, the issue, a `start_date` and `status: active` ([file format](candidate-registry.md#file-format)).
@@ -49,5 +49,5 @@ What a candidate is and when it is promoted or killed is on [Goal and strategy](
    - A data difference (the database now yields other bets than the recorded inputs did) is informational: the backtest, which loads from the database, would not reproduce that decision.
    - "No decisions to check" means the candidate has not decided yet.
 7. **Promote or kill** by changing the status in a pull request, which needs no version bump.
-   - Promote when the report says `promote`, then the stake-capacity gate before real money (not yet defined).
+   - Promote when the report says `promote` (the bar rises with k, the started versions of the rule's family), then the stake-capacity gate before real money (not yet defined).
    - Kill when it says `kill`, or by choice. Record the result on the idea issue and close it. Never delete the file.

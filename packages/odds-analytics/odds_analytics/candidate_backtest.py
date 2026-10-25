@@ -31,6 +31,7 @@ from odds_analytics.candidate_report import (
     ScoredBet,
     checkpoint_at,
     close_candidate_snapshots,
+    promote_level,
     scoreable_prefix,
     selection_close_probability,
     summarize_candidate,
@@ -114,6 +115,7 @@ async def replay(
     candidate: MechanicalCandidate,
     start: date,
     end: date,
+    family_versions: int,
     now: datetime | None = None,
     n_boot: int = DEFAULT_BOOTSTRAP_SAMPLES,
     seed: int = BOOTSTRAP_SEED,
@@ -178,7 +180,17 @@ async def replay(
         bets=len(bets),
         bets_with_close=sum(b.p_close is not None for b in bets),
     )
-    return score(candidate, start, end, bets, coverage, now or datetime.now(UTC), n_boot, seed)
+    return score(
+        candidate,
+        start,
+        end,
+        bets,
+        coverage,
+        family_versions,
+        now or datetime.now(UTC),
+        n_boot,
+        seed,
+    )
 
 
 def score(
@@ -187,13 +199,21 @@ def score(
     end: date,
     bets: Sequence[ScoredBet],
     coverage: Coverage,
+    family_versions: int,
     now: datetime,
     n_boot: int,
     seed: int,
 ) -> BacktestResult:
     """Summarise replayed ``bets`` with the forward-test report's code."""
     summary = summarize_candidate(
-        candidate.name, candidate.version, candidate.status, bets, now, n_boot, seed
+        candidate.name,
+        candidate.version,
+        candidate.status,
+        bets,
+        now,
+        family_versions,
+        n_boot,
+        seed,
     )
     with_close, _ = scoreable_prefix(bets, now)
     return BacktestResult(
@@ -206,5 +226,9 @@ def score(
         hash_status=hash_status(candidate),
         coverage=coverage,
         summary=summary,
-        overall=checkpoint_at(with_close, len(with_close), n_boot, seed) if with_close else None,
+        overall=checkpoint_at(
+            with_close, len(with_close), promote_level(family_versions), n_boot, seed
+        )
+        if with_close
+        else None,
     )

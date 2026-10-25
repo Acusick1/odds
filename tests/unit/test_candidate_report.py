@@ -12,7 +12,9 @@ from odds_analytics.candidate_report import (
     candidate_report,
     checkpoint_at,
     close_candidate_snapshots,
+    family_versions,
     judge,
+    promote_level,
     summarize_candidates,
 )
 from odds_cli.main import app
@@ -29,6 +31,7 @@ from tests.test_helpers import make_epl_event, make_tagged_snapshot, three_way_b
 N_BOOT = 400
 NOW = datetime(2026, 6, 1, tzinfo=UTC)
 LONG_AGO = NOW - timedelta(days=30)
+LEVEL = promote_level(1)
 
 
 def trade(
@@ -64,7 +67,7 @@ def noise(n: int, start: int = 0) -> list[ScoredBet]:
 
 
 def summary_of(sequence: list[ScoredBet], now: datetime = NOW):
-    return summarize_candidates(sequence, [], now, N_BOOT)[0]
+    return summarize_candidates(sequence, [], now, n_boot=N_BOOT)[0]
 
 
 def registry_entry(name: str = "cand", version: int = 1) -> AgentCandidate:
@@ -96,68 +99,70 @@ class TestCheckpoint:
         assert summary.verdict is Verdict.NOT_YET
 
     def test_exactly_100_scores_all(self) -> None:
-        checkpoint = checkpoint_at(trades(100), 100, N_BOOT, 0)
+        checkpoint = checkpoint_at(trades(100), 100, LEVEL, N_BOOT, 0)
         assert checkpoint.n == 100
         assert checkpoint.mean_ev == pytest.approx(0.5)
 
     def test_checkpoint_scores_only_the_earliest_n(self) -> None:
         sequence = trades(200, 0.5) + trades(50, -0.5, start=200)
-        assert checkpoint_at(sequence, 200, N_BOOT, 0).mean_ev == pytest.approx(0.5)
+        assert checkpoint_at(sequence, 200, LEVEL, N_BOOT, 0).mean_ev == pytest.approx(0.5)
 
     def test_mean_is_stake_weighted(self) -> None:
         sequence = [trade(i, 1.0, stake=3.0) for i in range(50)] + [
             trade(50 + i, -1.0, stake=1.0) for i in range(50)
         ]
-        assert checkpoint_at(sequence, 100, N_BOOT, 0).mean_ev == pytest.approx(0.5)
+        assert checkpoint_at(sequence, 100, LEVEL, N_BOOT, 0).mean_ev == pytest.approx(0.5)
 
     def test_events_are_resampled_as_clusters(self) -> None:
         sequence = [trade(i, 1.0, event_id="a") for i in range(50)] + [
             trade(50 + i, -1.0, event_id="b") for i in range(50)
         ]
-        checkpoint = checkpoint_at(sequence, 100, N_BOOT, 0)
+        checkpoint = checkpoint_at(sequence, 100, LEVEL, N_BOOT, 0)
         assert checkpoint.mean_ev == pytest.approx(0.0)
-        assert checkpoint.ci99 == pytest.approx((-1.0, 1.0))
+        assert checkpoint.promote_ci == pytest.approx((-1.0, 1.0))
 
     def test_seed_is_deterministic(self) -> None:
         sequence = [trade(i, 1.0 if i % 3 else -1.0) for i in range(100)]
-        assert checkpoint_at(sequence, 100, N_BOOT, 7) == checkpoint_at(sequence, 100, N_BOOT, 7)
+        assert checkpoint_at(sequence, 100, LEVEL, N_BOOT, 7) == checkpoint_at(
+            sequence, 100, LEVEL, N_BOOT, 7
+        )
 
 
 class TestVerdict:
     def test_promote_when_99_lower_bound_above_zero(self) -> None:
-        verdict, checkpoint = judge(trades(100, 0.5), N_BOOT, 0)
+        verdict, checkpoint = judge(trades(100, 0.5), LEVEL, N_BOOT, 0)
         assert verdict is Verdict.PROMOTE
         assert checkpoint is not None and checkpoint.n == 100
 
     def test_kill_when_95_upper_bound_at_or_below_zero(self) -> None:
-        assert judge(trades(100, -0.5), N_BOOT, 0)[0] is Verdict.KILL
+        assert judge(trades(100, -0.5), LEVEL, N_BOOT, 0)[0] is Verdict.KILL
 
     def test_continue_when_interval_straddles_zero(self) -> None:
-        verdict, checkpoint = judge(noise(400), N_BOOT, 0)
+        verdict, checkpoint = judge(noise(400), LEVEL, N_BOOT, 0)
         assert verdict is Verdict.CONTINUE
         assert checkpoint is not None and checkpoint.n == 400
 
     def test_kill_at_500_without_promotion(self) -> None:
-        verdict, checkpoint = judge(noise(500), N_BOOT, 0)
+        verdict, checkpoint = judge(noise(500), LEVEL, N_BOOT, 0)
         assert verdict is Verdict.KILL
         assert checkpoint is not None and checkpoint.n == 500
 
     def test_promotion_at_500_beats_the_kill_limit(self) -> None:
-        assert judge(trades(500, 0.5), N_BOOT, 0)[0] is Verdict.PROMOTE
+        assert judge(trades(500, 0.5), LEVEL, N_BOOT, 0)[0] is Verdict.PROMOTE
 
     def test_no_checkpoint_is_not_yet(self) -> None:
-        assert judge(trades(99), N_BOOT, 0) == (Verdict.NOT_YET, None)
+        assert judge(trades(99), LEVEL, N_BOOT, 0) == (Verdict.NOT_YET, None)
 
     def test_first_verdict_stands_when_later_bets_reverse_the_estimate(self) -> None:
         sequence = trades(100, 0.5) + trades(300, -0.5, start=100)
-        verdict, checkpoint = judge(sequence, N_BOOT, 0)
+        verdict, checkpoint = judge(sequence, LEVEL, N_BOOT, 0)
         assert verdict is Verdict.PROMOTE
         assert checkpoint is not None and checkpoint.n == 100
-        assert checkpoint_at(sequence, 400, N_BOOT, 0).ci99[0] < 0
+        assert checkpoint_at(sequence, 400, LEVEL, N_BOOT, 0).promote_ci[0] < 0
 
     def test_a_kill_stands_when_later_bets_recover(self) -> None:
         sequence = trades(100, -0.5) + trades(300, 0.5, start=100)
-        verdict, checkpoint = judge(sequence, N_BOOT, 0)
+        verdict, checkpoint = judge(sequence, LEVEL, N_BOOT, 0)
         assert verdict is Verdict.KILL
         assert checkpoint is not None and checkpoint.n == 100
 
@@ -223,21 +228,133 @@ class TestSummaries:
         sequence = [trade(0, version=1), trade(1, version=2)]
         by_version = {
             s.version: s
-            for s in summarize_candidates(sequence, [registry_entry(version=2)], NOW, N_BOOT)
+            for s in summarize_candidates(sequence, [registry_entry(version=2)], NOW, n_boot=N_BOOT)
         }
         assert by_version[1].status is None
         assert by_version[2].status is CandidateStatus.ACTIVE
         assert by_version[1].settled_bets == by_version[2].settled_bets == 1
 
     def test_registered_candidate_without_trades_is_listed(self) -> None:
-        summary = summarize_candidates([], [registry_entry("fresh", 4)], NOW, N_BOOT)[0]
+        summary = summarize_candidates([], [registry_entry("fresh", 4)], NOW, n_boot=N_BOOT)[0]
         assert (summary.name, summary.version, summary.settled_bets) == ("fresh", 4, 0)
         assert summary.roi == 0.0
         assert summary.verdict is Verdict.NOT_YET
 
     def test_trades_of_a_candidate_missing_from_registry_are_listed(self) -> None:
-        summary = summarize_candidates([trade(0, name="ghost")], [], NOW, N_BOOT)[0]
+        summary = summarize_candidates([trade(0, name="ghost")], [], NOW, n_boot=N_BOOT)[0]
         assert summary.name == "ghost" and summary.status is None
+
+
+def mechanical(name: str, version: int = 1, start: str = "2026-01-01", **overrides: object):
+    from odds_core.candidates import MechanicalCandidate
+
+    return MechanicalCandidate.model_validate(
+        {
+            "name": name,
+            "description": "d",
+            "kind": "mechanical",
+            "sport": "soccer_epl",
+            "version": version,
+            "issue": 1,
+            "start_date": start,
+            "status": "active",
+            "rule": "exchange_gap",
+            "rule_sha256": "0" * 64,
+            **overrides,
+        }
+    )
+
+
+TODAY = NOW.date()
+
+
+class TestPromoteLevel:
+    def test_one_version_keeps_the_99_level(self) -> None:
+        assert promote_level(1) == pytest.approx(0.99)
+
+    def test_three_versions_is_about_99_7(self) -> None:
+        assert promote_level(3) == pytest.approx(0.996667, abs=1e-6)
+
+    def test_k_above_one_widens_the_promote_interval_only(self) -> None:
+        sequence = [trade(i, 1.0 if i % 4 else -1.0) for i in range(100)]
+        base, wide = (checkpoint_at(sequence, 100, promote_level(k), N_BOOT, 0) for k in (1, 8))
+        assert wide.promote_level > base.promote_level
+        assert wide.promote_ci[0] <= base.promote_ci[0]
+        assert wide.ci95 == base.ci95
+
+    def test_a_higher_k_can_withhold_a_promotion(self) -> None:
+        # 10 big winners in 100 events give a positive 99% lower bound but not a positive 99.999% one.
+        sequence = [trade(i, 5.0 if i < 10 else -0.2, event_id=f"e{i}") for i in range(100)]
+        k1 = summarize_candidates(sequence, [], NOW, n_boot=N_BOOT)[0]
+        verdict_k1 = judge(sequence, promote_level(1), N_BOOT, 0)[0]
+        verdict_wide = judge(sequence, promote_level(1000), N_BOOT, 0)[0]
+        assert k1.family_versions == 1
+        assert verdict_k1 is Verdict.PROMOTE
+        assert verdict_wide is not Verdict.PROMOTE
+
+
+class TestFamilyVersions:
+    def size(self, registry, decided=(), draft=None, sport="soccer_epl") -> int:
+        return family_versions("exchange_gap", sport, registry, decided, TODAY, draft)
+
+    def test_single_started_version_is_k_1(self) -> None:
+        assert self.size([mechanical("a")]) == 1
+
+    def test_started_siblings_all_count_whatever_their_status(self) -> None:
+        registry = [mechanical("a"), mechanical("b"), mechanical("c", status="killed")]
+        assert self.size(registry) == 3
+
+    def test_a_version_that_has_not_started_does_not_count(self) -> None:
+        registry = [mechanical("a"), mechanical("b", start="2026-06-02")]
+        assert self.size(registry) == 1
+
+    def test_start_day_itself_counts(self) -> None:
+        assert self.size([mechanical("a"), mechanical("b", start="2026-06-01")]) == 2
+
+    def test_other_rule_or_sport_is_another_family(self) -> None:
+        registry = [
+            mechanical("a"),
+            mechanical("b", rule="polymarket_gap"),
+            mechanical("c", sport="baseball_mlb"),
+        ]
+        assert self.size(registry) == 1
+
+    def test_earlier_versions_count_from_recorded_decisions(self) -> None:
+        registry = [mechanical("a", version=3), mechanical("b")]
+        decided = {("a", 1), ("a", 2), ("a", 3), ("b", 1), ("ghost", 1)}
+        assert self.size(registry, decided) == 4
+
+    def test_draft_counts_itself_once(self) -> None:
+        registry = [mechanical("a"), mechanical("b", start="2026-12-01")]
+        assert self.size(registry, draft=("new", 1)) == 2
+        assert self.size(registry, draft=("a", 1)) == 1
+        assert self.size(registry, draft=("b", 1)) == 2
+
+    def test_no_started_version_has_the_base_bar(self) -> None:
+        assert self.size([mechanical("a", start="2026-12-01")]) == 1
+
+
+class TestSummaryFamily:
+    def test_each_version_of_a_family_member_uses_the_family_size(self) -> None:
+        registry = [mechanical("a", version=2), mechanical("b")]
+        sequence = [trade(0, name="a", version=1), trade(1, name="a", version=2)]
+        decided = {("a", 1), ("a", 2), ("b", 1)}
+        summaries = summarize_candidates(sequence, registry, NOW, decided, N_BOOT)
+        assert {(s.name, s.version): s.family_versions for s in summaries} == {
+            ("a", 1): 3,
+            ("a", 2): 3,
+            ("b", 1): 3,
+        }
+
+    def test_unregistered_name_and_agent_have_k_1(self) -> None:
+        summaries = summarize_candidates(
+            [trade(0, name="ghost"), trade(1, name="cand")],
+            [registry_entry("cand"), mechanical("a"), mechanical("b")],
+            NOW,
+            n_boot=N_BOOT,
+        )
+        assert {s.name: s.family_versions for s in summaries}["ghost"] == 1
+        assert {s.name: s.family_versions for s in summaries}["cand"] == 1
 
 
 KICKOFF = datetime(2026, 4, 15, 15, 0, tzinfo=UTC)
@@ -408,7 +525,7 @@ class TestReportCommand:
 
         async def fake_report(registry):
             sequence = trades(100) + [trade(i, name="ghost", version=2) for i in range(3)]
-            return summarize_candidates(sequence, registry, NOW, N_BOOT)
+            return summarize_candidates(sequence, registry, NOW, n_boot=N_BOOT)
 
         monkeypatch.setattr("odds_cli.commands.candidates._report", fake_report)
         return tmp_path
@@ -416,6 +533,7 @@ class TestReportCommand:
     def test_lists_registered_and_unregistered_candidates(self, registry) -> None:
         result = CliRunner(env={"COLUMNS": "250"}).invoke(app, ["candidates", "report"])
         assert result.exit_code == 0, result.stdout
+        assert "Promote CI" in result.stdout and " k " in result.stdout
         assert "epl-agent" in result.stdout
         assert "ghost" in result.stdout
         assert "not current" in result.stdout

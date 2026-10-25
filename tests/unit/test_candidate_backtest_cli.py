@@ -35,19 +35,23 @@ def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     async def session():
         yield None
 
+    async def no_decisions(_session: Any) -> set[tuple[str, int]]:
+        return set()
+
     monkeypatch.setattr("odds_cli.commands.candidates.async_session_maker", session)
+    monkeypatch.setattr("odds_cli.commands.candidates.load_decided_versions", no_decisions)
     return directory
 
 
 def fake_replay(monkeypatch: pytest.MonkeyPatch) -> list[MechanicalCandidate]:
     seen: list[MechanicalCandidate] = []
 
-    async def replay(_session: Any, candidate: MechanicalCandidate, start: date, end: date):
+    async def replay(_session: Any, candidate: MechanicalCandidate, start: date, end: date, k: int):
         seen.append(candidate)
         coverage = Coverage(
             events=10, with_exchange=8, with_retail=9, with_bet=0, bets=0, bets_with_close=0
         )
-        return score(candidate, start, end, [], coverage, NOW, N_BOOT, 0)
+        return score(candidate, start, end, [], coverage, k, NOW, N_BOOT, 0)
 
     monkeypatch.setattr("odds_cli.commands.candidates.replay", replay)
     return seen
@@ -83,6 +87,41 @@ class TestBacktestCommand:
         assert summary["coverage"]["events"] == 10
         assert summary["hash_status"] == HashStatus.MATCH
         assert summary["start"] == "2025-08-01"
+
+    def test_started_sibling_raises_k_and_is_shown(
+        self, registry: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        fake_replay(monkeypatch)
+        write(registry, {**MECHANICAL, "name": "sibling", "start_date": "2026-01-01"})
+        out = tmp_path / "result.json"
+
+        result = RUNNER.invoke(
+            app,
+            ["candidates", "backtest", "back-longest", "--from", "2025-08-01", "--to", "2025-12-31"]
+            + ["--json", str(out)],
+        )
+
+        assert result.exit_code == 0, result.stdout
+        assert "k=2" in result.stdout
+        assert json.loads(out.read_text())["summary"]["family_versions"] == 2
+
+    def test_unstarted_registered_candidate_counts_itself_once(
+        self, registry: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_replay(monkeypatch)
+        result = RUNNER.invoke(
+            app,
+            [
+                "candidates",
+                "backtest",
+                "back-longest",
+                "--from",
+                "2025-08-01",
+                "--to",
+                "2025-12-31",
+            ],
+        )
+        assert "k=1" in result.stdout
 
     def test_draft_path_without_hash_is_reported(
         self, registry: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -187,6 +226,7 @@ class TestBacktestVerdictWording:
             date(2025, 9, 1),
             [],
             cov,
+            1,
             NOW,
             N_BOOT,
             0,

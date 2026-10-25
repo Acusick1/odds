@@ -9,17 +9,17 @@ reported beside it.
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 
 import numpy as np
 from odds_core.betfair_close import LIVE_CLOSE_WINDOW, event_close
-from odds_core.candidates import Candidate, CandidateStatus
+from odds_core.candidates import Candidate, CandidateStatus, MechanicalCandidate
 from odds_core.market_prices import THREE_WAY_MARKET, Outcome
 from odds_core.models import Event, OddsSnapshot
-from odds_core.paper_trade_models import PaperTrade, TradeResult
+from odds_core.paper_trade_models import CandidateDecision, PaperTrade, TradeResult
 from odds_core.snapshot_sources import FdukTimeBasis, SnapshotSource
 from sqlalchemy import Select, and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,9 +28,11 @@ from odds_analytics.retail_ev_metrics import event_clustered_ratio
 
 CHECKPOINT_SIZE = 100
 KILL_AT_BETS = 500
-PROMOTE_LEVEL = 0.99
+# The family-wise false-promote rate; each version's promote level is 1 - this / family size.
+PROMOTE_ERROR = 0.01
 KILL_LEVEL = 0.95
-DEFAULT_BOOTSTRAP_SAMPLES = 2000
+# A family's promote level reaches 99.9%, whose tail is a few resamples at 2000.
+DEFAULT_BOOTSTRAP_SAMPLES = 10_000
 BOOTSTRAP_SEED = 0
 # The FDUK closing price can arrive days after the match, so a missing close is final only later.
 CLOSE_GRACE = timedelta(days=7)
@@ -73,7 +75,8 @@ class Checkpoint:
     n: int
     mean_ev: float
     ci95: tuple[float, float]
-    ci99: tuple[float, float]
+    promote_level: float
+    promote_ci: tuple[float, float]
 
 
 @dataclass(frozen=True)
@@ -91,6 +94,7 @@ class CandidateSummary:
     pnl: float
     checkpoint: Checkpoint | None
     verdict: Verdict
+    family_versions: int
 
     @property
     def roi(self) -> float:
@@ -112,14 +116,52 @@ def selection_close_probability(
     return close.fair[Outcome(selection)]
 
 
-def checkpoint_at(scored: Sequence[ScoredBet], n: int, n_boot: int, seed: int) -> Checkpoint:
-    """Score the first ``n`` of ``scored``, which are trades with a close in placement order."""
+def promote_level(family_versions: int) -> float:
+    """Confidence of the promote interval: the Bonferroni level for a family of that many versions."""
+    return 1 - PROMOTE_ERROR / family_versions
+
+
+def family_versions(
+    rule: str,
+    sport: str,
+    registry: Sequence[Candidate],
+    decided: Collection[tuple[str, int]],
+    today: date,
+    draft: tuple[str, int] | None = None,
+) -> int:
+    """Versions in the (rule, sport) family that have started, killed ones included.
+
+    The registry holds each candidate's current version, counted once its start date has
+    passed. Earlier versions are counted from ``decided``, the (name, version) pairs that
+    have a recorded decision, for the names whose registry entry is in the family. ``draft``
+    is an unregistered version being backtested, which counts as one more. A family with
+    no started version has size 1, the base bar.
+    """
+    members = {
+        c.name
+        for c in registry
+        if isinstance(c, MechanicalCandidate) and c.rule == rule and c.sport == sport
+    }
+    versions = {
+        (c.name, c.version) for c in registry if c.name in members and c.start_date <= today
+    }
+    versions |= {key for key in decided if key[0] in members}
+    if draft is not None:
+        versions.add(draft)
+    return max(1, len(versions))
+
+
+def checkpoint_at(
+    scored: Sequence[ScoredBet], n: int, level: float, n_boot: int, seed: int
+) -> Checkpoint:
+    """Score the first ``n`` of ``scored``, which are trades with a close in placement order,
+    with a promote interval at ``level``."""
     head = scored[:n]
     estimate = event_clustered_ratio(
         np.array([t.event_id for t in head]),
         np.array([t.stake * t.ev for t in head]),  # type: ignore[operator]
         np.array([t.stake for t in head]),
-        (KILL_LEVEL, PROMOTE_LEVEL),
+        (KILL_LEVEL, level),
         n_boot,
         seed,
     )
@@ -127,11 +169,14 @@ def checkpoint_at(scored: Sequence[ScoredBet], n: int, n_boot: int, seed: int) -
         n=n,
         mean_ev=estimate.point,
         ci95=estimate.intervals[KILL_LEVEL],
-        ci99=estimate.intervals[PROMOTE_LEVEL],
+        promote_level=level,
+        promote_ci=estimate.intervals[level],
     )
 
 
-def judge(scored: Sequence[ScoredBet], n_boot: int, seed: int) -> tuple[Verdict, Checkpoint | None]:
+def judge(
+    scored: Sequence[ScoredBet], level: float, n_boot: int, seed: int
+) -> tuple[Verdict, Checkpoint | None]:
     """The first promote or kill at checkpoints 100, 200, ... 500, and the checkpoint it fired at.
 
     A verdict stands once reached, so later bets cannot reverse it. Without one, the verdict
@@ -139,8 +184,8 @@ def judge(scored: Sequence[ScoredBet], n_boot: int, seed: int) -> tuple[Verdict,
     """
     checkpoint: Checkpoint | None = None
     for n in range(CHECKPOINT_SIZE, min(len(scored), KILL_AT_BETS) + 1, CHECKPOINT_SIZE):
-        checkpoint = checkpoint_at(scored, n, n_boot, seed)
-        if checkpoint.ci99[0] > 0:
+        checkpoint = checkpoint_at(scored, n, level, n_boot, seed)
+        if checkpoint.promote_ci[0] > 0:
             return Verdict.PROMOTE, checkpoint
         if checkpoint.ci95[1] <= 0 or n >= KILL_AT_BETS:
             return Verdict.KILL, checkpoint
@@ -173,12 +218,16 @@ def summarize_candidate(
     status: CandidateStatus | None,
     trades: Sequence[ScoredBet],
     now: datetime,
+    family_versions: int,
     n_boot: int = DEFAULT_BOOTSTRAP_SAMPLES,
     seed: int = BOOTSTRAP_SEED,
 ) -> CandidateSummary:
-    """Summarise one candidate version's non-void trades, which must be in placement order."""
+    """Summarise one candidate version's non-void trades, which must be in placement order.
+
+    The promote bar is at ``promote_level(family_versions)``.
+    """
     with_close, prefix_length = scoreable_prefix(trades, now)
-    verdict, checkpoint = judge(with_close, n_boot, seed)
+    verdict, checkpoint = judge(with_close, promote_level(family_versions), n_boot, seed)
     settled = [t for t in trades if t.pnl is not None]
     return CandidateSummary(
         name=name,
@@ -192,6 +241,7 @@ def summarize_candidate(
         pnl=sum(t.pnl for t in settled if t.pnl is not None),
         checkpoint=checkpoint,
         verdict=verdict,
+        family_versions=family_versions,
     )
 
 
@@ -199,12 +249,16 @@ def summarize_candidates(
     trades: Sequence[ScoredBet],
     registry: Sequence[Candidate],
     now: datetime,
+    decided: Collection[tuple[str, int]] = (),
     n_boot: int = DEFAULT_BOOTSTRAP_SAMPLES,
     seed: int = BOOTSTRAP_SEED,
 ) -> list[CandidateSummary]:
     """One summary per (candidate, version) with trades, plus each registered candidate's version.
 
     ``trades`` must be in placement order. A version other than the registry's has no status.
+    Every version of a name takes the family size of the registry's entry for that name; a name
+    absent from the registry, and an agent, has a family of one. ``decided`` is as in
+    ``family_versions``.
     """
     by_key: dict[tuple[str, int], list[ScoredBet]] = defaultdict(list)
     for trade in trades:
@@ -212,9 +266,24 @@ def summarize_candidates(
     status = {(c.name, c.version): c.status for c in registry}
     for key in status:
         by_key.setdefault(key, [])
+    current = {c.name: c for c in registry}
+
+    def family_size(name: str) -> int:
+        entry = current.get(name)
+        if not isinstance(entry, MechanicalCandidate):
+            return 1
+        return family_versions(entry.rule, entry.sport, registry, decided, now.date())
+
     return [
         summarize_candidate(
-            name, version, status.get((name, version)), by_key[(name, version)], now, n_boot, seed
+            name,
+            version,
+            status.get((name, version)),
+            by_key[(name, version)],
+            now,
+            family_size(name),
+            n_boot,
+            seed,
         )
         for name, version in sorted(by_key)
     ]
@@ -278,6 +347,14 @@ async def load_scored_trades(session: AsyncSession) -> list[ScoredBet]:
     return scored
 
 
+async def load_decided_versions(session: AsyncSession) -> set[tuple[str, int]]:
+    """The (name, version) of every mechanical candidate version with a recorded decision."""
+    rows = await session.execute(
+        select(CandidateDecision.candidate_name, CandidateDecision.candidate_version).distinct()
+    )
+    return {(name, version) for name, version in rows.all()}
+
+
 async def candidate_report(
     session: AsyncSession,
     registry: Sequence[Candidate],
@@ -286,5 +363,10 @@ async def candidate_report(
     now: datetime | None = None,
 ) -> list[CandidateSummary]:
     return summarize_candidates(
-        await load_scored_trades(session), registry, now or datetime.now(UTC), n_boot, seed
+        await load_scored_trades(session),
+        registry,
+        now or datetime.now(UTC),
+        await load_decided_versions(session),
+        n_boot,
+        seed,
     )

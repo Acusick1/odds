@@ -3,7 +3,7 @@
 import asyncio
 import dataclasses
 import json
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -15,6 +15,8 @@ from odds_analytics.candidate_report import (
     Checkpoint,
     Verdict,
     candidate_report,
+    family_versions,
+    load_decided_versions,
 )
 from odds_core.candidates import (
     Candidate,
@@ -107,6 +109,10 @@ def _interval(low_high: tuple[float, float]) -> str:
     return f"[{low_high[0]:+.3f}, {low_high[1]:+.3f}]"
 
 
+def _promote_interval(cp: Checkpoint) -> str:
+    return f"{cp.promote_level:.2%} {_interval(cp.promote_ci)}"
+
+
 @app.command("report")
 def report() -> None:
     """Settled results and checkpoint verdict per candidate and version."""
@@ -138,7 +144,8 @@ def _report_table(summaries: list[CandidateSummary]) -> Table:
     table.add_column("Checkpoint n", justify="right")
     table.add_column("Mean EV", justify="right")
     table.add_column("95% CI", justify="right")
-    table.add_column("99% CI", justify="right")
+    table.add_column("Promote CI", justify="right")
+    table.add_column("k", justify="right")
     table.add_column("Verdict")
     for s in summaries:
         cp = s.checkpoint
@@ -157,7 +164,8 @@ def _report_table(summaries: list[CandidateSummary]) -> Table:
             str(cp.n) if cp else "-",
             f"{cp.mean_ev:+.4f}" if cp else "-",
             _interval(cp.ci95) if cp else "-",
-            _interval(cp.ci99) if cp else "-",
+            _promote_interval(cp) if cp else "-",
+            str(s.family_versions),
             f"[{style}]{s.verdict}[/{style}]",
         )
     return table
@@ -200,7 +208,7 @@ def _checkpoint_row(table: Table, label: str, cp: Checkpoint | None) -> None:
     if cp is None:
         table.add_row(label, "-", "-", "-", "-")
         return
-    table.add_row(label, str(cp.n), f"{cp.mean_ev:+.4f}", _interval(cp.ci95), _interval(cp.ci99))
+    table.add_row(label, str(cp.n), f"{cp.mean_ev:+.4f}", _interval(cp.ci95), _promote_interval(cp))
 
 
 def _backtest_tables(result: BacktestResult) -> list[Table]:
@@ -231,7 +239,7 @@ def _backtest_tables(result: BacktestResult) -> list[Table]:
     verdict.add_column("n", justify="right")
     verdict.add_column("Mean EV", justify="right")
     verdict.add_column("95% CI", justify="right")
-    verdict.add_column("99% CI", justify="right")
+    verdict.add_column("Promote CI", justify="right")
     _checkpoint_row(verdict, "Checkpoint", summary.checkpoint)
     _checkpoint_row(verdict, "All bets with close", result.overall)
     style = _VERDICT_STYLE[summary.verdict]
@@ -239,7 +247,7 @@ def _backtest_tables(result: BacktestResult) -> list[Table]:
     if summary.verdict is Verdict.PROMOTE:
         label += " (development data, not a promotion)"
     verdict.caption = (
-        f"[{style}]{label}[/{style}]  staked {summary.total_stake:.2f}  "
+        f"[{style}]{label}[/{style}]  family versions k={summary.family_versions}  staked {summary.total_stake:.2f}  "
         f"P&L {summary.pnl:+.2f}  ROI {summary.roi:+.1%}"
     )
     return [coverage, verdict]
@@ -259,13 +267,22 @@ def backtest(
     Development data can kill an idea, never promote one.
     """
     resolved = _resolve(candidate)
+    registry = _load_registry()
     first, last = _parse_day(start), _parse_day(end)
     if last < first:
         raise _fail("--to is before --from")
 
     async def run() -> BacktestResult:
         async with async_session_maker() as session:
-            return await replay(session, resolved, first, last)
+            k = family_versions(
+                resolved.rule,
+                resolved.sport,
+                registry,
+                await load_decided_versions(session),
+                datetime.now(UTC).date(),
+                draft=(resolved.name, resolved.version),
+            )
+            return await replay(session, resolved, first, last, k)
 
     try:
         result = asyncio.run(run())

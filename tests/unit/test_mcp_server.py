@@ -632,6 +632,7 @@ class TestGetPortfolioCandidates:
                 "pnl": 0,
                 "roi": 0.0,
                 "checkpoint": None,
+                "family_versions": 1,
                 "verdict": "not_yet",
             }
         ]
