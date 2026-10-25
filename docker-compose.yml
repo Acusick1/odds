@@ -2,6 +2,7 @@ services:
   postgres:
     image: postgres:15
     restart: unless-stopped
+    shm_size: 1g
     environment:
       POSTGRES_DB: odds
       POSTGRES_USER: postgres

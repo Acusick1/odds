@@ -5,6 +5,7 @@ description: Install the scheduler's systemd unit on the production host, option
 sources:
   - odds-scheduler.service
   - deploy.sh
+  - docker-compose.yml
 status: stable
 ---
 
@@ -56,6 +57,17 @@ Run `./deploy.sh` from the repo root on the production host; it is the only path
 - Dry-run makes self-scheduling a no-op, so the live schedule store is untouched. It does not stop the jobs' own work: smoke runs each job's real `main()`. It skips `fetch-odds` and `fetch-scores` unless passed `--include-paid-api`, so a deploy spends no Odds API quota ([CLI](local-scheduler.md#cli)).
 - `--ff-only` fails on a diverged checkout, so discard or commit local edits on the host first.
 - A pending migration always runs with the scheduler stopped, so the old scheduler never reads a schema it does not know. The hand-run agent's MCP server is not managed by the script and reads the database directly: do not deploy during an agent session ([Create and apply a database migration](../foundations/howto-database-migration.md)).
+
+## Apply a compose change to the production database
+
+`deploy.sh` never touches the `postgres` container, so a change to `docker-compose.yml` (for example `shm_size`) takes effect only when the container is recreated by hand on the production host. This restarts the database, so stop the scheduler first.
+
+1. **Stop the scheduler.** `sudo systemctl stop odds-scheduler`; and do not run this during an agent session, whose MCP server reads the database directly.
+2. **Recreate Postgres.** `docker compose up -d postgres` from the repo root.
+   - It recreates the container from the new definition; the `postgres_data` volume persists, so no data is lost.
+3. **Wait for healthy.** `docker compose ps postgres` shows `healthy` (the `pg_isready` healthcheck).
+   - Check the change took effect, e.g. `docker inspect <container> --format '{{.HostConfig.ShmSize}}'` prints `1073741824` after `shm_size: 1g`.
+4. **Start the scheduler.** `sudo systemctl start odds-scheduler`, then `odds scheduler list-jobs`.
 
 ## Related
 
