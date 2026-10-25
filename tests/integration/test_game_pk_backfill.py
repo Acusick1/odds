@@ -48,6 +48,7 @@ def _game(
     home: str = CUBS,
     away: str = CARDINALS,
     state: MlbGameState = MlbGameState.FINAL,
+    tbd: bool = False,
     score: tuple[int, int] | None = None,
 ) -> MlbGameResult:
     return MlbGameResult(
@@ -59,6 +60,7 @@ def _game(
         home_score=score[0] if score else None,
         away_score=score[1] if score else None,
         game_number=game_number,
+        start_time_tbd=tbd,
         official_date=start.date(),
         state=state,
         schedule_date=start.date(),
@@ -446,6 +448,79 @@ class TestMergeRefusesClashingDecisions:
         assert (await session.get(Event, "op_live_a")).mlb_game_pk is None
         assert await _count(session, CandidateDecision, "op_live_b") == 1
         assert await _count(session, PaperTrade, "op_live_b") == 1
+
+
+class TestTbdReplay:
+    """A rainout replayed as a doubleheader's TBD game 2 (gamePk 823637, 2026-04-25 → 04-26)."""
+
+    POSTPONED_AT = datetime(2026, 4, 25, 20, 10, tzinfo=UTC)
+    GAME_ONE_AT = datetime(2026, 4, 26, 17, 40, tzinfo=UTC)
+    PLACEHOLDER_AT = datetime(2026, 4, 26, 17, 46, tzinfo=UTC)
+    LISTED_AT = datetime(2026, 4, 26, 21, 11, tzinfo=UTC)
+
+    def _schedule(self) -> list[MlbGameResult]:
+        return [
+            _game(823637, self.POSTPONED_AT, state=MlbGameState.POSTPONED),
+            _game(823700, self.GAME_ONE_AT, 1),
+            _game(823637, self.PLACEHOLDER_AT, 2, tbd=True),
+        ]
+
+    async def test_event_on_the_played_date_is_kept_over_the_postponed_slot(
+        self, pglite_async_session: AsyncSession
+    ) -> None:
+        session = pglite_async_session
+        session.add_all(
+            [
+                _event("op_live_2026-04-25T2011", self.POSTPONED_AT),
+                _event("op_live_2026-04-26T1740", self.GAME_ONE_AT, 823700),
+                _event("op_live_2026-04-26T2111", self.LISTED_AT),
+            ]
+        )
+        await session.flush()
+        session.add_all(
+            [
+                _snapshot("op_live_2026-04-26T2111", self.LISTED_AT - timedelta(hours=1), 1.8),
+                _snapshot("op_live_2026-04-25T2011", self.POSTPONED_AT - timedelta(hours=1), 1.9),
+            ]
+        )
+        await session.commit()
+
+        plan, [outcome] = await _plan_and_apply(session, FakeFetcher(self._schedule()))
+
+        assert (outcome.game_pk, outcome.kept_id, outcome.merged_ids) == (
+            823637,
+            "op_live_2026-04-26T2111",
+            ("op_live_2026-04-25T2011",),
+        )
+        assert (outcome.moved_from, outcome.start_tbd) == (None, True)
+        kept = await session.get(Event, "op_live_2026-04-26T2111")
+        assert (kept.mlb_game_pk, kept.commence_time) == (823637, self.LISTED_AT)
+        hours = (
+            (
+                await session.execute(
+                    select(OddsSnapshot.hours_until_commence).order_by(OddsSnapshot.snapshot_time)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert hours == [pytest.approx(26.0 + 1 / 60), pytest.approx(1.0)]
+
+    async def test_lone_postponed_slot_event_moves_to_the_placeholder_on_the_played_date(
+        self, pglite_async_session: AsyncSession
+    ) -> None:
+        session = pglite_async_session
+        session.add(_event("op_live_2026-04-25T2011", self.POSTPONED_AT))
+        await session.commit()
+
+        plan, [outcome] = await _plan_and_apply(session, FakeFetcher(self._schedule()))
+
+        assert (outcome.kept_id, outcome.moved_from, outcome.moved_to, outcome.start_tbd) == (
+            "op_live_2026-04-25T2011",
+            self.POSTPONED_AT,
+            self.PLACEHOLDER_AT,
+            True,
+        )
 
 
 class TestScoresAndSettlement:

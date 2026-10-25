@@ -212,6 +212,8 @@ def _outcome_line(tag: str, outcome: AssignmentOutcome) -> str:
         line += f" moved_from={_utc(outcome.moved_from)}→{_utc(outcome.moved_to)}"
     else:
         line += " moved=no"
+    if outcome.start_tbd:
+        line += " start=tbd"
     line += f" score={outcome.score.value}"
     if outcome.score_detail:
         line += f":{outcome.score_detail}"

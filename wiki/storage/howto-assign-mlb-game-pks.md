@@ -27,7 +27,7 @@ MLB events stored before the live jobs keyed events to the MLB Stats API `gamePk
 2. **Read the summary, then the lines.** Each line starts with its kind, so `grep '^MERGE '` lists the merges.
    - `MERGE_READ_ONLY` merges move paper trades, match briefs or candidate decisions to the kept event. Check that each kept event is the game the trade or brief was about.
    - `REFUSED reason=paper_trade_clash` games would delete a candidate decision or paper trade, so they are left as they are; settle them in step 5.
-   - `moved_from=` shows the kept event's old and new start. A postponed slot can move by weeks, and all its snapshots are re-tiered against the new start.
+   - `moved_from=` shows the kept event's old and new start. A postponed slot can move by weeks, and all its snapshots are re-tiered against the new start. `start=tbd` marks a game replayed with a TBD start: a kept event on the played date keeps its listed time, and a postponed slot's event moves to MLB's placeholder start, a few minutes after game 1, on the played date.
    - `score=` and `settled=` show where the kept event's result comes from. `settled=mlb` settles it from MLB's Final score; any `conflict` is left as stored for `repair-scores` (step 6).
    - `same_time_pairs_conflicting` counts snapshot pairs taken at one time with different prices, which are two games' prices on one event (#535), on merges and singles alike. They stay in place.
    - `UNRESOLVED` events are left as they are; settle them in step 5.
