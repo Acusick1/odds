@@ -12,7 +12,7 @@ from bisect import bisect_right
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
 import numpy as np
@@ -134,29 +134,21 @@ def family_starts(
     draft: tuple[str, int] | None = None,
     draft_start: datetime | None = None,
 ) -> list[datetime]:
-    """When each version in the (rule, sport) family started, sorted; killed ones included.
+    """When each version in the (rule, sport) family took its first look, sorted.
 
-    A version starts at its first recorded decision in ``decision_starts``, for names whose
-    registry entry is in the family: a ``start_date`` can be back-dated, a decision cannot. A
-    registry entry, which holds its candidate's current version, without a decision starts at
-    midnight UTC of its ``start_date``. An earlier version has no registry entry, so without a
-    decision it never started. An unregistered ``draft`` starts at ``draft_start``.
+    A version counts from its first recorded decision in ``decision_starts``, for names whose
+    registry entry is in the family: a version with no decision has taken no look, and a
+    ``start_date`` can be back-dated where a decision cannot. An unregistered ``draft`` counts
+    from ``draft_start``, unless it already has a decision.
     """
     members = {
         c.name
         for c in registry
         if isinstance(c, MechanicalCandidate) and c.rule == rule and c.sport == sport
     }
-    starts = {
-        (c.name, c.version): datetime.combine(c.start_date, time.min, tzinfo=UTC)
-        for c in registry
-        if c.name in members
-    }
-    for key, first in decision_starts.items():
-        if key[0] in members:
-            starts[key] = first
+    starts = {key: first for key, first in decision_starts.items() if key[0] in members}
     if draft is not None and draft_start is not None:
-        starts[draft] = draft_start
+        starts.setdefault(draft, draft_start)
     return sorted(starts.values())
 
 

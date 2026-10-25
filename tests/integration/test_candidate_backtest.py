@@ -252,7 +252,7 @@ class TestSharedScoring:
 
 
 class TestFamilySize:
-    async def test_report_starts_earlier_versions_at_their_first_decision(
+    async def test_report_counts_versions_from_their_first_decision(
         self, pglite_async_session
     ) -> None:
         session = pglite_async_session
@@ -278,9 +278,10 @@ class TestFamilySize:
         starts = await load_decision_starts(session)
         assert starts == {("gap", 1): KICKOFF, ("gap", 2): KICKOFF + timedelta(days=1)}
 
+        # The registered gap v3 and the sibling have not decided, so only v1 and v2 count.
         registry = [candidate(version=3), candidate(name="sibling")]
         summaries = await candidate_report(session, registry, N_BOOT, now=NOW)
         assert {(s.name, s.version): s.family_versions for s in summaries} == {
-            ("gap", 3): 4,
-            ("sibling", 1): 4,
+            ("gap", 3): 2,
+            ("sibling", 1): 2,
         }

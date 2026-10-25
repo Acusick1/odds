@@ -88,11 +88,23 @@ class TestBacktestCommand:
         assert summary["hash_status"] == HashStatus.MATCH
         assert summary["start"] == "2025-08-01"
 
-    def test_started_sibling_raises_k_and_is_shown(
+    def backtest(self, name: str = "back-longest"):
+        return RUNNER.invoke(
+            app, ["candidates", "backtest", name, "--from", "2025-08-01", "--to", "2025-12-31"]
+        )
+
+    def decisions(self, monkeypatch: pytest.MonkeyPatch, *keys: tuple[str, int]) -> None:
+        async def recorded(_session: Any) -> dict[tuple[str, int], datetime]:
+            return dict.fromkeys(keys, NOW)
+
+        monkeypatch.setattr("odds_cli.commands.candidates.load_decision_starts", recorded)
+
+    def test_sibling_with_a_decision_raises_k_and_is_shown(
         self, registry: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         fake_replay(monkeypatch)
-        write(registry, {**MECHANICAL, "name": "sibling", "start_date": "2026-01-01"})
+        write(registry, {**MECHANICAL, "name": "sibling"})
+        self.decisions(monkeypatch, ("sibling", 1))
         out = tmp_path / "result.json"
 
         result = RUNNER.invoke(
@@ -105,23 +117,19 @@ class TestBacktestCommand:
         assert "k=2" in result.stdout
         assert json.loads(out.read_text())["summary"]["family_versions"] == 2
 
-    def test_unstarted_registered_candidate_counts_itself_once(
+    def test_registered_sibling_without_a_decision_does_not_count(
         self, registry: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         fake_replay(monkeypatch)
-        result = RUNNER.invoke(
-            app,
-            [
-                "candidates",
-                "backtest",
-                "back-longest",
-                "--from",
-                "2025-08-01",
-                "--to",
-                "2025-12-31",
-            ],
-        )
-        assert "k=1" in result.stdout
+        write(registry, {**MECHANICAL, "name": "sibling"})
+        assert "k=1" in self.backtest().stdout
+
+    def test_registered_candidate_with_decisions_is_not_counted_twice(
+        self, registry: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_replay(monkeypatch)
+        self.decisions(monkeypatch, ("back-longest", 1))
+        assert "k=1" in self.backtest().stdout
 
     def test_draft_backtest_survives_a_rule_hash_mismatch_in_the_registry(
         self, registry: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

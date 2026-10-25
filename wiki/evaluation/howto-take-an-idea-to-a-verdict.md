@@ -35,10 +35,10 @@ What a candidate is and when it is promoted or killed is on [Goal and strategy](
      ```
 
    - Run `uv run odds candidates backtest <path> --from 2024-08-01 --to 2026-07-31`, with `--json <file>` to keep the result ([replay backtest](candidate-backtest.md)).
-   - Read the coverage first: events with an exchange price and a retail quote at the decision time, and bets with a close. Then read k, the number of versions in the rule's family that count against this draft, and the checkpoint and overall estimates, whose promote interval widens as k grows. A draft counts as one more version.
+   - Read the coverage first: events with an exchange price and a retail quote at the decision time, and bets with a close. Then read k, the family's versions with a recorded decision plus this draft, and the checkpoint and overall estimates, whose promote interval widens as k grows.
    - Development data can kill an idea and never promotes one: the output says `meets_promote_bar`, not `promote`, and the range has been examined many times.
 3. **Register it** with a pull request that adds `candidates/<name>.yaml`.
-   - Take the hash from `uv run odds candidates rule-hash <rule>`, and set `version: 1`, the issue, a `start_date` of today or later and `status: active` ([file format](candidate-registry.md#file-format)).
+   - Take the hash from `uv run odds candidates rule-hash <rule>`, and set `version: 1`, the issue, a `start_date` and `status: active` ([file format](candidate-registry.md#file-format)).
    - `uv run odds candidates list` validates the file, and the `candidate-versions` hook checks that a later change carries a new version ([version check](candidate-registry.md#version-check)). A rule's code change reaches the file as a new hash, so it needs a new version.
 4. **Deploy.** The [run-candidates job](run-candidates-job.md) places the candidate's paper trades from its start date and records every decision. Nothing else is needed.
 5. **Read the report on the production host.** `odds copy from-prod` copies no trades or decisions, so a local database cannot show them ([report](candidate-registry.md#odds-candidates-report)).
@@ -49,5 +49,5 @@ What a candidate is and when it is promoted or killed is on [Goal and strategy](
    - A data difference (the database now yields other bets than the recorded inputs did) is informational: the backtest, which loads from the database, would not reproduce that decision.
    - "No decisions to check" means the candidate has not decided yet.
 7. **Promote or kill** by changing the status in a pull request, which needs no version bump.
-   - Promote when the report says `promote` (each checkpoint is judged at the k of its nth bet, the started versions of the rule's family, so a later variant never reverses it), then the stake-capacity gate before real money (not yet defined).
+   - Promote when the report says `promote` (each checkpoint is judged at the k of its nth bet, the family's versions that have decided, so a later variant never reverses it), then the stake-capacity gate before real money (not yet defined).
    - Kill when it says `kill`, or by choice. Record the result on the idea issue and close it. Never delete the file.

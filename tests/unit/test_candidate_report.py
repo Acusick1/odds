@@ -299,42 +299,39 @@ class TestPromoteLevel:
 
 
 class TestFamilyStarts:
-    def starts(self, registry, decisions=None, draft=None, draft_start=None, sport="soccer_epl"):
-        return family_starts("exchange_gap", sport, registry, decisions or {}, draft, draft_start)
+    def starts(self, registry, decisions=None, draft=None, draft_start=None):
+        return family_starts(
+            "exchange_gap", "soccer_epl", registry, decisions or {}, draft, draft_start
+        )
 
-    def test_registered_version_starts_at_its_start_date(self) -> None:
-        assert self.starts([mechanical("a", start="2026-05-03")]) == [at(3)]
+    def test_a_version_counts_from_its_first_decision(self) -> None:
+        registry = [mechanical("a", version=3), mechanical("b")]
+        decisions = {("a", 1): at(2), ("a", 2): at(9), ("a", 3): at(21), ("b", 1): at(5)}
+        assert self.starts(registry, decisions) == [at(2), at(5), at(9), at(21)]
 
-    def test_killed_and_inactive_siblings_count(self) -> None:
+    def test_registered_versions_without_a_decision_do_not_count(self) -> None:
+        registry = [mechanical("a"), mechanical("b", start="2026-01-01")]
+        assert self.starts(registry, {("a", 1): at(4)}) == [at(4)]
+
+    def test_killed_siblings_count(self) -> None:
         registry = [mechanical("a"), mechanical("b", status="killed")]
-        assert len(self.starts(registry)) == 2
+        assert len(self.starts(registry, {("a", 1): at(1), ("b", 1): at(2)})) == 2
 
-    def test_other_rule_or_sport_is_another_family(self) -> None:
+    def test_other_rule_or_sport_or_unregistered_name_is_another_family(self) -> None:
         registry = [
             mechanical("a"),
             mechanical("b", rule="polymarket_gap"),
             mechanical("c", sport="baseball_mlb"),
         ]
-        assert len(self.starts(registry)) == 1
+        decisions = {(name, 1): at(1) for name in ("a", "b", "c", "ghost")}
+        assert self.starts(registry, decisions) == [at(1)]
 
-    def test_earlier_versions_start_at_their_first_decision(self) -> None:
-        registry = [mechanical("a", version=3, start="2026-05-20"), mechanical("b")]
-        decisions = {("a", 1): at(2), ("a", 2): at(9), ("a", 3): at(21), ("ghost", 1): at(1)}
-        assert self.starts(registry, decisions) == [
-            datetime(2026, 1, 1, tzinfo=UTC),
-            at(2),
-            at(9),
-            at(21),
-        ]
-
-    def test_a_recorded_decision_overrides_a_back_dated_start_date(self) -> None:
-        registry = [mechanical("a", start="2026-05-01")]
-        assert self.starts(registry, {("a", 1): at(20)}) == [at(20)]
-
-    def test_draft_starts_at_the_given_time_and_is_counted_once(self) -> None:
-        registry = [mechanical("a", start="2026-05-03")]
-        assert self.starts(registry, draft=("new", 1), draft_start=at(30)) == [at(3), at(30)]
-        assert self.starts(registry, draft=("a", 1), draft_start=at(30)) == [at(30)]
+    def test_draft_counts_once_from_the_given_time(self) -> None:
+        registry = [mechanical("a")]
+        decisions = {("a", 1): at(3)}
+        assert self.starts(registry, decisions, ("new", 1), at(30)) == [at(3), at(30)]
+        assert self.starts(registry, decisions, ("a", 1), at(30)) == [at(3)]
+        assert self.starts(registry, {}, ("a", 1), at(30)) == [at(30)]
 
     def test_size_counts_the_versions_started_by_a_time_and_is_at_least_one(self) -> None:
         starts = [at(3), at(10)]
@@ -344,26 +341,26 @@ class TestFamilyStarts:
 
 
 class TestKAtEachCheckpoint:
-    def test_a_variant_starting_after_a_promote_leaves_it_standing(self) -> None:
-        # Trade i is placed i minutes after LONG_AGO, long before the variant starts.
-        registry = [
-            mechanical("a", start="2026-01-01"),
-            mechanical("b", start="2026-05-31"),
-        ]
-        summary = summarize_candidates(
-            [trade(i, 0.5, name="a") for i in range(100)], registry, NOW, n_boot=N_BOOT
-        )
-        by_name = {s.name: s for s in summary}
-        assert by_name["a"].verdict is Verdict.PROMOTE
-        assert by_name["a"].family_versions == 1
-        assert by_name["b"].family_versions == 2
+    registry = [mechanical("a"), mechanical("b")]
 
-    def test_a_variant_starting_before_the_checkpoint_raises_its_k(self) -> None:
-        late_registry = [mechanical("a", start="2026-01-01"), mechanical("b", start="2026-05-02")]
-        summaries = summarize_candidates(
-            [trade(i, 0.5, name="a") for i in range(100)], late_registry, NOW, n_boot=N_BOOT
-        )
-        a = next(s for s in summaries if s.name == "a")
+    def judged(self, decisions: dict):
+        sequence = [trade(i, 0.5, name="a") for i in range(100)]
+        summaries = summarize_candidates(sequence, self.registry, NOW, decisions, N_BOOT)
+        return {s.name: s for s in summaries}
+
+    def test_a_variant_deciding_after_a_promote_leaves_it_standing(self) -> None:
+        # Trade i is placed i minutes after LONG_AGO; b first decides a day later.
+        summaries = self.judged({("a", 1): LONG_AGO, ("b", 1): LONG_AGO + timedelta(days=1)})
+        assert summaries["a"].verdict is Verdict.PROMOTE
+        assert summaries["a"].family_versions == 1
+        assert summaries["b"].family_versions == 2
+
+    def test_a_registered_variant_without_a_decision_does_not_change_k(self) -> None:
+        summaries = self.judged({("a", 1): LONG_AGO})
+        assert summaries["a"].family_versions == summaries["b"].family_versions == 1
+
+    def test_a_variant_deciding_before_the_checkpoint_raises_its_k(self) -> None:
+        a = self.judged({("a", 1): LONG_AGO, ("b", 1): LONG_AGO})["a"]
         assert a.family_versions == 2
         assert a.checkpoint is not None and a.checkpoint.family_versions == 2
 
@@ -375,10 +372,10 @@ class TestKAtEachCheckpoint:
         assert verdict is Verdict.CONTINUE
         assert checkpoint is not None and checkpoint.family_versions == 3
 
-    def test_earlier_versions_count_from_their_first_decision(self) -> None:
+    def test_every_version_of_a_name_takes_the_family_of_its_registry_entry(self) -> None:
         registry = [mechanical("a", version=2)]
         sequence = [trade(i, name="a", version=1) for i in range(3)]
-        decisions = {("a", 1): LONG_AGO - timedelta(days=1), ("a", 2): at(31)}
+        decisions = {("a", 1): LONG_AGO, ("a", 2): at(31)}
         summaries = summarize_candidates(sequence, registry, NOW, decisions, N_BOOT)
         assert {(s.name, s.version): s.family_versions for s in summaries} == {
             ("a", 1): 2,
@@ -390,6 +387,7 @@ class TestKAtEachCheckpoint:
             [trade(0, name="ghost"), trade(1, name="cand")],
             [registry_entry("cand"), mechanical("a"), mechanical("b")],
             NOW,
+            {("a", 1): at(1), ("b", 1): at(1)},
             n_boot=N_BOOT,
         )
         assert {s.name: s.family_versions for s in summaries}["ghost"] == 1
