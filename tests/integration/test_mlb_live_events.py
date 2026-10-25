@@ -768,19 +768,20 @@ class TestRescheduledGame:
                 status=EventStatus.POSTPONED,
             )
         )
-        for minutes in (20, 5):
-            taken_at = postponed_slot - timedelta(minutes=minutes)
-            job_session.add(
-                OddsSnapshot(
-                    event_id="old_slot",
-                    snapshot_time=taken_at,
-                    raw_data={"bookmakers": []},
-                    bookmaker_count=0,
-                    hours_until_commence=minutes / 60,
-                    fetch_tier=FetchTier.CLOSING.value,
-                )
+        seeded = [
+            OddsSnapshot(
+                event_id="old_slot",
+                snapshot_time=postponed_slot - timedelta(minutes=minutes),
+                raw_data={"bookmakers": []},
+                bookmaker_count=0,
+                hours_until_commence=minutes / 60,
+                fetch_tier=FetchTier.CLOSING.value,
             )
+            for minutes in (20, 5)
+        ]
+        job_session.add_all(seeded)
         await job_session.commit()
+        seeded_ids = [snapshot.id for snapshot in seeded]
         mlb_schedule.schedule = [
             _game(813001, postponed_slot, YANKEES, RED_SOX, state=MlbGameState.POSTPONED),
             _game(813001, EVENING, YANKEES, RED_SOX),
@@ -792,7 +793,7 @@ class TestRescheduledGame:
             (
                 await job_session.execute(
                     select(OddsSnapshot)
-                    .where(OddsSnapshot.snapshot_time < postponed_slot)
+                    .where(OddsSnapshot.id.in_(seeded_ids))
                     .order_by(OddsSnapshot.snapshot_time)
                 )
             )
