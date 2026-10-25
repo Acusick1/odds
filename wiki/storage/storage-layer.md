@@ -28,9 +28,10 @@ status: stable
 | Module | Class | Notes |
 |---|---|---|
 | `odds_lambda.storage.writers` / `odds_lambda.storage.readers` | [`odds_lambda.storage.writers.OddsWriter`](odds-writer.md) / [`odds_lambda.storage.readers.OddsReader`](odds-reader.md) | Events (status and scores, live-twin merges, MLB `gamePk`s), snapshots, odds (stored as decimal prices), fetch logs, including their API quota, and data-quality logs |
-| `odds_lambda.storage.event_resolver` | functions | [Event resolver](event-resolver.md): finds or creates a listed game's event under an advisory lock and records its external ids; flushes |
+| `odds_lambda.storage.event_resolver` | functions | [Event resolver](event-resolver.md): finds or creates a listed game's event under an advisory lock taken in key order, and records its external ids; flushes |
 | `odds_lambda.storage.event_kickoff` | functions | [Kick-off authority](kickoff-authority.md): the one function that moves `commence_time`; flushes when it re-times snapshots |
 | `odds_lambda.storage.snapshot_store` | functions | [Storing a snapshot under its key](price-tables.md#storing-a-snapshot-under-its-key): inserts a snapshot and its prices, or keeps the stored one; flushes in a savepoint |
+| `odds_lambda.storage.data_quality` | `odds_lambda.storage.data_quality.record_issue` | Logs a warning and adds the matching `data_quality_logs` row, without flushing; used by the resolver, `odds_lambda.storage.snapshot_store` and the merger |
 | `odds_lambda.storage.validators` | `odds_lambda.storage.validators.OddsValidator` | [Odds validation](odds-validator.md) (zero-margin books skip the vig floor; prices are checked as decimals) |
 | `odds_lambda.storage.same_time_pairs` | functions | [Same-time pairs](odds-tables.md#same-time-pairs): finds them and, through `odds_lambda.storage.same_time_pairs.delete_same_time_pairs`, deletes snapshots and odds rows without committing |
 | `odds_lambda.storage.tier_validator` | `odds_lambda.storage.tier_validator.TierCoverageValidator` | [Coverage and completeness checks](coverage-checks.md) |

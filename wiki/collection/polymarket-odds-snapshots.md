@@ -79,7 +79,7 @@ No grid time after the earlier of the event's `commence_time` and Polymarket's s
 
 - It lists closed events from Gamma and pairs them with `FINAL` events of the sport at or after `--since` in the database `DATABASE_URL` points at.
 - It skips an event that already has a snapshot with `api_request_id` `polymarket_history` (`odds_lambda.polymarket_odds.HISTORY_REQUEST_ID`), so a rerun adds nothing, and commits per event, flushing rows in batches of `odds_lambda.polymarket_odds_backfill.INSERT_BATCH_SIZE`.
-- It writes only `odds_core.models.OddsSnapshot` rows, with `fetch_tier` and `hours_until_commence` and with `source`, `market` and `time_basis` NULL, no normalized `odds` or `prices` rows, like the other historical writers ([how odds are stored](../storage/odds-storage-model.md#the-normalized-half-is-not-universal)).
+- It writes only `odds_core.models.OddsSnapshot` rows, with `fetch_tier` and `hours_until_commence` and with every redesigned snapshot column (`source`, `market`, `time_basis` and the market metadata) NULL, no normalized `odds` or `prices` rows, like the other historical writers ([how odds are stored](../storage/odds-storage-model.md#the-normalized-half-is-not-universal)).
 - It prints the counts: finished events, paired, skipped, written, snapshots, dropped points by reason, and unpaired events and matches. `--dry-run` fetches and resamples but writes nothing.
 
 > [!WARNING]

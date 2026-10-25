@@ -21,7 +21,7 @@ status: stable
 
 # Event status lifecycle
 
-`odds_core.models.EventStatus` has six values: `scheduled`, `live`, `final`, `cancelled`, `postponed`, `unmatched`. Unmatched marks an MLB event with no game in MLB's schedule, and nothing sets it yet. New [events](../storage/events.md) default to SCHEDULED. Every transition but one goes through `odds_lambda.storage.writers.OddsWriter.update_event_status` (the FDUK loader sets FINAL on the event directly), which stamps `updated_at`, refuses FINAL without both scores, refuses a move that `odds_core.models.EventStatus.can_become` does not allow, and for FINAL sets `home_score`, `away_score` and `completed_at` ([odds-writer](../storage/odds-writer.md)). Five jobs, the FDUK loader and two commands write status. The jobs themselves are described on [results-jobs](results-jobs.md).
+`odds_core.models.EventStatus` has six values: `scheduled`, `live`, `final`, `cancelled`, `postponed`, `unmatched`. Unmatched marks an MLB event with no game in MLB's schedule; no code sets it. New [events](../storage/events.md) default to SCHEDULED. Every transition but one goes through `odds_lambda.storage.writers.OddsWriter.update_event_status` (the FDUK loader sets FINAL on the event directly), which stamps `updated_at`, refuses FINAL without both scores, refuses a move that `odds_core.models.EventStatus.can_become` does not allow, and for FINAL sets `home_score`, `away_score` and `completed_at` ([odds-writer](../storage/odds-writer.md)). Five jobs, the FDUK loader and two commands write status. The jobs themselves are described on [results-jobs](results-jobs.md).
 
 ## Allowed moves
 

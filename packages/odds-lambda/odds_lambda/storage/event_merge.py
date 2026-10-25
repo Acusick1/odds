@@ -7,12 +7,13 @@ from datetime import datetime, timedelta
 
 import structlog
 from odds_core.event_source import EventSource, canonical_event_id
-from odds_core.models import Event, OddsSnapshot
+from odds_core.models import Event, EventExternalId, HealthCheckAcknowledgement, OddsSnapshot
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from odds_core.time import ensure_utc
 from sqlalchemy import and_, delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from odds_lambda.storage.data_quality import record_issue
 from odds_lambda.tier_utils import calculate_hours_until_commence, calculate_tier_from_timestamps
 
 logger = structlog.get_logger()
@@ -257,6 +258,8 @@ class EventMerger:
             await self._rebase_snapshot_timing(duplicate, keep)
             for table, count in (await self._drop_clashing_decisions(duplicate, keep)).items():
                 rows_deleted[table] = rows_deleted.get(table, 0) + count
+            for table, count in (await self._drop_clashing_identity_rows(duplicate, keep)).items():
+                rows_deleted[table] = rows_deleted.get(table, 0) + count
             for table, count in (await self._repoint_event_references(duplicate, keep)).items():
                 rows_moved[table] = rows_moved.get(table, 0) + count
             self._carry_result(keep, duplicate)
@@ -324,6 +327,82 @@ class EventMerger:
         )
         deleted = {"candidate_decisions": len(clashing), "paper_trades": trades.rowcount}
         return {table: count for table, count in deleted.items() if count}
+
+    async def _drop_clashing_identity_rows(self, duplicate: Event, keep: Event) -> dict[str, int]:
+        """Delete the duplicate's external ids from sources the kept event has an id from, and
+        its acknowledgements of checks the kept event is acknowledged for, logging each.
+
+        An event holds one id per source and one acknowledgement per check, so the kept
+        event's rows win, as the resolver keeps the first id it recorded.
+        """
+        deleted: dict[str, int] = {}
+        kept_sources = set(
+            (
+                await self.session.execute(
+                    select(EventExternalId.source).where(
+                        EventExternalId.event_id == keep.surrogate_id
+                    )
+                )
+            ).scalars()
+        )
+        for row in (
+            await self.session.execute(
+                select(EventExternalId).where(EventExternalId.event_id == duplicate.surrogate_id)
+            )
+        ).scalars():
+            if row.source not in kept_sources:
+                continue
+            record_issue(
+                self.session,
+                keep.id,
+                "merge_dropped_external_id",
+                f"{row.source.value} id {row.external_id} of merged event {duplicate.id} dropped: "
+                f"the kept event holds a {row.source.value} id",
+                {
+                    "source": row.source.value,
+                    "external_id": row.external_id,
+                    "duplicate_id": duplicate.id,
+                },
+            )
+            await self.session.delete(row)
+            deleted["event_external_ids"] = deleted.get("event_external_ids", 0) + 1
+        kept_checks = set(
+            (
+                await self.session.execute(
+                    select(HealthCheckAcknowledgement.check_name).where(
+                        HealthCheckAcknowledgement.event_id == keep.surrogate_id
+                    )
+                )
+            ).scalars()
+        )
+        for ack in (
+            await self.session.execute(
+                select(HealthCheckAcknowledgement).where(
+                    HealthCheckAcknowledgement.event_id == duplicate.surrogate_id
+                )
+            )
+        ).scalars():
+            if ack.check_name not in kept_checks:
+                continue
+            record_issue(
+                self.session,
+                keep.id,
+                "merge_dropped_acknowledgement",
+                f"{ack.check_name.value} acknowledgement of merged event {duplicate.id} dropped: "
+                "the kept event has one",
+                {
+                    "check_name": ack.check_name.value,
+                    "reason": ack.reason,
+                    "duplicate_id": duplicate.id,
+                },
+            )
+            await self.session.delete(ack)
+            deleted["health_check_acknowledgements"] = (
+                deleted.get("health_check_acknowledgements", 0) + 1
+            )
+        if deleted:
+            await self.session.flush()
+        return deleted
 
     @staticmethod
     def _carry_result(keep: Event, duplicate: Event) -> None:

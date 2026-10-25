@@ -13,7 +13,7 @@ status: stable
 
 # Prices and snapshot payloads tables
 
-`prices` holds one row per price in a snapshot, and `snapshot_payloads` holds what a source returned. They sit beside the `odds` table and `odds_snapshots.raw_data` ([Odds snapshot and odds tables](odds-tables.md)), which every reader and writer still uses. No writer fills them yet. The snapshot columns they rely on (`source`, `market`, `time_basis` and the market metadata) are on [odds_snapshots](odds-tables.md#odds_snapshots).
+`prices` holds one row per price in a snapshot, and `snapshot_payloads` holds what a source returned. They sit beside the `odds` table and `odds_snapshots.raw_data` ([Odds snapshot and odds tables](odds-tables.md)), which every reader and writer uses. No writer fills them. The snapshot columns they rely on (`source`, `market`, `time_basis` and the market metadata) are on [odds_snapshots](odds-tables.md#odds_snapshots).
 
 ## prices
 
@@ -47,6 +47,7 @@ The closed sets are `StrEnum`s in `odds_core.vocabulary`, stored as their values
 | `odds_core.vocabulary.Source` | odds_api, oddsportal, betfair, football_data_uk, polymarket, mlb_stats_api, espn | `odds_snapshots.source` (only `odds_core.vocabulary.PRICE_SOURCES`), `event_external_ids.source` (only `odds_core.vocabulary.EXTERNAL_ID_SOURCES`) |
 | `odds_core.vocabulary.Market` | 1x2, h2h, spreads, totals | `odds_snapshots.market` |
 | `odds_core.vocabulary.TimeBasis` | observed, source_stamped, upper_bound, close | `odds_snapshots.time_basis` |
+| `odds_core.vocabulary.MarketStatus` | inactive, open, suspended, closed (Betfair's statuses, lower-cased) | `odds_snapshots.market_status` |
 | `odds_core.vocabulary.PriceOutcome` | home, draw, away, over, under | `prices.outcome` |
 | `odds_core.vocabulary.Side` | back, lay, mid, traded | `prices.side` |
 | `odds_core.vocabulary.HealthCheck` | missing_mlb_game_pk | `health_check_acknowledgements.check_name` |
@@ -59,9 +60,9 @@ The closed sets are `StrEnum`s in `odds_core.vocabulary`, stored as their values
 |---|---|---|
 | `inserted` | no snapshot holds the key | the snapshot and its prices are added |
 | `identical` | the stored snapshot has the same time basis, market metadata and set of prices | nothing is written |
-| `conflicting` | anything differs | nothing is written; `snapshot_key_conflict` is logged and an `odds_core.models.DataQualityLog` row (issue type `snapshot_key_conflict`) names the kept snapshot |
+| `conflicting` | anything differs | nothing is written; `odds_lambda.storage.data_quality.record_issue` logs `snapshot_key_conflict` and adds a `data_quality_logs` row naming the kept snapshot |
 
-Prices compare by value, so a float price equal to a stored decimal is the same price. The insert runs in a savepoint: when a concurrent writer stores the key first, the unique violation rolls back only this insert and the snapshot is compared with the stored one. It flushes and never commits.
+Prices compare by value (`odds_lambda.storage.snapshot_store.PriceRow`, `odds_lambda.storage.snapshot_store.SnapshotMarketState`), so a float price equal to a stored decimal is the same price. The insert runs in a savepoint: when a concurrent writer stores the key first, the unique violation rolls back only this insert and the snapshot is compared with the stored one. It flushes and never commits.
 
 ## Related
 

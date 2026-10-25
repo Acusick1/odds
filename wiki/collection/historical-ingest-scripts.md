@@ -21,7 +21,7 @@ status: stable
 
 Three scripts under `scripts/` load OddsPortal scrapes and football-data.co.uk (FDUK) CSVs for EPL as `odds_core.models.Event` plus `odds_core.models.OddsSnapshot` ([columns and constraints](../storage/odds-tables.md#odds_snapshots)) rows in the live `raw_data` format. This is the history that models train and are evaluated on ([data-sources](data-sources.md)). None is scheduled. The steps to run them are in [howto-load-historical-epl-odds](howto-load-historical-epl-odds.md).
 
-The scripts write `odds_core.models.Event` and `odds_core.models.OddsSnapshot` rows only, leaving the snapshots' `source`, `market` and `time_basis` NULL, and no `odds_core.models.Odds`, prices or external-id rows, so backtests and `odds_lambda.storage.readers.OddsReader.get_odds_at_time` skip these events (#435; [odds-tables](../storage/odds-tables.md)). Some OddsPortal history events hold two snapshots at one time with different prices; [same-time pairs](../storage/odds-tables.md#same-time-pairs) reports them and leaves them.
+The scripts write `odds_core.models.Event` and `odds_core.models.OddsSnapshot` rows only, leaving every redesigned snapshot column (`source`, `market`, `time_basis` and the market metadata) NULL, and no `odds_core.models.Odds`, prices or external-id rows, so backtests and `odds_lambda.storage.readers.OddsReader.get_odds_at_time` skip these events (#435; [odds-tables](../storage/odds-tables.md)). Some OddsPortal history events hold two snapshots at one time with different prices; [same-time pairs](../storage/odds-tables.md#same-time-pairs) reports them and leaves them.
 
 ## Inputs
 

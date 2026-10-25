@@ -8,17 +8,20 @@ import pytest
 from odds_core.models import DataQualityLog, Event, EventExternalId
 from odds_core.vocabulary import Source
 from odds_lambda.mlb_game_resolver import ResolutionRule, ResolvedGame
+from odds_lambda.storage import event_resolver
 from odds_lambda.storage.event_resolver import (
     EventIdTaken,
     ListedGame,
+    LockOrderError,
     Resolution,
     event_lock_key,
     resolve_event,
+    resolve_events,
 )
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.test_helpers import TWIN_KICKOFF
+from tests.test_helpers import TWIN_KICKOFF, make_epl_event
 
 MLB = "baseball_mlb"
 YANKEES, RED_SOX = "New York Yankees", "Boston Red Sox"
@@ -193,6 +196,76 @@ class TestResolveEvent:
         with pytest.raises(EventIdTaken):
             await resolve_event(pglite_async_session, listing)
 
+    @pytest.mark.asyncio
+    async def test_ties_go_to_the_oldest_event(self, pglite_async_session) -> None:
+        first = make_epl_event("zz_first", TWIN_KICKOFF - timedelta(minutes=30))
+        second = make_epl_event("aa_second", TWIN_KICKOFF + timedelta(minutes=30))
+        pglite_async_session.add(first)
+        await pglite_async_session.flush()
+        pglite_async_session.add(second)
+        await pglite_async_session.flush()
+
+        resolved = await resolve_event(pglite_async_session, epl_listing())
+
+        assert resolved.event.id == "zz_first"
+
+    @pytest.mark.asyncio
+    async def test_a_taken_suffixed_id_raises_and_leaves_the_transaction_usable(
+        self, pglite_async_session
+    ) -> None:
+        far = TWIN_KICKOFF + timedelta(days=30)
+        pglite_async_session.add_all(
+            [make_epl_event("op_live_ARS_CHE", far), make_epl_event("op_live_ARS_CHE_op-1", far)]
+        )
+        await pglite_async_session.flush()
+
+        with pytest.raises(EventIdTaken):
+            await resolve_event(pglite_async_session, epl_listing())
+
+        count = await pglite_async_session.execute(select(func.count()).select_from(Event))
+        assert count.scalar_one() == 2
+
+
+class TestLockOrder:
+    @staticmethod
+    def listing(home: str, away: str) -> ListedGame:
+        return ListedGame(
+            Source.ODDSPORTAL, "soccer_epl", "EPL", home, away, TWIN_KICKOFF, f"{home}-{away}"
+        )
+
+    def ordered(self) -> list[ListedGame]:
+        games = [self.listing("Arsenal", "Chelsea"), self.listing("Liverpool", "Everton")]
+        return sorted(games, key=lambda g: event_lock_key(g.sport_key, g.home_team, g.away_team))
+
+    @pytest.mark.asyncio
+    async def test_a_lower_new_lock_in_one_transaction_raises(self, pglite_async_session) -> None:
+        low, high = self.ordered()
+        await resolve_event(pglite_async_session, high)
+        await resolve_event(pglite_async_session, high)
+
+        with pytest.raises(LockOrderError):
+            await resolve_event(pglite_async_session, low)
+
+    @pytest.mark.asyncio
+    async def test_a_new_transaction_starts_a_new_order(self, pglite_async_session) -> None:
+        low, high = self.ordered()
+        await resolve_event(pglite_async_session, high)
+        await pglite_async_session.commit()
+
+        resolved = await resolve_event(pglite_async_session, low)
+
+        assert resolved.resolution is Resolution.CREATED
+
+    @pytest.mark.asyncio
+    async def test_a_batch_resolves_in_key_order_and_answers_in_input_order(
+        self, pglite_async_session
+    ) -> None:
+        low, high = self.ordered()
+
+        resolved = await resolve_events(pglite_async_session, [high, low])
+
+        assert [r.event.id for r in resolved] == [high.legacy_id, low.legacy_id]
+
 
 class TestEventLockKey:
     def test_ignores_kick_off_and_separates_fixtures(self) -> None:
@@ -214,6 +287,84 @@ class TestListedGame:
 
 
 class TestResolveMlbEvent:
+    @pytest.mark.asyncio
+    async def test_moves_once_to_the_schedules_start(
+        self, pglite_async_session, monkeypatch
+    ) -> None:
+        moves: list[tuple[Source, datetime | None]] = []
+        real_move = event_resolver.move_kickoff
+
+        async def recording_move(session, event, source, start):  # type: ignore[no-untyped-def]
+            moves.append((source, start))
+            return await real_move(session, event, source, start)
+
+        monkeypatch.setattr(event_resolver, "move_kickoff", recording_move)
+        listing = ListedGame(
+            source=Source.MLB_STATS_API,
+            sport_key=MLB,
+            sport_title="MLB",
+            home_team=YANKEES,
+            away_team=RED_SOX,
+            commence_time=GAME_1_START + timedelta(minutes=20),
+            legacy_id="g1",
+            mlb_game=ResolvedGame(1001, ResolutionRule.SINGLE_GAME, GAME_1_START),
+        )
+
+        resolved = await resolve_event(pglite_async_session, listing)
+
+        assert moves == [(Source.MLB_STATS_API, GAME_1_START)]
+        assert resolved.event.commence_time == GAME_1_START
+
+    @pytest.mark.asyncio
+    async def test_refuses_a_source_id_another_event_holds(self, pglite_async_session) -> None:
+        await resolve_event(
+            pglite_async_session,
+            mlb_listing(1001, GAME_1_START, external_id="bf-1", legacy_id="g1"),
+        )
+        await resolve_event(pglite_async_session, mlb_listing(1002, GAME_2_START, legacy_id="g2"))
+
+        # The schedule says game 2, but the source reuses game 1's id.
+        resolved = await resolve_event(
+            pglite_async_session, mlb_listing(1002, GAME_2_START, external_id="bf-1")
+        )
+
+        assert resolved.event.id == "g2"
+        assert await external_ids(pglite_async_session, resolved.event) == {
+            Source.MLB_STATS_API: "1002"
+        }
+        [log] = await refusals(pglite_async_session)
+        assert log.event_id == "g2"
+        assert log.raw_data is not None and "held by event" in log.raw_data["reason"]
+
+    @pytest.mark.asyncio
+    async def test_refuses_a_game_pk_when_the_event_holds_another(
+        self, pglite_async_session
+    ) -> None:
+        stored = Event(
+            id="legacy",
+            sport_key=MLB,
+            sport_title="MLB",
+            commence_time=GAME_1_START,
+            home_team=YANKEES,
+            away_team=RED_SOX,
+            mlb_game_pk=1001,
+        )
+        pglite_async_session.add(stored)
+        await pglite_async_session.flush()
+        pglite_async_session.add(
+            EventExternalId(
+                source=Source.MLB_STATS_API, external_id="999", event_id=stored.surrogate_id
+            )
+        )
+        await pglite_async_session.flush()
+
+        resolved = await resolve_event(pglite_async_session, mlb_listing(1001, GAME_1_START))
+
+        assert resolved.event.id == "legacy"
+        assert await external_ids(pglite_async_session, stored) == {Source.MLB_STATS_API: "999"}
+        [log] = await refusals(pglite_async_session)
+        assert log.raw_data is not None and log.raw_data["external_id"] == "1001"
+
     @pytest.mark.asyncio
     async def test_doubleheader_games_get_one_event_each(self, pglite_async_session) -> None:
         game_1 = await resolve_event(

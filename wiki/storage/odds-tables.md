@@ -31,10 +31,10 @@ Odds are stored twice ([How odds are stored](odds-storage-model.md)). `odds_core
 - `api_request_id`: free-text provenance tag, see [Provenance](#provenance).
 - Indexes: single-column `event_id`, `snapshot_time`, `fetch_tier`, `payload_id`; composite `ix_event_snapshot_time (event_id, snapshot_time)` and `ix_event_tier (event_id, fetch_tier)`.
 
-The columns of the redesigned snapshot are nullable, and no writer fills them yet, so every stored snapshot holds NULL in them:
+The columns of the redesigned snapshot are nullable, and no writer fills them, so every stored snapshot holds NULL in them:
 
 - `source` (`odds_core.vocabulary.PRICE_SOURCES`), `market` (`odds_core.vocabulary.Market`) and `time_basis` (`odds_core.vocabulary.TimeBasis`), each a CHECKed closed set ([closed sets](price-tables.md#closed-sets)).
-- Market metadata: `in_play`, `market_status`, `total_matched` and `market_start_time`.
+- Market metadata: `in_play`, `market_status` (`odds_core.vocabulary.MarketStatus`, a closed set), `total_matched` and `market_start_time`.
 - `payload_id`: FK to `snapshot_payloads.id` ([Prices and snapshot payloads tables](price-tables.md#snapshot_payloads)).
 - `uq_odds_snapshots_event_source_market_time` makes (`event_id`, `source`, `market`, `snapshot_time`) unique. PostgreSQL treats NULLs as distinct here, so snapshots with no `source` or `market` are never in conflict. How a writer handles a stored key is on [storing a snapshot under its key](price-tables.md#storing-a-snapshot-under-its-key).
 

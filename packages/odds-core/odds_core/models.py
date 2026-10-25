@@ -32,6 +32,7 @@ from odds_core.vocabulary import (
     PRICE_SOURCES,
     HealthCheck,
     Market,
+    MarketStatus,
     PriceOutcome,
     Side,
     Source,
@@ -202,7 +203,9 @@ class OddsSnapshot(SQLModel, table=True):
     market: Market | None = Field(default=None, sa_column=Column(StrEnumText(Market)))
     time_basis: TimeBasis | None = Field(default=None, sa_column=Column(StrEnumText(TimeBasis)))
     in_play: bool | None = Field(default=None, sa_column=Column(Boolean))
-    market_status: str | None = Field(default=None, sa_column=Column(Text))
+    market_status: MarketStatus | None = Field(
+        default=None, sa_column=Column(StrEnumText(MarketStatus))
+    )
     total_matched: Decimal | None = Field(default=None, sa_column=Column(Numeric))
     market_start_time: datetime | None = Field(
         default=None, sa_column=Column(DateTime(timezone=True))
@@ -231,6 +234,7 @@ class OddsSnapshot(SQLModel, table=True):
         closed_set_check("source", PRICE_SOURCES, "ck_odds_snapshots_source"),
         closed_set_check("market", Market, "ck_odds_snapshots_market"),
         closed_set_check("time_basis", TimeBasis, "ck_odds_snapshots_time_basis"),
+        closed_set_check("market_status", MarketStatus, "ck_odds_snapshots_market_status"),
     )
 
 

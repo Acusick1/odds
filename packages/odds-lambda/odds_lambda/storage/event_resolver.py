@@ -9,8 +9,7 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 
 import structlog
-from odds_core.event_source import canonical_event_id
-from odds_core.models import DataQualityLog, Event, EventExternalId, EventStatus
+from odds_core.models import Event, EventExternalId, EventStatus
 from odds_core.team import normalize_team_name
 from odds_core.time import ensure_utc
 from odds_core.vocabulary import EXTERNAL_ID_SOURCES, Source
@@ -18,6 +17,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.mlb_game_resolver import MLB_SPORT_KEY, ResolvedGame
+from odds_lambda.storage.data_quality import record_issue
 from odds_lambda.storage.event_kickoff import move_kickoff
 from odds_lambda.storage.event_merge import find_match_candidates
 
@@ -64,7 +64,15 @@ class ResolvedEvent:
 
 
 class EventIdTaken(ValueError):
-    """A new event's string id belongs to another event and the game offers no suffix."""
+    """Every string id a new event could take belongs to another event."""
+
+
+class LockOrderError(RuntimeError):
+    """A transaction asked for a fixture lock below one it holds, which can deadlock."""
+
+
+# The highest fixture lock each open transaction holds, keyed on the session.
+_HELD_LOCK = "event_resolver_held_lock"
 
 
 def event_lock_key(sport_key: str, home_team: str, away_team: str) -> int:
@@ -76,21 +84,30 @@ def event_lock_key(sport_key: str, home_team: str, away_team: str) -> int:
     return int.from_bytes(digest, "big", signed=True)
 
 
+async def resolve_events(session: AsyncSession, games: Sequence[ListedGame]) -> list[ResolvedEvent]:
+    """``resolve_event`` for each game, in lock-key order so that concurrent batches cannot
+    deadlock; results come back in the order of ``games``."""
+    order = sorted(range(len(games)), key=lambda i: _lock_key(games[i]))
+    resolved: dict[int, ResolvedEvent] = {}
+    for i in order:
+        resolved[i] = await resolve_event(session, games[i])
+    return [resolved[i] for i in range(len(games))]
+
+
 async def resolve_event(session: AsyncSession, game: ListedGame) -> ResolvedEvent:
     """The event of ``game``, recording the source's id on it. Flushes; the caller commits.
 
-    Holds a transaction advisory lock on the fixture, so writers resolving the same teams
-    concurrently see each other's events. Looks an MLB game up by ``gamePk``, then any game by
-    the source's id; else matches the sport and teams within ±2 h (for MLB, only events holding
-    no ``gamePk``); else creates the event. A second id from one source for the event, or an id
-    another event holds, is refused and logged rather than recorded.
+    Holds a transaction advisory lock on the fixture until the caller's transaction ends, so
+    writers resolving the same teams concurrently see each other's events. One transaction
+    takes fixture locks in ascending key order (``resolve_events`` sorts a batch) or raises
+    ``LockOrderError``. Looks an MLB game up by ``gamePk``, then any game by the source's id;
+    else matches the sport and teams within ±2 h (for MLB, only events holding no ``gamePk``);
+    else creates the event. A second id from one source for the event, or an id another event
+    holds, is refused and logged rather than recorded.
     """
     home_team = normalize_team_name(game.home_team)
     away_team = normalize_team_name(game.away_team)
-    await session.execute(
-        text("SELECT pg_advisory_xact_lock(:key)"),
-        {"key": event_lock_key(game.sport_key, home_team, away_team)},
-    )
+    await _lock(session, _lock_key(game))
     resolved = await _find(session, game, home_team, away_team)
     if resolved is None:
         resolved = ResolvedEvent(
@@ -102,8 +119,38 @@ async def resolve_event(session: AsyncSession, game: ListedGame) -> ResolvedEven
     if game.mlb_game is not None:
         await _record_game_pk(session, event, game.mlb_game.game_pk)
         await move_kickoff(session, event, Source.MLB_STATS_API, game.mlb_game.start)
-    await move_kickoff(session, event, game.source, game.commence_time)
+    else:
+        await move_kickoff(session, event, game.source, game.commence_time)
     return resolved
+
+
+def _lock_key(game: ListedGame) -> int:
+    return event_lock_key(
+        game.sport_key, normalize_team_name(game.home_team), normalize_team_name(game.away_team)
+    )
+
+
+@dataclass
+class _HeldLocks:
+    transaction: object
+    keys: set[int]
+
+
+async def _lock(session: AsyncSession, key: int) -> None:
+    await session.connection()  # begins the transaction the lock belongs to
+    transaction = session.sync_session.get_transaction()
+    held = session.info.get(_HELD_LOCK)
+    if not isinstance(held, _HeldLocks) or held.transaction is not transaction:
+        held = _HeldLocks(transaction, set())
+        session.info[_HELD_LOCK] = held
+    # Re-taking a held lock cannot wait; a new one below a held one could deadlock.
+    if key not in held.keys and held.keys and key < max(held.keys):
+        raise LockOrderError(
+            "fixture locks must be taken in ascending key order within one transaction; "
+            "resolve a batch with resolve_events or commit between fixtures"
+        )
+    await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": key})
+    held.keys.add(key)
 
 
 async def _find(
@@ -173,8 +220,10 @@ async def _match(
         return abs(ensure_utc(event.commence_time) - ensure_utc(start))
 
     nearest_gap = min(gap(e, anchor) for e in candidates)
-    nearest_ids = [e.id for e in candidates if gap(e, anchor) == nearest_gap]
-    nearest = next(e for e in candidates if e.id == canonical_event_id(nearest_ids))
+    nearest = min(
+        (e for e in candidates if gap(e, anchor) == nearest_gap),
+        key=lambda e: e.surrogate_id or 0,
+    )
     if game.mlb_game is not None and any(
         gap(nearest, start) < nearest_gap for start in game.mlb_game.sibling_starts
     ):
@@ -189,13 +238,17 @@ def _anchor(game: ListedGame) -> datetime:
 
 
 async def _create(session: AsyncSession, game: ListedGame, home_team: str, away_team: str) -> Event:
-    event_id = game.legacy_id
-    if await session.get(Event, event_id) is not None:
-        suffix = game.mlb_game.game_pk if game.mlb_game is not None else game.external_id
-        if suffix is None:
-            raise EventIdTaken(f"event id {event_id} is taken by an event the game did not match")
-        logger.warning("event_id_collision", event_id=event_id, suffix=suffix)
-        event_id = f"{event_id}_{suffix}"
+    suffix = game.mlb_game.game_pk if game.mlb_game is not None else game.external_id
+    choices = [game.legacy_id] + ([f"{game.legacy_id}_{suffix}"] if suffix is not None else [])
+    event_id = None
+    for choice in choices:
+        if await session.get(Event, choice) is None:
+            event_id = choice
+            break
+    if event_id is None:
+        raise EventIdTaken(f"event ids {choices} are all taken by events the game did not match")
+    if event_id != game.legacy_id:
+        logger.warning("event_id_collision", event_id=game.legacy_id, used=event_id)
     event = Event(
         id=event_id,
         sport_key=game.sport_key,
@@ -248,19 +301,10 @@ async def _record_external_id(
 def _refuse(
     session: AsyncSession, event: Event, source: Source, external_id: str, reason: str
 ) -> None:
-    logger.warning(
+    record_issue(
+        session,
+        event.id,
         "external_id_refused",
-        event_id=event.id,
-        source=source.value,
-        external_id=external_id,
-        reason=reason,
-    )
-    session.add(
-        DataQualityLog(
-            event_id=event.id,
-            severity="warning",
-            issue_type="external_id_refused",
-            description=f"{source.value} id {external_id} refused: {reason}",
-            raw_data={"source": source.value, "external_id": external_id, "reason": reason},
-        )
+        f"{source.value} id {external_id} refused: {reason}",
+        {"source": source.value, "external_id": external_id, "reason": reason},
     )

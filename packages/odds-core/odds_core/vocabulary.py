@@ -61,6 +61,15 @@ class Market(StrEnum):
     TOTALS = "totals"
 
 
+class MarketStatus(StrEnum):
+    """An exchange market's status, as Betfair reports it."""
+
+    INACTIVE = "inactive"
+    OPEN = "open"
+    SUSPENDED = "suspended"
+    CLOSED = "closed"
+
+
 class PriceOutcome(StrEnum):
     HOME = "home"
     DRAW = "draw"

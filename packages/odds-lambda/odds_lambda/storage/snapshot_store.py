@@ -8,21 +8,38 @@ from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
 
-import structlog
-from odds_core.models import DataQualityLog, OddsSnapshot, Price
+from odds_core.models import OddsSnapshot, Price
 from odds_core.time import ensure_utc
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-logger = structlog.get_logger()
+from odds_lambda.storage.data_quality import record_issue
 
-type PriceRow = tuple[
-    str, str, Decimal | None, str, Decimal, Decimal | None, Decimal | None, datetime | None
-]
-type SnapshotMarketState = tuple[
-    str | None, bool | None, str | None, Decimal | None, datetime | None
-]
+
+@dataclass(frozen=True)
+class PriceRow:
+    """A price's content, compared by value whatever numeric type it was built with."""
+
+    bookmaker: str
+    outcome: str
+    line: Decimal | None
+    side: str
+    price: Decimal
+    size: Decimal | None
+    matched: Decimal | None
+    changed_at: datetime | None
+
+
+@dataclass(frozen=True)
+class SnapshotMarketState:
+    """The market-level content of a snapshot beyond its key."""
+
+    time_basis: str | None
+    in_play: bool | None
+    market_status: str | None
+    total_matched: Decimal | None
+    market_start_time: datetime | None
 
 
 class SnapshotWriteOutcome(StrEnum):
@@ -90,28 +107,36 @@ def _decimal(value: Decimal | float | None) -> Decimal | None:
     return None if value is None else Decimal(str(value))
 
 
+def _optional_str(value: object | None) -> str | None:
+    return None if value is None else str(value)
+
+
+def _optional_utc(value: datetime | None) -> datetime | None:
+    return None if value is None else ensure_utc(value)
+
+
 def _price_row(price: Price) -> PriceRow:
     amount = _decimal(price.price)
     assert amount is not None
-    return (
-        price.bookmaker,
-        str(price.outcome),
-        _decimal(price.line),
-        str(price.side),
-        amount,
-        _decimal(price.size),
-        _decimal(price.matched),
-        None if price.changed_at is None else ensure_utc(price.changed_at),
+    return PriceRow(
+        bookmaker=price.bookmaker,
+        outcome=str(price.outcome),
+        line=_decimal(price.line),
+        side=str(price.side),
+        price=amount,
+        size=_decimal(price.size),
+        matched=_decimal(price.matched),
+        changed_at=_optional_utc(price.changed_at),
     )
 
 
 def _market_state(snapshot: OddsSnapshot) -> SnapshotMarketState:
-    return (
-        None if snapshot.time_basis is None else str(snapshot.time_basis),
-        snapshot.in_play,
-        snapshot.market_status,
-        _decimal(snapshot.total_matched),
-        None if snapshot.market_start_time is None else ensure_utc(snapshot.market_start_time),
+    return SnapshotMarketState(
+        time_basis=_optional_str(snapshot.time_basis),
+        in_play=snapshot.in_play,
+        market_status=_optional_str(snapshot.market_status),
+        total_matched=_decimal(snapshot.total_matched),
+        market_start_time=_optional_utc(snapshot.market_start_time),
     )
 
 
@@ -125,22 +150,17 @@ async def _same_content(
 
 
 def _log_conflict(session: AsyncSession, held: OddsSnapshot, snapshot: OddsSnapshot) -> None:
-    context = {
-        "kept_snapshot_id": held.id,
-        "source": str(snapshot.source),
-        "market": str(snapshot.market),
-        "snapshot_time": ensure_utc(snapshot.snapshot_time).isoformat(),
-    }
-    logger.warning("snapshot_key_conflict", event_id=snapshot.event_id, **context)
-    session.add(
-        DataQualityLog(
-            event_id=snapshot.event_id,
-            severity="warning",
-            issue_type="snapshot_key_conflict",
-            description=(
-                f"{snapshot.source} {snapshot.market} snapshot at {context['snapshot_time']} "
-                f"differs from stored snapshot {held.id}; the stored one is kept"
-            ),
-            raw_data=context,
-        )
+    snapshot_time = ensure_utc(snapshot.snapshot_time).isoformat()
+    record_issue(
+        session,
+        snapshot.event_id,
+        "snapshot_key_conflict",
+        f"{snapshot.source} {snapshot.market} snapshot at {snapshot_time} differs from stored "
+        f"snapshot {held.id}; the stored one is kept",
+        {
+            "kept_snapshot_id": held.id,
+            "source": str(snapshot.source),
+            "market": str(snapshot.market),
+            "snapshot_time": snapshot_time,
+        },
     )

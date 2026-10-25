@@ -42,7 +42,7 @@ All pass the MLB Stats API as the source:
 - `odds_lambda.storage.game_pk_backfill.apply_assignment` ([assigning gamePks](event-merge.md#assigning-gamepks)).
 - `odds_lambda.storage.event_resolver.resolve_event` ([Event resolver](event-resolver.md)).
 
-`odds_lambda.storage.writers.OddsWriter.upsert_event` and `odds_lambda.storage.writers.OddsWriter.bulk_upsert_events` still overwrite `commence_time` directly ([upsert verbs](events.md#upsert-verbs)).
+`odds_lambda.storage.writers.OddsWriter.upsert_event` and `odds_lambda.storage.writers.OddsWriter.bulk_upsert_events` overwrite `commence_time` directly, outside this function ([upsert verbs](events.md#upsert-verbs)).
 
 ## Related
 

@@ -23,6 +23,7 @@ PRICE_SOURCES = ("betfair", "football_data_uk", "odds_api", "oddsportal", "polym
 EXTERNAL_ID_SOURCES = ("betfair", "espn", "mlb_stats_api", "odds_api", "oddsportal", "polymarket")
 MARKETS = ("1x2", "h2h", "spreads", "totals")
 TIME_BASES = ("close", "observed", "source_stamped", "upper_bound")
+MARKET_STATUSES = ("closed", "inactive", "open", "suspended")
 OUTCOMES = ("away", "draw", "home", "over", "under")
 SIDES = ("back", "lay", "mid", "traded")
 HEALTH_CHECKS = ("missing_mlb_game_pk",)
@@ -92,6 +93,11 @@ def upgrade() -> None:
     op.create_check_constraint("ck_odds_snapshots_market", "odds_snapshots", _in("market", MARKETS))
     op.create_check_constraint(
         "ck_odds_snapshots_time_basis", "odds_snapshots", _in("time_basis", TIME_BASES)
+    )
+    op.create_check_constraint(
+        "ck_odds_snapshots_market_status",
+        "odds_snapshots",
+        _in("market_status", MARKET_STATUSES),
     )
     # Rows whose source and market are still NULL are exempt until the backfill fills them.
     op.create_unique_constraint(
@@ -180,6 +186,7 @@ def downgrade() -> None:
     op.drop_constraint(
         "uq_odds_snapshots_event_source_market_time", "odds_snapshots", type_="unique"
     )
+    op.drop_constraint("ck_odds_snapshots_market_status", "odds_snapshots", type_="check")
     op.drop_constraint("ck_odds_snapshots_time_basis", "odds_snapshots", type_="check")
     op.drop_constraint("ck_odds_snapshots_market", "odds_snapshots", type_="check")
     op.drop_constraint("ck_odds_snapshots_source", "odds_snapshots", type_="check")

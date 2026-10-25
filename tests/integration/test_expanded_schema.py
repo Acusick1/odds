@@ -6,6 +6,7 @@ from decimal import Decimal
 
 import pytest
 from odds_core.models import (
+    DataQualityLog,
     Event,
     EventExternalId,
     EventStatus,
@@ -135,6 +136,73 @@ class TestEventExternalIds:
         assert moved is not None and moved.event_id == keep.surrogate_id
 
 
+class TestMergeClashes:
+    @pytest.fixture
+    async def twins(self, pglite_async_session) -> tuple[Event, Event]:
+        keep, duplicate = make_epl_event("keep"), make_epl_event("op_dup")
+        pglite_async_session.add_all([keep, duplicate])
+        await pglite_async_session.flush()
+        return keep, duplicate
+
+    @pytest.mark.asyncio
+    async def test_a_duplicates_id_from_a_source_the_kept_event_holds_is_dropped(
+        self, pglite_async_session, twins
+    ) -> None:
+        keep, duplicate = twins
+        pglite_async_session.add_all(
+            [
+                EventExternalId(
+                    source=Source.ODDSPORTAL, external_id="op-keep", event_id=keep.surrogate_id
+                ),
+                EventExternalId(
+                    source=Source.ODDSPORTAL, external_id="op-dup", event_id=duplicate.surrogate_id
+                ),
+                EventExternalId(
+                    source=Source.BETFAIR, external_id="bf-dup", event_id=duplicate.surrogate_id
+                ),
+            ]
+        )
+        await pglite_async_session.flush()
+
+        report = await EventMerger(pglite_async_session).merge(keep, [duplicate])
+        await pglite_async_session.flush()
+
+        held = await pglite_async_session.execute(
+            select(EventExternalId.source, EventExternalId.external_id).where(
+                EventExternalId.event_id == keep.surrogate_id
+            )
+        )
+        assert set(held.all()) == {(Source.ODDSPORTAL, "op-keep"), (Source.BETFAIR, "bf-dup")}
+        assert report.rows_deleted == {"event_external_ids": 1}
+        [log] = (await pglite_async_session.execute(select(DataQualityLog))).scalars().all()
+        assert log.issue_type == "merge_dropped_external_id"
+        assert log.raw_data is not None and log.raw_data["external_id"] == "op-dup"
+
+    @pytest.mark.asyncio
+    async def test_a_duplicates_acknowledgement_of_a_check_the_kept_event_has_is_dropped(
+        self, pglite_async_session, twins
+    ) -> None:
+        keep, duplicate = twins
+        for event, reason in ((keep, "kept reason"), (duplicate, "duplicate reason")):
+            pglite_async_session.add(
+                HealthCheckAcknowledgement(
+                    event_id=event.surrogate_id,
+                    check_name=HealthCheck.MISSING_MLB_GAME_PK,
+                    reason=reason,
+                )
+            )
+        await pglite_async_session.flush()
+
+        report = await EventMerger(pglite_async_session).merge(keep, [duplicate])
+        await pglite_async_session.flush()
+
+        reasons = await pglite_async_session.execute(select(HealthCheckAcknowledgement.reason))
+        assert reasons.scalars().all() == ["kept reason"]
+        assert report.rows_deleted == {"health_check_acknowledgements": 1}
+        [log] = (await pglite_async_session.execute(select(DataQualityLog))).scalars().all()
+        assert log.issue_type == "merge_dropped_acknowledgement"
+
+
 class TestHealthCheckAcknowledgements:
     @pytest.mark.asyncio
     async def test_one_acknowledgement_per_event_and_check(
@@ -189,7 +257,12 @@ class TestSnapshotKey:
     async def test_market_and_source_are_closed_sets(
         self, pglite_async_session, epl_snapshot
     ) -> None:
-        for column, value in (("source", "mlb_stats_api"), ("market", "btts"), ("time_basis", "x")):
+        for column, value in (
+            ("source", "mlb_stats_api"),
+            ("market", "btts"),
+            ("time_basis", "x"),
+            ("market_status", "OPEN"),
+        ):
             with pytest.raises(IntegrityError):
                 async with pglite_async_session.begin_nested():
                     await pglite_async_session.execute(
