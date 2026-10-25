@@ -58,7 +58,7 @@ class BetfairBook:
     market_id: str
     betfair_event_id: str
     betfair_event_name: str
-    market_start_time: datetime
+    market_start_time: datetime | None
     market_status: str
     inplay: bool
     total_matched: float | None
@@ -173,13 +173,17 @@ class BetfairExchangeClient:
         self,
         sport_cfg: SportBetfairConfig,
         lookahead_hours: int,
+        lookback_hours: int = 0,
     ) -> list[BetfairEvent]:
-        """List upcoming events for a sport+competition within a window."""
+        """List events for a sport+competition from ``lookback_hours`` ago to ``lookahead_hours`` ahead.
+
+        Betfair's start time can pass before the game's, so a lookback keeps a started game listed.
+        """
         competition_id = self.resolve_competition_id(sport_cfg)
 
         now = datetime.now(UTC)
         time_range = filters.time_range(
-            from_=now.isoformat(),
+            from_=(now - timedelta(hours=lookback_hours)).isoformat(),
             to=(now + timedelta(hours=lookahead_hours)).isoformat(),
         )
         market_filter = filters.market_filter(
@@ -289,7 +293,7 @@ class BetfairExchangeClient:
                     market_id=cat.market_id,
                     betfair_event_id=event_id,
                     betfair_event_name=event_name,
-                    market_start_time=start or datetime.now(UTC),
+                    market_start_time=start,
                     market_status=str(book.status or ""),
                     inplay=bool(book.inplay),
                     total_matched=(

@@ -14,8 +14,12 @@ from odds_core.mlb_data_models import MlbProbablePitchers
 from odds_core.models import AlertHistory, Event, EventStatus, OddsSnapshot
 from odds_core.snapshot_sources import SnapshotSource
 from odds_lambda import collection_calendar
+from odds_lambda.betfair.client import BetfairBook, BetfairRunner
+from odds_lambda.betfair.constants import SPORT_CONFIG
 from odds_lambda.collection_calendar import (
     EmptyCollectionError,
+    EventKey,
+    MlbGameKey,
     fixture_calendar,
     latest_snapshot_time,
     require_rows_for_fixtures,
@@ -191,6 +195,50 @@ class TestRequireRowsForFixtures:
         await seed(NOW + timedelta(days=6))
 
         await require_rows_for_fixtures(fetch_oddsportal.SOURCE, {"soccer_epl": 0}, now=NOW)
+
+    async def test_fixtures_all_accounted_for_pass(self, seed: Callable[..., Any]) -> None:
+        await seed(NOW + timedelta(hours=2))
+
+        await require_rows_for_fixtures(
+            fetch_betfair_exchange.SOURCE,
+            {"soccer_epl": 0},
+            accounted_by_sport={"soccer_epl": {EventKey("event_1")}},
+            now=NOW,
+        )
+
+    async def test_a_fixture_beyond_the_accounted_ones_raises(
+        self, seed: Callable[..., Any]
+    ) -> None:
+        await seed(NOW + timedelta(hours=2))
+        await seed(NOW + timedelta(hours=3))
+
+        with pytest.raises(EmptyCollectionError, match="with 1 fixture"):
+            await require_rows_for_fixtures(
+                fetch_betfair_exchange.SOURCE,
+                {"soccer_epl": 0},
+                accounted_by_sport={"soccer_epl": {EventKey("event_1")}},
+                now=NOW,
+            )
+
+    async def test_an_mlb_game_is_accounted_for_by_its_game_pk(
+        self, seed_mlb_game: Callable[..., Any]
+    ) -> None:
+        await seed_mlb_game(NOW + timedelta(hours=2))
+        await seed_mlb_game(NOW + timedelta(hours=3))
+
+        with pytest.raises(EmptyCollectionError, match="with 1 fixture"):
+            await require_rows_for_fixtures(
+                fetch_betfair_exchange.SOURCE,
+                {"baseball_mlb": 0},
+                accounted_by_sport={"baseball_mlb": {MlbGameKey(1)}},
+                now=NOW,
+            )
+        await require_rows_for_fixtures(
+            fetch_betfair_exchange.SOURCE,
+            {"baseball_mlb": 0},
+            accounted_by_sport={"baseball_mlb": {MlbGameKey(1), MlbGameKey(2)}},
+            now=NOW,
+        )
 
     async def test_one_empty_sport_raises_although_another_wrote_rows(
         self, seed_mlb_game: Callable[..., Any]
@@ -1059,6 +1107,40 @@ class TestBetfairJob:
 
         assert alerts.heartbeats == []
 
+    @staticmethod
+    def _ingest_accounted(monkeypatch: pytest.MonkeyPatch, *event_ids: str) -> None:
+        stats = fetch_betfair_exchange.IngestionStats(
+            sport="soccer_epl",
+            events_seen=len(event_ids),
+            books_fetched=len(event_ids),
+            books_in_play=len(event_ids),
+            accounted_fixtures={EventKey(i) for i in event_ids},
+        )
+        monkeypatch.setattr(fetch_betfair_exchange, "ingest_sport", AsyncMock(return_value=stats))
+
+    async def test_a_run_whose_only_fixture_is_accounted_for_passes_with_a_heartbeat(
+        self, monkeypatch: pytest.MonkeyPatch, seed: Callable[..., Any], alerts: _AlertRecorder
+    ) -> None:
+        await seed(datetime.now(UTC) + timedelta(hours=1))
+        self._ingest_accounted(monkeypatch, "event_1")
+
+        await fetch_betfair_exchange.main(JobContext(sport="soccer_epl"))
+
+        assert alerts.heartbeats == ["heartbeat:fetch-betfair-exchange-epl"]
+
+    async def test_an_accounted_fixture_does_not_excuse_a_pre_play_one_with_no_rows(
+        self, monkeypatch: pytest.MonkeyPatch, seed: Callable[..., Any], alerts: _AlertRecorder
+    ) -> None:
+        now = datetime.now(UTC)
+        await seed(now + timedelta(hours=1))
+        await seed(now + timedelta(hours=4))
+        self._ingest_accounted(monkeypatch, "event_1")
+
+        with pytest.raises(EmptyCollectionError, match="with 1 fixture"):
+            await fetch_betfair_exchange.main(JobContext(sport="soccer_epl"))
+
+        assert alerts.heartbeats == []
+
     async def test_zero_rows_without_fixtures_writes_a_heartbeat(
         self, monkeypatch: pytest.MonkeyPatch, alerts: _AlertRecorder
     ) -> None:
@@ -1067,6 +1149,90 @@ class TestBetfairJob:
         await fetch_betfair_exchange.main(JobContext(sport="soccer_epl"))
 
         assert alerts.heartbeats == ["heartbeat:fetch-betfair-exchange-epl"]
+
+
+@pytest.mark.usefixtures("guard_session")
+class TestBetfairEplAccounting:
+    """An in-play EPL book accounts for its event through the real ingestion path (#634)."""
+
+    @pytest.fixture(autouse=True)
+    def session_maker(self, monkeypatch: pytest.MonkeyPatch, pglite_async_session: Any) -> None:
+        monkeypatch.setattr(
+            fetch_betfair_exchange, "async_session_maker", SessionMaker(pglite_async_session)
+        )
+
+    @staticmethod
+    def _event(event_id: str, home: str, away: str, kickoff: datetime) -> Event:
+        return Event(
+            id=event_id,
+            sport_key="soccer_epl",
+            sport_title="EPL",
+            commence_time=kickoff,
+            home_team=home,
+            away_team=away,
+            status=EventStatus.SCHEDULED,
+        )
+
+    @staticmethod
+    async def _ingest(kickoff: datetime) -> fetch_betfair_exchange.IngestionStats:
+        def runner(selection_id: int, name: str) -> BetfairRunner:
+            return BetfairRunner(selection_id, name, None, None, None, None, None)
+
+        book = BetfairBook(
+            market_id="1.1",
+            betfair_event_id="1",
+            betfair_event_name="Arsenal v Chelsea",
+            market_start_time=kickoff,
+            market_status="OPEN",
+            inplay=True,
+            total_matched=1000.0,
+            runners=[runner(1, "Arsenal"), runner(2, "Chelsea"), runner(3, "The Draw")],
+        )
+        client = MagicMock()
+        client.list_events.return_value = ["1"]
+        client.list_match_odds_books.return_value = [book]
+        return await fetch_betfair_exchange.ingest_sport(
+            SPORT_CONFIG["soccer_epl"], client=client, lookahead_hours=72, snapshot_time=NOW
+        )
+
+    async def test_the_in_play_book_accounts_for_its_event_so_the_check_passes(
+        self, pglite_async_session: Any
+    ) -> None:
+        kickoff = NOW + timedelta(hours=1)
+        pglite_async_session.add(self._event("arsenal_chelsea", "Arsenal", "Chelsea", kickoff))
+        await pglite_async_session.commit()
+
+        stats = await self._ingest(kickoff)
+
+        assert stats.accounted_fixtures == {EventKey("arsenal_chelsea")}
+        await require_rows_for_fixtures(
+            fetch_betfair_exchange.SOURCE,
+            {"soccer_epl": stats.snapshots_stored},
+            accounted_by_sport={"soccer_epl": stats.accounted_fixtures},
+            now=NOW,
+        )
+
+    async def test_another_pre_play_fixture_with_no_rows_still_raises(
+        self, pglite_async_session: Any
+    ) -> None:
+        kickoff = NOW + timedelta(hours=1)
+        pglite_async_session.add_all(
+            [
+                self._event("arsenal_chelsea", "Arsenal", "Chelsea", kickoff),
+                self._event("spurs_everton", "Tottenham", "Everton", kickoff + timedelta(hours=2)),
+            ]
+        )
+        await pglite_async_session.commit()
+
+        stats = await self._ingest(kickoff)
+
+        with pytest.raises(EmptyCollectionError, match="with 1 fixture"):
+            await require_rows_for_fixtures(
+                fetch_betfair_exchange.SOURCE,
+                {"soccer_epl": stats.snapshots_stored},
+                accounted_by_sport={"soccer_epl": stats.accounted_fixtures},
+                now=NOW,
+            )
 
 
 @pytest.mark.usefixtures("guard_session")

@@ -37,6 +37,7 @@ from odds_lambda.betfair import (
 from odds_lambda.betfair.cert_loader import resolve_cert_paths
 from odds_lambda.collection_calendar import (
     CollectionSource,
+    FixtureKey,
     decide_collection_run,
     require_rows_for_fixtures,
 )
@@ -73,6 +74,10 @@ CADENCE = CadenceConfig(
 
 LIVE_REQUEST_ID_PREFIX = "betfair_api_"
 
+# Betfair's start time for a game can pass before the game's own, and it differs from the MLB
+# schedule's, so a started game stays listed long enough to be seen in play.
+LOOKBACK_HOURS = 12
+
 SOURCE = CollectionSource(
     key="betfair_exchange",
     job_name="fetch-betfair-exchange",
@@ -91,6 +96,7 @@ class IngestionStats:
     events_seen: int = 0
     books_fetched: int = 0
     books_in_play: int = 0
+    accounted_fixtures: set[FixtureKey] = field(default_factory=set)
     books_suspended: int = 0
     snapshots_stored: int = 0
     events_matched: int = 0
@@ -119,6 +125,21 @@ def _should_skip_book(book: BetfairBook, sport_cfg: SportBetfairConfig) -> bool:
     return False
 
 
+def _account_for(
+    accounted: list[GameRow], book: BetfairBook, sport_cfg: SportBetfairConfig
+) -> None:
+    """Note the game of a book the run saw but did not price (in play, started, or priceless).
+
+    A book with no start time or unparseable teams identifies no fixture, so it accounts for none.
+    """
+    teams = resolve_teams(book, sport_cfg)
+    if teams is None or book.market_start_time is None:
+        return
+    accounted.append(
+        GameRow(*teams, book.market_start_time, doubleheader_game_number(book.betfair_event_name))
+    )
+
+
 async def ingest_sport(
     sport_cfg: SportBetfairConfig,
     *,
@@ -130,7 +151,9 @@ async def ingest_sport(
     stats = IngestionStats(sport=sport_cfg.sport_key)
 
     # API calls are blocking; run in worker thread to avoid stalling the loop.
-    events = await asyncio.to_thread(client.list_events, sport_cfg, lookahead_hours)
+    events = await asyncio.to_thread(
+        client.list_events, sport_cfg, lookahead_hours, lookback_hours=LOOKBACK_HOURS
+    )
     stats.events_seen = len(events)
     if not events:
         logger.warning("betfair_no_events_found", sport=sport_cfg.sport_key)
@@ -145,13 +168,18 @@ async def ingest_sport(
         return stats
 
     priced: list[tuple[BetfairBook, GameRow, dict[str, Any]]] = []
+    accounted: list[GameRow] = []
     for book in books:
-        if _should_skip_book(book, sport_cfg):
-            if book.inplay:
-                stats.books_in_play += 1
+        started = book.market_start_time is not None and book.market_start_time <= snapshot_time
+        if book.inplay:
+            stats.books_in_play += 1
+        if _should_skip_book(book, sport_cfg) or started:
+            if book.inplay or started:
+                _account_for(accounted, book, sport_cfg)
             continue
 
-        if (book.market_status or "").upper() == "SUSPENDED":
+        is_suspended = (book.market_status or "").upper() == "SUSPENDED"
+        if is_suspended:
             stats.books_suspended += 1
 
         teams = resolve_teams(book, sport_cfg)
@@ -159,6 +187,9 @@ async def ingest_sport(
             stats.errors.append(f"unparseable_event_name: {book.betfair_event_name}")
             continue
         home, away = teams
+        if book.market_start_time is None:
+            stats.errors.append(f"no_start_time: {book.betfair_event_name}")
+            continue
 
         entry = betfair_book_to_bookmaker_entry(
             book,
@@ -169,6 +200,8 @@ async def ingest_sport(
         )
         if entry is None:
             stats.errors.append(f"unusable_outcomes: {book.betfair_event_name}")
+            if is_suspended:
+                _account_for(accounted, book, sport_cfg)
             continue
         game = GameRow(
             home, away, book.market_start_time, doubleheader_game_number(book.betfair_event_name)
@@ -176,7 +209,9 @@ async def ingest_sport(
         priced.append((book, game, entry))
 
     finder = await LiveEventFinder.for_run(
-        sport_cfg.sport_key, sport_cfg.sport_title, (game for _, game, _ in priced)
+        sport_cfg.sport_key,
+        sport_cfg.sport_title,
+        [*(game for _, game, _ in priced), *accounted],
     )
     if finder.schedule_unavailable:
         stats.errors.append("MLB schedule unavailable: no new events created")
@@ -213,6 +248,11 @@ async def ingest_sport(
                 msg = f"{book.betfair_event_name}: {type(e).__name__}: {e}"
                 stats.errors.append(msg)
                 logger.error("betfair_book_ingestion_failed", error=msg, exc_info=True)
+
+        for game in accounted:
+            key = await finder.fixture_key(session, game)
+            if key is not None:
+                stats.accounted_fixtures.add(key)
 
         # FetchLog for observability — sport-level summary.
         if stats.snapshots_stored or stats.events_seen:
@@ -321,10 +361,18 @@ async def main(ctx: JobContext) -> None:
         finally:
             await asyncio.to_thread(client.logout)
         await alert_dropped_games(compound_job_name, stats.dropped_games)
+        if stats.accounted_fixtures and not stats.snapshots_stored:
+            logger.warning(
+                "betfair_empty_run_check_discounts_unpriced",
+                sport=stats.sport,
+                accounted_fixtures=sorted(map(str, stats.accounted_fixtures)),
+            )
         await require_rows_for_fixtures(
             SOURCE,
             {stats.sport: stats.snapshots_stored},
             errors_by_sport={stats.sport: stats.errors},
+            accounted_by_sport={stats.sport: stats.accounted_fixtures},
+            now=snapshot_time,
         )
 
     # Reschedule based on (possibly updated) next kickoff after fetch.

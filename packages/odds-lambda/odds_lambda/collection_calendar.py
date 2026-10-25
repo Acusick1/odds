@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
@@ -28,6 +28,23 @@ EPL_SPORT_KEY = "soccer_epl"
 MLB_PRICED_GAME_TYPES = ("R", "F", "D", "L", "W")
 MLB_SCHEDULE_MAX_AGE = timedelta(hours=36)
 ERRORS_SHOWN = 3
+
+
+@dataclass(frozen=True, slots=True)
+class EventKey:
+    """A fixture of an event-backed sport, by its ``events`` row."""
+
+    event_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class MlbGameKey:
+    """An MLB fixture, by the ``gamePk`` of the schedule that is its calendar."""
+
+    game_pk: int
+
+
+FixtureKey = EventKey | MlbGameKey
 
 
 class EmptyCollectionError(RuntimeError):
@@ -68,26 +85,38 @@ class FixtureCalendar:
 
 
 async def fixture_calendar(
-    session: AsyncSession, sport_key: str, *, now: datetime, horizon: timedelta
+    session: AsyncSession,
+    sport_key: str,
+    *,
+    now: datetime,
+    horizon: timedelta,
+    excluding: Collection[FixtureKey] = (),
 ) -> FixtureCalendar:
     """Upcoming fixtures of a sport, MLB from the MLB Stats API schedule.
 
     The MLB calendar comes from ``mlb_probable_pitchers`` so it does not depend
     on the collectors being monitored, which create the ``events`` rows.
+    ``excluding`` leaves out fixtures by key (see ``FixtureKey``).
     """
     if sport_key == MLB_SPORT_KEY:
-        return await _mlb_schedule_calendar(session, now=now, horizon=horizon)
-    return await event_calendar(session, sport_key, now=now, horizon=horizon)
+        return await _mlb_schedule_calendar(session, now=now, horizon=horizon, excluding=excluding)
+    return await event_calendar(session, sport_key, now=now, horizon=horizon, excluding=excluding)
 
 
 async def event_calendar(
-    session: AsyncSession, sport_key: str, *, now: datetime, horizon: timedelta
+    session: AsyncSession,
+    sport_key: str,
+    *,
+    now: datetime,
+    horizon: timedelta,
+    excluding: Collection[FixtureKey] = (),
 ) -> FixtureCalendar:
     """Upcoming SCHEDULED ``events`` of a sport, whichever collector created them."""
     scheduled = (
         Event.sport_key == sport_key,
         Event.status == EventStatus.SCHEDULED,
         Event.commence_time > now,
+        Event.id.notin_([k.event_id for k in excluding if isinstance(k, EventKey)]),  # type: ignore[attr-defined]
     )
     next_kickoff = (
         await session.execute(select(func.min(Event.commence_time)).where(*scheduled))
@@ -101,7 +130,11 @@ async def event_calendar(
 
 
 async def _mlb_schedule_calendar(
-    session: AsyncSession, *, now: datetime, horizon: timedelta
+    session: AsyncSession,
+    *,
+    now: datetime,
+    horizon: timedelta,
+    excluding: Collection[FixtureKey] = (),
 ) -> FixtureCalendar:
     """Games of the latest schedule fetch, which is the job's only write path.
 
@@ -116,6 +149,9 @@ async def _mlb_schedule_calendar(
         MlbProbablePitchers.commence_time > now,
         MlbProbablePitchers.game_type.in_(MLB_PRICED_GAME_TYPES),  # type: ignore[attr-defined]
         MlbProbablePitchers.start_time_tbd.is_(False),  # type: ignore[attr-defined]
+        MlbProbablePitchers.game_pk.notin_(
+            [k.game_pk for k in excluding if isinstance(k, MlbGameKey)]
+        ),  # type: ignore[attr-defined]
         or_(
             MlbProbablePitchers.game_status.is_(None),  # type: ignore[union-attr]
             MlbProbablePitchers.game_status.notin_(UNPLAYED_GAME_STATUSES),  # type: ignore[union-attr]
@@ -244,6 +280,7 @@ async def require_rows_for_fixtures(
     rows_by_sport: Mapping[str, int],
     *,
     errors_by_sport: Mapping[str, Sequence[str]] | None = None,
+    accounted_by_sport: Mapping[str, Collection[FixtureKey]] | None = None,
     now: datetime | None = None,
 ) -> None:
     """Raise when a sport got no rows although fixtures inside the source's horizon are scheduled.
@@ -251,6 +288,9 @@ async def require_rows_for_fixtures(
     Called inside the job's alert context so the failure skips the heartbeat and
     raises a critical alert. An empty fixture calendar (international break,
     off-season) never raises. The run's own errors for the sport join the message.
+    ``accounted_by_sport`` holds the keys of fixtures the run identified but rightly
+    did not price (a market already in play); the calendar leaves them out, so the
+    check raises only for fixtures beyond them.
     """
     moment = now or datetime.now(UTC)
     async with async_session_maker() as session:
@@ -258,7 +298,13 @@ async def require_rows_for_fixtures(
             if rows_written > 0 or sport_key not in source.fixture_horizons:
                 continue
             horizon = source.fixture_horizon(sport_key)
-            calendar = await fixture_calendar(session, sport_key, now=moment, horizon=horizon)
+            calendar = await fixture_calendar(
+                session,
+                sport_key,
+                now=moment,
+                horizon=horizon,
+                excluding=(accounted_by_sport or {}).get(sport_key, ()),
+            )
             if calendar.kickoffs_in_horizon:
                 errors = list((errors_by_sport or {}).get(sport_key, ()))[:ERRORS_SHOWN]
                 detail = f"; errors: {'; '.join(errors)}" if errors else ""

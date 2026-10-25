@@ -14,16 +14,22 @@ from enum import StrEnum
 import structlog
 from odds_core.alerts import send_recorded_alert
 from odds_core.config import get_settings
+from odds_core.team import normalize_team_name
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from odds_lambda.collection_calendar import EventKey, FixtureKey, MlbGameKey
 from odds_lambda.mlb_game_resolver import (
     MLB_SPORT_KEY,
     GameResolution,
     GameRow,
     MlbScheduleUnavailable,
+    ResolutionRule,
+    ResolvedGame,
     UnresolvedGame,
     resolve_batch,
 )
 from odds_lambda.mlb_stats_fetcher import MlbStatsFetcher
+from odds_lambda.storage.event_merge import find_match_id
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
@@ -84,6 +90,30 @@ class LiveEventFinder:
     @property
     def schedule_unavailable(self) -> bool:
         return self.resolutions is None
+
+    async def fixture_key(self, session: AsyncSession, game: GameRow) -> FixtureKey | None:
+        """The calendar fixture a listed game identifies, never creating one; ``None`` if it matches nothing.
+
+        An MLB game is its resolved ``gamePk``, unless the resolver only inferred it from a started
+        sibling: that row can be the started game's own, and naming the next game would excuse it.
+        Another sport's game is the event within ±2 h.
+        """
+        if self.sport_key == MLB_SPORT_KEY:
+            resolution = (self.resolutions or {}).get(game)
+            if (
+                not isinstance(resolution, ResolvedGame)
+                or resolution.rule is ResolutionRule.SIBLING_STARTED
+            ):
+                return None
+            return MlbGameKey(resolution.game_pk)
+        event_id = await find_match_id(
+            session,
+            normalize_team_name(game.home_team),
+            normalize_team_name(game.away_team),
+            game.start,
+            self.sport_key,
+        )
+        return EventKey(event_id) if event_id is not None else None
 
     async def find_or_create(
         self, writer: OddsWriter, game: GameRow
