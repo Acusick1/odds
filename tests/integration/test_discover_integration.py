@@ -117,7 +117,8 @@ class TestDiscoverIntegration:
         updated_event = next(e for e in events if e.id == "event1")
         assert updated_event.home_team == "Lakers"  # Updated
         assert updated_event.away_team == "Celtics"  # Updated
-        assert updated_event.commence_time == datetime(2024, 10, 15, 19, 0, 0, tzinfo=UTC)
+        # A historical start is in the past, so it is not offered as a kick-off move.
+        assert updated_event.commence_time == datetime(2024, 10, 14, 19, 0, 0, tzinfo=UTC)
 
     @pytest.mark.asyncio
     async def test_discover_multiple_days(self, test_session, mock_api_client_factory):
