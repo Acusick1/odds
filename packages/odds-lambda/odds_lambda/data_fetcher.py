@@ -13,6 +13,7 @@ from odds_core.api_models import (
     ScoresResponse,
     create_scheduled_event,
 )
+from odds_core.bookmakers import ODDS_API_BOOKMAKER_KEY_MAP
 from odds_core.config import get_settings
 from odds_core.utils import relabel_three_way_markets
 from tenacity import (
@@ -25,16 +26,6 @@ from tenacity import (
 from odds_lambda.api_key_manager import AllKeysExhaustedError, APIKeyManager
 
 logger = structlog.get_logger()
-
-# Odds API keys that differ from the pipeline's bookmaker keys
-# (odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP, scripts/ingest_football_data_uk.py).
-ODDS_API_BOOKMAKER_KEY_MAP: dict[str, str] = {
-    "betfair_ex_uk": "betfair_exchange",
-    "betfair_ex_eu": "betfair_exchange",
-    "ladbrokes_uk": "ladbrokes",
-    "betfred_uk": "betfred",
-    "sport888": "888sport",
-}
 
 
 def canonicalize_bookmaker_keys(raw_events_data: list[dict[str, Any]]) -> None:

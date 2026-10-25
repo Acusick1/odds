@@ -56,20 +56,17 @@ The MLB Stats API is the one source in `odds_lambda.storage.event_kickoff.PLAYED
 Nothing happens when no start is given or it equals the stored kick-off. Otherwise:
 
 - `commence_time` becomes the new start and `updated_at` is set.
-- A POSTPONED event becomes SCHEDULED.
+- A POSTPONED event becomes SCHEDULED, and so does a LIVE event moved to a start after `now` (a delayed kick-off).
 - Every stored snapshot of the event has `hours_until_commence` and `fetch_tier` recomputed against the new start (`odds_lambda.storage.event_merge.retime_snapshots`), so the pre-move snapshots of a postponed game lose their closing tier.
 - `event_rescheduled` is logged with the source and both times.
 
 ## Callers
 
-All pass the MLB Stats API as the source:
+- `odds_lambda.storage.event_resolver.resolve_event` ([Event resolver](event-resolver.md)), for the live OddsPortal and Betfair jobs ([live MLB events](event-matching.md#live-mlb-events)): the MLB Stats API with the schedule's start for MLB, else the listing source with its listed start.
+- `odds_lambda.jobs.fetch_mlb_results` ([fetch-mlb-results](../collection/results-jobs.md#fetch-mlb-results)), with the MLB Stats API.
+- `odds_lambda.storage.game_pk_backfill.apply_assignment` ([assigning gamePks](event-merge.md#assigning-gamepks)), with the MLB Stats API.
 
-- `odds_lambda.storage.writers.OddsWriter.find_or_create_event`, for the live OddsPortal and Betfair jobs ([live MLB events](event-matching.md#live-mlb-events)).
-- `odds_lambda.jobs.fetch_mlb_results` ([fetch-mlb-results](../collection/results-jobs.md#fetch-mlb-results)).
-- `odds_lambda.storage.game_pk_backfill.apply_assignment` ([assigning gamePks](event-merge.md#assigning-gamepks)).
-- `odds_lambda.storage.event_resolver.resolve_event` ([Event resolver](event-resolver.md)).
-
-`odds_lambda.storage.writers.OddsWriter.upsert_event` and `odds_lambda.storage.writers.OddsWriter.bulk_upsert_events` overwrite `commence_time` directly, outside this function ([upsert verbs](events.md#upsert-verbs)).
+- `odds_lambda.storage.writers.OddsWriter.upsert_event` and `odds_lambda.storage.writers.OddsWriter.bulk_upsert_events` ([upsert verbs](events.md#upsert-verbs)), for Odds API ingestion and event sync: the Odds API with the listed start.
 
 ## Related
 

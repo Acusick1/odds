@@ -30,6 +30,7 @@ import structlog
 from odds_core.candidates import candidates_dir, load_candidates
 from odds_core.database import async_session_maker
 from odds_core.snapshot_sources import SnapshotSource
+from odds_core.vocabulary import Source, TimeBasis
 
 from odds_lambda.candidate_rules import decision_leads
 from odds_lambda.collection_calendar import (
@@ -40,6 +41,7 @@ from odds_lambda.collection_calendar import (
 from odds_lambda.live_events import (
     DroppedGame,
     LiveEventFinder,
+    LiveListing,
     SkipReason,
     alert_dropped_games,
     count_dropped,
@@ -50,7 +52,7 @@ from odds_lambda.oddsportal_client import OddsPortalClient, OddsPortalError
 from odds_lambda.scheduling.decision import CadenceConfig, Lead, ScheduleDecision
 from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
-from odds_lambda.storage.writers import OddsWriter
+from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload
 
 logger = structlog.get_logger()
 
@@ -259,41 +261,31 @@ async def ingest_league(
     )
     if finder.schedule_unavailable:
         stats.errors.append("MLB schedule unavailable: no new events created")
-    dropped: dict[GameRow, DroppedGame] = {}
 
     async with async_session_maker() as session:
-        writer = OddsWriter(session)
-
-        for match in all_converted:
-            try:
-                found = await finder.find_or_create(writer, _game_row(match))
-                if isinstance(found, DroppedGame):
-                    dropped[found.game] = found
-                    continue
-                event_id, created = found
-
-                if created:
-                    stats.events_created += 1
-                else:
-                    stats.events_matched += 1
-
-                snapshot, _ = await writer.store_odds_snapshot(
-                    event_id=event_id,
+        payload_id = await store_payload(session, [m.raw_data for m in all_converted])
+        writes = await finder.store_listings(
+            session,
+            [
+                LiveListing(
+                    game=_game_row(match),
+                    external_id=match.raw_data.get("oddsportal_event_id"),
                     raw_data=match.raw_data,
                     snapshot_time=match.scraped_date,
+                    label=f"{match.home_team} vs {match.away_team} ({match.market})",
                 )
-
-                snapshot.api_request_id = api_request_id
-                stats.snapshots_stored += 1
-
-            except Exception as e:
-                msg = f"{match.home_team} vs {match.away_team} ({match.market}): {e}"
-                stats.errors.append(msg)
-                logger.error("match_ingestion_failed", error=msg, exc_info=True)
-
+                for match in all_converted
+            ],
+            SnapshotShape(Source.ODDSPORTAL, TimeBasis.OBSERVED, payload_id),
+            api_request_id,
+        )
         await session.commit()
 
-    stats.dropped_games = list(dropped.values())
+    stats.events_created += writes.events_created
+    stats.events_matched += writes.events_matched
+    stats.snapshots_stored += writes.snapshots_stored
+    stats.errors.extend(writes.errors)
+    stats.dropped_games = list(writes.dropped.values())
     logger.info(
         "league_ingestion_complete",
         league=spec.league,

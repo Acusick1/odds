@@ -4,18 +4,30 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator, Sequence
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 import pytest
 from odds_cli.commands import copy_from_prod as copy_cli
-from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
+from odds_core.models import (
+    Event,
+    EventExternalId,
+    EventStatus,
+    HealthCheckAcknowledgement,
+    Odds,
+    OddsSnapshot,
+    Price,
+)
 from odds_core.odds_math import american_to_decimal
+from odds_core.vocabulary import HealthCheck, PriceOutcome, Side, Source
 from odds_lambda import copy_from_production
 from odds_lambda.copy_from_production import CopyStats, ProductionDataCopier
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from sqlmodel import SQLModel
 from typer.testing import CliRunner
+
+from tests.test_helpers import make_epl_event
 
 PROD_SCHEMA = "prod_source"
 KICKOFF = datetime(2026, 8, 22, 15, 0, tzinfo=UTC)
@@ -432,3 +444,91 @@ class TestCopyLeavesLocalTwins:
                 .all()
             )
         assert len(twin_snapshots) == 1
+
+
+async def _seed_new_shape(
+    prod_session_maker: async_sessionmaker[AsyncSession], event_id: str, snapshot_id: int
+) -> None:
+    async with prod_session_maker() as session:
+        event = await session.get(Event, event_id)
+        assert event is not None and event.surrogate_id is not None
+        session.add_all(
+            [
+                Price(
+                    snapshot_id=snapshot_id,
+                    bookmaker="bet365",
+                    outcome=PriceOutcome.HOME,
+                    side=Side.BACK,
+                    price=Decimal("2.5"),
+                ),
+                EventExternalId(
+                    source=Source.ODDSPORTAL, external_id="Kl1AOZN9", event_id=event.surrogate_id
+                ),
+                HealthCheckAcknowledgement(
+                    event_id=event.surrogate_id,
+                    check_name=HealthCheck.MISSING_MLB_GAME_PK,
+                    reason="exhibition",
+                ),
+            ]
+        )
+        await session.commit()
+
+
+class TestCopyNewShape:
+    @pytest.mark.asyncio
+    async def test_prices_external_ids_and_acknowledgements_follow_the_local_keys(
+        self,
+        prod_session_maker: async_sessionmaker[AsyncSession],
+        local_session_maker: async_sessionmaker[AsyncSession],
+    ) -> None:
+        await _seed_prod_event(prod_session_maker, "evt_a", first_snapshot_id=500)
+        await _seed_new_shape(prod_session_maker, "evt_a", snapshot_id=502)
+        async with local_session_maker() as session:
+            session.add(make_epl_event("local_first", KICKOFF + timedelta(days=30)))
+            await session.commit()
+
+        for skip_existing in (True, False):
+            stats = await _copier(
+                prod_session_maker, local_session_maker, skip_existing=skip_existing
+            ).copy_events(*WINDOW, SPORT)
+            assert stats.events_failed == 0
+
+        async with local_session_maker() as session:
+            event = await session.get(Event, "evt_a")
+            assert event is not None
+            [price] = (await session.execute(select(Price))).scalars().all()
+            snapshot = await session.get(OddsSnapshot, price.snapshot_id)
+            assert snapshot is not None and snapshot.event_id == "evt_a"
+            assert snapshot.snapshot_time == KICKOFF - timedelta(hours=1)
+            [external] = (await session.execute(select(EventExternalId))).scalars().all()
+            assert (external.external_id, external.event_id) == ("Kl1AOZN9", event.surrogate_id)
+            [ack] = (await session.execute(select(HealthCheckAcknowledgement))).scalars().all()
+            assert (ack.event_id, ack.reason) == (event.surrogate_id, "exhibition")
+
+    @pytest.mark.asyncio
+    async def test_an_id_held_by_another_local_event_stays_with_it(
+        self,
+        prod_session_maker: async_sessionmaker[AsyncSession],
+        local_session_maker: async_sessionmaker[AsyncSession],
+    ) -> None:
+        await _seed_prod_event(prod_session_maker, "evt_a", first_snapshot_id=500)
+        await _seed_new_shape(prod_session_maker, "evt_a", snapshot_id=502)
+        async with local_session_maker() as session:
+            twin = make_epl_event("local_twin", KICKOFF)
+            session.add(twin)
+            await session.flush()
+            assert twin.surrogate_id is not None
+            session.add(
+                EventExternalId(
+                    source=Source.ODDSPORTAL, external_id="Kl1AOZN9", event_id=twin.surrogate_id
+                )
+            )
+            await session.commit()
+            twin_key = twin.surrogate_id
+
+        stats = await _copier(prod_session_maker, local_session_maker).copy_events(*WINDOW, SPORT)
+
+        assert (stats.events_failed, stats.external_ids_skipped) == (0, 1)
+        async with local_session_maker() as session:
+            [external] = (await session.execute(select(EventExternalId))).scalars().all()
+            assert external.event_id == twin_key

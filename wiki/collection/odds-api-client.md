@@ -14,7 +14,7 @@ status: stable
 
 # The Odds API client and key rotation
 
-`odds_lambda.data_fetcher.TheOddsAPIClient` is an async aiohttp client used as `async with TheOddsAPIClient() as client`. Rotation state lives in `odds_lambda.api_key_manager.APIKeyManager`. Quota is spent only by this client; only the `odds_lambda.data_fetcher.TheOddsAPIClient.get_events` and `odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_events` costs below are stated in method docstrings in `odds_lambda.data_fetcher`; the rest are the vendor's published pricing `(inferred)`, and actual billing is not verifiable from code. Settings are in `odds_core.config.APIConfig` (`ODDS_API_` prefix; [configuration](../foundations/configuration.md)). How usage is recorded and alerted is on [odds-api-quota](odds-api-quota.md).
+`odds_lambda.data_fetcher.TheOddsAPIClient` is an async aiohttp client used as `async with TheOddsAPIClient() as client`; it rewrites response bookmaker keys through `odds_core.bookmakers.ODDS_API_BOOKMAKER_KEY_MAP` ([sport and market keys](sport-and-market-keys.md)). Rotation state lives in `odds_lambda.api_key_manager.APIKeyManager`. Quota is spent only by this client; only the `odds_lambda.data_fetcher.TheOddsAPIClient.get_events` and `odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_events` costs below are stated in method docstrings in `odds_lambda.data_fetcher`; the rest are the vendor's published pricing `(inferred)`, and actual billing is not verifiable from code. Settings are in `odds_core.config.APIConfig` (`ODDS_API_` prefix; [configuration](../foundations/configuration.md)). How usage is recorded and alerted is on [odds-api-quota](odds-api-quota.md).
 
 ## Methods
 

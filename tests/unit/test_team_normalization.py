@@ -7,7 +7,11 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from odds_core.models import Event, EventStatus
 from odds_core.team import normalize_team_name
-from odds_lambda.mlb_game_resolver import ResolutionRule, ResolvedGame
+from odds_core.vocabulary import Source
+from odds_lambda.live_events import LiveEventFinder
+from odds_lambda.mlb_game_resolver import GameRow, ResolutionRule, ResolvedGame
+from odds_lambda.storage.event_resolver import Resolution, ResolvedEvent, StaleListing
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class TestNormalizeTeamName:
@@ -122,273 +126,134 @@ class TestEventFieldValidator:
         assert event.home_team == "Manchester City"
 
 
-class TestFindOrCreateEventNormalization:
-    """Test that find_or_create_event normalizes inputs before querying."""
+async def _resolve(
+    session: AsyncSession,
+    home_team: str,
+    away_team: str,
+    start: datetime,
+    sport_key: str = "soccer_epl",
+    game_pk: int | None = None,
+) -> tuple[str, bool]:
+    game = GameRow(home_team, away_team, start)
+    resolutions = (
+        {} if game_pk is None else {game: ResolvedGame(game_pk, ResolutionRule.SINGLE_GAME)}
+    )
+    finder = LiveEventFinder(sport_key, sport_key, resolutions)
+    found = await finder.resolve(session, game, Source.ODDSPORTAL, None)
+    assert isinstance(found, ResolvedEvent)
+    await session.flush()
+    return found.event.id, found.resolution is Resolution.CREATED
 
+
+class TestLiveEventFinderNormalization:
     @pytest.mark.asyncio
     async def test_finds_existing_event_with_alias_input(self, test_session) -> None:
-        """Query with 'Wolverhampton Wanderers' matches DB row with 'Wolves'."""
-        from odds_lambda.storage.writers import OddsWriter
-
-        event = Event(
-            id="existing_wolves",
-            sport_key="soccer_epl",
-            sport_title="EPL",
-            commence_time=datetime(2026, 4, 15, 15, 0, tzinfo=UTC),
-            home_team="Wolves",
-            away_team="Arsenal",
-            status=EventStatus.SCHEDULED,
+        test_session.add(
+            Event(
+                id="existing_wolves",
+                sport_key="soccer_epl",
+                sport_title="EPL",
+                commence_time=datetime(2026, 4, 15, 15, 0, tzinfo=UTC),
+                home_team="Wolves",
+                away_team="Arsenal",
+                status=EventStatus.SCHEDULED,
+            )
         )
-        test_session.add(event)
         await test_session.flush()
 
-        writer = OddsWriter(test_session)
-
-        event_id, created = await writer.find_or_create_event(
-            home_team="Wolverhampton Wanderers",
-            away_team="Arsenal",
-            match_date=datetime(2026, 4, 15, 16, 0, tzinfo=UTC),
-            sport_key="soccer_epl",
-            sport_title="EPL",
+        event_id, created = await _resolve(
+            test_session,
+            "Wolverhampton Wanderers",
+            "Arsenal",
+            datetime(2026, 4, 15, 16, 0, tzinfo=UTC),
         )
 
-        assert created is False
-        assert event_id == "existing_wolves"
+        assert (event_id, created) == ("existing_wolves", False)
 
 
-class TestFindOrCreateEventOnWriter:
-    """Test that find_or_create_event lives on OddsWriter."""
-
+class TestLiveEventFinderCreates:
     @pytest.mark.asyncio
-    async def test_creates_event_when_none_exists(self, test_session) -> None:
-        from odds_lambda.storage.writers import OddsWriter
-
-        writer = OddsWriter(test_session)
-
-        event_id, created = await writer.find_or_create_event(
-            home_team="Arsenal",
-            away_team="Chelsea",
-            match_date=datetime.now(UTC) + timedelta(days=7),
-            sport_key="soccer_epl",
-            sport_title="EPL",
+    async def test_creates_an_op_live_event_when_none_exists(self, test_session) -> None:
+        event_id, created = await _resolve(
+            test_session, "Arsenal", "Chelsea", datetime.now(UTC) + timedelta(days=7)
         )
 
         assert created is True
-        assert event_id.startswith("op_live_")
-        assert "ARS" in event_id
-        assert "CHE" in event_id
+        assert event_id.startswith("op_live_ARS_CHE_")
 
     @pytest.mark.asyncio
-    async def test_finds_existing_event(self, test_session) -> None:
-        from odds_lambda.storage.writers import OddsWriter
+    async def test_re_listing_is_idempotent(self, test_session) -> None:
+        start = datetime.now(UTC) + timedelta(days=7)
 
-        # Pre-create an event
-        event = Event(
-            id="existing_123",
-            sport_key="soccer_epl",
-            sport_title="EPL",
-            commence_time=datetime(2026, 4, 15, 15, 0, tzinfo=UTC),
-            home_team="Arsenal",
-            away_team="Chelsea",
-            status=EventStatus.SCHEDULED,
-        )
-        test_session.add(event)
-        await test_session.flush()
+        first = await _resolve(test_session, "Arsenal", "Chelsea", start)
+        second = await _resolve(test_session, "Arsenal", "Chelsea", start + timedelta(minutes=35))
 
-        writer = OddsWriter(test_session)
-
-        event_id, created = await writer.find_or_create_event(
-            home_team="Arsenal",
-            away_team="Chelsea",
-            match_date=datetime(2026, 4, 15, 16, 0, tzinfo=UTC),
-            sport_key="soccer_epl",
-            sport_title="EPL",
-        )
-
-        assert created is False
-        assert event_id == "existing_123"
-
-    @pytest.mark.asyncio
-    async def test_idempotent_create(self, test_session) -> None:
-        from odds_lambda.storage.writers import OddsWriter
-
-        writer = OddsWriter(test_session)
-        match_date = datetime.now(UTC) + timedelta(days=7)
-
-        event_id_1, created_1 = await writer.find_or_create_event(
-            home_team="Arsenal",
-            away_team="Chelsea",
-            match_date=match_date,
-            sport_key="soccer_epl",
-            sport_title="EPL",
-        )
-        await test_session.flush()
-
-        event_id_2, created_2 = await writer.find_or_create_event(
-            home_team="Arsenal",
-            away_team="Chelsea",
-            match_date=match_date,
-            sport_key="soccer_epl",
-            sport_title="EPL",
-        )
-
-        assert event_id_1 == event_id_2
-        assert created_1 is True
-        assert created_2 is False
+        assert first == (first[0], True)
+        assert second == (first[0], False)
 
 
-class TestFindOrCreateEventMatchWindow:
-    """Regression tests for MLB games stored as one event each.
-
-    The prior ±24h window silently merged back-to-back same-matchup games
-    (MLB series pattern) and same-day doubleheaders into a single event row.
-    """
+class TestLiveEventFinderMatchWindow:
+    """MLB games stored as one event each: back-to-back series games and doubleheaders."""
 
     @pytest.mark.asyncio
     async def test_same_teams_consecutive_days_are_distinct_events(self, test_session) -> None:
-        """Team A vs B on day N and day N+1 must create two event rows."""
-        from odds_lambda.storage.writers import OddsWriter
-
-        writer = OddsWriter(test_session)
-
-        # Anchor to the future so the live-event stale guardrail never trips.
         day_one = (datetime.now(UTC) + timedelta(days=1)).replace(
             hour=23, minute=10, second=0, microsecond=0
         )
-        day_two = day_one + timedelta(days=1)
 
-        event_id_1, created_1 = await writer.find_or_create_event(
-            home_team="New York Yankees",
-            away_team="Boston Red Sox",
-            match_date=day_one,
-            sport_key="baseball_mlb",
-            sport_title="MLB",
-            mlb_game=ResolvedGame(1001, ResolutionRule.SINGLE_GAME),
+        first = await _resolve(
+            test_session, "New York Yankees", "Boston Red Sox", day_one, "baseball_mlb", 1001
         )
-        await test_session.flush()
-
-        event_id_2, created_2 = await writer.find_or_create_event(
-            home_team="New York Yankees",
-            away_team="Boston Red Sox",
-            match_date=day_two,
-            sport_key="baseball_mlb",
-            sport_title="MLB",
-            mlb_game=ResolvedGame(1002, ResolutionRule.SINGLE_GAME),
+        second = await _resolve(
+            test_session,
+            "New York Yankees",
+            "Boston Red Sox",
+            day_one + timedelta(days=1),
+            "baseball_mlb",
+            1002,
         )
 
-        assert created_1 is True
-        assert created_2 is True
-        assert event_id_1 != event_id_2
+        assert first[1] and second[1]
+        assert first[0] != second[0]
 
     @pytest.mark.asyncio
     async def test_same_day_doubleheader_games_are_distinct_events(self, test_session) -> None:
-        """Team A vs B at 13:00 and 18:00 same day must create two event rows."""
-        from odds_lambda.storage.writers import OddsWriter
-
-        writer = OddsWriter(test_session)
-
-        # Anchor to the future so the live-event stale guardrail never trips.
         game_one = (datetime.now(UTC) + timedelta(days=1)).replace(
             hour=13, minute=0, second=0, microsecond=0
         )
-        game_two = game_one + timedelta(hours=5)
 
-        event_id_1, created_1 = await writer.find_or_create_event(
-            home_team="Chicago Cubs",
-            away_team="St. Louis Cardinals",
-            match_date=game_one,
-            sport_key="baseball_mlb",
-            sport_title="MLB",
-            mlb_game=ResolvedGame(1001, ResolutionRule.SINGLE_GAME),
+        first = await _resolve(
+            test_session, "Chicago Cubs", "St. Louis Cardinals", game_one, "baseball_mlb", 1001
         )
-        await test_session.flush()
-
-        event_id_2, created_2 = await writer.find_or_create_event(
-            home_team="Chicago Cubs",
-            away_team="St. Louis Cardinals",
-            match_date=game_two,
-            sport_key="baseball_mlb",
-            sport_title="MLB",
-            mlb_game=ResolvedGame(1002, ResolutionRule.SINGLE_GAME),
+        second = await _resolve(
+            test_session,
+            "Chicago Cubs",
+            "St. Louis Cardinals",
+            game_one + timedelta(hours=5),
+            "baseball_mlb",
+            1002,
         )
 
-        assert created_1 is True
-        assert created_2 is True
-        assert event_id_1 != event_id_2
+        assert first[1] and second[1]
+        assert first[0] != second[0]
+
+
+class TestLiveEventFinderStaleListing:
+    """A live listing never creates an event whose start is over an hour past."""
 
     @pytest.mark.asyncio
-    async def test_re_scrape_same_match_is_idempotent(self, test_session) -> None:
-        """Re-scraping the same match (match_date jittered within ±2h) reuses the row."""
-        from odds_lambda.storage.writers import OddsWriter
-
-        writer = OddsWriter(test_session)
-
-        # Anchor to the future so the live-event stale guardrail never trips.
-        first_scrape = (datetime.now(UTC) + timedelta(days=1)).replace(
-            hour=23, minute=10, second=0, microsecond=0
-        )
-        # Source occasionally re-reports commence_time within a small window.
-        second_scrape = first_scrape + timedelta(minutes=35)
-
-        event_id_1, created_1 = await writer.find_or_create_event(
-            home_team="New York Yankees",
-            away_team="Boston Red Sox",
-            match_date=first_scrape,
-            sport_key="baseball_mlb",
-            sport_title="MLB",
-            mlb_game=ResolvedGame(1001, ResolutionRule.SINGLE_GAME),
-        )
-        await test_session.flush()
-
-        event_id_2, created_2 = await writer.find_or_create_event(
-            home_team="New York Yankees",
-            away_team="Boston Red Sox",
-            match_date=second_scrape,
-            sport_key="baseball_mlb",
-            sport_title="MLB",
-            mlb_game=ResolvedGame(1001, ResolutionRule.SINGLE_GAME),
-        )
-
-        assert created_1 is True
-        assert created_2 is False
-        assert event_id_1 == event_id_2
-
-
-class TestFindOrCreateEventStaleLiveGuardrail:
-    """Defense-in-depth: refuse to mint op_live_* events with past commence times."""
-
-    @pytest.mark.asyncio
-    async def test_accepts_live_event_within_window(self, test_session) -> None:
-        from odds_lambda.storage.writers import OddsWriter
-
-        writer = OddsWriter(test_session)
-        match_date = datetime.now(UTC) + timedelta(minutes=30)
-
-        event_id, created = await writer.find_or_create_event(
-            home_team="Arsenal",
-            away_team="Chelsea",
-            match_date=match_date,
-            sport_key="soccer_epl",
-            sport_title="EPL",
+    async def test_accepts_a_listing_within_the_window(self, test_session) -> None:
+        event_id, created = await _resolve(
+            test_session, "Arsenal", "Chelsea", datetime.now(UTC) - timedelta(minutes=30)
         )
 
         assert created is True
-        assert event_id.startswith("op_live_")
 
     @pytest.mark.asyncio
-    async def test_rejects_stale_live_event(self, test_session) -> None:
-        from odds_lambda.storage.writers import OddsWriter
-
-        writer = OddsWriter(test_session)
-        match_date = datetime.now(UTC) - timedelta(hours=2)
-
-        with pytest.raises(ValueError, match="stale live-scrape event"):
-            await writer.find_or_create_event(
-                home_team="Arsenal",
-                away_team="Chelsea",
-                match_date=match_date,
-                sport_key="soccer_epl",
-                sport_title="EPL",
+    async def test_refuses_to_create_a_stale_event(self, test_session) -> None:
+        with pytest.raises(StaleListing, match="too far past"):
+            await _resolve(
+                test_session, "Arsenal", "Chelsea", datetime.now(UTC) - timedelta(hours=2)
             )
 
     @pytest.mark.asyncio
@@ -415,32 +280,21 @@ class TestFindOrCreateEventStaleLiveGuardrail:
         assert result.commence_time == match_date
 
     @pytest.mark.asyncio
-    async def test_finds_existing_stale_live_event_without_creating(self, test_session) -> None:
-        """Guardrail only fires on create — looking up existing stale events still works."""
-        from odds_lambda.storage.writers import OddsWriter
-
+    async def test_finds_an_existing_stale_event_without_creating(self, test_session) -> None:
         match_date = datetime.now(UTC) - timedelta(hours=5)
-        event = Event(
-            id="op_live_ARS_CHE_2020-01-01T1500",
-            sport_key="soccer_epl",
-            sport_title="EPL",
-            commence_time=match_date,
-            home_team="Arsenal",
-            away_team="Chelsea",
-            status=EventStatus.SCHEDULED,
+        test_session.add(
+            Event(
+                id="op_live_ARS_CHE_2020-01-01T1500",
+                sport_key="soccer_epl",
+                sport_title="EPL",
+                commence_time=match_date,
+                home_team="Arsenal",
+                away_team="Chelsea",
+                status=EventStatus.SCHEDULED,
+            )
         )
-        test_session.add(event)
         await test_session.flush()
 
-        writer = OddsWriter(test_session)
+        event_id, created = await _resolve(test_session, "Arsenal", "Chelsea", match_date)
 
-        event_id, created = await writer.find_or_create_event(
-            home_team="Arsenal",
-            away_team="Chelsea",
-            match_date=match_date,
-            sport_key="soccer_epl",
-            sport_title="EPL",
-        )
-
-        assert created is False
-        assert event_id == "op_live_ARS_CHE_2020-01-01T1500"
+        assert (event_id, created) == ("op_live_ARS_CHE_2020-01-01T1500", False)

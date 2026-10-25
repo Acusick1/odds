@@ -1,7 +1,8 @@
 """
 Copy data from production database to local database.
 
-Replicates events, snapshots and odds for a given sport and date range.
+Replicates events with their external ids and health-check acknowledgements, and their
+snapshots, odds and price rows, for a given sport and date range.
 """
 
 from __future__ import annotations
@@ -11,7 +12,14 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 import structlog
-from odds_core.models import Event, Odds, OddsSnapshot
+from odds_core.models import (
+    Event,
+    EventExternalId,
+    HealthCheckAcknowledgement,
+    Odds,
+    OddsSnapshot,
+    Price,
+)
 from rich.console import Console
 from rich.progress import (
     BarColumn,
@@ -38,6 +46,9 @@ class CopyStats:
     events_skipped: int = 0
     snapshots_copied: int = 0
     odds_copied: int = 0
+    prices_copied: int = 0
+    external_ids_copied: int = 0
+    external_ids_skipped: int = 0
     local_twin_matches: int = 0
     failed_event_ids: list[str] = field(default_factory=list)
 
@@ -174,6 +185,40 @@ class ProductionDataCopier:
                 .all()
             )
 
+            prod_prices = list(
+                (
+                    await prod_session.execute(
+                        select(Price).where(
+                            Price.snapshot_id.in_([s.id for s in prod_snapshots])  # type: ignore[union-attr]
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            prod_external_ids = list(
+                (
+                    await prod_session.execute(
+                        select(EventExternalId).where(
+                            EventExternalId.event_id == event.surrogate_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            prod_acknowledgements = list(
+                (
+                    await prod_session.execute(
+                        select(HealthCheckAcknowledgement).where(
+                            HealthCheckAcknowledgement.event_id == event.surrogate_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
             await local_session.execute(delete(Odds).where(Odds.event_id == event.id))
             await local_session.execute(
                 delete(OddsSnapshot).where(OddsSnapshot.event_id == event.id)
@@ -183,10 +228,14 @@ class ProductionDataCopier:
             local_event = await local_session.get(Event, event.id)
             if local_event is not None:
                 copied.surrogate_id = local_event.surrogate_id
-            await local_session.merge(copied)
+            local_event = await local_session.merge(copied)
             await local_session.flush()
+            await self._copy_identity(
+                local_session, local_event, prod_external_ids, prod_acknowledgements
+            )
 
-            # Payloads are not copied, so a local snapshot points at none.
+            # Payloads are an archive read only to re-parse after an adapter bug, so they stay
+            # on production and a local snapshot points at none.
             local_snapshots = [
                 OddsSnapshot(**snapshot.model_dump(exclude={"id", "payload_id"}))
                 for snapshot in prod_snapshots
@@ -212,12 +261,74 @@ class ProductionDataCopier:
                     ],
                 )
 
+            if prod_prices:
+                await local_session.execute(
+                    insert(Price),
+                    [
+                        row.model_dump(exclude={"id"})
+                        | {"snapshot_id": local_snapshot_ids[row.snapshot_id]}
+                        for row in prod_prices
+                        if row.snapshot_id is not None
+                    ],
+                )
+
             await local_session.commit()
 
         self.stats.events_copied += 1
         self.stats.snapshots_copied += len(local_snapshots)
         self.stats.odds_copied += len(prod_odds)
+        self.stats.prices_copied += len(prod_prices)
         logger.info("event_copied", event_id=event.id, snapshot_count=len(local_snapshots))
+
+    async def _copy_identity(
+        self,
+        session: AsyncSession,
+        event: Event,
+        external_ids: list[EventExternalId],
+        acknowledgements: list[HealthCheckAcknowledgement],
+    ) -> None:
+        """Replace the local event's external ids and acknowledgements with production's,
+        keyed to its local surrogate id. An id another local event holds stays with it."""
+        assert event.surrogate_id is not None
+        await session.execute(
+            delete(EventExternalId).where(EventExternalId.event_id == event.surrogate_id)  # type: ignore[arg-type]
+        )
+        await session.execute(
+            delete(HealthCheckAcknowledgement).where(
+                HealthCheckAcknowledgement.event_id == event.surrogate_id  # type: ignore[arg-type]
+            )
+        )
+        for row in external_ids:
+            held = await session.get(EventExternalId, (row.source, row.external_id))
+            if held is not None:
+                self.stats.external_ids_skipped += 1
+                logger.warning(
+                    "copy_external_id_held_locally",
+                    event_id=event.id,
+                    source=row.source.value,
+                    external_id=row.external_id,
+                    local_event_key=held.event_id,
+                )
+                continue
+            session.add(
+                EventExternalId(
+                    source=row.source,
+                    external_id=row.external_id,
+                    event_id=event.surrogate_id,
+                    created_at=row.created_at,
+                )
+            )
+            self.stats.external_ids_copied += 1
+        for ack in acknowledgements:
+            session.add(
+                HealthCheckAcknowledgement(
+                    event_id=event.surrogate_id,
+                    check_name=ack.check_name,
+                    reason=ack.reason,
+                    acknowledged_at=ack.acknowledged_at,
+                )
+            )
+        await session.flush()
 
     def _print_summary(self) -> None:
         """Print summary statistics."""
@@ -228,6 +339,13 @@ class ProductionDataCopier:
         console.print(f"  Snapshots copied: [green]{self.stats.snapshots_copied}[/green]")
 
         console.print(f"  Odds rows copied: [green]{self.stats.odds_copied}[/green]")
+        console.print(f"  Price rows copied: [green]{self.stats.prices_copied}[/green]")
+        console.print(f"  External ids copied: [green]{self.stats.external_ids_copied}[/green]")
+        if self.stats.external_ids_skipped:
+            console.print(
+                f"  External ids held by another local event: "
+                f"[yellow]{self.stats.external_ids_skipped}[/yellow]"
+            )
         if self.stats.local_twin_matches:
             console.print(
                 f"  Local matches stored as several events: "

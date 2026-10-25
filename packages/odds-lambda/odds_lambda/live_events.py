@@ -1,20 +1,24 @@
-"""Find or create the event of each game a live collection run lists (#612).
+"""Resolve each game a live collection run lists to its event (#612).
 
 MLB games are resolved to their MLB Stats API ``gamePk`` once per run, so an MLB event is
-found by, or created with, its ``gamePk``. Other sports match on teams within ±2 h.
+found by, or created with, its ``gamePk``. Every game then goes through the event resolver
+(``odds_lambda.storage.event_resolver.resolve_event``).
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
-from datetime import timedelta
+from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+from typing import Any
 
 import structlog
 from odds_core.alerts import send_recorded_alert
 from odds_core.config import get_settings
-from odds_core.team import normalize_team_name
+from odds_core.event_ids import LIVE_EVENT_ID_PREFIX
+from odds_core.team import normalize_team_name, team_abbrev
+from odds_core.vocabulary import Source
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.collection_calendar import EventKey, FixtureKey, MlbGameKey
@@ -30,11 +34,40 @@ from odds_lambda.mlb_game_resolver import (
 )
 from odds_lambda.mlb_stats_fetcher import MlbStatsFetcher
 from odds_lambda.storage.event_merge import find_match_id
+from odds_lambda.storage.event_resolver import (
+    ListedGame,
+    Resolution,
+    ResolvedEvent,
+    event_lock_key,
+    resolve_event,
+    resolve_unscheduled_mlb_event,
+)
+from odds_lambda.storage.shaped_snapshots import SnapshotShape
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
 
 DROPPED_GAMES_SHOWN = 10
+# A live listing this far past its start matches an event but creates none.
+LIVE_EVENT_STALE_THRESHOLD = timedelta(hours=1)
+
+
+def live_event_id(home_team: str, away_team: str, start: datetime) -> str:
+    """The string id an event a live listing creates takes, while ``events.id`` is a string.
+
+    It carries the start to the minute, so a doubleheader's games get distinct ids.
+    """
+    return (
+        f"{LIVE_EVENT_ID_PREFIX}{team_abbrev(home_team)}_{team_abbrev(away_team)}_"
+        f"{start:%Y-%m-%dT%H%M}"
+    )
+
+
+def lock_order(sport_key: str, game: GameRow) -> int:
+    """Sort key that resolves a run's games in fixture-lock order within one transaction."""
+    return event_lock_key(
+        sport_key, normalize_team_name(game.home_team), normalize_team_name(game.away_team)
+    )
 
 
 class SkipReason(StrEnum):
@@ -57,6 +90,28 @@ class DroppedGame:
             f"{self.game.away_team} @ {self.game.home_team}{label} "
             f"{self.game.start:%Y-%m-%d %H:%M}Z ({why})"
         )
+
+
+@dataclass(frozen=True)
+class LiveListing:
+    """One market of one game as a live run read it: the envelope it stores."""
+
+    game: GameRow
+    external_id: str | None
+    raw_data: dict[str, Any]
+    snapshot_time: datetime
+    label: str
+
+
+@dataclass
+class ListingWrites:
+    """What storing a run's listings did; ``dropped`` holds each dropped game once."""
+
+    events_created: int = 0
+    events_matched: int = 0
+    snapshots_stored: int = 0
+    dropped: dict[GameRow, DroppedGame] = field(default_factory=dict)
+    errors: list[str] = field(default_factory=list)
 
 
 def count_dropped(dropped: Iterable[DroppedGame], reason: SkipReason) -> int:
@@ -115,36 +170,108 @@ class LiveEventFinder:
         )
         return EventKey(event_id) if event_id is not None else None
 
-    async def find_or_create(
-        self, writer: OddsWriter, game: GameRow
-    ) -> tuple[str, bool] | DroppedGame:
-        """``(event_id, was_created)``, or the game dropped from this run.
+    async def resolve(
+        self,
+        session: AsyncSession,
+        game: GameRow,
+        source: Source,
+        external_id: str | None,
+        *,
+        now: datetime | None = None,
+    ) -> ResolvedEvent | DroppedGame:
+        """The game's event, recording ``source``'s id for it, or the game dropped from this run.
 
         Without the MLB schedule a game attaches only to the one event of its pair within ±2 h
-        and never creates one, since a new event could not carry its ``gamePk``.
+        and never creates one, since a new event could not carry its ``gamePk``. Flushes; the
+        caller commits.
+
+        Raises:
+            StaleListing: when the game matches no event and started over
+                ``LIVE_EVENT_STALE_THRESHOLD`` before ``now``.
         """
-        if self.sport_key != MLB_SPORT_KEY:
-            return await writer.find_or_create_event(
-                game.home_team, game.away_team, game.start, self.sport_key, self.sport_title
-            )
-        if self.resolutions is None:
-            event_id = await writer.find_unscheduled_mlb_event(
-                game.home_team, game.away_team, game.start, game.game_number
-            )
-            if event_id is None:
-                return DroppedGame(game, SkipReason.SCHEDULE_UNAVAILABLE)
-            return event_id, False
-        resolution = self.resolutions[game]
-        if isinstance(resolution, UnresolvedGame):
-            return DroppedGame(game, SkipReason.UNRESOLVED, resolution.reason)
-        return await writer.find_or_create_event(
-            game.home_team,
-            game.away_team,
-            game.start,
-            self.sport_key,
-            self.sport_title,
-            mlb_game=resolution,
+        now = now or datetime.now(UTC)
+        mlb_game: ResolvedGame | None = None
+        start = game.start
+        if self.sport_key == MLB_SPORT_KEY:
+            if self.resolutions is None:
+                found = await resolve_unscheduled_mlb_event(
+                    session,
+                    source,
+                    game.home_team,
+                    game.away_team,
+                    game.start,
+                    game.game_number,
+                    external_id,
+                )
+                return found or DroppedGame(game, SkipReason.SCHEDULE_UNAVAILABLE)
+            resolution = self.resolutions[game]
+            if isinstance(resolution, UnresolvedGame):
+                return DroppedGame(game, SkipReason.UNRESOLVED, resolution.reason)
+            mlb_game = resolution
+            start = resolution.start or game.start
+        return await resolve_event(
+            session,
+            ListedGame(
+                source=source,
+                sport_key=self.sport_key,
+                sport_title=self.sport_title,
+                home_team=game.home_team,
+                away_team=game.away_team,
+                commence_time=game.start,
+                legacy_id=live_event_id(
+                    normalize_team_name(game.home_team), normalize_team_name(game.away_team), start
+                ),
+                external_id=external_id,
+                mlb_game=mlb_game,
+                earliest_created_start=now - LIVE_EVENT_STALE_THRESHOLD,
+            ),
         )
+
+    async def store_listings(
+        self,
+        session: AsyncSession,
+        listings: Sequence[LiveListing],
+        shape: SnapshotShape,
+        api_request_id: str,
+        *,
+        now: datetime | None = None,
+    ) -> ListingWrites:
+        """Resolve each listing's game and store its snapshot, all in the caller's transaction.
+
+        Listings go in fixture-lock order (``lock_order``), so one transaction never asks for a
+        lock below one it holds. Each runs in its own savepoint: a failing listing is rolled
+        back and recorded in ``errors``, and the run's other writes stand. Does not commit.
+        """
+        writer = OddsWriter(session)
+        writes = ListingWrites()
+        for listing in sorted(listings, key=lambda item: lock_order(self.sport_key, item.game)):
+            try:
+                async with session.begin_nested():
+                    found = await self.resolve(
+                        session, listing.game, shape.source, listing.external_id, now=now
+                    )
+                    if isinstance(found, DroppedGame):
+                        writes.dropped[found.game] = found
+                        continue
+                    if found.resolution is Resolution.CREATED:
+                        writes.events_created += 1
+                    else:
+                        writes.events_matched += 1
+                    await writer.store_odds_snapshot(
+                        event_id=found.event.id,
+                        raw_data=listing.raw_data,
+                        snapshot_time=listing.snapshot_time,
+                        shape=shape,
+                        api_request_id=api_request_id,
+                    )
+                    writes.snapshots_stored += 1
+            except Exception as e:
+                msg = f"{listing.label}: {type(e).__name__}: {e}"
+                writes.errors.append(msg)
+                logger.error(
+                    "listing_ingestion_failed", source=shape.source.value, error=msg, exc_info=True
+                )
+        return writes
 
 
 async def alert_dropped_games(job_name: str, dropped: Sequence[DroppedGame]) -> bool:

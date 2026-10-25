@@ -158,3 +158,14 @@ class TestMoveKickoffAfterTheStoredKickoff:
             pglite_async_session, mlb_event, Source.MLB_STATS_API, IN_PLAY, now=MOVED
         )
         assert mlb_event.commence_time == IN_PLAY
+
+    @pytest.mark.asyncio
+    async def test_a_live_event_moved_to_a_future_start_is_scheduled_again(
+        self, pglite_async_session, stored_epl_event
+    ) -> None:
+        stored_epl_event.status = EventStatus.LIVE
+
+        assert await move_kickoff(
+            pglite_async_session, stored_epl_event, Source.ODDSPORTAL, MOVED, now=IN_PLAY
+        )
+        assert stored_epl_event.status == EventStatus.SCHEDULED

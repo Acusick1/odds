@@ -50,7 +50,8 @@ async def move_kickoff(
     session: AsyncSession, event: Event, source: Source, start: datetime | None, *, now: datetime
 ) -> bool:
     """Move ``event`` to ``start`` as reported by ``source`` when that source is the event's
-    schedule authority, re-timing its stored snapshots; a postponed event becomes scheduled.
+    schedule authority, re-timing its stored snapshots. A postponed event becomes scheduled, and
+    so does a live one moved to a start after ``now``.
 
     Returns whether the event moved: never for a source outside its sport's authority order, a
     ``None`` start or an unchanged one. Before the stored kick-off (``now`` earlier) a source
@@ -74,7 +75,9 @@ async def move_kickoff(
     moved_from = ensure_utc(event.commence_time)
     event.commence_time = start
     event.updated_at = datetime.now(UTC)
-    if event.status == EventStatus.POSTPONED:
+    if event.status == EventStatus.POSTPONED or (
+        event.status == EventStatus.LIVE and ensure_utc(start) > ensure_utc(now)
+    ):
         event.status = EventStatus.SCHEDULED
     retimed = await retime_snapshots(session, event_id, start)
     logger.info(

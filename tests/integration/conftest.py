@@ -12,8 +12,32 @@ import pytest
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 from odds_core.odds_math import american_to_decimal
 from odds_core.vocabulary import Market, Source, TimeBasis
+from odds_lambda import collection_calendar
+from odds_lambda.jobs import fetch_betfair_exchange, fetch_oddsportal
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.test_helpers import TWIN_EVENT_ID, TWIN_KICKOFF, make_epl_event
+
+
+@pytest.fixture
+def job_session(
+    pglite_async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> AsyncSession:
+    """The test session, handed to the OddsPortal and Betfair jobs as their session."""
+
+    class _Maker:
+        def __call__(self) -> _Maker:
+            return self
+
+        async def __aenter__(self) -> AsyncSession:
+            return pglite_async_session
+
+        async def __aexit__(self, *args: object) -> bool:
+            return False
+
+    for module in (fetch_oddsportal, fetch_betfair_exchange, collection_calendar):
+        monkeypatch.setattr(module, "async_session_maker", _Maker())
+    return pglite_async_session
 
 
 @pytest.fixture

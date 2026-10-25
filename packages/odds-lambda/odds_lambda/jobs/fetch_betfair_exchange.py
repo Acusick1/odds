@@ -24,6 +24,7 @@ from odds_core.database import async_session_maker
 from odds_core.models import FetchLog
 from odds_core.snapshot_sources import SnapshotSource
 from odds_core.sports import SportKey
+from odds_core.vocabulary import Source, TimeBasis
 
 from odds_lambda.betfair import (
     SPORT_CONFIG,
@@ -46,6 +47,7 @@ from odds_lambda.collection_calendar import (
 from odds_lambda.live_events import (
     DroppedGame,
     LiveEventFinder,
+    LiveListing,
     SkipReason,
     alert_dropped_games,
     count_dropped,
@@ -59,7 +61,7 @@ from odds_lambda.scheduling.decision import (
 )
 from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
-from odds_lambda.storage.writers import OddsWriter
+from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload
 
 logger = structlog.get_logger()
 
@@ -148,6 +150,14 @@ def _account_for(
     )
 
 
+def _envelope(book: BetfairBook, entry: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "bookmakers": [entry],
+        "source": SnapshotSource.BETFAIR_API.value,
+        "betfair_event_id": book.betfair_event_id,
+    }
+
+
 async def ingest_sport(
     sport_cfg: SportBetfairConfig,
     *,
@@ -227,37 +237,31 @@ async def ingest_sport(
         stats.errors.append("MLB schedule unavailable: no new events created")
 
     async with async_session_maker() as session:
-        writer = OddsWriter(session)
-
-        for book, game, entry in priced:
-            try:
-                found = await finder.find_or_create(writer, game)
-                if isinstance(found, DroppedGame):
-                    stats.dropped_games.append(found)
-                    continue
-                event_id, created = found
-                if created:
-                    stats.events_created += 1
-                else:
-                    stats.events_matched += 1
-
-                raw_data = {
-                    "bookmakers": [entry],
-                    "source": "betfair_api",
-                    "betfair_event_id": book.betfair_event_id,
-                }
-                snapshot, _ = await writer.store_odds_snapshot(
-                    event_id=event_id,
+        envelopes = [(book, game, _envelope(book, entry)) for book, game, entry in priced]
+        payload_id = (
+            await store_payload(session, [raw for _, _, raw in envelopes]) if envelopes else None
+        )
+        writes = await finder.store_listings(
+            session,
+            [
+                LiveListing(
+                    game=game,
+                    external_id=book.betfair_event_id,
                     raw_data=raw_data,
                     snapshot_time=snapshot_time,
+                    label=book.betfair_event_name,
                 )
-                snapshot.api_request_id = f"{LIVE_REQUEST_ID_PREFIX}{snapshot_time.isoformat()}"
-                stats.snapshots_stored += 1
-
-            except Exception as e:
-                msg = f"{book.betfair_event_name}: {type(e).__name__}: {e}"
-                stats.errors.append(msg)
-                logger.error("betfair_book_ingestion_failed", error=msg, exc_info=True)
+                for book, game, raw_data in envelopes
+            ],
+            SnapshotShape(Source.BETFAIR, TimeBasis.OBSERVED, payload_id),
+            f"{LIVE_REQUEST_ID_PREFIX}{snapshot_time.isoformat()}",
+            now=snapshot_time,
+        )
+        stats.events_created += writes.events_created
+        stats.events_matched += writes.events_matched
+        stats.snapshots_stored += writes.snapshots_stored
+        stats.errors.extend(writes.errors)
+        stats.dropped_games.extend(writes.dropped.values())
 
         for game in accounted:
             key = await finder.fixture_key(session, game)

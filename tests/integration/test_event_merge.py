@@ -14,7 +14,6 @@ from odds_lambda.event_sync import EventSyncService
 from odds_lambda.oddsportal_common import find_existing_event
 from odds_lambda.storage.event_merge import EventMerger
 from odds_lambda.storage.event_name_repair import repair_team_names
-from odds_lambda.storage.writers import OddsWriter
 from sqlalchemy import select
 
 from tests.test_helpers import (
@@ -229,20 +228,6 @@ class TestAdoptTwins:
         assert await _event_ids(session, PaperTrade) == {API_EVENT_ID}
 
 
-class TestFindOrCreateEventPrefersApiEvent:
-    @pytest.mark.asyncio
-    async def test_prefers_non_live_candidate(self, pglite_async_session) -> None:
-        # The API id sorts after the twin id, so ordering alone would pick the twin.
-        pglite_async_session.add_all([make_epl_event(TWIN_EVENT_ID), make_epl_event(API_EVENT_ID)])
-        await pglite_async_session.flush()
-
-        event_id, created = await OddsWriter(pglite_async_session).find_or_create_event(
-            "Arsenal", "Chelsea", TWIN_KICKOFF, "soccer_epl", "EPL"
-        )
-
-        assert (event_id, created) == (API_EVENT_ID, False)
-
-
 FDUK_EVENT_ID = "fduk_2025-2026_ARS_CHE_2026-04-15"
 HISTORICAL_EVENT_ID = "op_2025-2026_ARS_CHE_2026-04-15"
 
@@ -319,34 +304,6 @@ class TestMergeGroup:
 
 
 class TestFindersAreReadOnly:
-    @pytest.mark.asyncio
-    async def test_find_or_create_returns_canonical_and_deletes_nothing(
-        self, pglite_async_session
-    ) -> None:
-        session = pglite_async_session
-        session.add_all([make_epl_event(TWIN_EVENT_ID), make_epl_event(API_EVENT_ID)])
-        await session.flush()
-
-        event_id, created = await OddsWriter(session).find_or_create_event(
-            "Arsenal", "Chelsea", TWIN_KICKOFF, "soccer_epl", "EPL"
-        )
-        await session.flush()
-
-        assert (event_id, created) == (API_EVENT_ID, False)
-        assert await _stored_event_ids(session) == {API_EVENT_ID, TWIN_EVENT_ID}
-
-    @pytest.mark.asyncio
-    async def test_find_or_create_never_creates_beside_twins(self, pglite_async_session) -> None:
-        session = pglite_async_session
-        session.add_all([make_epl_event(TWIN_EVENT_ID), make_epl_event(FDUK_EVENT_ID)])
-        await session.flush()
-
-        event_id, created = await OddsWriter(session).find_or_create_event(
-            "Arsenal", "Chelsea", TWIN_KICKOFF, "soccer_epl", "EPL"
-        )
-
-        assert (event_id, created) == (TWIN_EVENT_ID, False)
-
     @pytest.mark.asyncio
     async def test_historical_twins_resolve_to_canonical_without_merging(
         self, pglite_async_session
