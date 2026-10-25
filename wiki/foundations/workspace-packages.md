@@ -59,7 +59,7 @@ Python 3.12+ (`pyproject.toml`), a uv workspace. Per package dependencies are in
 
 | Concern | Library | Declared in |
 |---|---|---|
-| ORM and driver | SQLModel, asyncpg, on PostgreSQL 15, run by Docker Compose (`docker-compose.yml`) | `packages/odds-core/pyproject.toml` |
+| ORM and driver | SQLModel (odds-analytics declares it too, for `sqlmodel.col`), asyncpg, on PostgreSQL 15, run by Docker Compose (`docker-compose.yml`) | `packages/odds-core/pyproject.toml`, `packages/odds-analytics/pyproject.toml` |
 | Settings and logging | Pydantic Settings, structlog | `packages/odds-core/pyproject.toml` |
 | Local scheduler | APScheduler 4 (pinned alpha), tenacity retries | `packages/odds-lambda/pyproject.toml` |
 | Migrations | Alembic | `pyproject.toml` |

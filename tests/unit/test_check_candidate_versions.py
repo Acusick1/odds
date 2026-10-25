@@ -2,6 +2,7 @@
 
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,10 @@ status: active
 params:
   min_edge: 0.02
 """
+
+
+def days_from_today(days: int) -> str:
+    return (datetime.now(UTC).date() + timedelta(days=days)).isoformat()
 
 
 def git(repo: Path, *args: str) -> None:
@@ -66,8 +71,37 @@ class TestCheckCandidateVersions:
 
     def test_params_change_with_bump_passes(self, repo: Path) -> None:
         self.edit(repo, "0.02", "0.05")
-        self.edit(repo, "version: 2", "version: 3")
+        self.edit(repo, "version: 2", f"version: 3\nstart_date: {days_from_today(0)}")
         assert self.run(repo).returncode == 0
+
+    def test_bump_with_a_back_dated_start_fails(self, repo: Path) -> None:
+        self.edit(repo, "version: 2", f"version: 3\nstart_date: {days_from_today(-1)}")
+        result = self.run(repo)
+        assert result.returncode == 1 and "before today" in result.stderr
+
+    def test_bump_without_a_start_date_fails(self, repo: Path) -> None:
+        self.edit(repo, "version: 2", "version: 3")
+        result = self.run(repo)
+        assert result.returncode == 1 and "needs a start_date" in result.stderr
+
+    def test_new_file_starting_today_or_later_passes(self, repo: Path) -> None:
+        for offset, name in ((0, "today"), (5, "later")):
+            (repo / "candidates" / f"{name}.yaml").write_text(
+                f"name: {name}\nversion: 1\nstart_date: {days_from_today(offset)}\n"
+            )
+        assert self.run(repo).returncode == 0
+
+    def test_new_file_with_a_back_dated_start_fails(self, repo: Path) -> None:
+        (repo / "candidates" / "old.yaml").write_text(
+            f"name: old\nversion: 1\nstart_date: {days_from_today(-1)}\n"
+        )
+        result = self.run(repo)
+        assert result.returncode == 1
+        assert "old.yaml" in result.stderr and "before today" in result.stderr
+
+    def test_new_file_without_a_start_date_fails(self, repo: Path) -> None:
+        (repo / "candidates" / "bare.yaml").write_text("name: bare\nversion: 1\n")
+        assert self.run(repo).returncode == 1
 
     def test_version_decrease_fails(self, repo: Path) -> None:
         self.edit(repo, "version: 2", "version: 1")
@@ -80,13 +114,15 @@ class TestCheckCandidateVersions:
         assert result.returncode == 1 and "status: killed" in result.stderr
 
     def test_new_file_passes(self, repo: Path) -> None:
-        (repo / "candidates" / "fresh.yaml").write_text(BASE_YAML.replace("back-longest", "fresh"))
+        (repo / "candidates" / "fresh.yaml").write_text(
+            BASE_YAML.replace("back-longest", "fresh") + f"start_date: {days_from_today(1)}\n"
+        )
         assert self.run(repo).returncode == 0
 
     def test_default_base_is_merge_base_with_main(self, repo: Path) -> None:
         git(repo, "checkout", "-q", "-b", "feature")
         self.edit(repo, "0.02", "0.05")
-        self.edit(repo, "version: 2", "version: 3")
+        self.edit(repo, "version: 2", f"version: 3\nstart_date: {days_from_today(1)}")
         git(repo, "commit", "-qam", "bump")
         self.edit(repo, "0.05", "0.07")
         git(repo, "commit", "-qam", "tweak")

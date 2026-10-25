@@ -324,8 +324,12 @@ class TestFamilyStarts:
             datetime(2026, 1, 1, tzinfo=UTC),
             at(2),
             at(9),
-            at(20),
+            at(21),
         ]
+
+    def test_a_recorded_decision_overrides_a_back_dated_start_date(self) -> None:
+        registry = [mechanical("a", start="2026-05-01")]
+        assert self.starts(registry, {("a", 1): at(20)}) == [at(20)]
 
     def test_draft_starts_at_the_given_time_and_is_counted_once(self) -> None:
         registry = [mechanical("a", start="2026-05-03")]

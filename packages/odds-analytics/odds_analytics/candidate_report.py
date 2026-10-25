@@ -24,6 +24,7 @@ from odds_core.paper_trade_models import CandidateDecision, PaperTrade, TradeRes
 from odds_core.snapshot_sources import FdukTimeBasis, SnapshotSource
 from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from odds_analytics.retail_ev_metrics import event_clustered_ratio
 
@@ -135,11 +136,11 @@ def family_starts(
 ) -> list[datetime]:
     """When each version in the (rule, sport) family started, sorted; killed ones included.
 
-    A registry entry, which holds its candidate's current version, starts at midnight UTC of
-    its ``start_date``. An earlier version is not in the registry, so it starts at its first
-    recorded decision in ``decision_starts``, for names whose registry entry is in the family.
-    A version with no decision, and not current, never started. An unregistered ``draft``
-    starts at ``draft_start``.
+    A version starts at its first recorded decision in ``decision_starts``, for names whose
+    registry entry is in the family: a ``start_date`` can be back-dated, a decision cannot. A
+    registry entry, which holds its candidate's current version, without a decision starts at
+    midnight UTC of its ``start_date``. An earlier version has no registry entry, so without a
+    decision it never started. An unregistered ``draft`` starts at ``draft_start``.
     """
     members = {
         c.name
@@ -153,7 +154,7 @@ def family_starts(
     }
     for key, first in decision_starts.items():
         if key[0] in members:
-            starts.setdefault(key, first)
+            starts[key] = first
     if draft is not None and draft_start is not None:
         starts[draft] = draft_start
     return sorted(starts.values())
@@ -372,10 +373,10 @@ async def load_scored_trades(session: AsyncSession) -> list[ScoredBet]:
 
 async def load_decision_starts(session: AsyncSession) -> dict[tuple[str, int], datetime]:
     """The first recorded decision time of every candidate version that has one."""
-    name = CandidateDecision.candidate_name
-    version = CandidateDecision.candidate_version
+    name = col(CandidateDecision.candidate_name)
+    version = col(CandidateDecision.candidate_version)
     rows = await session.execute(
-        select(name, version, func.min(CandidateDecision.decision_time)).group_by(name, version)  # type: ignore[call-overload]
+        select(name, version, func.min(CandidateDecision.decision_time)).group_by(name, version)
     )
     return {(name, version): first for name, version, first in rows.all()}
 

@@ -6,6 +6,7 @@ Only stdlib and yaml are imported: the pre-commit hook env has no project instal
 """
 
 import argparse
+import datetime as dt
 import subprocess
 import sys
 from pathlib import Path
@@ -45,10 +46,34 @@ def _load(text: str) -> dict[str, Any]:
     return loaded if isinstance(loaded, dict) else {}
 
 
+def _start_date_error(rel: str, data: dict[str, Any], today: dt.date) -> str | None:
+    """A version's start date is the first day it may bet, and the day its family grows, so it
+    cannot lie in the past: a back-dated start would change verdicts already read."""
+    start = data.get("start_date")
+    if not isinstance(start, dt.date) or isinstance(start, dt.datetime):
+        return f"{rel}: a new file or version needs a start_date (YYYY-MM-DD)"
+    if start < today:
+        return f"{rel}: start_date {start} is before today ({today}, UTC)"
+    return None
+
+
 def check(base: str) -> list[str]:
     root = Path(_git("rev-parse", "--show-toplevel").strip())
+    today = dt.datetime.now(dt.UTC).date()
     listing = _git("ls-tree", "-r", "--name-only", base, "--", f"{CANDIDATES_DIR}/")
     errors: list[str] = []
+    at_base = {rel for rel in listing.splitlines() if rel.endswith(".yaml")}
+    for path in sorted((root / CANDIDATES_DIR).glob("*.yaml")):
+        rel = path.relative_to(root).as_posix()
+        if rel in at_base:
+            continue
+        try:
+            error = _start_date_error(rel, _load(path.read_text()), today)
+        except yaml.YAMLError as exc:
+            reason = getattr(exc, "problem", None) or str(exc).splitlines()[0]
+            error = f"{rel}: invalid YAML ({reason})"
+        if error:
+            errors.append(error)
     for rel in listing.splitlines():
         if not rel.endswith(".yaml"):
             continue
@@ -71,6 +96,8 @@ def check(base: str) -> list[str]:
                 errors.append(f"{rel}: version decreased from {old_version} to {new_version}")
                 continue
             if new_version > old_version:
+                if error := _start_date_error(rel, new, today):
+                    errors.append(error)
                 continue
         elif old_version != new_version:
             errors.append(f"{rel}: version changed to a non-integer value")

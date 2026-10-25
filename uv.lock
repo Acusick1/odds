@@ -2763,6 +2763,7 @@ dependencies = [
     { name = "rich" },
     { name = "scipy" },
     { name = "sqlalchemy" },
+    { name = "sqlmodel" },
     { name = "structlog" },
     { name = "xgboost" },
 ]
@@ -2799,6 +2800,7 @@ requires-dist = [
     { name = "scikit-learn", marker = "extra == 'training'", specifier = ">=1.3.0" },
     { name = "scipy", specifier = ">=1.16.3" },
     { name = "sqlalchemy", specifier = ">=2.0.44" },
+    { name = "sqlmodel", specifier = ">=0.0.27" },
     { name = "structlog", specifier = ">=25.5.0" },
     { name = "xgboost", specifier = ">=3.1.1" },
 ]
