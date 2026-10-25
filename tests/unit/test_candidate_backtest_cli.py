@@ -50,6 +50,7 @@ def fake_replay(monkeypatch: pytest.MonkeyPatch) -> list[MechanicalCandidate]:
         seen.append(candidate)
         coverage = Coverage(
             events=10,
+            decisions=10,
             with_input=9,
             with_exchange=8,
             with_retail=9,
@@ -250,6 +251,7 @@ class TestBacktestVerdictWording:
 
         cov = Coverage(
             events=1,
+            decisions=1,
             with_input=1,
             with_exchange=1,
             with_retail=1,

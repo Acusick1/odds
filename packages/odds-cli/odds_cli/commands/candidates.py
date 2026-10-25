@@ -5,7 +5,7 @@ import dataclasses
 import json
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, cast
 
 import typer
 from odds_analytics.candidate_backtest import BacktestResult, HashStatus, replay
@@ -214,13 +214,16 @@ def _checkpoint_row(table: Table, label: str, cp: Checkpoint | None) -> None:
 
 def _backtest_tables(result: BacktestResult) -> list[Table]:
     cov, summary = result.coverage, result.summary
+    leads = ", ".join(map(str, cast("list[int]", result.params["minutes_before_kickoff"])))
     coverage = Table(
         title=(
             f"{result.name} v{result.version} ({result.rule}), {result.start} to {result.end}, "
+            f"decisions at {leads} min before kick-off, "
             f"max input age {result.params['max_input_age_minutes']} min"
         )
     )
     coverage.add_column("Events", justify="right")
+    coverage.add_column("Decisions", justify="right")
     coverage.add_column("With input", justify="right")
     coverage.add_column("With exchange", justify="right")
     coverage.add_column("With UK retail", justify="right")
@@ -231,6 +234,7 @@ def _backtest_tables(result: BacktestResult) -> list[Table]:
     coverage.add_column("Pending", justify="right")
     coverage.add_row(
         str(cov.events),
+        str(cov.decisions),
         str(cov.with_input),
         str(cov.with_exchange),
         str(cov.with_retail),

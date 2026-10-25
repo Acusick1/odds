@@ -47,7 +47,7 @@ def candidate(**overrides: Any) -> MechanicalCandidate:
         "status": "active",
         "rule": "exchange_gap",
         "rule_sha256": rule_sha256("exchange_gap"),
-        "params": {"threshold": 0.02, "minutes_before_kickoff": 60, "max_input_age_minutes": 10},
+        "params": {"threshold": 0.02, "minutes_before_kickoff": [60], "max_input_age_minutes": 10},
         **overrides,
     }
     return MechanicalCandidate.model_validate(fields)
@@ -142,11 +142,38 @@ class TestReplay:
         # visible had the event been decided 60 minutes before 15:30.
         await add_event(pglite_async_session, "moved", snapshot_offset=timedelta(minutes=30))
         later = candidate(
-            params={"threshold": 0.02, "minutes_before_kickoff": 30, "max_input_age_minutes": 10}
+            params={"threshold": 0.02, "minutes_before_kickoff": [30], "max_input_age_minutes": 10}
         )
 
         assert (await run(pglite_async_session, later)).coverage.bets == 1
         assert (await run(pglite_async_session)).coverage.bets == 0
+
+    async def test_each_decision_time_is_decided_and_an_outcome_is_bet_once(
+        self, pglite_async_session
+    ) -> None:
+        await add_event(pglite_async_session, "e1")
+        # Inputs at both decision times, each with the home edge.
+        pglite_async_session.add(
+            make_tagged_snapshot(
+                "e1",
+                KICKOFF - timedelta(minutes=95),
+                [three_way_bookmaker("bet365", RETAIL), betfair(EXCHANGE)],
+                "oddsportal_live",
+            )
+        )
+        await pglite_async_session.commit()
+        two_times = candidate(
+            params={
+                "threshold": 0.02,
+                "minutes_before_kickoff": [60, 90],
+                "max_input_age_minutes": 10,
+            }
+        )
+
+        coverage = (await run(pglite_async_session, two_times)).coverage
+
+        assert (coverage.events, coverage.decisions, coverage.with_input) == (1, 2, 2)
+        assert (coverage.with_bet, coverage.bets) == (1, 1)
 
     async def test_twins_of_one_match_count_once(self, pglite_async_session) -> None:
         kickoff = TWIN_KICKOFF
@@ -187,13 +214,14 @@ class TestReplay:
 
         assert (
             coverage.events,
+            coverage.decisions,
             coverage.with_input,
             coverage.with_exchange,
             coverage.with_retail,
             coverage.with_bet,
             coverage.bets,
             coverage.bets_with_close,
-        ) == (5, 2, 2, 2, 1, 1, 1)
+        ) == (5, 5, 2, 2, 2, 1, 1, 1)
 
     async def test_empty_range_has_no_verdict(self, pglite_async_session) -> None:
         result = await run(pglite_async_session)
@@ -267,6 +295,7 @@ class TestFamilySize:
                     candidate_name="gap",
                     candidate_version=version,
                     event_id=event_id,
+                    minutes_before_kickoff=60,
                     decision_time=when,
                     kickoff_at_decision=when,
                     known_at=when,

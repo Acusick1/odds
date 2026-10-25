@@ -412,6 +412,7 @@ class TestMergeRefusesClashingDecisions:
                 candidate_name="exchange-gap",
                 candidate_version=1,
                 event_id=event_id,
+                minutes_before_kickoff=60,
                 decision_time=AFTERNOON - timedelta(hours=1),
                 kickoff_at_decision=AFTERNOON,
                 known_at=AFTERNOON - timedelta(hours=1),
