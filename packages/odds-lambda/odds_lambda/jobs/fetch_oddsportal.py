@@ -47,7 +47,7 @@ from odds_lambda.live_events import (
 from odds_lambda.mlb_game_resolver import GameRow
 from odds_lambda.oddsportal_adapter import MatchOdds, convert_market
 from odds_lambda.oddsportal_client import OddsPortalClient, OddsPortalError
-from odds_lambda.scheduling.decision import CadenceConfig, ScheduleDecision
+from odds_lambda.scheduling.decision import CadenceConfig, Lead, ScheduleDecision
 from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
 from odds_lambda.storage.writers import OddsWriter
@@ -309,8 +309,9 @@ async def ingest_league(
     return stats
 
 
-def candidate_scrape_leads(sport_key: str) -> list[timedelta]:
-    """``SCRAPE_LEAD`` before each active mechanical candidate's decision time, before kickoff.
+def candidate_scrape_leads(sport_key: str) -> list[Lead]:
+    """A run ``SCRAPE_LEAD`` before each active mechanical candidate's decision time, which
+    still runs late until that decision time.
 
     An unreadable registry gives none, so collection keeps its cadence.
     """
@@ -319,7 +320,7 @@ def candidate_scrape_leads(sport_key: str) -> list[timedelta]:
     except ValueError as e:
         logger.error("candidate_registry_invalid", error=str(e))
         return []
-    return [lead + SCRAPE_LEAD for lead in decision_leads(candidates, sport_key)]
+    return [Lead(lead + SCRAPE_LEAD, until=lead) for lead in decision_leads(candidates, sport_key)]
 
 
 async def main(ctx: JobContext) -> None:
@@ -344,10 +345,11 @@ async def main(ctx: JobContext) -> None:
     overnight = (spec.overnight_start_utc, spec.overnight_resume_utc)
     sport_keys = [spec.sport_key]
     leads = candidate_scrape_leads(spec.sport_key)
+    started = datetime.now(UTC)
 
     async def _reschedule(label: str) -> ScheduleDecision:
         decision = await decide_collection_run(
-            sport_keys, CADENCE, overnight=overnight, leads=leads
+            sport_keys, CADENCE, overnight=overnight, leads=leads, run_started=started
         )
         assert decision.next_execution is not None  # noqa: S101
         try:

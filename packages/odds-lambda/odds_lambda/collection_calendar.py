@@ -18,6 +18,7 @@ from odds_lambda.scheduling.decision import (
     OVERNIGHT_WINDOWS,
     CadenceConfig,
     KickoffLookup,
+    Lead,
     OvernightWindow,
     ScheduleDecision,
     decide_forward_resilient,
@@ -224,14 +225,16 @@ async def decide_collection_run(
     now: datetime | None = None,
     stored_only: bool = False,
     stored_kickoff: KickoffLookup | None = None,
-    leads: Sequence[timedelta] = (),
+    leads: Sequence[Lead] = (),
+    run_started: datetime | None = None,
 ) -> ScheduleDecision:
     """Next run of a collector, dormant while no fixture is within ``DORMANCY_HORIZON_DAYS``.
 
     ``stored_only`` looks at stored events alone, for a job that only pairs
     with events other jobs create. ``stored_kickoff`` replaces the stored events'
     ``commence_time`` as their kickoff, for the cadence and the lead runs.
-    ``leads`` adds a run that long before each kickoff.
+    ``leads`` adds a run before each kickoff that the run started at
+    ``run_started`` did not serve.
     """
     lookup: KickoffLookup | None = None if stored_only else next_fixture_kickoff
     if stored_kickoff is not None:
@@ -250,6 +253,7 @@ async def decide_collection_run(
         next_kickoff_lookup=lookup,
         leads=leads,
         lead_kickoff_lookup=stored_kickoff,
+        run_started=run_started,
     )
 
 

@@ -9,7 +9,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any
 
-from odds_core import as_of
+from odds_core import as_of, betfair_close, bookmakers, market_prices
 from odds_core.candidates import Candidate, CandidateStatus, MechanicalCandidate
 from odds_core.market_prices import Outcome, market_outcomes
 from odds_core.models import Event
@@ -72,6 +72,28 @@ def exchange_gap(state: MarketState, params: ExchangeGapParams) -> list[BetInten
     return bets
 
 
+# Code outside this package that decides which prices a market state holds.
+RULE_INPUT_FUNCTIONS: tuple[Callable[..., Any], ...] = (
+    betfair_close.exchange_price,
+    betfair_close.complete_exchange_prices,
+    betfair_close.devig,
+    betfair_close.overround,
+    market_prices.book_prices,
+    bookmakers.canonical_bookmaker_key,
+)
+
+
+def rule_input_constants() -> list[tuple[str, str]]:
+    """The values, in a fixed order and a stable text form, that pick a market state's prices."""
+    return [
+        ("UK_RETAIL_BOOKMAKERS", repr(sorted(bookmakers.UK_RETAIL_BOOKMAKERS))),
+        ("BOOKMAKER_ALIASES", repr(sorted(bookmakers.BOOKMAKER_ALIASES.items()))),
+        ("ODDS_API_KEY_ALIASES", repr(sorted(bookmakers.ODDS_API_KEY_ALIASES.items()))),
+        ("EXCHANGE_BOOKMAKER", repr(betfair_close.EXCHANGE_BOOKMAKER)),
+        ("MAX_EXCHANGE_OVERROUND", repr(betfair_close.MAX_EXCHANGE_OVERROUND)),
+    ]
+
+
 @dataclass(frozen=True)
 class RuleSpec:
     # Each rule takes its own params model, which a shared Callable cannot express.
@@ -97,7 +119,7 @@ async def run_rule(
 
     The live runner, the replay backtest and the parity check all decide through this.
     ``kickoff`` overrides the event's current kick-off with the one a recorded decision saw.
-    The returned state's ``snapshot_ids`` are the decision's inputs.
+    The returned state's ``snapshot_id`` is the decision's input.
     """
     state = await load_market_state(session, event, at, max_input_age(params), known_at)
     return apply_rule(spec, params, state, kickoff)
@@ -118,20 +140,24 @@ def apply_rule(
 
 
 def rule_sha256(rule_name: str) -> str:
-    """Hash of the code a rule's bets depend on, in a fixed order.
+    """Hash of the code and values a rule's bets depend on, in a fixed order.
 
-    The rule function, its params model, the params every rule takes, the market state
-    module and the as-of module.
+    The source of the rule function, its params model, the params every rule takes, the
+    market state module, the as-of module and the functions that read a snapshot's prices
+    (``RULE_INPUT_FUNCTIONS``), then the values of ``rule_input_constants``.
     """
     spec = RULES[rule_name]
     digest = hashlib.sha256()
-    for source in (
+    sources = [
         inspect.getsource(spec.function),
         inspect.getsource(spec.params_model),
         inspect.getsource(RuleParams),
         inspect.getsource(market_state),
         inspect.getsource(as_of),
-    ):
+        *(inspect.getsource(function) for function in RULE_INPUT_FUNCTIONS),
+        *(f"{name}={value}" for name, value in rule_input_constants()),
+    ]
+    for source in sources:
         digest.update(source.encode())
         digest.update(b"\0")
     return digest.hexdigest()

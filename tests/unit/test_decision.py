@@ -10,6 +10,7 @@ from odds_core.models import Event, EventStatus
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.scheduling.decision import (
     CadenceConfig,
+    Lead,
     ScheduleDecision,
     decide_backward,
     decide_backward_resilient,
@@ -282,7 +283,7 @@ class TestLeadRuns:
         opening=2.0,
         no_game=2.0,
     )
-    LEADS = [timedelta(minutes=5)]
+    LEADS = [Lead(timedelta(minutes=5))]
 
     @staticmethod
     def _kickoffs(monkeypatch: pytest.MonkeyPatch, kickoffs: list[datetime]) -> None:
@@ -292,7 +293,7 @@ class TestLeadRuns:
         monkeypatch.setattr("odds_lambda.scheduling.decision.get_next_kickoff", fake_kickoff)
 
     async def _decide(
-        self, now: datetime = NOW, leads: list[timedelta] | None = None, **kwargs: Any
+        self, now: datetime = NOW, leads: list[Lead] | None = None, **kwargs: Any
     ) -> ScheduleDecision:
         return await decide_forward_resilient(
             ["soccer_epl"],
@@ -354,7 +355,9 @@ class TestLeadRuns:
         kickoff = NOW + timedelta(minutes=70)
         self._kickoffs(monkeypatch, [kickoff])
 
-        decision = await self._decide(leads=[timedelta(minutes=5), timedelta(minutes=65)])
+        decision = await self._decide(
+            leads=[Lead(timedelta(minutes=5)), Lead(timedelta(minutes=65))]
+        )
 
         assert decision.next_execution == kickoff - timedelta(minutes=65)
 
@@ -382,6 +385,57 @@ class TestLeadRuns:
         decision = await self._decide(lead_kickoff_lookup=earlier)
 
         assert decision.next_execution == betfair_start - timedelta(minutes=5)
+
+    DECISION_LEAD = Lead(timedelta(minutes=65), until=timedelta(minutes=60))
+
+    @pytest.mark.asyncio
+    async def test_a_run_that_started_before_the_lead_time_does_not_cancel_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        kickoff = NOW + timedelta(minutes=66)
+        self._kickoffs(monkeypatch, [kickoff])
+
+        decision = await self._decide(
+            leads=[self.DECISION_LEAD], run_started=kickoff - timedelta(minutes=67, seconds=30)
+        )
+
+        assert decision.next_execution == kickoff - timedelta(minutes=65)
+
+    @pytest.mark.asyncio
+    async def test_a_passed_lead_time_runs_now_until_its_deadline(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        kickoff = NOW + timedelta(minutes=64)
+        self._kickoffs(monkeypatch, [kickoff])
+        started = kickoff - timedelta(minutes=67, seconds=30)
+
+        decision = await self._decide(leads=[self.DECISION_LEAD], run_started=started)
+
+        assert decision.next_execution == NOW
+
+    @pytest.mark.asyncio
+    async def test_a_lead_time_past_its_deadline_is_dropped(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        kickoff = NOW + timedelta(minutes=59)
+        self._kickoffs(monkeypatch, [kickoff])
+        started = kickoff - timedelta(minutes=67, seconds=30)
+
+        decision = await self._decide(leads=[self.DECISION_LEAD], run_started=started)
+
+        assert decision.next_execution == NOW + timedelta(minutes=15)
+
+    @pytest.mark.asyncio
+    async def test_a_run_that_started_at_the_lead_time_serves_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        kickoff = NOW + timedelta(minutes=64)
+        self._kickoffs(monkeypatch, [kickoff])
+        started = kickoff - timedelta(minutes=65, seconds=30)
+
+        decision = await self._decide(leads=[self.DECISION_LEAD], run_started=started)
+
+        assert decision.next_execution == NOW + timedelta(minutes=15)
 
     @pytest.mark.asyncio
     async def test_without_leads_cadence_is_unchanged(

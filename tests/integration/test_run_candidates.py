@@ -151,8 +151,10 @@ class TestDecisions:
         assert trade.bankroll_before is None and trade.stake == 1.0
 
     async def test_late_decision_is_recorded_as_missed_and_logged(
-        self, pglite_async_session, registry
+        self, pglite_async_session, registry, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        alert = AsyncMock()
+        monkeypatch.setattr(run_candidates, "send_recorded_alert", alert)
         write_candidate(registry)
         await add_event(pglite_async_session, "e1", LATE)
         assert NOW - (LATE - timedelta(minutes=60)) > MAX_LATENESS
@@ -168,10 +170,13 @@ class TestDecisions:
         [missed] = [log for log in logs if log["event"] == "candidate_decision_missed"]
         assert missed["log_level"] == "warning"
         assert (missed["candidate"], missed["event_id"], missed["reason"]) == ("cand", "e1", "late")
+        alert.assert_not_awaited()
 
     async def test_decision_without_a_recent_snapshot_is_recorded_as_missed(
-        self, pglite_async_session, registry
+        self, pglite_async_session, registry, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        alert = AsyncMock()
+        monkeypatch.setattr(run_candidates, "send_recorded_alert", alert)
         write_candidate(
             registry, params={"minutes_before_kickoff": 60, "max_input_age_minutes": 10}
         )
@@ -189,6 +194,10 @@ class TestDecisions:
         )
         [missed] = [log for log in logs if log["event"] == "candidate_decision_missed"]
         assert missed["reason"] == "no_input"
+        [call] = alert.await_args_list
+        assert call.args[:2] == ("candidate_no_input:cand", "warning")
+        assert "e1" in call.args[2]
+        assert call.kwargs["every"] == run_candidates.stale_reminder_interval()
 
     async def test_rerun_places_nothing_new(self, pglite_async_session, registry) -> None:
         write_candidate(registry)

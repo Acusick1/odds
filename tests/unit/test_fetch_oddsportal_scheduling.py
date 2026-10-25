@@ -12,7 +12,7 @@ import pytest
 import yaml
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.jobs.fetch_oddsportal import CADENCE, candidate_scrape_leads, main
-from odds_lambda.scheduling.decision import DORMANCY_HORIZON_DAYS
+from odds_lambda.scheduling.decision import DORMANCY_HORIZON_DAYS, Lead
 from odds_lambda.scheduling.jobs import JobContext
 
 
@@ -63,7 +63,9 @@ class TestCandidateScrapeLeads:
         }
         (registry / "gap.yaml").write_text(yaml.safe_dump(fields))
 
-        assert candidate_scrape_leads("soccer_epl") == [timedelta(minutes=65)]
+        assert candidate_scrape_leads("soccer_epl") == [
+            Lead(timedelta(minutes=65), until=timedelta(minutes=60))
+        ]
         assert candidate_scrape_leads("baseball_mlb") == []
 
     def test_unreadable_registry_adds_no_runs(self, registry: Path) -> None:

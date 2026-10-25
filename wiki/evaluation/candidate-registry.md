@@ -38,7 +38,7 @@ A change of status goes through a pull request. The version is a strict positive
 
 ## `odds candidates rule-hash`
 
-`odds_cli.commands.candidates.rule_hash` prints `odds_lambda.candidate_rules.rules.rule_sha256` for a rule name, the value a mechanical candidate records as `odds_core.candidates.MechanicalCandidate.rule_sha256`. An unknown rule name prints the known names and exits 1.
+`odds_cli.commands.candidates.rule_hash` prints `odds_lambda.candidate_rules.rules.rule_sha256` for a rule name (the hash of the rule's code and of the code and values that pick its inputs, [rule pinning](candidate-rules.md#rule-pinning)), the value a mechanical candidate records as `odds_core.candidates.MechanicalCandidate.rule_sha256`. An unknown rule name prints the known names and exits 1.
 
 ## `odds candidates report`
 

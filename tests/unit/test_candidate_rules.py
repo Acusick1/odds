@@ -365,9 +365,12 @@ class TestRuleSha256:
             "odds_lambda.candidate_rules.rules.RuleParams",
             "odds_lambda.candidate_rules.market_state",
             "odds_core.as_of",
+            "odds_core.betfair_close.exchange_price",
+            "odds_core.market_prices.book_prices",
+            "odds_core.bookmakers.canonical_bookmaker_key",
         ],
     )
-    def test_covers_the_rule_its_params_the_state_and_the_as_of_module(
+    def test_covers_the_code_that_picks_the_inputs(
         self, monkeypatch: pytest.MonkeyPatch, target: str
     ) -> None:
         real = inspect.getsource
@@ -384,6 +387,21 @@ class TestRuleSha256:
 
         before = rule_sha256("exchange_gap")
         monkeypatch.setattr(inspect, "getsource", fake)
+        assert rule_sha256("exchange_gap") != before
+
+    @pytest.mark.parametrize(
+        ("module", "name", "value"),
+        [
+            ("odds_core.bookmakers", "UK_RETAIL_BOOKMAKERS", frozenset({"bet365"})),
+            ("odds_core.bookmakers", "BOOKMAKER_ALIASES", {}),
+            ("odds_core.betfair_close", "MAX_EXCHANGE_OVERROUND", 0.1),
+        ],
+    )
+    def test_covers_the_constants_that_pick_the_inputs(
+        self, monkeypatch: pytest.MonkeyPatch, module: str, name: str, value: object
+    ) -> None:
+        before = rule_sha256("exchange_gap")
+        monkeypatch.setattr(f"{module}.{name}", value)
         assert rule_sha256("exchange_gap") != before
 
     def test_a_stale_hash_fails_validation_with_the_new_one(self) -> None:
