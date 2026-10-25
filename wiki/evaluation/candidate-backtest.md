@@ -48,7 +48,7 @@ For a model rule, `odds_analytics.candidate_backtest.replay` takes the range's c
 
 ## Comparison
 
-`--compare` replays the second candidate over the same range with `only_events` set to the first candidate's `odds_analytics.candidate_backtest.BacktestResult.decided_event_ids`: a model rule's scored matches, or every range event for a rule without a model. Its k is its own family's. The command prints its tables after the first candidate's, then one table with both candidates' estimates over every bet with a close. A model rule cannot be the second candidate, because it trains on its own range. The re-test of the retail-EV model compares its draft, `experiments/configs/candidate_retail_ev_model_epl.yaml`, with `exchange-gap-epl` this way ([#657](https://github.com/Acusick1/odds/issues/657)).
+`--compare` replays the second candidate over the same range with `only_events` set to the first candidate's `odds_analytics.candidate_backtest.BacktestResult.decided_event_ids`: a model rule's scored matches, or every range event for a rule without a model. Its k is its own family's. The command prints its tables after the first candidate's, then one table with both candidates' estimates over every bet with a close. The command refuses a model rule as the second candidate, because it trains on its own range. The re-test of the retail-EV model compares its draft, `experiments/configs/candidate_retail_ev_model_epl.yaml`, with `exchange-gap-epl` this way ([#657](https://github.com/Acusick1/odds/issues/657)).
 
 ## Scoring
 

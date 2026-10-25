@@ -12,6 +12,7 @@ from typing import Any
 import pytest
 import yaml
 from odds_analytics.candidate_backtest import Coverage, HashStatus, score
+from odds_analytics.candidate_model import Refit, Tuning
 from odds_analytics.candidate_parity import DecisionParity, ParityReport, ParityStatus
 from odds_analytics.candidate_report import Verdict
 from odds_cli.main import app
@@ -67,7 +68,21 @@ def fake_replay(monkeypatch: pytest.MonkeyPatch) -> list[MechanicalCandidate]:
             bets=0,
             bets_with_close=0,
         )
-        return score(candidate, start, end, [], coverage, k, NOW, N_BOOT, 0)
+        result = score(candidate, start, end, [], coverage, k, NOW, N_BOOT, 0)
+        if candidate.rule != "retail_ev_model":
+            return result
+        return dataclasses.replace(
+            result,
+            range_events=12,
+            tuning=Tuning(
+                params={"max_depth": 3, "learning_rate": 0.05},
+                cv_wmse=0.0069,
+                baseline_cv_wmse=0.0072,
+                folds=2,
+                trials=5,
+            ),
+            refits=(Refit(0, NOW, 2, 40, ("e3", "e4")),),
+        )
 
     monkeypatch.setattr("odds_cli.commands.candidates.replay", replay)
     fake_replay.only_events = only  # type: ignore[attr-defined]
@@ -128,6 +143,64 @@ class TestBacktestCommand:
         payload = json.loads(out.read_text())
         assert payload["comparison"]["name"] == "other"
         assert payload["comparison"]["summary"]["verdict"] == "not_yet"
+
+    def _model_draft(self, tmp_path: Path) -> Path:
+        draft = tmp_path / "model.yaml"
+        draft.write_text(
+            yaml.safe_dump(
+                {
+                    **{k: v for k, v in MECHANICAL.items() if k != "rule_sha256"},
+                    "name": "model",
+                    "rule": "retail_ev_model",
+                    "params": {
+                        "model": "retail_ev_price_only",
+                        "threshold": 0.01,
+                        "training_matches": 2,
+                        "refit_every_matches": 2,
+                        "tuning_trials": 5,
+                        "tuning_seed": 0,
+                        "tuning_min_train_matches": 1,
+                        "tuning_step_matches": 1,
+                        "minutes_before_kickoff": [60],
+                        "max_input_age_minutes": 10,
+                    },
+                }
+            )
+        )
+        return draft
+
+    def test_compare_replays_the_other_candidate_on_the_models_scored_matches(
+        self, registry: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        fake_replay(monkeypatch)
+        draft = self._model_draft(tmp_path)
+
+        result = RUNNER.invoke(
+            app,
+            ["candidates", "backtest", str(draft), "--from", "2025-08-01", "--to", "2025-12-31"]
+            + ["--compare", "back-longest"],
+        )
+
+        assert result.exit_code == 0, result.stdout
+        assert fake_replay.only_events == [None, ("e3", "e4")]  # type: ignore[attr-defined]
+        assert "learning_rate" in result.stdout and "0.007200" in result.stdout
+        assert "12 matches in range" in result.stdout
+
+    def test_a_model_rule_cannot_be_the_comparison(
+        self, registry: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        seen = fake_replay(monkeypatch)
+        draft = self._model_draft(tmp_path)
+
+        result = RUNNER.invoke(
+            app,
+            ["candidates", "backtest", "back-longest", "--from", "2025-08-01", "--to", "2025-12-31"]
+            + ["--compare", str(draft)],
+        )
+
+        assert result.exit_code == 1
+        assert "is a model rule" in result.stdout
+        assert seen == []
 
     def backtest(self, name: str = "back-longest"):
         return RUNNER.invoke(

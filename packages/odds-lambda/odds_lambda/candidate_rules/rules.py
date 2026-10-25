@@ -208,6 +208,10 @@ RULES: dict[str, RuleSpec | ModelRuleSpec] = {
             "odds_analytics.xgboost_line_movement",
             # The close every training target is measured against.
             "odds_core.betfair_close",
+            # The tuning objective, the search-space draws and the search-space model.
+            "odds_analytics.retail_ev_metrics",
+            "odds_analytics.training.tuner",
+            "odds_analytics.training.config",
         ),
     ),
 }

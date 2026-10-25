@@ -12,6 +12,7 @@ from odds_core.candidates import MechanicalCandidate
 from odds_core.event_source import canonical_event_id
 from odds_core.models import EventStatus
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade, TradeResult
+from odds_core.snapshot_sources import FdukTimeBasis
 from odds_lambda.candidate_rules import rule_sha256
 
 from tests.test_helpers import (
@@ -438,11 +439,20 @@ class TestModelReplay:
         assert seen == set(ids[:3])
 
     async def test_labels_come_only_from_a_live_close(self, pglite_async_session) -> None:
-        # Without a live Betfair close no training match has a label, so tuning cannot run.
+        # Closed only by FDUK, published after the refit, no training match has a label.
         for i in range(5):
-            await add_event(
-                pglite_async_session, f"m{i}", KICKOFF + i * WEEK, away_team=f"T{i}", close=None
+            kickoff = KICKOFF + i * WEEK
+            await add_event(pglite_async_session, f"m{i}", kickoff, away_team=f"T{i}", close=None)
+            pglite_async_session.add(
+                make_tagged_snapshot(
+                    f"m{i}",
+                    kickoff,
+                    [betfair(EXCHANGE, home_team="Arsenal", away_team=f"T{i}")],
+                    "football_data_uk",
+                    FdukTimeBasis.KICKOFF,
+                )
             )
+        await pglite_async_session.commit()
 
         with pytest.raises(ValueError, match="no tuning fold"):
             await run_model(pglite_async_session, model_candidate())

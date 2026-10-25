@@ -28,7 +28,7 @@ from odds_core.candidates import (
     load_candidates,
 )
 from odds_core.database import async_session_maker
-from odds_lambda.candidate_rules import RULES, rule_sha256, validate_candidate_rules
+from odds_lambda.candidate_rules import RULES, ModelRuleSpec, rule_sha256, validate_candidate_rules
 from rich.console import Console
 from rich.table import Table
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -379,6 +379,11 @@ def backtest(
     """
     resolved = _resolve(candidate)
     other = _resolve(compare) if compare is not None else None
+    if other is not None and isinstance(RULES.get(other.rule), ModelRuleSpec):
+        raise _fail(
+            f"--compare {other.name!r} is a model rule, which trains on its own range and so "
+            "cannot be replayed on another candidate's matches"
+        )
     try:
         # Not _load_registry: a rule edited since its hash was recorded must stay a warning.
         registry = load_candidates(candidates_dir())
