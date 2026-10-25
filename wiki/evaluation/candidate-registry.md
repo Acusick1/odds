@@ -38,7 +38,7 @@ A change of status goes through a pull request. The version is a strict positive
 
 ## `odds candidates rule-hash`
 
-`odds_cli.commands.candidates.rule_hash` prints `odds_lambda.candidate_rules.rules.rule_sha256` for a rule name (the hash of the rule's code, of its once-per-outcome filter and of the code and values that pick its inputs, [rule pinning](candidate-rules.md#rule-pinning)), the value a mechanical candidate records as `odds_core.candidates.MechanicalCandidate.rule_sha256`. An unknown rule name prints the known names and exits 1.
+`odds_cli.commands.candidates.rule_hash` prints `odds_lambda.candidate_rules.rules.rule_sha256` for a rule name (the hash of the rule's code, of its once-per-outcome filter, of the code and values that pick its inputs and, for a model rule, of the modules that fit and query its model, [rule pinning](candidate-rules.md#rule-pinning)), the value a mechanical candidate records as `odds_core.candidates.MechanicalCandidate.rule_sha256`. An unknown rule name prints the known names and exits 1.
 
 ## `odds candidates report`
 
@@ -58,7 +58,7 @@ What is scored, in `odds_analytics.candidate_report`:
 
 ## Replay commands
 
-`odds_cli.commands.candidates.backtest` replays a rule over completed events and scores it with the functions above ([replay backtest](candidate-backtest.md)). `odds_cli.commands.candidates.parity` replays each recorded decision from its recorded input snapshots and compares the bets ([parity check](candidate-parity.md)). The steps that use them are on [From idea to verdict](howto-take-an-idea-to-a-verdict.md).
+`odds_cli.commands.candidates.backtest` replays a rule over completed events, tuning a model rule's model on its training matches and refitting it as it goes, and recording the library versions that fit it, and scores it with the functions above, optionally beside a second candidate, never a model rule, on the same matches ([replay backtest](candidate-backtest.md)). It is the only command that runs a [model rule](candidate-rules.md#model-rules). `odds_cli.commands.candidates.parity` replays each recorded decision from its recorded input snapshots and compares the bets ([parity check](candidate-parity.md)). The steps that use them are on [From idea to verdict](howto-take-an-idea-to-a-verdict.md).
 
 ## Version check
 

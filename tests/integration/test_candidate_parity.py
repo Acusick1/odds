@@ -16,6 +16,7 @@ from tests.integration.test_candidate_backtest import (
     T,
     betfair,
     candidate,
+    model_candidate,
 )
 from tests.test_helpers import make_epl_event, make_tagged_snapshot, three_way_bookmaker
 
@@ -187,6 +188,10 @@ class TestCheckParity:
     ) -> None:
         with pytest.raises(ValueError, match="version 1"):
             await check_parity(pglite_async_session, candidate(), version=2)
+
+    async def test_a_model_rule_is_refused(self, pglite_async_session) -> None:
+        with pytest.raises(ValueError, match="needs a fitted model"):
+            await check_parity(pglite_async_session, model_candidate())
 
     async def test_an_outcome_bet_at_an_earlier_decision_is_not_replayed_again(
         self, pglite_async_session

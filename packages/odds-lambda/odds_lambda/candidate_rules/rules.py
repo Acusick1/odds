@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import inspect
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
-from typing import Any
+from functools import partial
+from typing import Any, Literal
 
 from odds_core import as_of, betfair_close, bookmakers, market_prices
 from odds_core.candidates import Candidate, CandidateStatus, MechanicalCandidate
@@ -21,6 +23,7 @@ from pydantic import (
     PositiveInt,
     ValidationError,
     field_validator,
+    model_validator,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -119,8 +122,98 @@ class RuleSpec:
     params_model: type[RuleParams]
 
 
-RULES: dict[str, RuleSpec] = {
+# Predicted EV of each (outcome, UK retail book) quote in a state.
+EvPredictor = Callable[[MarketState], Mapping[tuple[Outcome, str], float]]
+
+
+@dataclass(frozen=True)
+class ModelRuleSpec:
+    """A rule whose bets need a fitted model: ``function(state, params, predict)``.
+
+    Only the replay backtest fits one (``odds_analytics.candidate_model``) and binds it; the
+    live runner and the parity check refuse a model rule. ``model_modules`` name the modules
+    that build, fit and query the model. They are hashed by name because this package does not
+    depend on them.
+    """
+
+    function: Callable[[MarketState, Any, EvPredictor], list[BetIntent]]
+    params_model: type[RuleParams]
+    model_modules: tuple[str, ...]
+
+    def bind(self, predict: EvPredictor) -> RuleSpec:
+        return RuleSpec(partial(self.function, predict=predict), self.params_model)
+
+
+class RetailEvModelParams(RuleParams):
+    """``model`` names the model. A replay leaves the first ``training_matches`` of its range
+    to training only and refits before every ``refit_every_matches`` scored matches.
+
+    Its hyperparameters are tuned once, on the training matches alone: ``tuning_trials``
+    trials seeded with ``tuning_seed`` (also the model's random state), scored on expanding
+    walk-forward folds that first train on ``tuning_min_train_matches`` matches and then
+    validate ``tuning_step_matches`` matches at a time.
+    """
+
+    model: Literal["retail_ev_price_only"]
+    threshold: PositiveFloat
+    training_matches: PositiveInt
+    refit_every_matches: PositiveInt
+    tuning_trials: PositiveInt
+    tuning_seed: int
+    tuning_min_train_matches: PositiveInt
+    tuning_step_matches: PositiveInt
+    stake: PositiveFloat = 1.0
+
+    @model_validator(mode="after")
+    def _folds_fit_the_training_matches(self) -> RetailEvModelParams:
+        if self.tuning_min_train_matches >= self.training_matches:
+            raise ValueError(
+                f"tuning_min_train_matches {self.tuning_min_train_matches} leaves no match of "
+                f"the {self.training_matches} training matches to validate"
+            )
+        return self
+
+
+def retail_ev_model(
+    state: MarketState, params: RetailEvModelParams, predict: EvPredictor
+) -> list[BetIntent]:
+    """Back the longest UK retail price of each outcome whose predicted EV exceeds the threshold."""
+    if state.exchange is None:
+        return []
+    predicted = predict(state)
+    bets: list[BetIntent] = []
+    for outcome in market_outcomes(state.market):
+        quotes = [
+            (price, book)
+            for book, prices in state.retail.items()
+            if (price := prices.get(outcome)) is not None
+        ]
+        if not quotes:
+            continue
+        price, book = min(quotes, key=lambda q: (-q[0], q[1]))
+        ev = predicted.get((outcome, book))
+        if ev is not None and ev > params.threshold:
+            bets.append(BetIntent(outcome, book, price, params.stake))
+    return bets
+
+
+RULES: dict[str, RuleSpec | ModelRuleSpec] = {
     "exchange_gap": RuleSpec(exchange_gap, ExchangeGapParams),
+    "retail_ev_model": ModelRuleSpec(
+        retail_ev_model,
+        RetailEvModelParams,
+        (
+            "odds_analytics.candidate_model",
+            "odds_analytics.retail_ev",
+            "odds_analytics.xgboost_line_movement",
+            # The close every training target is measured against.
+            "odds_core.betfair_close",
+            # The tuning objective, the search-space draws and the search-space model.
+            "odds_analytics.retail_ev_metrics",
+            "odds_analytics.training.tuner",
+            "odds_analytics.training.config",
+        ),
+    ),
 }
 
 
@@ -170,7 +263,8 @@ def rule_sha256(rule_name: str) -> str:
     The source of the rule function, its params model, the params every rule takes,
     ``apply_rule`` (which drops outcomes already bet), the market state module, the as-of
     module and the functions that read a snapshot's prices (``RULE_INPUT_FUNCTIONS``), then
-    the values of ``rule_input_constants``.
+    the values of ``rule_input_constants``. A model rule adds the source of its
+    ``model_modules``.
     """
     spec = RULES[rule_name]
     digest = hashlib.sha256()
@@ -184,13 +278,17 @@ def rule_sha256(rule_name: str) -> str:
         *(inspect.getsource(function) for function in RULE_INPUT_FUNCTIONS),
         *(f"{name}={value}" for name, value in rule_input_constants()),
     ]
+    if isinstance(spec, ModelRuleSpec):
+        sources += [
+            inspect.getsource(importlib.import_module(module)) for module in spec.model_modules
+        ]
     for source in sources:
         digest.update(source.encode())
         digest.update(b"\0")
     return digest.hexdigest()
 
 
-def resolve_rule(candidate: MechanicalCandidate) -> tuple[RuleSpec, RuleParams]:
+def resolve_rule(candidate: MechanicalCandidate) -> tuple[RuleSpec | ModelRuleSpec, RuleParams]:
     """The candidate's rule and validated params; ``ValueError`` names what is invalid.
 
     Does not check ``rule_sha256``, which a draft may lack.

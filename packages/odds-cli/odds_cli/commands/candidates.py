@@ -28,9 +28,10 @@ from odds_core.candidates import (
     load_candidates,
 )
 from odds_core.database import async_session_maker
-from odds_lambda.candidate_rules import RULES, rule_sha256, validate_candidate_rules
+from odds_lambda.candidate_rules import RULES, ModelRuleSpec, rule_sha256, validate_candidate_rules
 from rich.console import Console
 from rich.table import Table
+from sqlalchemy.ext.asyncio import AsyncSession
 
 app = typer.Typer()
 console = Console()
@@ -263,6 +264,102 @@ def _backtest_tables(result: BacktestResult) -> list[Table]:
     return [coverage, verdict]
 
 
+def _refit_table(result: BacktestResult) -> Table:
+    table = Table(
+        title=(
+            f"Model refits: {result.range_events} matches in range, the first "
+            f"{result.range_events - len(result.decided_event_ids or ())} training only"
+        )
+    )
+    table.add_column("Refit", justify="right")
+    table.add_column("At")
+    table.add_column("Training matches", justify="right")
+    table.add_column("Training rows", justify="right")
+    table.add_column("Scored matches", justify="right")
+    for refit in result.refits:
+        table.add_row(
+            str(refit.index),
+            f"{refit.at:%Y-%m-%d %H:%M}",
+            str(refit.training_matches),
+            str(refit.training_rows),
+            str(len(refit.event_ids)),
+        )
+    return table
+
+
+def _tuning_table(result: BacktestResult) -> Table:
+    tuning = result.tuning
+    assert tuning is not None  # noqa: S101
+    table = Table(
+        title=(
+            f"Hyperparameters tuned on the training matches: {tuning.trials} trials, "
+            f"{tuning.folds} walk-forward folds"
+        )
+    )
+    table.add_column("Parameter")
+    table.add_column("Value", justify="right")
+    for name, value in tuning.params.items():
+        table.add_row(name, f"{value:.4g}" if isinstance(value, float) else str(value))
+    versions = ", ".join(f"{k} {v}" for k, v in (result.library_versions or {}).items())
+    table.caption = (
+        f"{tuning.tuning_matches} tuning matches, validation rows per fold "
+        f"{list(tuning.validation_rows)}; mean fold weighted MSE {tuning.cv_wmse:.6f}, "
+        f"baseline {tuning.baseline_cv_wmse:.6f}; {versions}"
+    )
+    return table
+
+
+def _comparison_table(result: BacktestResult, comparison: BacktestResult) -> Table:
+    table = Table(title="Mean EV on the same decided matches, every bet with a close")
+    table.add_column("Candidate")
+    table.add_column("Events", justify="right")
+    table.add_column("Bets with close", justify="right")
+    table.add_column("Mean EV", justify="right")
+    table.add_column("95% CI", justify="right")
+    table.add_column("Verdict")
+    for r in (result, comparison):
+        cp = r.overall
+        table.add_row(
+            f"{r.name} v{r.version}",
+            str(r.coverage.events),
+            str(r.coverage.bets_with_close),
+            f"{cp.mean_ev:+.4f}" if cp else "-",
+            _interval(cp.ci95) if cp else "-",
+            _backtest_verdict(r.summary.verdict),
+        )
+    return table
+
+
+def _print_backtest(result: BacktestResult) -> None:
+    if result.hash_status is not HashStatus.MATCH:
+        console.print(
+            f"[yellow]{result.name}: rule_sha256 {result.hash_status}: this is a draft, not a "
+            f"registrable candidate (`odds candidates rule-hash {result.rule}` prints the "
+            f"current hash)[/yellow]",
+            soft_wrap=True,
+        )
+    if result.tuning is not None:
+        console.print(_tuning_table(result))
+    if result.decided_event_ids is not None:
+        console.print(_refit_table(result))
+    for table in _backtest_tables(result):
+        console.print(table)
+
+
+async def _family_size(
+    session: AsyncSession, candidate: MechanicalCandidate, registry: list[Candidate], now: datetime
+) -> int:
+    starts = family_starts(
+        candidate.rule,
+        candidate.sport,
+        registry,
+        await load_decision_starts(session),
+        draft=(candidate.name, candidate.version),
+        draft_start=now,
+    )
+    return family_size_at(starts, now)
+
+
 @app.command("backtest")
 def backtest(
     candidate: Annotated[str, typer.Argument(help="Registered candidate name, or a YAML path")],
@@ -271,12 +368,25 @@ def backtest(
     json_path: Annotated[
         Path | None, typer.Option("--json", help="Write the summary to this file")
     ] = None,
+    compare: Annotated[
+        str | None,
+        typer.Option(
+            "--compare",
+            help="Also replay this candidate (name or YAML path) on the same decided matches",
+        ),
+    ] = None,
 ) -> None:
     """Replay a mechanical candidate over completed events and score it like the report.
 
     Development data can kill an idea, never promote one.
     """
     resolved = _resolve(candidate)
+    other = _resolve(compare) if compare is not None else None
+    if other is not None and isinstance(RULES.get(other.rule), ModelRuleSpec):
+        raise _fail(
+            f"--compare {other.name!r} is a model rule, which trains on its own range and so "
+            "cannot be replayed on another candidate's matches"
+        )
     try:
         # Not _load_registry: a rule edited since its hash was recorded must stay a warning.
         registry = load_candidates(candidates_dir())
@@ -289,34 +399,37 @@ def backtest(
     async def run() -> BacktestResult:
         async with async_session_maker() as session:
             now = datetime.now(UTC)
-            starts = family_starts(
-                resolved.rule,
-                resolved.sport,
-                registry,
-                await load_decision_starts(session),
-                draft=(resolved.name, resolved.version),
-                draft_start=now,
+            k = await _family_size(session, resolved, registry, now)
+            result = await replay(session, resolved, first, last, k)
+            if other is None:
+                return result
+            compared = await replay(
+                session,
+                other,
+                first,
+                last,
+                await _family_size(session, other, registry, now),
+                only_events=result.decided_event_ids,
             )
-            k = family_size_at(starts, now)
-            return await replay(session, resolved, first, last, k)
+            return dataclasses.replace(result, comparison=compared)
 
     try:
         result = asyncio.run(run())
     except ValueError as exc:
         raise _fail(str(exc)) from exc
 
-    if result.hash_status is not HashStatus.MATCH:
-        console.print(
-            f"[yellow]rule_sha256 {result.hash_status}: this is a draft, not a registrable "
-            f"candidate (`odds candidates rule-hash {result.rule}` prints the current hash)"
-            f"[/yellow]",
-            soft_wrap=True,
-        )
-    for table in _backtest_tables(result):
-        console.print(table)
+    _print_backtest(result)
+    if result.comparison is not None:
+        console.print(f"[bold]Compared with {result.comparison.name}[/bold]")
+        _print_backtest(result.comparison)
+        console.print(_comparison_table(result, result.comparison))
     if json_path is not None:
         payload = dataclasses.asdict(result)
         payload["summary"]["verdict"] = _backtest_verdict(result.summary.verdict)
+        if payload["comparison"] is not None:
+            payload["comparison"]["summary"]["verdict"] = _backtest_verdict(
+                result.comparison.summary.verdict  # type: ignore[union-attr]
+            )
         json_path.write_text(json.dumps(payload, indent=2, default=str) + "\n")
 
 

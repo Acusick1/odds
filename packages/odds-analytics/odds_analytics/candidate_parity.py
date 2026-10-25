@@ -24,6 +24,7 @@ from odds_core.models import Event, OddsSnapshot
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from odds_lambda.candidate_rules import (
     BetIntent,
+    ModelRuleSpec,
     RuleParams,
     RuleSpec,
     apply_rule,
@@ -144,7 +145,8 @@ async def check_parity(
     the order the live runs took them.
 
     The rule and params are the candidate's, so ``version`` must be the one the file holds;
-    ``ValueError`` otherwise.
+    ``ValueError`` otherwise, and for a rule that needs a fitted model, which has no live
+    decisions to replay.
     """
     version = candidate.version if version is None else version
     if version != candidate.version:
@@ -153,6 +155,11 @@ async def check_parity(
             f"params of version {version} are only in git history"
         )
     spec, params = resolve_rule(candidate)
+    if isinstance(spec, ModelRuleSpec):
+        raise ValueError(
+            f"candidate {candidate.name!r}: rule {candidate.rule!r} needs a fitted model; the "
+            "live runner does not run it, so it has no decisions to check"
+        )
 
     decisions = (
         (

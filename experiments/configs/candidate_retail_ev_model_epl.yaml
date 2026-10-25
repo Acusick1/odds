@@ -1,0 +1,23 @@
+# Draft of the retail-EV model re-test (#657, #680). Not registered: a pass leads to live
+# model pinning first. Run with --compare exchange-gap-epl from the first dense match.
+name: retail-ev-model-epl
+description: Back the longest UK retail price when the price-only retail-EV model predicts EV above 1%, 60 and 30 minutes before kick-off (each outcome once); hyperparameters tuned on 50 training-only matches, then refitted every 10 matches
+kind: mechanical
+sport: soccer_epl
+version: 1
+issue: 680
+start_date: 2026-10-19
+status: active
+rule: retail_ev_model
+params:
+  model: retail_ev_price_only
+  threshold: 0.01
+  training_matches: 50
+  refit_every_matches: 10
+  tuning_trials: 50
+  tuning_seed: 42
+  tuning_min_train_matches: 20
+  tuning_step_matches: 10
+  minutes_before_kickoff: [60, 30]
+  max_input_age_minutes: 10
+  stake: 1.0

@@ -19,7 +19,7 @@ status: stable
 
 ## Command
 
-`odds_cli.commands.candidates.parity` finds the candidate in the registry, which `odds_cli.commands.candidates._load_registry` validates, so a rule whose code changed without a new version fails there. `--version` defaults to the registry's version. `odds_analytics.candidate_parity.check_parity` raises `ValueError` for another version, because the rule and params of an earlier version are only in git history.
+`odds_cli.commands.candidates.parity` finds the candidate in the registry, which `odds_cli.commands.candidates._load_registry` validates, so a rule whose code changed without a new version fails there. `--version` defaults to the registry's version. `odds_analytics.candidate_parity.check_parity` raises `ValueError` for another version, because the rule and params of an earlier version are only in git history, and for a [model rule](candidate-rules.md#model-rules), which the live runner never runs and so has no decisions.
 
 The output is the counts of decisions checked, matched, mismatched and data differences, then each mismatched decision with its live and replayed bets and each data difference with both replays. The exit code is 1 when any decision is a mismatch, and 0 otherwise, including when no decision was checked, which prints a "no decisions to check" warning.
 

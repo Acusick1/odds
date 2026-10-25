@@ -34,7 +34,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.candidate_rules import (
     RULES,
+    ModelRuleSpec,
     RuleParams,
+    RuleSpec,
     decision_times,
     run_rule,
     validate_candidate_rules,
@@ -59,6 +61,7 @@ RETRY_DELAY = timedelta(minutes=2)
 @dataclass(frozen=True)
 class RunnableCandidate:
     candidate: MechanicalCandidate
+    spec: RuleSpec
     params: RuleParams
 
 
@@ -88,8 +91,8 @@ async def _alert_invalid(name: str, error: ValueError) -> None:
 async def runnable_candidates(sport: SportKey, today: datetime) -> list[RunnableCandidate]:
     """Active mechanical candidates of ``sport`` that have started and validate.
 
-    An invalid candidate is skipped with one alert per ``stale_reminder_interval``; an
-    unreadable registry skips them all.
+    An invalid candidate, or one whose rule needs a fitted model (which only a replay fits), is
+    skipped with one alert per ``stale_reminder_interval``; an unreadable registry skips them all.
     """
     try:
         loaded: Sequence[Candidate] = load_candidates(candidates_dir())
@@ -108,13 +111,20 @@ async def runnable_candidates(sport: SportKey, today: datetime) -> list[Runnable
         ):
             continue
         try:
+            spec = RULES.get(candidate.rule)
+            if isinstance(spec, ModelRuleSpec):
+                raise ValueError(
+                    f"candidate {candidate.name!r}: rule {candidate.rule!r} needs a fitted model, "
+                    "which only the replay backtest fits; the live runner does not run it"
+                )
             validate_candidate_rules([candidate])
         except ValueError as exc:
             logger.error("candidate_invalid", candidate=candidate.name, error=str(exc))
             await _alert_invalid(candidate.name, exc)
             continue
-        params = RULES[candidate.rule].params_model.model_validate(candidate.params)
-        runnable.append(RunnableCandidate(candidate, params))
+        assert isinstance(spec, RuleSpec)  # noqa: S101
+        params = spec.params_model.model_validate(candidate.params)
+        runnable.append(RunnableCandidate(candidate, spec, params))
     return runnable
 
 
@@ -217,7 +227,7 @@ async def _decide(
 
     state, intents = await run_rule(
         session,
-        RULES[candidate.rule],
+        item.spec,
         item.params,
         event,
         t,

@@ -13,9 +13,12 @@ from odds_core.market_prices import Outcome
 from odds_core.models import OddsSnapshot
 from odds_core.snapshot_sources import FdukTimeBasis, SnapshotKind
 from odds_lambda.candidate_rules import (
+    RULES,
     BetIntent,
     ExchangeGapParams,
     MarketState,
+    ModelRuleSpec,
+    RetailEvModelParams,
     RuleSpec,
     apply_rule,
     build_market_state,
@@ -23,6 +26,8 @@ from odds_lambda.candidate_rules import (
     decision_times,
     exchange_gap,
     max_input_age,
+    resolve_rule,
+    retail_ev_model,
     rule_sha256,
     validate_candidate_rules,
 )
@@ -293,6 +298,103 @@ class TestExchangeGap:
             ExchangeGapParams(**PARAMS.model_dump(), surprise=1)
 
 
+MODEL_PARAMS = RetailEvModelParams(
+    model="retail_ev_price_only",
+    threshold=0.01,
+    training_matches=50,
+    refit_every_matches=10,
+    tuning_trials=50,
+    tuning_seed=42,
+    tuning_min_train_matches=20,
+    tuning_step_matches=10,
+    minutes_before_kickoff=(60,),
+    max_input_age_minutes=10,
+)
+
+
+def _predicting(evs: dict[tuple[Outcome, str], float]) -> Any:
+    seen: list[MarketState] = []
+
+    def predict(state: MarketState) -> dict[tuple[Outcome, str], float]:
+        seen.append(state)
+        return evs
+
+    predict.seen = seen  # type: ignore[attr-defined]
+    return predict
+
+
+class TestRetailEvModel:
+    RETAIL = {
+        "bet365": {HOME: 2.1, DRAW: 3.4, AWAY: 4.0},
+        "betway": {HOME: 2.0, DRAW: 3.5, AWAY: 4.0},
+    }
+
+    def test_bets_the_longest_price_when_its_predicted_ev_exceeds_the_threshold(self) -> None:
+        predict = _predicting(
+            {(HOME, "bet365"): 0.02, (HOME, "betway"): 0.5, (DRAW, "betway"): 0.011}
+        )
+        state = _rule_state(self.RETAIL, _exchange(0.5, 0.25, 0.25))
+        assert retail_ev_model(state, MODEL_PARAMS, predict) == [
+            BetIntent(HOME, "bet365", 2.1, 1.0),
+            BetIntent(DRAW, "betway", 3.5, 1.0),
+        ]
+        assert predict.seen == [state]
+
+    def test_threshold_is_strict(self) -> None:
+        predict = _predicting({(HOME, "bet365"): 0.01})
+        state = _rule_state(self.RETAIL, _exchange(0.5, 0.25, 0.25))
+        assert retail_ev_model(state, MODEL_PARAMS, predict) == []
+
+    def test_tie_goes_to_the_alphabetically_first_book(self) -> None:
+        predict = _predicting({(AWAY, "bet365"): 0.05, (AWAY, "betway"): 0.0})
+        state = _rule_state(self.RETAIL, _exchange(0.5, 0.25, 0.25))
+        assert retail_ev_model(state, MODEL_PARAMS, predict) == [
+            BetIntent(AWAY, "bet365", 4.0, 1.0)
+        ]
+
+    def test_no_exchange_no_prediction_and_no_bets(self) -> None:
+        predict = _predicting({(HOME, "bet365"): 0.5})
+        assert retail_ev_model(_rule_state(self.RETAIL, None), MODEL_PARAMS, predict) == []
+        assert predict.seen == []
+
+    @pytest.mark.parametrize(
+        "missing",
+        [
+            "model",
+            "threshold",
+            "training_matches",
+            "refit_every_matches",
+            "tuning_trials",
+            "tuning_seed",
+            "tuning_min_train_matches",
+            "tuning_step_matches",
+        ],
+    )
+    def test_params_are_required(self, missing: str) -> None:
+        fields = MODEL_PARAMS.model_dump()
+        del fields[missing]
+        with pytest.raises(ValidationError):
+            RetailEvModelParams.model_validate(fields)
+
+    def test_tuning_must_leave_a_training_match_to_validate(self) -> None:
+        with pytest.raises(ValidationError, match="leaves no match"):
+            RetailEvModelParams.model_validate(
+                {**MODEL_PARAMS.model_dump(), "tuning_min_train_matches": 50}
+            )
+
+    def test_unknown_model_is_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            RetailEvModelParams.model_validate({**MODEL_PARAMS.model_dump(), "model": "other"})
+
+    def test_is_a_model_rule_bound_to_a_predictor(self) -> None:
+        spec = RULES["retail_ev_model"]
+        assert isinstance(spec, ModelRuleSpec)
+        predict = _predicting({(HOME, "bet365"): 0.5})
+        state = _rule_state(self.RETAIL, _exchange(0.5, 0.25, 0.25))
+        _, bets = apply_rule(spec.bind(predict), MODEL_PARAMS, state, bet_outcomes={DRAW})
+        assert bets == [BetIntent(HOME, "bet365", 2.1, 1.0)]
+
+
 class TestApplyRule:
     def test_state_without_input_gives_no_bets_whatever_the_rule(self) -> None:
         always = RuleSpec(
@@ -366,6 +468,17 @@ class TestValidateCandidateRules:
     def test_registered_candidates_are_valid(self) -> None:
         validate_candidate_rules(load_candidates(candidates_dir()))
 
+    def test_model_candidate_resolves_to_its_model_rule(self) -> None:
+        candidate = _candidate(
+            rule="retail_ev_model",
+            rule_sha256=rule_sha256("retail_ev_model"),
+            params=MODEL_PARAMS.model_dump(mode="json"),
+        )
+        validate_candidate_rules([candidate])
+        spec, params = resolve_rule(candidate)
+        assert isinstance(spec, ModelRuleSpec)
+        assert params == MODEL_PARAMS
+
 
 class TestDecisionLeads:
     def test_active_mechanical_candidates_of_the_sport(self) -> None:
@@ -436,6 +549,32 @@ class TestRuleSha256:
         before = rule_sha256("exchange_gap")
         monkeypatch.setattr(f"{module}.{name}", value)
         assert rule_sha256("exchange_gap") != before
+
+    @pytest.mark.parametrize(
+        "target",
+        [
+            "odds_lambda.candidate_rules.rules.retail_ev_model",
+            "odds_lambda.candidate_rules.rules.RetailEvModelParams",
+            "odds_lambda.candidate_rules.market_state",
+            "odds_analytics.candidate_model",
+            "odds_analytics.retail_ev",
+            "odds_analytics.xgboost_line_movement",
+            "odds_core.betfair_close",
+        ],
+    )
+    def test_model_rule_covers_the_code_that_fits_and_queries_the_model(
+        self, monkeypatch: pytest.MonkeyPatch, target: str
+    ) -> None:
+        real = inspect.getsource
+
+        def fake(obj: Any) -> str:
+            name = obj.__name__ if inspect.ismodule(obj) else f"{obj.__module__}.{obj.__qualname__}"
+            return real(obj) + ("# changed" if name == target else "")
+
+        before = rule_sha256("retail_ev_model")
+        assert before != rule_sha256("exchange_gap")
+        monkeypatch.setattr(inspect, "getsource", fake)
+        assert rule_sha256("retail_ev_model") != before
 
     def test_a_stale_hash_fails_validation_with_the_new_one(self) -> None:
         with pytest.raises(ValueError, match="'gap'.*code of rule 'exchange_gap' changed") as exc:

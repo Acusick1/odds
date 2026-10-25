@@ -1,9 +1,11 @@
 ---
 type: reference
 title: Replay backtest
-description: What odds candidates backtest replays, the decision state and timing it uses, how bets are scored, the coverage it reports and its JSON output.
+description: What odds candidates backtest replays, the decision state and timing it uses, how a model rule is tuned and refitted during the replay, the comparison candidate, how bets are scored, the coverage it reports and its JSON output.
 sources:
   - odds_analytics.candidate_backtest
+  - odds_analytics.candidate_model.ModelReplay
+  - odds_analytics.candidate_model.refit_blocks
   - odds_cli.commands.candidates.backtest
   - odds_lambda.candidate_rules.rules.run_rule
   - odds_lambda.storage.event_merge.canonical_events
@@ -18,7 +20,7 @@ status: stable
 
 ## Command
 
-`odds_cli.commands.candidates.backtest` resolves its argument with `odds_cli.commands.candidates._resolve`: a path to an existing file loads that file, and any other argument is a registered candidate name. `--from` and `--to` are UTC days, both inclusive. `--json <path>` also writes the result as JSON. An unknown candidate, an agent candidate, a bad date, `--to` before `--from` or an invalid rule or params prints the error and exits 1.
+`odds_cli.commands.candidates.backtest` resolves its argument with `odds_cli.commands.candidates._resolve`: a path to an existing file loads that file, and any other argument is a registered candidate name. `--from` and `--to` are UTC days, both inclusive. `--json <path>` also writes the result as JSON. `--compare <name-or-path>` also replays a second candidate, resolved the same way, on the events the first decided ([comparison](#comparison)). An unknown candidate, an agent candidate, a bad date, `--to` before `--from` or an invalid rule or params prints the error and exits 1.
 
 A file loaded by path may be an unregistered draft. `odds_core.candidates.load_candidate_file` parses it with the registry's model, but does not require the file name to match `name` and does not require `odds_core.candidates.MechanicalCandidate.rule_sha256`. `odds_analytics.candidate_backtest.hash_status` reports whether the recorded hash is `match`, `mismatch` or `absent` against the rule's current hash ([rule pinning](candidate-rules.md#rule-pinning)), and the command prints a warning unless it matches. The registry rejects a mechanical file without the hash.
 
@@ -32,7 +34,21 @@ A file loaded by path may be an unregistered draft. `odds_core.candidates.load_c
 4. **Bets.** The rule's bets, less those on outcomes an earlier decision time of the event already bet, as the live runner drops them ([once per outcome](candidate-rules.md#once-per-outcome)). Each bet is placed at its decision time, and the bets are ordered by it, then by kick-off and rule order, as the report orders paper trades by placement. Each is settled from the final score with `odds_core.odds_math.determine_h2h_winner` and `odds_core.odds_math.calculate_profit_from_decimal`, as `odds_lambda.paper_trading.settle_trades` does.
 5. **Close.** Each `1x2` bet's `p_close` comes from `odds_analytics.candidate_report.selection_close_probability` over the snapshots `odds_analytics.candidate_report.close_candidate_snapshots` selects. An `h2h` bet, every MLB bet, has none.
 
+A [model rule](candidate-rules.md#model-rules) decides only part of the range, with its model refitted as the replay goes ([model rules](#model-rules)).
+
 Events are processed in batches of `odds_analytics.candidate_backtest.EVENT_BATCH_SIZE`, with the session's loaded snapshots dropped after each batch: one query per decision reads only the maximum input age before its decision time, and the close snapshots are read once per batch for events that have a bet.
+
+## Model rules
+
+For a model rule, `odds_analytics.candidate_backtest.replay` takes the range's canonical events in kick-off order and leaves the first `training_matches` of them to training only, with any later match that kicks off at the same time as the last of them (`odds_analytics.candidate_model.training_prefix`): they are never decided. `odds_analytics.candidate_model.refit_blocks` splits the rest, the scored matches, into blocks of `refit_every_matches` in kick-off order; the last block may be partial. A range with no match after its training prefix scores nothing.
+
+`odds_analytics.candidate_model.ModelReplay` first tunes the model's hyperparameters on the training matches that kicked off before the first scored decision time, the matches the first refit trains on, so every tuning label exists before any scored decision ([hyperparameters](candidate-rules.md#the-retail-ev-model-rule)); no scored match reaches the tuning, and a training match kicking off later is left out of it. It then refits the model before each block, at the block's earliest decision time, with those hyperparameters, on the [training rows](candidate-rules.md#the-retail-ev-model-rule) of every range match that kicked off before that time: the prefix and the earlier scored matches. A prefix match that kicks off after a scored match's first decision waits for a later block. Each match's rows are built once, from all of its snapshots, and only a match with a live Betfair close has rows. A tuning or a refit without any training row raises `ValueError`, which the command prints before exiting 1. The block's matches are then decided as in [replay](#replay), steps 2 to 5, with the rule bound to that fit, so the model never sees a match before it is scored.
+
+`odds_analytics.candidate_backtest.BacktestResult.tuning` records the chosen hyperparameters, the trial count, the tuning matches, the folds used with each one's validation row count, and the mean fold weighted MSE of the model and of the exchange-at-t baseline (`odds_analytics.candidate_model.Tuning`). `odds_analytics.candidate_backtest.BacktestResult.refits` records each fit (`odds_analytics.candidate_model.Refit`): its time, the matches with training rows, the row count and the scored event ids. The command prints both as tables above the coverage.
+
+## Comparison
+
+`--compare` replays the second candidate over the same range with `only_events` set to the first candidate's `odds_analytics.candidate_backtest.BacktestResult.decided_event_ids`: a model rule's scored matches, or every range event for a rule without a model. Its k is its own family's. The command prints its tables after the first candidate's, then one table with both candidates' estimates over every bet with a close. The command refuses a model rule as the second candidate, because it trains on its own range. The re-test of the retail-EV model compares its draft, `experiments/configs/candidate_retail_ev_model_epl.yaml`, with `exchange-gap-epl` this way ([#657](https://github.com/Acusick1/odds/issues/657)).
 
 ## Scoring
 
@@ -46,7 +62,7 @@ The checkpoint is the verdict's: the first 100, 200, … 500 bets with a close, 
 
 | Field | Counts |
 |---|---|
-| `events` | Canonical events in range |
+| `events` | Canonical events decided: those in range, or for a model rule its scored matches (`odds_analytics.candidate_backtest.BacktestResult.range_events` counts the range, before any `only_events` filter) |
 | `decisions` | Decisions: each event once per decision time |
 | `with_input` | Decisions with a snapshot within the maximum input age at the decision time |
 | `with_exchange` | Decisions with an exchange price at the decision time |
@@ -58,4 +74,4 @@ The command prints the verdict as `meets_promote_bar` (with "development data, n
 
 ## JSON output
 
-`--json` writes `dataclasses.asdict` of `odds_analytics.candidate_backtest.BacktestResult`: the candidate's name, version, rule, params and hash status, the range, the coverage, the summary (including `odds_analytics.candidate_report.CandidateSummary.family_versions`) and the overall estimate. Dates and enums are written as strings.
+`--json` writes `dataclasses.asdict` of `odds_analytics.candidate_backtest.BacktestResult`: the candidate's name, version, rule, params and hash status, the range, the coverage, the summary (including `odds_analytics.candidate_report.CandidateSummary.family_versions`), the overall estimate, the range's event count, a model rule's tuning, refits and `odds_analytics.candidate_backtest.BacktestResult.library_versions` (the XGBoost, Optuna and NumPy versions, from `odds_analytics.candidate_model.library_versions`), and the comparison candidate's result in the same form, or `null`. Dates and enums are written as strings.

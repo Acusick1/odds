@@ -10,7 +10,7 @@ from __future__ import annotations
 import bisect
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, cast, get_args
 
@@ -44,7 +44,7 @@ from odds_core.snapshot_sources import SnapshotKind, snapshot_kind
 
 from odds_analytics.epl_schedule_features import EplScheduleFeatures
 from odds_analytics.standings_features import StandingsFeatures
-from odds_analytics.training.config import RetailEvFeatureGroupName
+from odds_analytics.training.config import RetailEvArm, RetailEvFeatureGroupName
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,6 +52,7 @@ if TYPE_CHECKING:
     from odds_analytics.as_of_team_features import TeamHistory
     from odds_analytics.feature_groups import PreparedFeatureData
     from odds_analytics.training.config import FeatureConfig
+    from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
 
 logger = structlog.get_logger()
 
@@ -101,7 +102,12 @@ class _RetailQuote:
 
 
 @dataclass(frozen=True)
-class RetailEvRow:
+class RetailEvInput:
+    """What a decision row knows at its decision time t: everything but the close.
+
+    ``dynamics`` is ``None`` for an input built from one snapshot, which has no history.
+    """
+
     event_id: str
     commence_time: datetime
     outcome: Outcome
@@ -114,9 +120,8 @@ class RetailEvRow:
     consensus_prob: float
     num_bookmakers: int
     exchange: ExchangePrice
-    close: ExchangePrice
     polymarket: PolymarketPrice | None
-    dynamics: Dynamics
+    dynamics: Dynamics | None
 
     @property
     def decision_time_is_exact(self) -> bool:
@@ -146,12 +151,21 @@ class RetailEvRow:
         return (self.decision_time - self.exchange.time).total_seconds() / 3600
 
     @property
-    def target(self) -> float:
-        return self.close.fair[self.outcome] * self.retail_decimal - 1
-
-    @property
     def baseline(self) -> float:
         return self.exchange.fair[self.outcome] * self.retail_decimal - 1
+
+
+@dataclass(frozen=True)
+class RetailEvRow(RetailEvInput):
+    close: ExchangePrice
+
+    @classmethod
+    def with_close(cls, inputs: RetailEvInput, close: ExchangePrice) -> RetailEvRow:
+        return cls(**{f.name: getattr(inputs, f.name) for f in fields(inputs)}, close=close)
+
+    @property
+    def target(self) -> float:
+        return self.close.fair[self.outcome] * self.retail_decimal - 1
 
 
 @dataclass
@@ -279,6 +293,49 @@ def _dynamics(
     )
 
 
+def quote_inputs(
+    event_id: str,
+    kickoff: datetime,
+    kind: SnapshotKind,
+    t: datetime,
+    books: Mapping[str, Mapping[Outcome, float]],
+    outcomes: tuple[Outcome, ...],
+    exchange: ExchangePrice,
+    polymarket: PolymarketPrice | None,
+    dynamics: Mapping[Outcome, Dynamics] | None,
+) -> list[RetailEvInput]:
+    """One input per UK retail book and outcome it prices in one retail snapshot at ``t``."""
+    implied: dict[Outcome, list[float]] = {o: [] for o in outcomes}
+    for prices in books.values():
+        for outcome, price in prices.items():
+            implied[outcome].append(1 / price)
+    inputs: list[RetailEvInput] = []
+    for book, prices in books.items():
+        complete = set(prices) == set(outcomes)
+        book_fair = devig(dict(prices), outcomes) if complete else None
+        book_overround = overround(dict(prices), outcomes) if complete else None
+        for outcome, price in prices.items():
+            inputs.append(
+                RetailEvInput(
+                    event_id=event_id,
+                    commence_time=kickoff,
+                    outcome=outcome,
+                    book=book,
+                    retail_kind=kind,
+                    decision_time=t,
+                    retail_decimal=price,
+                    book_fair_prob=book_fair[outcome] if book_fair is not None else None,
+                    book_overround=book_overround,
+                    consensus_prob=float(np.mean(implied[outcome])),
+                    num_bookmakers=len(implied[outcome]),
+                    exchange=exchange,
+                    polymarket=polymarket,
+                    dynamics=None if dynamics is None else dynamics[outcome],
+                )
+            )
+    return inputs
+
+
 def build_event_rows(
     event: Event,
     snapshots: Sequence[OddsSnapshot],
@@ -398,31 +455,20 @@ def build_event_rows(
             for outcome in outcomes
         }
 
-        for book, prices in quote.books.items():
-            complete = set(prices) == set(outcomes)
-            book_fair = devig(prices, outcomes) if complete else None
-            book_overround = overround(prices, outcomes) if complete else None
-            for outcome, price in prices.items():
-                implied_for_outcome = quote.implied[outcome]
-                rows.append(
-                    RetailEvRow(
-                        event_id=event.id,
-                        commence_time=kickoff,
-                        outcome=outcome,
-                        book=book,
-                        retail_kind=quote.kind,
-                        decision_time=t,
-                        retail_decimal=price,
-                        book_fair_prob=book_fair[outcome] if book_fair is not None else None,
-                        book_overround=book_overround,
-                        consensus_prob=float(np.mean(implied_for_outcome)),
-                        num_bookmakers=len(implied_for_outcome),
-                        exchange=exchange,
-                        close=close,
-                        polymarket=pm_price,
-                        dynamics=dynamics[outcome],
-                    )
-                )
+        rows.extend(
+            RetailEvRow.with_close(inputs, close)
+            for inputs in quote_inputs(
+                event.id,
+                kickoff,
+                quote.kind,
+                t,
+                quote.books,
+                outcomes,
+                exchange,
+                pm_price,
+                dynamics,
+            )
+        )
     return rows, drops
 
 
@@ -469,7 +515,7 @@ def _nan_if_none(value: float | None) -> float:
     return np.nan if value is None else value
 
 
-def _price_features(row: RetailEvRow, outcomes: tuple[Outcome, ...]) -> list[float]:
+def _price_features(row: RetailEvInput, outcomes: tuple[Outcome, ...]) -> list[float]:
     implied = 1 / row.retail_decimal
     sharp = row.exchange.fair[row.outcome]
     weekday = row.commence_time.weekday()
@@ -494,7 +540,7 @@ def _price_features(row: RetailEvRow, outcomes: tuple[Outcome, ...]) -> list[flo
     return price_block + outcome_block + book_block
 
 
-def _polymarket_features(row: RetailEvRow) -> list[float]:
+def _polymarket_features(row: RetailEvInput) -> list[float]:
     pm = row.polymarket
     if pm is None:
         return [np.nan] * len(_POLYMARKET_FEATURE_NAMES)
@@ -509,8 +555,12 @@ def _polymarket_features(row: RetailEvRow) -> list[float]:
     ]
 
 
-def _dynamics_features(row: RetailEvRow) -> list[float]:
+def _dynamics_features(row: RetailEvInput) -> list[float]:
     d = row.dynamics
+    if d is None:
+        raise ValueError(
+            f"the dynamics group needs history, and the input for {row.event_id} has none"
+        )
     return [
         *(_nan_if_none(m) for m in d.exchange_moves),
         *(_nan_if_none(m) for m in d.consensus_moves),
@@ -529,15 +579,15 @@ _STANDINGS_FEATURE_NAMES: tuple[str, ...] = tuple(
 @dataclass(frozen=True)
 class _FeatureGroup:
     names: tuple[str, ...]
-    values: Callable[[RetailEvFeatures, RetailEvRow], list[float]]
+    values: Callable[[RetailEvFeatures, RetailEvInput], list[float]]
     needs_teams: bool = False
 
 
-def _schedule_features(features: RetailEvFeatures, row: RetailEvRow) -> list[float]:
+def _schedule_features(features: RetailEvFeatures, row: RetailEvInput) -> list[float]:
     return features.team_features(row, "schedule_as_of_t", lambda h, e, t: h.schedule_at(e, t))
 
 
-def _standings_features(features: RetailEvFeatures, row: RetailEvRow) -> list[float]:
+def _standings_features(features: RetailEvFeatures, row: RetailEvInput) -> list[float]:
     return features.team_features(row, "standings_as_of_t", lambda h, e, t: h.standings_at(e, t))
 
 
@@ -601,7 +651,7 @@ class RetailEvFeatures:
 
     def team_features(
         self,
-        row: RetailEvRow,
+        row: RetailEvInput,
         group: RetailEvFeatureGroupName,
         extract: Callable[[TeamHistory, Event, datetime], EplScheduleFeatures | StandingsFeatures],
     ) -> list[float]:
@@ -621,13 +671,13 @@ class RetailEvFeatures:
             )
         return self._team_cache[key]
 
-    def row(self, row: RetailEvRow) -> np.ndarray:
+    def row(self, row: RetailEvInput) -> np.ndarray:
         values = _price_features(row, self.outcomes)
         for group in self.groups:
             values += _FEATURE_GROUPS[group].values(self, row)
         return np.array(values, dtype=np.float64)
 
-    def matrix(self, rows: Sequence[RetailEvRow]) -> np.ndarray:
+    def matrix(self, rows: Sequence[RetailEvInput]) -> np.ndarray:
         return np.array([self.row(r) for r in rows], dtype=np.float32).reshape(
             len(rows), len(self.names)
         )
@@ -724,3 +774,26 @@ async def prepare_retail_ev_training_data(
         sample_weights=dataset.loss_weights,
         commence_times=dataset.commence_times,
     )
+
+
+def fit_retail_ev(
+    X: np.ndarray,
+    y: np.ndarray,
+    loss_weights: np.ndarray,
+    feature_names: list[str],
+    xgboost_params: Mapping[str, Any],
+    arm: RetailEvArm,
+) -> XGBoostLineMovementStrategy:
+    """Fit XGBoost on retail-EV rows; the residual arm takes the baseline as its base margin."""
+    from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
+
+    strategy = XGBoostLineMovementStrategy()
+    strategy.train(
+        X,
+        y,
+        feature_names,
+        sample_weight_train=loss_weights,
+        margin_feature=BASELINE_FEATURE if arm is RetailEvArm.RESIDUAL else None,
+        **xgboost_params,
+    )
+    return strategy
