@@ -71,8 +71,9 @@ def build_market_state(
 ) -> MarketState:
     """The event's state at ``decision_time``; snapshots stamped after it are ignored.
 
-    Retail: for each retail snapshot kind, only its latest snapshot at or before t, if
-    within ``MAX_RETAIL_AGE``, counts, so a book absent from it is absent from the state.
+    Retail: for each retail snapshot kind, only its latest snapshot at or before t that
+    quotes the market, if within ``MAX_RETAIL_AGE``, counts, so a book absent from it is
+    absent from the state.
     A book quoted by two kinds takes the more recent snapshot's price. The exchange price
     is the latest complete, not in-play live Betfair price within ``MAX_EXCHANGE_AGE``
     whose back overround is at most ``max_exchange_overround``.
@@ -97,7 +98,9 @@ def build_market_state(
         kind = snapshot_kind(snapshot.raw_data)
         if kind in UPPER_BOUND_TIME_KINDS:
             continue
-        if kind in RETAIL_KINDS:
+        # OddsPortal writes one snapshot per market per scrape, so the latest of a kind
+        # may quote only another market.
+        if kind in RETAIL_KINDS and book_prices(snapshot.raw_data, kind, market, names):
             latest_retail[kind] = snapshot
         if kind not in EXCHANGE_AT_T_KINDS:
             continue
