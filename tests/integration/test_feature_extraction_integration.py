@@ -7,7 +7,8 @@ from odds_analytics.feature_extraction import FeatureEvent, TabularFeatureExtrac
 from odds_core.models import Event, EventStatus, Odds
 from odds_core.odds_math import american_to_decimal
 from odds_lambda.storage.readers import OddsReader
-from odds_lambda.storage.writers import OddsWriter
+
+from tests.test_helpers import add_event
 
 
 @pytest.mark.asyncio
@@ -79,8 +80,7 @@ class TestFeatureExtractionIntegration:
         ]
 
         # Insert into database
-        writer = OddsWriter(test_session)
-        await writer.upsert_event(event)
+        await add_event(test_session, event)
 
         for odds in odds_records:
             test_session.add(odds)

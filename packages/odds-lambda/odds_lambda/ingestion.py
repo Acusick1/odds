@@ -9,8 +9,12 @@ import structlog
 from odds_core.config import Settings, get_settings
 from odds_core.database import async_session_maker
 from odds_core.models import FetchLog
+from odds_core.vocabulary import Source, TimeBasis
 
 from odds_lambda.data_fetcher import OddsResponse, TheOddsAPIClient
+from odds_lambda.live_events import DroppedGame
+from odds_lambda.odds_api_events import odds_api_finder, resolve_odds_api_event
+from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger(__name__)
@@ -130,17 +134,27 @@ class OddsIngestionService:
         failures: list[EventIngestionFailure] = []
         processed = 0
 
+        finder = await odds_api_finder(sport_key, response.events)
+        async with self._session_factory() as session:
+            payload_id = (
+                await store_payload(session, response.raw_events_data) if response.events else None
+            )
+            await session.commit()
+        shape = SnapshotShape(Source.ODDS_API, TimeBasis.OBSERVED, payload_id)
+
         for event, event_data in zip(response.events, response.raw_events_data, strict=True):
             try:
                 async with self._session_factory() as session:
                     writer = OddsWriter(session)
-                    await writer.upsert_event(event)
-                    await session.flush()
+                    found = await resolve_odds_api_event(finder, session, event)
+                    if isinstance(found, DroppedGame):
+                        raise ValueError(f"game dropped: {found.describe()}")
                     await writer.store_odds_snapshot(
-                        event_id=event.id,
+                        event_id=found.event.id,
                         raw_data=event_data,
                         snapshot_time=response.timestamp,
                         validate=validation_enabled,
+                        shape=shape,
                     )
                     await session.commit()
 

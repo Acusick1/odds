@@ -257,29 +257,6 @@ class TestLiveEventFinderStaleListing:
             )
 
     @pytest.mark.asyncio
-    async def test_historical_ingestion_via_upsert_event_unaffected(self, test_session) -> None:
-        """Historical backfill callers go through upsert_event with non-live ids."""
-        from odds_lambda.storage.writers import OddsWriter
-
-        writer = OddsWriter(test_session)
-        match_date = datetime(2020, 1, 1, 15, 0, tzinfo=UTC)
-
-        event = Event(
-            id="fduk_2020_01_01_arsenal_chelsea",
-            sport_key="soccer_epl",
-            sport_title="EPL",
-            commence_time=match_date,
-            home_team="Arsenal",
-            away_team="Chelsea",
-            status=EventStatus.FINAL,
-        )
-
-        result = await writer.upsert_event(event)
-
-        assert result.id == "fduk_2020_01_01_arsenal_chelsea"
-        assert result.commence_time == match_date
-
-    @pytest.mark.asyncio
     async def test_finds_an_existing_stale_event_without_creating(self, test_session) -> None:
         match_date = datetime.now(UTC) - timedelta(hours=5)
         test_session.add(

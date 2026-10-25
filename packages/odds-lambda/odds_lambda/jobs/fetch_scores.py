@@ -18,6 +18,7 @@ from odds_core.database import async_session_maker
 from odds_core.models import EventStatus
 
 from odds_lambda.data_fetcher import TheOddsAPIClient
+from odds_lambda.odds_api_events import find_event_by_odds_api_id
 from odds_lambda.scheduling.decision import ScheduleDecision, decide_backward_resilient
 from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
@@ -136,16 +137,20 @@ async def _fetch_and_update_scores(sports: list[str]) -> None:
             updated_count = 0
             for score_data in response.scores_data:
                 try:
-                    event_id = score_data.get("id")
+                    odds_api_id = score_data.get("id")
                     completed = score_data.get("completed", False)
 
-                    if completed and event_id:
+                    if completed and odds_api_id:
                         # Extract home and away scores using helper
                         home_score, away_score = parse_scores_from_api_dict(score_data)
 
                         if home_score is not None and away_score is not None:
+                            event = await find_event_by_odds_api_id(session, odds_api_id)
+                            if event is None:
+                                logger.warning("score_event_not_found", odds_api_id=odds_api_id)
+                                continue
                             await writer.update_event_status(
-                                event_id=event_id,
+                                event_id=event.id,
                                 status=EventStatus.FINAL,
                                 home_score=home_score,
                                 away_score=away_score,

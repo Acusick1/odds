@@ -41,7 +41,7 @@ If there are any warnings, `odds_lambda.storage.writers.OddsWriter.store_envelop
 
 ## Configuration
 
-`odds_core.config.DataQualityConfig` has env `ENABLE_VALIDATION` (default true) and `REJECT_INVALID_ODDS` (default false) ([Configuration](../foundations/configuration.md)). `odds_lambda.ingestion.OddsIngestionService.ingest_sport` is the only reader of `enable_validation`, as the default for its `validate` argument. `reject_invalid_odds` is read by nothing, so invalid odds are always stored (#448).
+`odds_core.config.DataQualityConfig` has env `ENABLE_VALIDATION` (default true) and `REJECT_INVALID_ODDS` (default false) ([Configuration](../foundations/configuration.md)). `odds_lambda.ingestion.OddsIngestionService.ingest_sport` is the only reader of `enable_validation`, as the default for its `validate` argument, which it passes to `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` for every event it stores. `reject_invalid_odds` is read by nothing, so invalid odds are always stored (#448).
 
 ## Related
 

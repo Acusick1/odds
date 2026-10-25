@@ -5,7 +5,6 @@ description: The odds_lambda.storage module map, the commit and flush contract, 
 sources:
   - odds_lambda.storage
   - odds_lambda.storage.event_merge.EventMerger
-  - odds_lambda.storage.writers.OddsWriter.bulk_upsert_events
   - odds_lambda.storage.readers.OddsReader
   - odds_lambda.storage.validators.OddsValidator
   - odds_lambda.storage.tier_validator.TierCoverageValidator
@@ -51,7 +50,7 @@ status: stable
 
 ## Verb conventions
 
-- `upsert_*`: Postgres `ON CONFLICT DO UPDATE`, usually with a dynamically built `set_` excluding the key columns (`odds_lambda.storage.writers.OddsWriter.bulk_upsert_events` also leaves `created_at`, `surrogate_id`, `mlb_game_pk`, `no_game_pk_reason`, status, scores and `completed_at` out). Each per-source writer has its own copy of this loop.
+- `upsert_*`: Postgres `ON CONFLICT DO UPDATE`, usually with a dynamically built `set_` excluding the key columns. Each per-source writer has its own copy of this loop. Events are not upserted: the [event resolver](event-resolver.md) finds or creates them.
 - `insert_*` / `bulk_insert_*`: `ON CONFLICT DO NOTHING` (`odds_lambda.storage.mlb_pitcher_writer.MlbPitcherWriter.insert_snapshots`).
 - `store_*`: plain `session.add()`.
 - The rule is not enforced anywhere; check the method body before relying on conflict behaviour.

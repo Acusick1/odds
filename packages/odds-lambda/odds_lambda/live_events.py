@@ -1,4 +1,4 @@
-"""Resolve each game a live collection run lists to its event (#612).
+"""Resolve each game a collection run lists to its event (#612).
 
 MLB games are resolved to their MLB Stats API ``gamePk`` once per run, so an MLB event is
 found by, or created with, its ``gamePk``. Every game then goes through the event resolver
@@ -178,8 +178,14 @@ class LiveEventFinder:
         external_id: str | None,
         *,
         now: datetime | None = None,
+        legacy_id: str | None = None,
+        create_stale: bool = False,
     ) -> ResolvedEvent | DroppedGame:
         """The game's event, recording ``source``'s id for it, or the game dropped from this run.
+
+        An event the game creates takes ``legacy_id``, by default the ``op_live_`` id of its teams
+        and start. With ``create_stale`` a game that started long ago may still create an event,
+        for a source that lists games already under way.
 
         Without the MLB schedule a game attaches only to the one event of its pair within ±2 h
         and never creates one, since a new event could not carry its ``gamePk``. Flushes; the
@@ -218,12 +224,13 @@ class LiveEventFinder:
                 home_team=game.home_team,
                 away_team=game.away_team,
                 commence_time=game.start,
-                legacy_id=live_event_id(
+                legacy_id=legacy_id
+                or live_event_id(
                     normalize_team_name(game.home_team), normalize_team_name(game.away_team), start
                 ),
                 external_id=external_id,
                 mlb_game=mlb_game,
-                earliest_created_start=now - LIVE_EVENT_STALE_THRESHOLD,
+                earliest_created_start=None if create_stale else now - LIVE_EVENT_STALE_THRESHOLD,
             ),
         )
 

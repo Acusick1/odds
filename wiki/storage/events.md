@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Events table
-description: The events columns and statuses, id prefixes by source, team-name normalizers, and the upsert verbs that write events.
+description: The events columns and statuses, id prefixes by source, team-name normalizers, and the writers that create and update events.
 sources:
   - odds_core.models.Event
   - odds_core.models.EventStatus
@@ -11,9 +11,9 @@ sources:
   - odds_core.team.normalize_team_name
   - odds_lambda.polymarket_matching.normalize_team
   - odds_lambda.polymarket_matching.TEAM_ALIASES
-  - odds_lambda.storage.writers.OddsWriter.upsert_event
   - odds_lambda.storage.writers.OddsWriter.update_event_status
-  - odds_lambda.storage.writers.OddsWriter.bulk_upsert_events
+  - odds_lambda.odds_api_events.resolve_odds_api_events
+  - odds_lambda.odds_api_events.find_event_by_odds_api_id
   - odds_lambda.storage.event_merge.EventMerger.adopt_twins
   - odds_lambda.live_events.live_event_id
   - odds_lambda.event_sync.EventSyncService.sync_sport
@@ -65,7 +65,7 @@ Training's `data_source` filter matches these prefixes (`op_%`, `fduk_%`; `oddsa
 
 The two share no data.
 
-## Upsert verbs
+## Writing events
 
 - `odds_lambda.storage.writers.OddsWriter.upsert_event`: select-then-update. On an existing row it overwrites sport, teams and `updated_at` only; status and scores are untouched, and `commence_time` moves only through `odds_lambda.storage.event_kickoff.move_kickoff` with the Odds API as the source and `now` as the clock, whatever other sources' snapshots the event holds ([Kick-off authority](kickoff-authority.md)).
 - `odds_lambda.storage.writers.OddsWriter.update_event_status`: raises `ValueError` for `FINAL` unless both scores are given, and for a move `odds_core.models.EventStatus.can_become` refuses (a FINAL event never changes status), so a FINAL event written through it always has scores; it then sets the scores and `completed_at`. Scores passed with any other status are ignored.

@@ -14,6 +14,7 @@ from datetime import date, datetime
 import structlog
 from odds_core.time import utc_isoformat
 from odds_lambda.fetch_tier import FetchTier
+from odds_lambda.odds_api_events import odds_api_id_of
 from odds_lambda.storage.readers import OddsReader
 from odds_lambda.storage.tier_validator import TierCoverageValidator
 from odds_lambda.tier_utils import calculate_tier_from_timestamps
@@ -456,6 +457,7 @@ class GapBackfillPlanner:
 
             game_plan = {
                 "event_id": game.event_id,
+                "odds_api_id": await odds_api_id_of(self.session, game.event_id),
                 "home_team": game.home_team,
                 "away_team": game.away_team,
                 "commence_time": utc_isoformat(game.commence_time),

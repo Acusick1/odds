@@ -8,6 +8,8 @@ from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds
 from odds_lambda.storage.readers import OddsReader
 from odds_lambda.storage.writers import OddsWriter
 
+from tests.test_helpers import add_event
+
 
 class TestDatabaseIntegration:
     """Integration tests for database operations."""
@@ -15,7 +17,6 @@ class TestDatabaseIntegration:
     @pytest.mark.asyncio
     async def test_create_event(self, test_session):
         """Test creating an event in database."""
-        writer = OddsWriter(test_session)
         event = Event(
             id="test123",
             sport_key="basketball_nba",
@@ -25,39 +26,12 @@ class TestDatabaseIntegration:
             away_team="Celtics",
         )
 
-        result = await writer.upsert_event(event)
+        result = await add_event(test_session, event)
         await test_session.commit()
 
         assert result.id == "test123"
         assert result.home_team == "Lakers"
         assert result.status == EventStatus.SCHEDULED
-
-    @pytest.mark.asyncio
-    async def test_update_event(self, test_session):
-        """Test updating an existing event."""
-        writer = OddsWriter(test_session)
-
-        # Create event
-        event = Event(
-            id="test123",
-            sport_key="basketball_nba",
-            sport_title="NBA",
-            commence_time=datetime.now(UTC),
-            home_team="Lakers",
-            away_team="Celtics",
-        )
-
-        await writer.upsert_event(event)
-        await test_session.commit()
-
-        # Update event
-        updated_event = event.model_copy()
-        updated_event.home_team = "Golden State Warriors"
-        result = await writer.upsert_event(updated_event)
-        await test_session.commit()
-
-        assert result.home_team == "Golden State Warriors"
-        assert result.id == "test123"
 
     @pytest.mark.asyncio
     async def test_store_odds_snapshot(self, test_session, sample_odds_data):
@@ -73,7 +47,7 @@ class TestDatabaseIntegration:
             home_team=sample_odds_data["home_team"],
             away_team=sample_odds_data["away_team"],
         )
-        await writer.upsert_event(event)
+        await add_event(test_session, event)
 
         # Store snapshot
         snapshot, odds_records = await writer.store_odds_snapshot(
@@ -111,7 +85,7 @@ class TestDatabaseIntegration:
             away_team="Celtics",
             status=EventStatus.SCHEDULED,
         )
-        await writer.upsert_event(event)
+        await add_event(test_session, event)
         await test_session.commit()
 
         # Update to final with scores
@@ -176,7 +150,6 @@ class TestDatabaseIntegration:
     @pytest.mark.asyncio
     async def test_get_events_by_date_range(self, test_session):
         """Test querying events by date range."""
-        writer = OddsWriter(test_session)
         reader = OddsReader(test_session)
 
         # Create events with different dates
@@ -192,7 +165,7 @@ class TestDatabaseIntegration:
                 "away_team": f"Team{i + 1}",
             }
             event = create_scheduled_event(event_data)
-            await writer.upsert_event(event)
+            await add_event(test_session, event)
 
         await test_session.commit()
 
@@ -207,7 +180,6 @@ class TestDatabaseIntegration:
     @pytest.mark.asyncio
     async def test_get_events_by_team(self, test_session):
         """Test querying events by team name."""
-        writer = OddsWriter(test_session)
         reader = OddsReader(test_session)
 
         # Create events
@@ -228,8 +200,8 @@ class TestDatabaseIntegration:
             away_team="Los Angeles Lakers",
         )
 
-        await writer.upsert_event(event1)
-        await writer.upsert_event(event2)
+        await add_event(test_session, event1)
+        await add_event(test_session, event2)
         await test_session.commit()
 
         # Query by team
@@ -253,7 +225,7 @@ class TestDatabaseIntegration:
             home_team=sample_odds_data["home_team"],
             away_team=sample_odds_data["away_team"],
         )
-        await writer.upsert_event(event)
+        await add_event(test_session, event)
 
         # Store snapshot at specific time
         snapshot_time = datetime.now(UTC)
@@ -291,7 +263,7 @@ class TestDatabaseIntegration:
             home_team=sample_odds_data["home_team"],
             away_team=sample_odds_data["away_team"],
         )
-        await writer.upsert_event(event)
+        await add_event(test_session, event)
 
         await writer.store_odds_snapshot(
             event_id=sample_odds_data["id"],

@@ -46,13 +46,13 @@ Every table is a SQLModel class in `packages/odds-core/odds_core/`; migrations a
 - [Event matching across sources](event-matching.md) — The matcher each ingest path uses to find its events row (window, team comparison, ambiguity rule) and the duplicates and NULL event ids that follow.
 - [Event merge](event-merge.md) — How events for one match are merged into one canonical event, which event is kept, who merges, how twins and rescheduled duplicates are detected, how stored MLB events get their gamePk, and the odds events merge-twins, repair-names, assign-game-pks, set-game-pk and mark-unassignable commands.
 - [Event resolver](event-resolver.md) — How resolve_event finds or creates the one event of a listed game (lock, lookup order, ±2 h match, creation) and records the source's id, and which ids it refuses.
-- [Events table](events.md) — The events columns and statuses, id prefixes by source, team-name normalizers, and the upsert verbs that write events.
+- [Events table](events.md) — The events columns and statuses, id prefixes by source, team-name normalizers, and the writers that create and update events.
 - [Fetch tier](fetch-tier.md) — The FetchTier enum and bounds, where tiers are written and read, and the boundary encodings.
 - [Kick-off authority](kickoff-authority.md) — Which source may move an event's commence_time for each sport, the move_kickoff function every move goes through, and what a move does to the event and its snapshots.
 - [Odds snapshot and odds tables](odds-tables.md) — The odds_snapshots and odds columns and indexes, how an odds row links to its snapshot, the raw_data format, the provenance tags, and same-time snapshot pairs.
 - [Odds validation](odds-validator.md) — OddsValidator checks, the data_quality_logs rows it produces, and DataQualityConfig.
 - [OddsReader](odds-reader.md) — Every OddsReader query, which read normalized rows and which re-parse raw_data, and the time-window semantics.
-- [OddsWriter](odds-writer.md) — store_odds_snapshot (envelope, odds rows and price rows), event upserts, logging helpers, and their edge cases.
+- [OddsWriter](odds-writer.md) — store_odds_snapshot (envelope, odds rows and price rows), event status updates, logging helpers, and their edge cases.
 - [Prices and snapshot payloads tables](price-tables.md) — The prices and snapshot_payloads tables, the closed sets their text columns take, how writers fill them from each source's envelope, and the policy store_snapshot applies when a snapshot's key is already stored.
 - [Storage layer](storage-layer.md) — The odds_lambda.storage module map, the commit and flush contract, and the upsert/insert/store verbs.
 

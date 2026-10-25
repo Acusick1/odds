@@ -6,8 +6,11 @@ import pytest
 from odds_analytics.backfill_executor import BackfillExecutor
 from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 from odds_core.time import parse_api_datetime
+from odds_core.vocabulary import TimeBasis
 from odds_lambda.storage.readers import OddsReader
 from sqlalchemy import select
+
+from tests.test_helpers import add_event
 
 
 def _api_dict_to_event(event_data: dict) -> Event:
@@ -94,7 +97,8 @@ class TestBackfillIntegration:
             select(OddsSnapshot).where(OddsSnapshot.event_id == "integration_test_1")
         )
         snapshots = list(result.scalars().all())
-        assert len(snapshots) == 2
+        # One snapshot per market (h2h and spreads) at each of the plan's two times
+        assert len(snapshots) == 4
 
         # Check odds were created
         result = await test_session.execute(
@@ -149,16 +153,13 @@ class TestBackfillIntegration:
             mock_client.get_historical_odds.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_event_upsert(
+    async def test_stored_event_is_found_by_its_api_id(
         self, test_session, mock_session_factory, simple_backfill_plan, mock_api_response_factory
     ):
-        """Test that events are properly upserted on multiple runs."""
+        """The backfill stores its snapshot on the event the API's id names, and adds no event."""
         from unittest.mock import AsyncMock
 
-        from odds_lambda.storage.writers import OddsWriter
-
         # Create event with old data
-        writer = OddsWriter(test_session)
         event_data = {
             "id": "integration_test_1",
             "sport_key": "basketball_nba",
@@ -168,10 +169,10 @@ class TestBackfillIntegration:
             "away_team": "Old Celtics",
         }
         event = _api_dict_to_event(event_data)
-        await writer.upsert_event(event)
+        await add_event(test_session, event)
         await test_session.commit()
 
-        # Run backfill - should update event
+        # Run backfill - should attach to the stored event
         mock_client = AsyncMock()
         mock_client.get_historical_odds = AsyncMock(
             return_value=mock_api_response_factory(
@@ -187,11 +188,12 @@ class TestBackfillIntegration:
         ) as executor:
             await executor.execute_plan(simple_backfill_plan)
 
-        # Verify event was updated
-        await test_session.refresh(await test_session.get(Event, "integration_test_1"))
-        event = await test_session.get(Event, "integration_test_1")
-        assert event.home_team == "Test Lakers"
-        assert event.away_team == "Test Celtics"
+        events = (await test_session.execute(select(Event))).scalars().all()
+        assert [e.id for e in events] == ["integration_test_1"]
+        assert events[0].home_team == "Old Lakers"
+        snapshots = (await test_session.execute(select(OddsSnapshot))).scalars().all()
+        assert {s.event_id for s in snapshots} == {"integration_test_1"}
+        assert {s.time_basis for s in snapshots} == {TimeBasis.UPPER_BOUND}
 
     @pytest.mark.asyncio
     async def test_snapshot_exists_check(
@@ -243,10 +245,8 @@ class TestBackfillPlanFromDatabase:
 
         from odds_analytics.game_selector import GameSelector
         from odds_lambda.storage.readers import OddsReader
-        from odds_lambda.storage.writers import OddsWriter
 
         # Insert test events into database
-        writer = OddsWriter(test_session)
         test_events = [
             Event(
                 id="db_plan_test_1",
@@ -273,7 +273,7 @@ class TestBackfillPlanFromDatabase:
         ]
 
         for event in test_events:
-            await writer.upsert_event(event)
+            await add_event(test_session, event)
         await test_session.commit()
 
         # Query events from database
@@ -331,10 +331,8 @@ class TestBackfillPlanFromDatabase:
         from odds_analytics.game_selector import GameSelector
         from odds_core.time import utc_isoformat
         from odds_lambda.storage.readers import OddsReader
-        from odds_lambda.storage.writers import OddsWriter
 
         # Insert test event
-        writer = OddsWriter(test_session)
         event = Event(
             id="structure_test_1",
             sport_key="basketball_nba",
@@ -346,7 +344,7 @@ class TestBackfillPlanFromDatabase:
             home_score=100,
             away_score=95,
         )
-        await writer.upsert_event(event)
+        await add_event(test_session, event)
         await test_session.commit()
 
         # Query from database and convert to dict (DB path)

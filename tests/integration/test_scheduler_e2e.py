@@ -24,10 +24,9 @@ from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.ingestion import OddsIngestionService
 from odds_lambda.scheduling.jobs import JobContext
 from odds_lambda.storage.readers import OddsReader
-from odds_lambda.storage.writers import OddsWriter
 from sqlalchemy import select
 
-from tests.test_helpers import StubOddsClient
+from tests.test_helpers import StubOddsClient, add_event
 
 # Test constants
 GAME_TIME = datetime(2025, 1, 15, 19, 0, 0, tzinfo=UTC)
@@ -152,8 +151,7 @@ def mock_odds_data():
 @pytest.fixture
 async def setup_test_event(test_session, synthetic_event):
     """Set up the initial event in the database."""
-    writer = OddsWriter(test_session)
-    await writer.upsert_event(synthetic_event)
+    await add_event(test_session, synthetic_event)
     await test_session.commit()
     return synthetic_event
 
@@ -223,12 +221,15 @@ async def test_scheduler_end_to_end(
     # Verify data persisted
     await test_session.rollback()
 
-    snapshot_query = select(OddsSnapshot).where(OddsSnapshot.event_id == EVENT_ID)
+    snapshot_query = (
+        select(OddsSnapshot).where(OddsSnapshot.event_id == EVENT_ID).order_by(OddsSnapshot.id)
+    )
     result = await test_session.execute(snapshot_query)
-    snapshot = result.scalar_one_or_none()
+    snapshots = result.scalars().all()
 
-    assert snapshot is not None, "Odds snapshot should exist"
-    assert snapshot.bookmaker_count == 2
+    # One snapshot per market quoted in the envelope
+    assert snapshots, "Odds snapshot should exist"
+    assert snapshots[0].bookmaker_count == 2
 
     reader = OddsReader(test_session)
     odds_list = await reader.get_odds_at_time(
@@ -260,8 +261,6 @@ async def test_job_self_scheduling_chain(test_session, mock_session_factory):
     from freezegun import freeze_time
     from odds_lambda.jobs import fetch_odds
 
-    writer = OddsWriter(test_session)
-
     test_cases = [
         (GAME_TIME - timedelta(days=5), FetchTier.OPENING, 48.0, "OPENING"),
         (GAME_TIME - timedelta(hours=18), FetchTier.SHARP, 12.0, "SHARP"),
@@ -278,7 +277,7 @@ async def test_job_self_scheduling_chain(test_session, mock_session_factory):
             away_team=AWAY_TEAM,
             status=EventStatus.SCHEDULED,
         )
-        await writer.upsert_event(event)
+        await add_event(test_session, event)
         await test_session.commit()
 
         scheduled_calls = []

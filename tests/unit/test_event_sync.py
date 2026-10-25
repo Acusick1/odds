@@ -8,7 +8,7 @@ from odds_core.models import Event, EventStatus
 from odds_lambda.event_sync import EventSyncResult, EventSyncService
 from sqlalchemy import select
 
-from tests.test_helpers import StubOddsClient
+from tests.test_helpers import StubOddsClient, add_event
 
 
 def _make_odds_response() -> OddsResponse:
@@ -21,14 +21,19 @@ def _make_odds_response() -> OddsResponse:
     )
 
 
-def _make_event(event_id: str, hours_from_now: float = 24.0) -> Event:
+def _make_event(
+    event_id: str,
+    hours_from_now: float = 24.0,
+    home_team: str = "Lakers",
+    away_team: str = "Celtics",
+) -> Event:
     return Event(
         id=event_id,
         sport_key="basketball_nba",
         sport_title="NBA",
         commence_time=datetime.now(UTC) + timedelta(hours=hours_from_now),
-        home_team="Lakers",
-        away_team="Celtics",
+        home_team=home_team,
+        away_team=away_team,
         status=EventStatus.SCHEDULED,
     )
 
@@ -75,16 +80,14 @@ class TestEventSyncService:
     @pytest.mark.asyncio
     async def test_sync_sport_updates_existing_events(self, test_session, mock_session_factory):
         """Events already in the database are updated, not double-counted as inserts."""
-        from odds_lambda.storage.writers import OddsWriter
 
         # Pre-insert one event
-        writer = OddsWriter(test_session)
         existing = _make_event("sync_existing_event")
-        await writer.upsert_event(existing)
+        await add_event(test_session, existing)
         await test_session.commit()
 
         # Sync returns the same event + one new one
-        new_event = _make_event("sync_new_event")
+        new_event = _make_event("sync_new_event", home_team="Warriors", away_team="Heat")
         client = StubOddsClient(
             _make_odds_response(),
             _make_events_response([existing, new_event]),

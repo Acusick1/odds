@@ -1,7 +1,7 @@
 ---
 type: reference
 title: OddsWriter
-description: store_odds_snapshot (envelope, odds rows and price rows), event upserts, logging helpers, and their edge cases.
+description: store_odds_snapshot (envelope, odds rows and price rows), event status updates, logging helpers, and their edge cases.
 sources:
   - odds_lambda.storage.writers.OddsWriter
   - odds_lambda.storage.writers.OddsWriter.store_odds_snapshot
@@ -26,7 +26,7 @@ status: stable
 
 `odds_lambda.storage.writers.OddsWriter.store_envelope` does the work and returns an `odds_lambda.storage.writers.StoredEnvelope` (the snapshot, its `odds` rows and whether it was inserted); `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` calls it and returns the snapshot and rows.
 
-`odds_lambda.storage.writers.OddsWriter.store_odds_snapshot(event_id, raw_data, snapshot_time=None, validate=True, *, shape=None, api_request_id=None)` stores one event's envelope (`raw_data`). `shape` (`odds_lambda.storage.shaped_snapshots.SnapshotShape`) names the snapshot's source, its [time basis](odds-tables.md#odds_snapshots) and the payload it came in; the OddsPortal live, Betfair and live Polymarket jobs pass it, and the other writers pass none. Steps:
+`odds_lambda.storage.writers.OddsWriter.store_odds_snapshot(event_id, raw_data, snapshot_time=None, validate=True, *, shape=None, api_request_id=None)` stores one event's envelope (`raw_data`). `shape` (`odds_lambda.storage.shaped_snapshots.SnapshotShape`) names the snapshot's source, its [time basis](odds-tables.md#odds_snapshots) and the payload it came in; the OddsPortal live, Betfair and live Polymarket jobs, Odds API ingestion and the Odds API backfill pass it, and the other writers pass none. Steps:
 
 1. Loads the event and computes `hours_until_commence` and the fetch tier from `snapshot_time` and the event's own `commence_time` (`odds_lambda.tier_utils.calculate_tier_from_timestamps`). The tier is per event, not per job run. If the event row is missing, both `fetch_tier` and `hours_until_commence` are stored as NULL ([Fetch tier](fetch-tier.md)); with `shape`, a missing event raises `ValueError`, since outcomes are matched to its teams.
 2. If `validate`, runs the validator and writes one `odds_core.models.DataQualityLog` row for any warnings; storage proceeds regardless ([Odds validation](odds-validator.md)). `odds_lambda.ingestion.OddsIngestionService.ingest_sport` is the only caller that passes `validate`: the `validate` argument of that method or of `odds_lambda.ingestion.OddsIngestionService.ingest_sports` when given, else `odds_core.config.DataQualityConfig.enable_validation`. Every other caller of `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` uses the default `True`.
@@ -39,7 +39,7 @@ Returns `(OddsSnapshot, list[Odds])`.
 
 ## Event handling
 
-Event upserts (`odds_lambda.storage.writers.OddsWriter.upsert_event`, `odds_lambda.storage.writers.OddsWriter.update_event_status`, `odds_lambda.storage.writers.OddsWriter.bulk_upsert_events`) are on [Events table](events.md#upsert-verbs); `odds_lambda.storage.writers.OddsWriter.update_event_status` raises `ValueError` for FINAL without both scores and for a move the stored status does not allow ([Event status lifecycle](../collection/event-status-lifecycle.md#allowed-moves)). The live OddsPortal and Betfair jobs find or create events through `odds_lambda.live_events.LiveEventFinder` and the [event resolver](event-resolver.md) ([live MLB events](event-matching.md#live-mlb-events)).
+`odds_lambda.storage.writers.OddsWriter.update_event_status` is on [Events table](events.md#writing-events); it raises `ValueError` for FINAL without both scores and for a move the stored status does not allow ([Event status lifecycle](../collection/event-status-lifecycle.md#allowed-moves)). The writer creates no events: the live OddsPortal and Betfair jobs and the Odds API writers find or create them through `odds_lambda.live_events.LiveEventFinder` and the [event resolver](event-resolver.md) ([live MLB events](event-matching.md#live-mlb-events), [Odds API events](event-matching.md#odds-api-events)).
 
 ## Log helpers
 

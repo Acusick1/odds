@@ -5,7 +5,12 @@ from unittest.mock import patch
 
 import pytest
 from odds_cli.main import app
+from odds_lambda.odds_api_events import OddsApiResolutions
 from typer.testing import CliRunner
+
+
+async def _resolved(session, finder, events):
+    return OddsApiResolutions(created=len(events))
 
 
 class TestDiscoverCommand:
@@ -51,11 +56,9 @@ class TestDiscoverCommand:
                 "odds_cli.commands.discover.async_session_maker",
                 return_value=mock_db_session,
             ):
-                with patch("odds_lambda.storage.writers.OddsWriter") as mock_writer_class:
-                    from odds_lambda.storage.writers import OddsWriter
-
-                    mock_writer_class.return_value = OddsWriter(mock_db_session)
-
+                with patch(
+                    "odds_cli.commands.discover.resolve_odds_api_events", side_effect=_resolved
+                ):
                     result = runner.invoke(
                         app,
                         [
@@ -98,11 +101,9 @@ class TestDiscoverCommand:
                 "odds_cli.commands.discover.async_session_maker",
                 return_value=mock_db_session,
             ):
-                with patch("odds_lambda.storage.writers.OddsWriter") as mock_writer_class:
-                    from odds_lambda.storage.writers import OddsWriter
-
-                    mock_writer_class.return_value = OddsWriter(mock_db_session)
-
+                with patch(
+                    "odds_cli.commands.discover.resolve_odds_api_events", side_effect=_resolved
+                ):
                     result = runner.invoke(
                         app,
                         [
@@ -230,11 +231,9 @@ class TestDiscoverCommand:
                 "odds_cli.commands.discover.async_session_maker",
                 return_value=mock_db_session,
             ):
-                with patch("odds_lambda.storage.writers.OddsWriter") as mock_writer_class:
-                    from odds_lambda.storage.writers import OddsWriter
-
-                    mock_writer_class.return_value = OddsWriter(mock_db_session)
-
+                with patch(
+                    "odds_cli.commands.discover.resolve_odds_api_events", side_effect=_resolved
+                ):
                     result = runner.invoke(
                         app,
                         [
@@ -250,9 +249,7 @@ class TestDiscoverCommand:
                     # Command should succeed
                     assert result.exit_code == 0
 
-                    # Verify bulk_upsert_events was called twice (100 + 50 events)
-                    # Note: We can't easily assert call_count with real implementation,
-                    # but we can verify the function worked by checking output
+                    # Events resolve in batches of 100 and 50; the output counts them all
                     assert (
                         "Events inserted: 150" in result.stdout
                         or "Events updated:" in result.stdout

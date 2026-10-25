@@ -11,6 +11,7 @@ from odds_analytics.game_selector import GameSelector
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_core.time import utc_isoformat
+from odds_lambda.odds_api_events import odds_api_id_of
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 from rich.table import Table
@@ -126,6 +127,7 @@ async def _create_plan_async(
             # Convert Event model to dict format expected by GameSelector
             event_dict = {
                 "id": event.id,
+                "odds_api_id": await odds_api_id_of(session, event.id),
                 "sport_key": event.sport_key,
                 "sport_title": event.sport_title,
                 "commence_time": event.commence_time.isoformat(),

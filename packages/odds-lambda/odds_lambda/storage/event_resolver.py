@@ -271,6 +271,9 @@ async def _find(
             return ResolvedEvent(held, Resolution.BY_GAME_PK)
     if game.external_id is not None:
         held = await _by_external_id(session, game.source, game.external_id)
+        if held is None and game.source is Source.ODDS_API:
+            # Events stored before the external-id table existed are keyed by the API's own id.
+            held = await session.get(Event, game.external_id)
         if held is not None and (game.mlb_game is None or not await holds_game_pk(session, held)):
             return ResolvedEvent(held, Resolution.BY_EXTERNAL_ID)
     matched = await _match(session, game, home_team, away_team)

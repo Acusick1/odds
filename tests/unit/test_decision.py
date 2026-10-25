@@ -17,7 +17,8 @@ from odds_lambda.scheduling.decision import (
     decide_forward,
     decide_forward_resilient,
 )
-from odds_lambda.storage.writers import OddsWriter
+
+from tests.test_helpers import add_event
 
 NOW = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
 
@@ -179,9 +180,9 @@ class TestDecideForward:
         self, test_session, mock_session_factory
     ) -> None:
         """EPL gate must ignore an imminent MLB fixture (the all-sports bug)."""
-        writer = OddsWriter(test_session)
         # Imminent MLB game, distant EPL game.
-        await writer.upsert_event(
+        await add_event(
+            test_session,
             Event(
                 id="mlb_soon",
                 sport_key="baseball_mlb",
@@ -190,9 +191,10 @@ class TestDecideForward:
                 home_team="Yankees",
                 away_team="Red Sox",
                 status=EventStatus.SCHEDULED,
-            )
+            ),
         )
-        await writer.upsert_event(
+        await add_event(
+            test_session,
             Event(
                 id="epl_far",
                 sport_key="soccer_epl",
@@ -201,7 +203,7 @@ class TestDecideForward:
                 home_team="Arsenal",
                 away_team="Chelsea",
                 status=EventStatus.SCHEDULED,
-            )
+            ),
         )
         await test_session.commit()
 
@@ -455,8 +457,8 @@ class TestDecideBackward:
     async def test_runs_when_non_final_game_in_window(
         self, test_session, mock_session_factory
     ) -> None:
-        writer = OddsWriter(test_session)
-        await writer.upsert_event(
+        await add_event(
+            test_session,
             Event(
                 id="recent_live",
                 sport_key="soccer_epl",
@@ -465,7 +467,7 @@ class TestDecideBackward:
                 home_team="A",
                 away_team="B",
                 status=EventStatus.LIVE,
-            )
+            ),
         )
         await test_session.commit()
 
@@ -482,8 +484,8 @@ class TestDecideBackward:
 
     @pytest.mark.asyncio
     async def test_idles_when_all_final(self, test_session, mock_session_factory) -> None:
-        writer = OddsWriter(test_session)
-        await writer.upsert_event(
+        await add_event(
+            test_session,
             Event(
                 id="recent_final",
                 sport_key="soccer_epl",
@@ -494,7 +496,7 @@ class TestDecideBackward:
                 status=EventStatus.FINAL,
                 home_score=1,
                 away_score=0,
-            )
+            ),
         )
         await test_session.commit()
 
@@ -514,8 +516,8 @@ class TestDecideBackward:
         self, test_session, mock_session_factory
     ) -> None:
         """With statuses_needing_update={SCHEDULED}, a LIVE game does not trigger."""
-        writer = OddsWriter(test_session)
-        await writer.upsert_event(
+        await add_event(
+            test_session,
             Event(
                 id="already_live",
                 sport_key="soccer_epl",
@@ -524,7 +526,7 @@ class TestDecideBackward:
                 home_team="A",
                 away_team="B",
                 status=EventStatus.LIVE,
-            )
+            ),
         )
         await test_session.commit()
 
@@ -542,8 +544,8 @@ class TestDecideBackward:
     @pytest.mark.asyncio
     async def test_sport_scoped(self, test_session, mock_session_factory) -> None:
         """An MLB game needing updates must not trigger the EPL backward gate."""
-        writer = OddsWriter(test_session)
-        await writer.upsert_event(
+        await add_event(
+            test_session,
             Event(
                 id="mlb_live",
                 sport_key="baseball_mlb",
@@ -552,7 +554,7 @@ class TestDecideBackward:
                 home_team="A",
                 away_team="B",
                 status=EventStatus.LIVE,
-            )
+            ),
         )
         await test_session.commit()
 

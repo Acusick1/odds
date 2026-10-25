@@ -7,6 +7,14 @@ from typing import Any
 
 from odds_core.api_models import EventsResponse, HistoricalOddsResponse, OddsResponse
 from odds_core.models import Event, EventStatus, OddsSnapshot
+from sqlalchemy.ext.asyncio import AsyncSession
+
+
+async def add_event(session: AsyncSession, event: Event) -> Event:
+    """Store ``event`` as it is, without resolving it against other events."""
+    session.add(event)
+    await session.flush()
+    return event
 
 
 class StubOddsClient:
