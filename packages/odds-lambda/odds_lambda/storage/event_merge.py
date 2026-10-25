@@ -287,7 +287,7 @@ class EventMerger:
         """Delete the duplicate's decisions, and their trades, that the kept event has too.
 
         A candidate version decides a match once per decision time and bets each outcome once
-        (``uq_candidate_decisions_candidate_event_time``, ``uq_paper_trades_candidate_bet``),
+        (``uq_candidate_decisions_candidate_event_lead``, ``uq_paper_trades_candidate_bet``),
         so when the kept event holds any decision of a candidate version, that version's
         decisions on the duplicate are dropped. The other decisions and trades move with the
         foreign keys: a trade only clashes with the kept event's trades through a decision of

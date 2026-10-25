@@ -253,6 +253,7 @@ def _log_missed(decision: CandidateDecision, reason: MissReason, now: datetime) 
         "candidate_decision_missed",
         candidate=decision.candidate_name,
         event_id=decision.event_id,
+        minutes_before_kickoff=decision.minutes_before_kickoff,
         decision_time=decision.decision_time.isoformat(),
         now=now.isoformat(),
         reason=reason.value,

@@ -66,6 +66,8 @@ async def add_decision(
     missed: bool = False,
     version: int = 1,
     decision_time: datetime = T,
+    kickoff: datetime = KICKOFF,
+    known_at: datetime | None = None,
 ) -> None:
     """A decision of ``gap`` on ``e1`` with the given (selection, book, price) unit-stake trades."""
     trades = trades or []
@@ -73,10 +75,10 @@ async def add_decision(
         candidate_name="gap",
         candidate_version=version,
         event_id="e1",
-        minutes_before_kickoff=int((KICKOFF - decision_time).total_seconds() // 60),
+        minutes_before_kickoff=int((kickoff - decision_time).total_seconds() // 60),
         decision_time=decision_time,
-        kickoff_at_decision=KICKOFF,
-        known_at=decision_time + timedelta(minutes=1),
+        kickoff_at_decision=kickoff,
+        known_at=known_at or decision_time + timedelta(minutes=1),
         input_snapshot_ids=input_ids,
         bets_placed=len(trades),
         missed=missed,
@@ -244,6 +246,48 @@ class TestCheckParity:
             ParityStatus.MISMATCH,
             ParityStatus.MATCH,
         ]
+
+    async def test_decisions_are_replayed_in_live_order_after_a_kickoff_moved_earlier(
+        self, pglite_async_session
+    ) -> None:
+        # KO-90 bet home; the kick-off then moved 31 minutes earlier, so the KO-60 decision,
+        # taken next, has an earlier decision time and bet nothing because home was bet.
+        await add_event(pglite_async_session)
+        snapshot = make_tagged_snapshot(
+            "e1",
+            KICKOFF - timedelta(minutes=95),
+            [three_way_bookmaker("bet365", RETAIL), betfair(EXCHANGE)],
+            "oddsportal_live",
+        )
+        snapshot.created_at = KICKOFF - timedelta(minutes=94)
+        pglite_async_session.add(snapshot)
+        await pglite_async_session.commit()
+        assert snapshot.id is not None
+        await add_decision(
+            pglite_async_session,
+            [snapshot.id],
+            [("home", "bet365", 2.2)],
+            decision_time=KICKOFF - timedelta(minutes=90),
+        )
+        moved = KICKOFF - timedelta(minutes=31)
+        await add_decision(
+            pglite_async_session,
+            [snapshot.id],
+            decision_time=moved - timedelta(minutes=60),
+            kickoff=moved,
+            known_at=KICKOFF - timedelta(minutes=88),
+        )
+        two_times = candidate(
+            params={
+                "threshold": 0.02,
+                "minutes_before_kickoff": [60, 90],
+                "max_input_age_minutes": 10,
+            }
+        )
+
+        report = await check_parity(pglite_async_session, two_times)
+
+        assert [d.status for d in report.decisions] == [ParityStatus.MATCH, ParityStatus.MATCH]
 
     async def test_decision_time_is_not_the_events_current_kickoff(
         self, pglite_async_session

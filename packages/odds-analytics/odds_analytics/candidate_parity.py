@@ -3,9 +3,9 @@
 Two comparisons per recorded decision. The parity comparison rebuilds the market state from
 exactly the snapshots the decision recorded (``input_snapshot_ids``), with its decision time
 and kick-off, runs the rule and compares the bets with the decision's trades; any difference
-is a mismatch. Decisions are taken earliest first, and each outcome of a match is bet once:
-the parity comparison drops the outcomes the match's earlier decisions placed trades on, as
-the live run did. The data comparison replays from the database as it is now, with
+is a mismatch. Decisions are replayed in the order the live runs took them, and each outcome
+of a match is bet once: the parity comparison drops the outcomes the match's earlier
+decisions placed trades on, as the live run did. The data comparison replays from the database as it is now, with
 ``known_at`` the decision's, dropping the outcomes its own replays of the earlier decisions
 bet, as the backtest does, and reports where that differs from the recorded-input replay (a
 later twin merge, commit lag): informational, never a failure.
@@ -140,8 +140,8 @@ async def _db_replayed(
 async def check_parity(
     session: AsyncSession, candidate: MechanicalCandidate, version: int | None = None
 ) -> ParityReport:
-    """Replay every non-missed decision of ``candidate``'s ``version`` (default its own),
-    earliest first.
+    """Replay every non-missed decision of ``candidate``'s ``version`` (default its own), in
+    the order the live runs took them.
 
     The rule and params are the candidate's, so ``version`` must be the one the file holds;
     ``ValueError`` otherwise.
@@ -163,7 +163,9 @@ async def check_parity(
                     CandidateDecision.candidate_version == version,
                     CandidateDecision.missed.is_(False),  # type: ignore[attr-defined]
                 )
-                .order_by(CandidateDecision.decision_time, CandidateDecision.id)  # type: ignore[arg-type]
+                # The order the live runs committed them: a kick-off moved earlier can put a
+                # later decision's time before an earlier one's.
+                .order_by(CandidateDecision.known_at, CandidateDecision.id)  # type: ignore[arg-type]
             )
         )
         .scalars()
@@ -180,8 +182,8 @@ async def check_parity(
             assert trade.decision_id is not None  # noqa: S101
             trades[trade.decision_id].append(trade)
 
-    # Outcomes bet so far per event, live and by the database replay; decisions come
-    # earliest first.
+    # Outcomes bet so far per event, live and by the database replay; decisions come in
+    # live order.
     live_outcomes: dict[str, set[Outcome]] = defaultdict(set)
     db_replayed_outcomes: dict[str, set[Outcome]] = defaultdict(set)
     results: list[DecisionParity] = []
