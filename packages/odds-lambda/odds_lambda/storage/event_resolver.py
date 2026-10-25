@@ -42,6 +42,7 @@ class ListedGame:
     legacy_id: str
     external_id: str | None = None
     mlb_game: ResolvedGame | None = None
+    earliest_created_start: datetime | None = None
 
     def __post_init__(self) -> None:
         if self.external_id is not None and self.source not in EXTERNAL_ID_SOURCES:
@@ -65,6 +66,10 @@ class ResolvedEvent:
 
 class EventIdTaken(ValueError):
     """Every string id a new event could take belongs to another event."""
+
+
+class StaleListing(ValueError):
+    """A live listing matched no event, and its start is too far past to create one."""
 
 
 class LockOrderError(RuntimeError):
@@ -103,7 +108,14 @@ async def resolve_event(session: AsyncSession, game: ListedGame) -> ResolvedEven
     ``LockOrderError``. Looks an MLB game up by ``gamePk``, then any game by the source's id;
     else matches the sport and teams within ±2 h (for MLB, only events holding no ``gamePk``);
     else creates the event. A second id from one source for the event, or an id another event
-    holds, is refused and logged rather than recorded.
+    holds, is refused and logged rather than recorded. A listed start offers the event a
+    kick-off move (``move_kickoff``) only while it is in the future: a start already past is an
+    in-play or historical time, not a schedule.
+
+    Raises:
+        StaleListing: when no event matches and the game starts before
+            ``game.earliest_created_start``.
+        EventIdTaken: when no event matches and every id a new event could take is taken.
     """
     home_team = normalize_team_name(game.home_team)
     away_team = normalize_team_name(game.away_team)
@@ -120,7 +132,7 @@ async def resolve_event(session: AsyncSession, game: ListedGame) -> ResolvedEven
     if game.mlb_game is not None:
         await _record_game_pk(session, event, game.mlb_game.game_pk)
         await move_kickoff(session, event, Source.MLB_STATS_API, game.mlb_game.start, now=now)
-    else:
+    elif ensure_utc(game.commence_time) > now:
         await move_kickoff(session, event, game.source, game.commence_time, now=now)
     return resolved
 
@@ -239,6 +251,12 @@ def _anchor(game: ListedGame) -> datetime:
 
 
 async def _create(session: AsyncSession, game: ListedGame, home_team: str, away_team: str) -> Event:
+    start = ensure_utc(_anchor(game))
+    if game.earliest_created_start is not None and start < ensure_utc(game.earliest_created_start):
+        raise StaleListing(
+            f"{game.source.value} lists {home_team} v {away_team} at {start.isoformat()}, which "
+            "matches no event and is too far past to create one"
+        )
     suffix = game.mlb_game.game_pk if game.mlb_game is not None else game.external_id
     choices = [game.legacy_id] + ([f"{game.legacy_id}_{suffix}"] if suffix is not None else [])
     event_id = None

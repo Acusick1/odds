@@ -1,19 +1,22 @@
 ---
 type: reference
 title: Prices and snapshot payloads tables
-description: The prices and snapshot_payloads tables, the closed sets their text columns take, and the policy store_snapshot applies when a snapshot's key is already stored.
+description: The prices and snapshot_payloads tables, the closed sets their text columns take, how writers fill them from each source's envelope, and the policy store_snapshot applies when a snapshot's key is already stored.
 sources:
   - odds_core.models.Price
   - odds_core.models.SnapshotPayload
   - odds_core.vocabulary
   - odds_lambda.storage.snapshot_store
+  - odds_lambda.storage.shaped_snapshots
+  - odds_lambda.price_rows
+  - odds_core.bookmakers.BOOKMAKER_ALIASES_BY_SOURCE
   - migrations/versions/9c822a7a3faf_expand_odds_data_model.py
 status: stable
 ---
 
 # Prices and snapshot payloads tables
 
-`prices` holds one row per price in a snapshot, and `snapshot_payloads` holds what a source returned. They sit beside the `odds` table and `odds_snapshots.raw_data` ([Odds snapshot and odds tables](odds-tables.md)), which every reader and writer uses. No writer fills them. The snapshot columns they rely on (`source`, `market`, `time_basis` and the market metadata) are on [odds_snapshots](odds-tables.md#odds_snapshots).
+`prices` holds one row per price in a snapshot, and `snapshot_payloads` holds what a source returned. They sit beside the `odds` table and `odds_snapshots.raw_data` ([Odds snapshot and odds tables](odds-tables.md)), which every reader uses. The OddsPortal live and Betfair jobs fill them as they write those ([Writing the new shape](#writing-the-new-shape)); the Odds API, Polymarket and historical writers do not yet. The snapshot columns they rely on (`source`, `market`, `time_basis` and the market metadata) are on [odds_snapshots](odds-tables.md#odds_snapshots).
 
 ## prices
 
@@ -51,6 +54,39 @@ The closed sets are `StrEnum`s in `odds_core.vocabulary`, stored as their values
 | `odds_core.vocabulary.PriceOutcome` | home, draw, away, over, under | `prices.outcome` |
 | `odds_core.vocabulary.Side` | back, lay, mid, traded | `prices.side` |
 | `odds_core.vocabulary.HealthCheck` | missing_mlb_game_pk | `health_check_acknowledgements.check_name` |
+
+## Writing the new shape
+
+A writer builds one envelope per event, as before (`raw_data`, [raw_data format](odds-tables.md#raw_data-format)), and `odds_lambda.storage.shaped_snapshots.store_shaped_snapshot` stores it in the new shape as well. It is called by `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` when the writer passes a `odds_lambda.storage.writers.SnapshotShape` ([OddsWriter](odds-writer.md#store_odds_snapshot)).
+
+1. `odds_lambda.price_rows.expand_envelope` reads the envelope as one `odds_lambda.price_rows.MarketSnapshot` per market, in `odds_lambda.price_rows.MARKET_ORDER` (1x2, h2h, spreads, totals), with its price rows. What it could not turn into a row comes back as an `odds_lambda.price_rows.RowIssue`, and each is logged to `data_quality_logs` (`odds_lambda.storage.data_quality.record_issue`).
+2. The envelope's snapshot takes the first market, its source and time basis, the market metadata and `payload_id`, and is stored with its prices through `odds_lambda.storage.snapshot_store.store_snapshot` ([storing a snapshot under its key](#storing-a-snapshot-under-its-key)). It keeps its whole `raw_data`, so readers of `raw_data` see what they saw before.
+3. Each further market (the Odds API's spreads and totals) becomes its own snapshot at the same time, with the same tier, `api_request_id` and payload, whose `raw_data` is the envelope cut to that market (`odds_lambda.price_rows.market_envelope`). The odds rows stay on the envelope's snapshot.
+4. An envelope that quotes no market is added as it is, with `source`, `time_basis` and `payload_id` set and no market or prices.
+
+A single-market envelope (OddsPortal, Betfair, FDUK, Polymarket) is therefore one snapshot whose id is the one readers already use; only a multi-market Odds API envelope adds snapshots.
+
+### Reading an envelope
+
+| Source | Rows |
+|---|---|
+| OddsPortal, the Odds API, FDUK | a `back` row per bookmaker and outcome. `changed_at` is the book's `last_update` for the Odds API (the market's when given) and OddsPortal, and NULL for FDUK, whose stamp is ours. FDUK's `market_max` and `market_avg` (`odds_lambda.price_rows.FDUK_AGGREGATE_BOOKMAKERS`) are not written. OddsPortal live's per-outcome `betfair_matched` volume goes in `matched` on the rows of the entry carrying it (the Betfair Exchange entry). |
+| The Odds API `h2h_lay` | `lay` rows of the 1x2 snapshot, Draw included (of the h2h snapshot when it quotes no Draw) |
+| Betfair | from `betfair_meta.runners`: `back` (best back, with the back size), `lay` (best lay, with the lay size) and `traded` (last price traded); the runner name is matched after its pitcher annotation is stripped, and `The Draw` is the draw. `inplay`, `market_status` (lower-cased into `odds_core.vocabulary.MarketStatus`; an unknown status is logged and left NULL), `total_matched` and `market_start_time` go on the snapshot. |
+| Polymarket | from `polymarket_meta`, as decimal odds 1/p: the Yes midpoint as `mid`, the ask as `back` and the bid as `lay`. History snapshots carry only `mid`. |
+
+- **Outcomes** are matched once, here: a name equal to the event's home or away team after `odds_core.team.normalize_team_name`, `Draw` on 1x2, `Over` and `Under` on totals. Spreads and totals carry the outcome's `point` in `line`. An unmatched name is logged as `unmatched_outcome`; the payload keeps it for a re-parse.
+- **Bookmakers** are canonicalised through the source's alias map, `odds_core.bookmakers.BOOKMAKER_ALIASES_BY_SOURCE` (`odds_core.bookmakers.canonical_bookmaker`): every source takes `odds_core.bookmakers.BOOKMAKER_ALIASES`, and the Odds API also `odds_core.bookmakers.ODDS_API_KEY_ALIASES` (US BetMGM is `betmgm_us`) and `betfair_ex_eu`. When two entries of one envelope name one book in a market (`7bet` and `7betuk`), the first is kept and the second logged as `bookmaker_alias_collision`. A second quote for the same book, outcome, line and side is logged as `duplicate_price`.
+- **Invalid prices**, a decimal price not above 1.0 (or not a number) or a probability not strictly between 0 and 1, are not stored and are logged as `invalid_price`. An unknown market key is logged as `unknown_market`.
+
+### time_basis and payloads
+
+| Writer | `time_basis` | Payload |
+|---|---|---|
+| OddsPortal live (`odds_lambda.jobs.fetch_oddsportal.ingest_league`) | `observed` | the run's envelopes, one payload per league run |
+| Betfair (`odds_lambda.jobs.fetch_betfair_exchange.ingest_sport`) | `observed` | the run's envelopes, one payload per sport run |
+
+`odds_lambda.storage.shaped_snapshots.store_payload` adds the payload in the writer's transaction before its snapshots. A payload is the envelopes as the writer stored them, so `odds_lambda.price_rows.expand_envelope` re-reads it.
 
 ## Storing a snapshot under its key
 

@@ -52,8 +52,8 @@ Every table is a SQLModel class in `packages/odds-core/odds_core/`; migrations a
 - [Odds snapshot and odds tables](odds-tables.md) — The odds_snapshots and odds columns and indexes, how an odds row links to its snapshot, the raw_data format, the provenance tags, and same-time snapshot pairs.
 - [Odds validation](odds-validator.md) — OddsValidator checks, the data_quality_logs rows it produces, and DataQualityConfig.
 - [OddsReader](odds-reader.md) — Every OddsReader query, which read normalized rows and which re-parse raw_data, and the time-window semantics.
-- [OddsWriter](odds-writer.md) — store_odds_snapshot, event upserts, find_or_create_event, logging helpers, and their edge cases.
-- [Prices and snapshot payloads tables](price-tables.md) — The prices and snapshot_payloads tables, the closed sets their text columns take, and the policy store_snapshot applies when a snapshot's key is already stored.
+- [OddsWriter](odds-writer.md) — store_odds_snapshot (old and new snapshot shapes), event upserts, logging helpers, and their edge cases.
+- [Prices and snapshot payloads tables](price-tables.md) — The prices and snapshot_payloads tables, the closed sets their text columns take, how writers fill them from each source's envelope, and the policy store_snapshot applies when a snapshot's key is already stored.
 - [Storage layer](storage-layer.md) — The odds_lambda.storage module map, the commit and flush contract, and the upsert/insert/store verbs.
 
 ### Explanation

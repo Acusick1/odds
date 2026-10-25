@@ -11,7 +11,7 @@ import pytest
 from odds_core.config import get_settings
 from odds_core.mlb_data_models import MlbProbablePitchers
 from odds_core.models import Event, EventStatus, OddsSnapshot
-from odds_lambda import collection_calendar
+from odds_lambda import live_events
 from odds_lambda.betfair.client import BetfairBook, BetfairRunner
 from odds_lambda.betfair.constants import SPORT_CONFIG
 from odds_lambda.collection_calendar import (
@@ -23,17 +23,18 @@ from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.health_monitor import HealthMonitor
 from odds_lambda.jobs import fetch_betfair_exchange, fetch_oddsportal
 from odds_lambda.jobs.fetch_oddsportal import LEAGUE_SPEC_BY_NAME, LeagueScrape, ingest_league
-from odds_lambda.live_events import DroppedGame, SkipReason, alert_dropped_games
-from odds_lambda.mlb_game_resolver import GameRow, ResolutionRule, ResolvedGame
+from odds_lambda.live_events import DroppedGame, SkipReason, alert_dropped_games, live_event_id
+from odds_lambda.mlb_game_resolver import GameRow
 from odds_lambda.mlb_stats_fetcher import MlbGameResult, MlbGameState
 from odds_lambda.oddsportal_adapter import MatchOdds
 from odds_lambda.storage.event_merge import ConflictingGamePks, EventMerger
+from odds_lambda.storage.event_resolver import ListedGame, ResolvedEvent
 from odds_lambda.storage.writers import OddsWriter
 from odds_lambda.tier_utils import calculate_tier_from_timestamps
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.test_helpers import make_epl_event
+from tests.test_helpers import FakeBetfairClient, make_epl_event
 
 MLB = "baseball_mlb"
 YANKEES, RED_SOX = "New York Yankees", "Boston Red Sox"
@@ -71,10 +72,6 @@ def _game(
     )
 
 
-def _resolved(pk: int) -> ResolvedGame:
-    return ResolvedGame(pk, ResolutionRule.SINGLE_GAME)
-
-
 class FakeMlbStatsFetcher:
     """Stands in for MlbStatsFetcher: a scripted schedule, or an outage."""
 
@@ -102,25 +99,6 @@ def mlb_schedule(monkeypatch: pytest.MonkeyPatch) -> type[FakeMlbStatsFetcher]:
     monkeypatch.setattr(FakeMlbStatsFetcher, "requests", 0)
     monkeypatch.setattr("odds_lambda.live_events.MlbStatsFetcher", FakeMlbStatsFetcher)
     return FakeMlbStatsFetcher
-
-
-@pytest.fixture
-def job_session(
-    pglite_async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-) -> AsyncSession:
-    class _Maker:
-        def __call__(self) -> _Maker:
-            return self
-
-        async def __aenter__(self) -> AsyncSession:
-            return pglite_async_session
-
-        async def __aexit__(self, *args: object) -> bool:
-            return False
-
-    for module in (fetch_oddsportal, fetch_betfair_exchange, collection_calendar):
-        monkeypatch.setattr(module, "async_session_maker", _Maker())
-    return pglite_async_session
 
 
 def _op_match(home: str, away: str, start: datetime) -> MatchOdds:
@@ -181,21 +159,6 @@ def _book(
 
 
 LISTED = "Boston Red Sox (B Bello) @ New York Yankees (G Cole)"
-
-
-class FakeBetfairClient:
-    def __init__(self, books: list[BetfairBook]) -> None:
-        self.books = books
-        self.lookback_hours: int | None = None
-
-    def list_events(
-        self, sport_cfg: Any, lookahead_hours: int, lookback_hours: int = 0
-    ) -> list[str]:
-        self.lookback_hours = lookback_hours
-        return [book.betfair_event_id for book in self.books]
-
-    def list_match_odds_books(self, sport_cfg: Any, events: list[str]) -> list[BetfairBook]:
-        return self.books
 
 
 async def _mlb_events(session: AsyncSession) -> list[Event]:
@@ -343,110 +306,6 @@ class TestLiveMlbEventsCarryGamePk:
         assert event.mlb_game_pk is None
         assert stats.events_created == 1
         assert mlb_schedule.requests == 0
-
-
-class TestFindOrCreateGame:
-    async def test_mlb_event_without_a_game_pk_is_refused(
-        self, pglite_async_session: AsyncSession
-    ) -> None:
-        with pytest.raises(ValueError, match="needs its gamePk"):
-            await OddsWriter(pglite_async_session).find_or_create_event(
-                YANKEES, RED_SOX, EVENING, MLB, "MLB"
-            )
-
-    async def test_claims_an_event_with_no_game_pk_within_two_hours(
-        self, pglite_async_session: AsyncSession
-    ) -> None:
-        session = pglite_async_session
-        session.add(
-            Event(
-                id="bfe",
-                sport_key=MLB,
-                sport_title="MLB",
-                commence_time=EVENING,
-                home_team=YANKEES,
-                away_team=RED_SOX,
-            )
-        )
-        await session.flush()
-
-        event_id, created = await OddsWriter(session).find_or_create_event(
-            YANKEES,
-            RED_SOX,
-            EVENING + timedelta(minutes=30),
-            MLB,
-            "MLB",
-            mlb_game=_resolved(813001),
-        )
-
-        assert (event_id, created) == ("bfe", False)
-        assert (await session.get(Event, "bfe")).mlb_game_pk == 813001
-
-    async def test_never_takes_an_event_that_holds_another_game_pk(
-        self, pglite_async_session: AsyncSession
-    ) -> None:
-        session = pglite_async_session
-        writer = OddsWriter(session)
-        first_id, _ = await writer.find_or_create_event(
-            CUBS, CARDINALS, AFTERNOON, MLB, "MLB", mlb_game=_resolved(824101)
-        )
-        await session.flush()
-
-        second_id, created = await writer.find_or_create_event(
-            CUBS,
-            CARDINALS,
-            AFTERNOON + timedelta(minutes=90),
-            MLB,
-            "MLB",
-            mlb_game=_resolved(824102),
-        )
-
-        assert created is True
-        assert second_id != first_id
-
-    async def test_game_pk_taken_concurrently_lands_on_the_holder(
-        self, pglite_async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        session = pglite_async_session
-        session.add_all(
-            [
-                Event(
-                    id="holder",
-                    sport_key=MLB,
-                    sport_title="MLB",
-                    commence_time=EVENING + timedelta(hours=4),
-                    home_team=YANKEES,
-                    away_team=RED_SOX,
-                    mlb_game_pk=813001,
-                ),
-                Event(
-                    id="unassigned",
-                    sport_key=MLB,
-                    sport_title="MLB",
-                    commence_time=EVENING,
-                    home_team=YANKEES,
-                    away_team=RED_SOX,
-                ),
-            ]
-        )
-        await session.commit()
-        writer = OddsWriter(session)
-        lookup = writer._event_by_game_pk
-        calls: list[int] = []
-
-        # The first lookup runs before a concurrent run commits the holder.
-        async def lookup_after_first(game_pk: int) -> Event | None:
-            calls.append(game_pk)
-            return None if len(calls) == 1 else await lookup(game_pk)
-
-        monkeypatch.setattr(writer, "_event_by_game_pk", lookup_after_first)
-
-        event_id, created = await writer.find_or_create_event(
-            YANKEES, RED_SOX, EVENING, MLB, "MLB", mlb_game=_resolved(813001)
-        )
-
-        assert (event_id, created) == ("holder", False)
-        assert (await session.get(Event, "unassigned")).mlb_game_pk is None
 
 
 def _mlb_event(event_id: str, commence: datetime, game_pk: int | None, **fields: Any) -> Event:
@@ -625,7 +484,7 @@ class TestDoubleheaderClaims:
     async def test_tbd_game_two_listed_first_leaves_game_ones_event_to_game_one(
         self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
     ) -> None:
-        game_one_id = OddsWriter._build_event_id(CUBS, CARDINALS, AFTERNOON)
+        game_one_id = live_event_id(CUBS, CARDINALS, AFTERNOON)
         job_session.add(_null_event(game_one_id, AFTERNOON))
         await job_session.commit()
         placeholder = AFTERNOON + timedelta(minutes=6)
@@ -641,7 +500,7 @@ class TestDoubleheaderClaims:
 
         events = {e.mlb_game_pk: e.id for e in await _mlb_events(job_session)}
         assert events[901] == game_one_id
-        assert events[902] == OddsWriter._build_event_id(CUBS, CARDINALS, placeholder)
+        assert events[902] == live_event_id(CUBS, CARDINALS, placeholder)
         assert [event_id for event_id, _ in await _snapshots(job_session)] == [
             events[902],
             events[901],
@@ -654,10 +513,8 @@ class TestDoubleheaderClaims:
         game_two_listed = AFTERNOON + timedelta(hours=3, minutes=31)
         job_session.add_all(
             [
-                _null_event(OddsWriter._build_event_id(CUBS, CARDINALS, AFTERNOON), AFTERNOON),
-                _null_event(
-                    OddsWriter._build_event_id(CUBS, CARDINALS, game_two_listed), game_two_listed
-                ),
+                _null_event(live_event_id(CUBS, CARDINALS, AFTERNOON), AFTERNOON),
+                _null_event(live_event_id(CUBS, CARDINALS, game_two_listed), game_two_listed),
             ]
         )
         await job_session.commit()
@@ -676,7 +533,7 @@ class TestDoubleheaderClaims:
     async def test_id_taken_by_another_game_creates_the_event_under_a_suffixed_id(
         self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
     ) -> None:
-        taken_id = OddsWriter._build_event_id(CUBS, CARDINALS, AFTERNOON)
+        taken_id = live_event_id(CUBS, CARDINALS, AFTERNOON)
         job_session.add(_null_event(taken_id, AFTERNOON + timedelta(hours=5), mlb_game_pk=999))
         await job_session.commit()
         mlb_schedule.schedule = [_game(901, AFTERNOON, CUBS, CARDINALS)]
@@ -693,43 +550,28 @@ class TestDoubleheaderClaims:
         mlb_schedule: type[FakeMlbStatsFetcher],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        job_session.add_all(
-            [
-                _null_event(
-                    "holder", EVENING + timedelta(hours=4), YANKEES, RED_SOX, mlb_game_pk=813001
-                ),
-                _null_event("unassigned", EVENING, YANKEES, RED_SOX),
-            ]
-        )
-        await job_session.commit()
         mlb_schedule.schedule = [
             _game(824101, EVENING, CUBS, CARDINALS),
             _game(813001, EVENING, YANKEES, RED_SOX),
         ]
-        lookup = OddsWriter._event_by_game_pk
-        raced: set[int] = set()
+        resolve = live_events.resolve_event
 
-        # The first lookup of 813001 runs before a concurrent run commits its holder.
-        async def racy(self: OddsWriter, game_pk: int) -> Event | None:
-            if game_pk == 813001 and game_pk not in raced:
-                raced.add(game_pk)
-                return None
-            return await lookup(self, game_pk)
+        async def failing(session: AsyncSession, game: ListedGame) -> ResolvedEvent:
+            resolved = await resolve(session, game)
+            if game.home_team == YANKEES:
+                raise RuntimeError("resolver failed after writing")
+            return resolved
 
-        monkeypatch.setattr(OddsWriter, "_event_by_game_pk", racy)
+        monkeypatch.setattr(live_events, "resolve_event", failing)
 
         stats = await _ingest_op(
             _op_match(CUBS, CARDINALS, EVENING), _op_match(YANKEES, RED_SOX, EVENING)
         )
 
         job_session.expire_all()
-        event_ids = [event_id for event_id, _ in await _snapshots(job_session)]
-        assert len(event_ids) == 2
-        assert event_ids[1] == "holder"
-        [(_, holder_hours)] = [row for row in await _snapshots(job_session) if row[0] == "holder"]
-        expected = (EVENING - datetime.now(UTC)).total_seconds() / 3600
-        assert holder_hours == pytest.approx(expected, abs=0.1)
-        assert stats.errors == []
+        assert [e.mlb_game_pk for e in await _mlb_events(job_session)] == [824101]
+        assert len(await _snapshots(job_session)) == 1
+        assert len(stats.errors) == 1
 
 
 class TestRescheduledGame:

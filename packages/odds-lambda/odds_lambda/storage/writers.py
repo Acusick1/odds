@@ -2,34 +2,38 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import structlog
-from odds_core.event_ids import LIVE_EVENT_ID_PREFIX
-from odds_core.event_source import canonical_event_id
 from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
 from odds_core.odds_math import outcome_price_decimal
-from odds_core.team import normalize_team_name, team_abbrev
 from odds_core.time import ensure_utc, parse_api_datetime
-from odds_core.vocabulary import Source
-from sqlalchemy import and_, case, literal, or_, select
+from odds_core.vocabulary import Source, TimeBasis
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_lambda.mlb_game_resolver import MLB_SPORT_KEY, ResolvedGame
 from odds_lambda.storage.event_kickoff import move_kickoff
-from odds_lambda.storage.event_merge import find_match_candidates, find_match_id
+from odds_lambda.storage.shaped_snapshots import store_shaped_snapshot
 from odds_lambda.storage.validators import OddsValidator
 from odds_lambda.tier_utils import calculate_hours_until_commence, calculate_tier_from_timestamps
 
 logger = structlog.get_logger()
 
 
+@dataclass(frozen=True)
+class SnapshotShape:
+    """What a writer knows about a snapshot beyond its envelope: its provider, what its time
+    means, and the archived fetch response it came in."""
+
+    source: Source
+    time_basis: TimeBasis
+    payload_id: int | None
+
+
 class OddsWriter:
     """Handles all write operations to the database."""
-
-    LIVE_EVENT_STALE_THRESHOLD = timedelta(hours=1)
 
     def __init__(self, session: AsyncSession):
         """
@@ -41,246 +45,34 @@ class OddsWriter:
         self.session = session
         self.validator = OddsValidator()
 
-    async def upsert_event(self, event: Event) -> Event:
+    async def upsert_event(self, event: Event, now: datetime | None = None) -> Event:
+        """Insert an Odds API event, or update the stored one's sport and teams.
+
+        The stored ``commence_time`` moves only through ``move_kickoff`` on the Odds API's
+        authority, and only to a start after ``now`` (defaults to the current time): a start
+        already past is an in-play or historical time, not a schedule.
         """
-        Insert or update an event.
-
-        Args:
-            event: Event instance to upsert
-
-        Returns:
-            Created or updated Event instance
-
-        Example:
-            event = Event(
-                id="abc123",
-                sport_key="basketball_nba",
-                sport_title="NBA",
-                commence_time=datetime(2024, 10, 20),
-                home_team="Lakers",
-                away_team="Celtics"
-            )
-            result = await writer.upsert_event(event)
-        """
-        # Check if event exists
         result = await self.session.execute(select(Event).where(Event.id == event.id))
         existing_event = result.scalar_one_or_none()
 
         if existing_event:
-            # Update existing event with new data
             existing_event.sport_key = event.sport_key
             existing_event.sport_title = event.sport_title
             existing_event.home_team = event.home_team
             existing_event.away_team = event.away_team
-            existing_event.commence_time = event.commence_time
             existing_event.updated_at = datetime.now(UTC)
+            await self._offer_kickoff(existing_event, event.commence_time, now or datetime.now(UTC))
 
             logger.info("event_updated", event_id=event.id)
             return existing_event
         else:
-            # Create new event
             self.session.add(event)
             logger.info("event_created", event_id=event.id)
             return event
 
-    @staticmethod
-    def _build_event_id(home_team: str, away_team: str, match_date: datetime) -> str:
-        """Generate deterministic event ID for OddsPortal-sourced events.
-
-        Includes the match start time down to the minute so same-day
-        doubleheaders produce distinct ids. The ±2h match window in
-        find_or_create_event handles minor jitter across re-scrapes.
-        """
-        home_abbrev = team_abbrev(home_team)
-        away_abbrev = team_abbrev(away_team)
-        date_str = match_date.strftime("%Y-%m-%dT%H%M")
-        return f"{LIVE_EVENT_ID_PREFIX}{home_abbrev}_{away_abbrev}_{date_str}"
-
-    async def find_unscheduled_mlb_event(
-        self, home_team: str, away_team: str, match_date: datetime, game_number: int | None
-    ) -> str | None:
-        """The MLB event of a listed game while the MLB schedule is unavailable: the one event of
-        the pair within ±2 h. A doubleheader game (``game_number`` set) or a window holding
-        several events matches nothing, since without the schedule it could be another game."""
-        if game_number is not None:
-            return None
-        candidates = await find_match_candidates(
-            self.session,
-            normalize_team_name(home_team),
-            normalize_team_name(away_team),
-            match_date,
-            MLB_SPORT_KEY,
-        )
-        return candidates[0].id if len(candidates) == 1 else None
-
-    async def find_or_create_event(
-        self,
-        home_team: str,
-        away_team: str,
-        match_date: datetime,
-        sport_key: str,
-        sport_title: str,
-        *,
-        mlb_game: ResolvedGame | None = None,
-    ) -> tuple[str, bool]:
-        """Find the event for a listed game or create it.
-
-        An MLB game must come resolved (``mlb_game``): see ``_find_or_create_game``. Other
-        sports match on teams within ±2 h.
-
-        Returns:
-            (event_id, was_created)
-        """
-        home_team = normalize_team_name(home_team)
-        away_team = normalize_team_name(away_team)
-        if sport_key == MLB_SPORT_KEY:
-            if mlb_game is None:
-                raise ValueError(f"an MLB event needs its gamePk: {home_team} v {away_team}")
-            return await self._find_or_create_game(
-                home_team, away_team, match_date, sport_title, mlb_game
-            )
-
-        existing_id = await find_match_id(self.session, home_team, away_team, match_date, sport_key)
-        if existing_id is not None:
-            return existing_id, False
-        event_id = self._build_event_id(home_team, away_team, match_date)
-        if await self.session.get(Event, event_id) is not None:
-            return event_id, False
-        self._add_event(event_id, home_team, away_team, match_date, sport_key, sport_title)
-        return event_id, True
-
-    async def _event_by_game_pk(self, game_pk: int) -> Event | None:
-        result = await self.session.execute(select(Event).where(Event.mlb_game_pk == game_pk))
-        return result.scalar_one_or_none()
-
-    async def _find_or_create_game(
-        self,
-        home_team: str,
-        away_team: str,
-        match_date: datetime,
-        sport_title: str,
-        game: ResolvedGame,
-    ) -> tuple[str, bool]:
-        """The event holding the game's ``gamePk``; else a claimable event, which takes it; else a
-        new event created with it. The event's ``commence_time`` follows the game's scheduled
-        start when the schedule has one."""
-        anchor = game.start or match_date
-        held = await self._event_by_game_pk(game.game_pk)
-        if held is not None:
-            await move_kickoff(
-                self.session, held, Source.MLB_STATS_API, game.start, now=datetime.now(UTC)
-            )
-            return held.id, False
-
-        claimable = await self._claimable_event(home_team, away_team, anchor, game)
-        # Read before the savepoint: a rollback expires the claimed event's attributes.
-        claimable_id = claimable.id if claimable is not None else None
-        # A concurrent run may take the gamePk first; the savepoint keeps its unique-index
-        # violation from aborting the rest of this run's batch.
-        try:
-            async with self.session.begin_nested():
-                if claimable is not None:
-                    claimable.assign_game_pk(game.game_pk)
-                    await move_kickoff(
-                        self.session,
-                        claimable,
-                        Source.MLB_STATS_API,
-                        game.start,
-                        now=datetime.now(UTC),
-                    )
-                    outcome = (claimable.id, False)
-                else:
-                    outcome = (
-                        await self._create_game_event(
-                            home_team, away_team, anchor, sport_title, game.game_pk
-                        ),
-                        True,
-                    )
-        except IntegrityError:
-            held = await self._event_by_game_pk(game.game_pk)
-            if held is None:
-                raise
-            logger.warning(
-                "mlb_game_pk_duplicate",
-                game_pk=game.game_pk,
-                event_id=held.id,
-                duplicate_id=claimable_id,
-            )
-            await move_kickoff(
-                self.session, held, Source.MLB_STATS_API, game.start, now=datetime.now(UTC)
-            )
-            return held.id, False
-        return outcome
-
-    async def _claimable_event(
-        self, home_team: str, away_team: str, anchor: datetime, game: ResolvedGame
-    ) -> Event | None:
-        """The nearest same-pair event within ±2 h of ``anchor``, when it holds no ``gamePk`` and
-        no other game of the pair that day is scheduled nearer to it."""
-        candidates = await find_match_candidates(
-            self.session, home_team, away_team, anchor, MLB_SPORT_KEY
-        )
-        if not candidates:
-            return None
-
-        def gap(event: Event, start: datetime) -> timedelta:
-            return abs(ensure_utc(event.commence_time) - ensure_utc(start))
-
-        nearest_gap = min(gap(e, anchor) for e in candidates)
-        nearest_ids = [e.id for e in candidates if gap(e, anchor) == nearest_gap]
-        nearest = next(e for e in candidates if e.id == canonical_event_id(nearest_ids))
-        if nearest.mlb_game_pk is not None:
-            return None
-        if any(gap(nearest, start) < nearest_gap for start in game.sibling_starts):
-            return None
-        return nearest
-
-    async def _create_game_event(
-        self, home_team: str, away_team: str, start: datetime, sport_title: str, game_pk: int
-    ) -> str:
-        event_id = self._build_event_id(home_team, away_team, start)
-        taken = await self.session.get(Event, event_id)
-        if taken is not None:
-            logger.warning(
-                "mlb_event_id_collision",
-                event_id=event_id,
-                held_game_pk=taken.mlb_game_pk,
-                game_pk=game_pk,
-            )
-            event_id = f"{event_id}_{game_pk}"
-        self._add_event(event_id, home_team, away_team, start, MLB_SPORT_KEY, sport_title, game_pk)
-        return event_id
-
-    def _add_event(
-        self,
-        event_id: str,
-        home_team: str,
-        away_team: str,
-        match_date: datetime,
-        sport_key: str,
-        sport_title: str,
-        mlb_game_pk: int | None = None,
-    ) -> None:
-        if event_id.startswith(LIVE_EVENT_ID_PREFIX):
-            stale_cutoff = datetime.now(UTC) - self.LIVE_EVENT_STALE_THRESHOLD
-            if ensure_utc(match_date) < stale_cutoff:
-                raise ValueError(
-                    "Refusing to create stale live-scrape event: "
-                    f"home={home_team} away={away_team} "
-                    f"match_date={match_date.isoformat()}"
-                )
-        self.session.add(
-            Event(
-                id=event_id,
-                sport_key=sport_key,
-                sport_title=sport_title,
-                commence_time=match_date,
-                home_team=home_team,
-                away_team=away_team,
-                status=EventStatus.SCHEDULED,
-                mlb_game_pk=mlb_game_pk,
-            )
-        )
+    async def _offer_kickoff(self, event: Event, start: datetime, now: datetime) -> None:
+        if ensure_utc(start) > ensure_utc(now):
+            await move_kickoff(self.session, event, Source.ODDS_API, start, now=now)
 
     async def store_odds_snapshot(
         self,
@@ -288,27 +80,31 @@ class OddsWriter:
         raw_data: dict,
         snapshot_time: datetime | None = None,
         validate: bool = True,
+        *,
+        shape: SnapshotShape | None = None,
+        api_request_id: str | None = None,
     ) -> tuple[OddsSnapshot, list[Odds]]:
-        """
-        Store odds snapshot with hybrid storage approach.
+        """Store an envelope as a snapshot with its ``odds`` rows.
+
+        With ``shape``, the snapshot also takes its new-shape columns and price rows, and the
+        envelope's other markets become their own snapshots
+        (``odds_lambda.storage.shaped_snapshots.store_shaped_snapshot``). A snapshot whose key
+        (event, source, market, time) is already stored is not written again, and neither are
+        its ``odds`` rows; the stored snapshot is returned.
 
         Args:
             event_id: Event identifier
-            raw_data: Complete API response for the event
+            raw_data: The envelope: what the source returned for the event, as stored
             snapshot_time: Time of snapshot (defaults to now)
             validate: Whether to run validation checks
+            shape: The source, time basis and payload of the snapshot
+            api_request_id: The fetch's request id
 
         Returns:
             Tuple of (OddsSnapshot, list of normalized Odds records)
-
-        Storage:
-            - Raw JSONB snapshot for debugging
-            - Normalized odds records for querying
-            - Fetch tier and hours_until_commence for validation and ML features
         """
         snapshot_time = ensure_utc(snapshot_time or datetime.now(UTC))
 
-        # Get event to calculate tier
         result = await self.session.execute(select(Event).where(Event.id == event_id))
         event = result.scalar_one_or_none()
 
@@ -334,23 +130,39 @@ class OddsWriter:
                 )
                 await self.log_data_quality_issue(quality_log)
 
-        # Store raw snapshot
         bookmakers = raw_data.get("bookmakers", [])
-        if isinstance(raw_data, list):
-            # Find specific event in list
-            event_data = next((e for e in raw_data if e.get("id") == event_id), {})
-            bookmakers = event_data.get("bookmakers", [])
-
         snapshot = OddsSnapshot(
             event_id=event_id,
             snapshot_time=snapshot_time,
             raw_data=raw_data,
             bookmaker_count=len(bookmakers),
+            api_request_id=api_request_id,
             fetch_tier=tier_value,
             hours_until_commence=hours_until,
         )
-        self.session.add(snapshot)
-        await self.session.flush()
+        if shape is None:
+            self.session.add(snapshot)
+            await self.session.flush()
+        else:
+            if event is None:
+                raise ValueError(f"event {event_id} is not stored")
+            written = await store_shaped_snapshot(
+                self.session,
+                snapshot,
+                event,
+                source=shape.source,
+                time_basis=shape.time_basis,
+                payload_id=shape.payload_id,
+            )
+            if not written.inserted:
+                logger.info(
+                    "odds_snapshot_already_stored",
+                    event_id=event_id,
+                    snapshot_id=written.snapshot.id,
+                    outcome=written.envelope.outcome if written.envelope else None,
+                )
+                return written.snapshot, []
+            snapshot = written.snapshot
         assert snapshot.id is not None
 
         # Parse and store normalized odds
@@ -568,10 +380,11 @@ class OddsWriter:
         Note:
             Uses PostgreSQL INSERT ... ON CONFLICT DO UPDATE pattern.
             Preserves created_at timestamps on updates, updates updated_at field.
-            Status, scores and completed_at are never overwritten, because the incoming
-            events are discovery records (scheduled, no scores). The exceptions
-            are a POSTPONED event whose kick-off moved and a LIVE event whose incoming
-            kick-off is after ``now``, which return to SCHEDULED.
+            Status, scores, completed_at and commence_time are never overwritten, because the
+            incoming events are discovery records (scheduled, no scores). A stored event's
+            kick-off moves through ``move_kickoff`` on the Odds API's authority, only to an
+            incoming start after ``now``; a POSTPONED or LIVE event that moves to a start after
+            ``now`` becomes SCHEDULED.
 
         Example:
             events = [
@@ -613,6 +426,7 @@ class OddsWriter:
         kept_columns = {
             "created_at",
             "surrogate_id",
+            "commence_time",
             "mlb_game_pk",
             "no_game_pk_reason",
             *result_columns,
@@ -622,21 +436,6 @@ class OddsWriter:
             for col in events_table.columns
             if not col.primary_key and col.name not in kept_columns
         }
-        now = now or datetime.now(UTC)
-        rescheduled = or_(
-            and_(
-                events_table.c.status == EventStatus.POSTPONED,
-                events_table.c.commence_time != stmt.excluded.commence_time,
-            ),
-            and_(
-                events_table.c.status == EventStatus.LIVE,
-                stmt.excluded.commence_time > now,
-            ),
-        )
-        set_["status"] = case(
-            (rescheduled, literal(EventStatus.SCHEDULED, events_table.c.status.type)),
-            else_=events_table.c.status,
-        )
         # Override updated_at to current time (SQLAlchemy doesn't auto-apply Python defaults)
         set_["updated_at"] = datetime.now(UTC)
 
@@ -646,6 +445,19 @@ class OddsWriter:
         )
 
         await self.session.execute(stmt)
+
+        now = now or datetime.now(UTC)
+        if existing_ids:
+            stored = await self.session.execute(
+                select(Event)
+                .where(Event.id.in_(existing_ids))  # type: ignore[attr-defined]
+                .execution_options(populate_existing=True)
+            )
+            stored_by_id = {e.id: e for e in stored.scalars()}
+            for event in events:
+                held = stored_by_id.get(event.id)
+                if held is not None:
+                    await self._offer_kickoff(held, event.commence_time, now)
 
         logger.info(
             "bulk_events_upserted",

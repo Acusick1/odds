@@ -31,7 +31,7 @@ Odds are stored twice ([How odds are stored](odds-storage-model.md)). `odds_core
 - `api_request_id`: free-text provenance tag, see [Provenance](#provenance).
 - Indexes: single-column `event_id`, `snapshot_time`, `fetch_tier`, `payload_id`; composite `ix_event_snapshot_time (event_id, snapshot_time)` and `ix_event_tier (event_id, fetch_tier)`.
 
-The columns of the redesigned snapshot are nullable, and no writer fills them, so every stored snapshot holds NULL in them:
+The columns of the redesigned snapshot are nullable. Snapshots the OddsPortal live and Betfair jobs store have them filled ([Writing the new shape](price-tables.md#writing-the-new-shape)); every other snapshot holds NULL in them:
 
 - `source` (`odds_core.vocabulary.PRICE_SOURCES`), `market` (`odds_core.vocabulary.Market`) and `time_basis` (`odds_core.vocabulary.TimeBasis`), each a CHECKed closed set ([closed sets](price-tables.md#closed-sets)).
 - Market metadata: `in_play`, `market_status` (`odds_core.vocabulary.MarketStatus`, a closed set), `total_matched` and `market_start_time`.
@@ -64,9 +64,9 @@ Training's `data_source` filter matches event-ID prefixes (`op_`, `fduk_`; `odds
 - `odds_timestamp`: the snapshot time the row was valid for. `last_update`: the bookmaker's own timestamp, defaulting to the snapshot time. `created_at`.
 - `is_valid` (default true) and `validation_notes` (nullable): `is_valid` is always true and `validation_notes` always null, because the writer sets the defaults (#448).
 - Indexes: single-column `event_id`, `snapshot_id`, `bookmaker_key`, `market_key`, `odds_timestamp`; composite `ix_event_bookmaker_market (event_id, bookmaker_key, market_key)` for lookups and line movement, and `ix_bookmaker_time (bookmaker_key, odds_timestamp)` for per-bookmaker analysis.
-- `odds` has no unique constraint beyond `id`, so storing a snapshot twice duplicates its rows (#448).
+- `odds` has no unique constraint beyond `id`, so storing a snapshot twice duplicates its rows (#448). A writer passing a snapshot shape stores no odds rows for a snapshot whose key is already stored ([OddsWriter](odds-writer.md#store_odds_snapshot)).
 
-Written by `odds_lambda.storage.writers.OddsWriter._parse_and_store_odds` and copied by `odds_lambda.copy_from_production.ProductionDataCopier`; read for prices by exactly three `odds_lambda.storage.readers.OddsReader` methods: `odds_lambda.storage.readers.OddsReader.get_odds_at_time`, `odds_lambda.storage.readers.OddsReader.get_line_movement` and `odds_lambda.storage.readers.OddsReader.get_best_odds` ([OddsReader](odds-reader.md)).
+Written by `odds_lambda.storage.writers.OddsWriter._parse_and_store_odds` and copied, with the snapshots and their price rows, by `odds_lambda.copy_from_production.ProductionDataCopier`; read for prices by exactly three `odds_lambda.storage.readers.OddsReader` methods: `odds_lambda.storage.readers.OddsReader.get_odds_at_time`, `odds_lambda.storage.readers.OddsReader.get_line_movement` and `odds_lambda.storage.readers.OddsReader.get_best_odds` ([OddsReader](odds-reader.md)).
 
 ## Snapshot link
 

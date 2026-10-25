@@ -30,6 +30,7 @@ import structlog
 from odds_core.candidates import candidates_dir, load_candidates
 from odds_core.database import async_session_maker
 from odds_core.snapshot_sources import SnapshotSource
+from odds_core.vocabulary import Source, TimeBasis
 
 from odds_lambda.candidate_rules import decision_leads
 from odds_lambda.collection_calendar import (
@@ -43,6 +44,7 @@ from odds_lambda.live_events import (
     SkipReason,
     alert_dropped_games,
     count_dropped,
+    lock_order,
 )
 from odds_lambda.mlb_game_resolver import GameRow
 from odds_lambda.oddsportal_adapter import MatchOdds, convert_market
@@ -50,7 +52,9 @@ from odds_lambda.oddsportal_client import OddsPortalClient, OddsPortalError
 from odds_lambda.scheduling.decision import CadenceConfig, Lead, ScheduleDecision
 from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
-from odds_lambda.storage.writers import OddsWriter
+from odds_lambda.storage.event_resolver import Resolution
+from odds_lambda.storage.shaped_snapshots import store_payload
+from odds_lambda.storage.writers import OddsWriter, SnapshotShape
 
 logger = structlog.get_logger()
 
@@ -263,28 +267,35 @@ async def ingest_league(
 
     async with async_session_maker() as session:
         writer = OddsWriter(session)
+        payload_id = await store_payload(session, [m.raw_data for m in all_converted])
 
-        for match in all_converted:
+        # One transaction resolves every game, so fixture locks are taken in key order.
+        for match in sorted(all_converted, key=lambda m: lock_order(spec.sport_key, _game_row(m))):
             try:
-                found = await finder.find_or_create(writer, _game_row(match))
-                if isinstance(found, DroppedGame):
-                    dropped[found.game] = found
-                    continue
-                event_id, created = found
+                async with session.begin_nested():
+                    found = await finder.resolve(
+                        session,
+                        _game_row(match),
+                        Source.ODDSPORTAL,
+                        match.raw_data.get("oddsportal_event_id"),
+                    )
+                    if isinstance(found, DroppedGame):
+                        dropped[found.game] = found
+                        continue
 
-                if created:
-                    stats.events_created += 1
-                else:
-                    stats.events_matched += 1
+                    if found.resolution is Resolution.CREATED:
+                        stats.events_created += 1
+                    else:
+                        stats.events_matched += 1
 
-                snapshot, _ = await writer.store_odds_snapshot(
-                    event_id=event_id,
-                    raw_data=match.raw_data,
-                    snapshot_time=match.scraped_date,
-                )
-
-                snapshot.api_request_id = api_request_id
-                stats.snapshots_stored += 1
+                    await writer.store_odds_snapshot(
+                        event_id=found.event.id,
+                        raw_data=match.raw_data,
+                        snapshot_time=match.scraped_date,
+                        shape=SnapshotShape(Source.ODDSPORTAL, TimeBasis.OBSERVED, payload_id),
+                        api_request_id=api_request_id,
+                    )
+                    stats.snapshots_stored += 1
 
             except Exception as e:
                 msg = f"{match.home_team} vs {match.away_team} ({match.market}): {e}"

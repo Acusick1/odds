@@ -4,7 +4,8 @@ import time
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from odds_core.models import Event, EventStatus
+from odds_core.models import Event, EventExternalId, EventStatus
+from odds_core.vocabulary import Source
 from odds_lambda.storage.writers import OddsWriter
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -456,19 +457,62 @@ class TestBulkUpsertKeepsResults:
         )
         assert live.status == EventStatus.LIVE
 
-    async def test_rediscovery_still_updates_kickoff(self, test_session: AsyncSession) -> None:
+    async def test_rediscovery_moves_a_future_kickoff(self, test_session: AsyncSession) -> None:
         kickoff = datetime(2026, 8, 22, 14, 0, tzinfo=UTC)
         test_session.add(_discovered("evt", kickoff))
         await test_session.commit()
 
         moved = kickoff + timedelta(days=1)
-        await OddsWriter(test_session).bulk_upsert_events([_discovered("evt", moved)])
+        await OddsWriter(test_session).bulk_upsert_events(
+            [_discovered("evt", moved)], now=kickoff - timedelta(days=2)
+        )
         await test_session.commit()
 
         test_session.expire_all()
         event = await test_session.get(Event, "evt")
         assert event is not None
         assert event.commence_time == moved
+
+    async def test_a_past_kickoff_never_moves_the_event(self, test_session: AsyncSession) -> None:
+        kickoff = datetime(2026, 8, 22, 14, 0, tzinfo=UTC)
+        test_session.add(_discovered("evt", kickoff))
+        await test_session.commit()
+
+        await OddsWriter(test_session).bulk_upsert_events(
+            [_discovered("evt", kickoff + timedelta(minutes=7))],
+            now=kickoff + timedelta(minutes=30),
+        )
+        await test_session.commit()
+
+        test_session.expire_all()
+        event = await test_session.get(Event, "evt")
+        assert event is not None
+        assert event.commence_time == kickoff
+
+    async def test_an_event_oddsportal_lists_keeps_its_kickoff(
+        self, test_session: AsyncSession
+    ) -> None:
+        kickoff = datetime(2026, 8, 22, 14, 0, tzinfo=UTC)
+        stored = _discovered("evt", kickoff)
+        test_session.add(stored)
+        await test_session.flush()
+        assert stored.surrogate_id is not None
+        test_session.add(
+            EventExternalId(
+                source=Source.ODDSPORTAL, external_id="Kl1AOZN9", event_id=stored.surrogate_id
+            )
+        )
+        await test_session.commit()
+
+        await OddsWriter(test_session).bulk_upsert_events(
+            [_discovered("evt", kickoff + timedelta(hours=1))], now=kickoff - timedelta(days=1)
+        )
+        await test_session.commit()
+
+        test_session.expire_all()
+        event = await test_session.get(Event, "evt")
+        assert event is not None
+        assert event.commence_time == kickoff
 
     async def test_postponed_event_with_a_new_kickoff_is_scheduled_again(
         self, test_session: AsyncSession
@@ -479,7 +523,8 @@ class TestBulkUpsertKeepsResults:
         await test_session.commit()
 
         await OddsWriter(test_session).bulk_upsert_events(
-            [_discovered("moved", kickoff + timedelta(days=7)), _discovered("same", kickoff)]
+            [_discovered("moved", kickoff + timedelta(days=7)), _discovered("same", kickoff)],
+            now=kickoff + timedelta(hours=1),
         )
         await test_session.commit()
 

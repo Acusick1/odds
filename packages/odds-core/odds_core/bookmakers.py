@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Any
 
 from odds_core.snapshot_sources import SnapshotKind
+from odds_core.vocabulary import PRICE_SOURCES, Source
 
 EXCHANGE_BOOKMAKERS: frozenset[str] = frozenset(
     {"betfair_exchange", "betdaq", "smarkets", "matchbook"}
@@ -63,6 +66,25 @@ def canonical_bookmaker_key(key: str, kind: SnapshotKind) -> str:
     if kind is SnapshotKind.ODDS_API and key in ODDS_API_KEY_ALIASES:
         return ODDS_API_KEY_ALIASES[key]
     return BOOKMAKER_ALIASES.get(key, key)
+
+
+# Per source, every key a source names a book by mapped to the book's canonical key; price rows
+# store only canonical keys. The Odds API names Betfair's exchange by region.
+BOOKMAKER_ALIASES_BY_SOURCE: Mapping[Source, Mapping[str, str]] = MappingProxyType(
+    {
+        source: MappingProxyType(
+            {**BOOKMAKER_ALIASES, **ODDS_API_KEY_ALIASES, "betfair_ex_eu": "betfair_exchange"}
+            if source is Source.ODDS_API
+            else dict(BOOKMAKER_ALIASES)
+        )
+        for source in PRICE_SOURCES
+    }
+)
+
+
+def canonical_bookmaker(source: Source, key: str) -> str:
+    """The canonical key of the book ``source`` names ``key``."""
+    return BOOKMAKER_ALIASES_BY_SOURCE[source].get(key, key)
 
 
 def is_reference_only_snapshot(raw_data: dict[str, Any] | None) -> bool:

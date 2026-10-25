@@ -24,6 +24,7 @@ from odds_core.database import async_session_maker
 from odds_core.models import FetchLog
 from odds_core.snapshot_sources import SnapshotSource
 from odds_core.sports import SportKey
+from odds_core.vocabulary import Source, TimeBasis
 
 from odds_lambda.betfair import (
     SPORT_CONFIG,
@@ -49,6 +50,7 @@ from odds_lambda.live_events import (
     SkipReason,
     alert_dropped_games,
     count_dropped,
+    lock_order,
 )
 from odds_lambda.mlb_game_resolver import GameRow
 from odds_lambda.scheduling.decision import (
@@ -59,7 +61,9 @@ from odds_lambda.scheduling.decision import (
 )
 from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
-from odds_lambda.storage.writers import OddsWriter
+from odds_lambda.storage.event_resolver import Resolution
+from odds_lambda.storage.shaped_snapshots import store_payload
+from odds_lambda.storage.writers import OddsWriter, SnapshotShape
 
 logger = structlog.get_logger()
 
@@ -148,6 +152,14 @@ def _account_for(
     )
 
 
+def _envelope(book: BetfairBook, entry: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "bookmakers": [entry],
+        "source": SnapshotSource.BETFAIR_API.value,
+        "betfair_event_id": book.betfair_event_id,
+    }
+
+
 async def ingest_sport(
     sport_cfg: SportBetfairConfig,
     *,
@@ -229,30 +241,35 @@ async def ingest_sport(
     async with async_session_maker() as session:
         writer = OddsWriter(session)
 
-        for book, game, entry in priced:
+        envelopes = [(book, game, _envelope(book, entry)) for book, game, entry in priced]
+        payload_id = (
+            await store_payload(session, [raw for _, _, raw in envelopes]) if envelopes else None
+        )
+        # One transaction resolves every game, so fixture locks are taken in key order.
+        for book, game, raw_data in sorted(
+            envelopes, key=lambda item: lock_order(sport_cfg.sport_key, item[1])
+        ):
             try:
-                found = await finder.find_or_create(writer, game)
-                if isinstance(found, DroppedGame):
-                    stats.dropped_games.append(found)
-                    continue
-                event_id, created = found
-                if created:
-                    stats.events_created += 1
-                else:
-                    stats.events_matched += 1
+                async with session.begin_nested():
+                    found = await finder.resolve(
+                        session, game, Source.BETFAIR, book.betfair_event_id, now=snapshot_time
+                    )
+                    if isinstance(found, DroppedGame):
+                        stats.dropped_games.append(found)
+                        continue
+                    if found.resolution is Resolution.CREATED:
+                        stats.events_created += 1
+                    else:
+                        stats.events_matched += 1
 
-                raw_data = {
-                    "bookmakers": [entry],
-                    "source": "betfair_api",
-                    "betfair_event_id": book.betfair_event_id,
-                }
-                snapshot, _ = await writer.store_odds_snapshot(
-                    event_id=event_id,
-                    raw_data=raw_data,
-                    snapshot_time=snapshot_time,
-                )
-                snapshot.api_request_id = f"{LIVE_REQUEST_ID_PREFIX}{snapshot_time.isoformat()}"
-                stats.snapshots_stored += 1
+                    await writer.store_odds_snapshot(
+                        event_id=found.event.id,
+                        raw_data=raw_data,
+                        snapshot_time=snapshot_time,
+                        shape=SnapshotShape(Source.BETFAIR, TimeBasis.OBSERVED, payload_id),
+                        api_request_id=f"{LIVE_REQUEST_ID_PREFIX}{snapshot_time.isoformat()}",
+                    )
+                    stats.snapshots_stored += 1
 
             except Exception as e:
                 msg = f"{book.betfair_event_name}: {type(e).__name__}: {e}"

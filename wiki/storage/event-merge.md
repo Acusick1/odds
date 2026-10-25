@@ -38,7 +38,7 @@ Events holding different MLB `gamePk`s (`events.mlb_game_pk`, [Event matching](e
 
 ## Finding and merging are separate
 
-The finders only read. `odds_lambda.storage.event_merge.find_match_id` (±2 h, used by `odds_lambda.storage.writers.OddsWriter.find_or_create_event`) returns the canonical candidate; `odds_lambda.storage.event_merge.find_match_candidates` returns every candidate, for the MLB claim rules ([live MLB events](event-matching.md#live-mlb-events)). `odds_lambda.storage.event_merge.find_historical_match_id` (±24 h, same sport, used by `odds_lambda.oddsportal_common.find_existing_event`) returns a lone candidate, or among several only the canonical one of those within ±2 h, else `None`. So neighbouring fixtures of the same teams (an NBA back-to-back) are never conflated, and a loader that gets `None` creates its own event. No finder merges or deletes.
+The finders only read. `odds_lambda.storage.event_merge.find_match_id` (±2 h, used by `odds_lambda.live_events.LiveEventFinder.fixture_key`) returns the canonical candidate; `odds_lambda.storage.event_merge.find_match_candidates` returns every candidate, for the [event resolver](event-resolver.md#steps) and the MLB claim rules ([live MLB events](event-matching.md#live-mlb-events)). `odds_lambda.storage.event_merge.find_historical_match_id` (±24 h, same sport, used by `odds_lambda.oddsportal_common.find_existing_event`) returns a lone candidate, or among several only the canonical one of those within ±2 h, else `None`. So neighbouring fixtures of the same teams (an NBA back-to-back) are never conflated, and a loader that gets `None` creates its own event. No finder merges or deletes.
 
 Merging happens in four places only:
 

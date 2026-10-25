@@ -1,20 +1,24 @@
-"""Find or create the event of each game a live collection run lists (#612).
+"""Resolve each game a live collection run lists to its event (#612).
 
 MLB games are resolved to their MLB Stats API ``gamePk`` once per run, so an MLB event is
-found by, or created with, its ``gamePk``. Other sports match on teams within ±2 h.
+found by, or created with, its ``gamePk``. Every game then goes through the event resolver
+(``odds_lambda.storage.event_resolver.resolve_event``).
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
 import structlog
 from odds_core.alerts import send_recorded_alert
 from odds_core.config import get_settings
-from odds_core.team import normalize_team_name
+from odds_core.event_ids import LIVE_EVENT_ID_PREFIX
+from odds_core.models import Event
+from odds_core.team import normalize_team_name, team_abbrev
+from odds_core.vocabulary import Source
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.collection_calendar import EventKey, FixtureKey, MlbGameKey
@@ -29,12 +33,38 @@ from odds_lambda.mlb_game_resolver import (
     resolve_batch,
 )
 from odds_lambda.mlb_stats_fetcher import MlbStatsFetcher
-from odds_lambda.storage.event_merge import find_match_id
-from odds_lambda.storage.writers import OddsWriter
+from odds_lambda.storage.event_merge import find_match_candidates, find_match_id
+from odds_lambda.storage.event_resolver import (
+    ListedGame,
+    Resolution,
+    ResolvedEvent,
+    event_lock_key,
+    resolve_event,
+)
 
 logger = structlog.get_logger()
 
 DROPPED_GAMES_SHOWN = 10
+# A live listing this far past its start matches an event but creates none.
+LIVE_EVENT_STALE_THRESHOLD = timedelta(hours=1)
+
+
+def live_event_id(home_team: str, away_team: str, start: datetime) -> str:
+    """The string id an event a live listing creates takes, while ``events.id`` is a string.
+
+    It carries the start to the minute, so a doubleheader's games get distinct ids.
+    """
+    return (
+        f"{LIVE_EVENT_ID_PREFIX}{team_abbrev(home_team)}_{team_abbrev(away_team)}_"
+        f"{start:%Y-%m-%dT%H%M}"
+    )
+
+
+def lock_order(sport_key: str, game: GameRow) -> int:
+    """Sort key that resolves a run's games in fixture-lock order within one transaction."""
+    return event_lock_key(
+        sport_key, normalize_team_name(game.home_team), normalize_team_name(game.away_team)
+    )
 
 
 class SkipReason(StrEnum):
@@ -115,36 +145,72 @@ class LiveEventFinder:
         )
         return EventKey(event_id) if event_id is not None else None
 
-    async def find_or_create(
-        self, writer: OddsWriter, game: GameRow
-    ) -> tuple[str, bool] | DroppedGame:
-        """``(event_id, was_created)``, or the game dropped from this run.
+    async def resolve(
+        self,
+        session: AsyncSession,
+        game: GameRow,
+        source: Source,
+        external_id: str | None,
+        *,
+        now: datetime | None = None,
+    ) -> ResolvedEvent | DroppedGame:
+        """The game's event, recording ``source``'s id for it, or the game dropped from this run.
 
         Without the MLB schedule a game attaches only to the one event of its pair within ±2 h
-        and never creates one, since a new event could not carry its ``gamePk``.
+        and never creates one, since a new event could not carry its ``gamePk``. Flushes; the
+        caller commits.
+
+        Raises:
+            StaleListing: when the game matches no event and started over
+                ``LIVE_EVENT_STALE_THRESHOLD`` before ``now``.
         """
-        if self.sport_key != MLB_SPORT_KEY:
-            return await writer.find_or_create_event(
-                game.home_team, game.away_team, game.start, self.sport_key, self.sport_title
-            )
-        if self.resolutions is None:
-            event_id = await writer.find_unscheduled_mlb_event(
-                game.home_team, game.away_team, game.start, game.game_number
-            )
-            if event_id is None:
-                return DroppedGame(game, SkipReason.SCHEDULE_UNAVAILABLE)
-            return event_id, False
-        resolution = self.resolutions[game]
-        if isinstance(resolution, UnresolvedGame):
-            return DroppedGame(game, SkipReason.UNRESOLVED, resolution.reason)
-        return await writer.find_or_create_event(
-            game.home_team,
-            game.away_team,
-            game.start,
-            self.sport_key,
-            self.sport_title,
-            mlb_game=resolution,
+        now = now or datetime.now(UTC)
+        mlb_game: ResolvedGame | None = None
+        start = game.start
+        if self.sport_key == MLB_SPORT_KEY:
+            if self.resolutions is None:
+                event = await find_unscheduled_mlb_event(session, game)
+                if event is None:
+                    return DroppedGame(game, SkipReason.SCHEDULE_UNAVAILABLE)
+                return ResolvedEvent(event, Resolution.MATCHED)
+            resolution = self.resolutions[game]
+            if isinstance(resolution, UnresolvedGame):
+                return DroppedGame(game, SkipReason.UNRESOLVED, resolution.reason)
+            mlb_game = resolution
+            start = resolution.start or game.start
+        return await resolve_event(
+            session,
+            ListedGame(
+                source=source,
+                sport_key=self.sport_key,
+                sport_title=self.sport_title,
+                home_team=game.home_team,
+                away_team=game.away_team,
+                commence_time=game.start,
+                legacy_id=live_event_id(
+                    normalize_team_name(game.home_team), normalize_team_name(game.away_team), start
+                ),
+                external_id=external_id,
+                mlb_game=mlb_game,
+                earliest_created_start=now - LIVE_EVENT_STALE_THRESHOLD,
+            ),
         )
+
+
+async def find_unscheduled_mlb_event(session: AsyncSession, game: GameRow) -> Event | None:
+    """The MLB event of a listed game while the MLB schedule is unavailable: the one event of the
+    pair within ±2 h. A doubleheader game (``game_number`` set) or a window holding several
+    events matches nothing, since without the schedule it could be another game."""
+    if game.game_number is not None:
+        return None
+    candidates = await find_match_candidates(
+        session,
+        normalize_team_name(game.home_team),
+        normalize_team_name(game.away_team),
+        game.start,
+        MLB_SPORT_KEY,
+    )
+    return candidates[0] if len(candidates) == 1 else None
 
 
 async def alert_dropped_games(job_name: str, dropped: Sequence[DroppedGame]) -> bool:

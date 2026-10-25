@@ -190,3 +190,18 @@ def make_tagged_snapshot(
         raw_data=raw_data,
         bookmaker_count=len(bookmakers),
     )
+
+
+class FakeBetfairClient:
+    def __init__(self, books: list[Any]) -> None:
+        self.books = books
+        self.lookback_hours: int | None = None
+
+    def list_events(
+        self, sport_cfg: Any, lookahead_hours: int, lookback_hours: int = 0
+    ) -> list[str]:
+        self.lookback_hours = lookback_hours
+        return [book.betfair_event_id for book in self.books]
+
+    def list_match_odds_books(self, sport_cfg: Any, events: list[str]) -> list[Any]:
+        return self.books
