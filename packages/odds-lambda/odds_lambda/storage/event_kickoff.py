@@ -24,14 +24,14 @@ logger = structlog.get_logger()
 KICKOFF_AUTHORITY: Mapping[SportKey, tuple[Source, ...]] = MappingProxyType(
     {
         "baseball_mlb": (Source.MLB_STATS_API,),
-        "soccer_epl": (Source.ODDSPORTAL, Source.ODDS_API),
+        "soccer_epl": (Source.ODDSPORTAL, Source.ODDS_API, Source.FOOTBALL_DATA_UK),
         "basketball_nba": (Source.ODDSPORTAL, Source.ODDS_API),
     }
 )
 
-# Sources whose schedule dates a postponed game by when it was played, so they may move an event
-# to a start in the past. Every other source is held to the after-kick-off guard in move_kickoff.
-PLAYED_START_SOURCES: frozenset[Source] = frozenset({Source.MLB_STATS_API})
+# Sources whose schedule dates a game by when it was played, so they may move an event to a start
+# in the past. Every other source is held to the after-kick-off guard in move_kickoff.
+PLAYED_START_SOURCES: frozenset[Source] = frozenset({Source.MLB_STATS_API, Source.FOOTBALL_DATA_UK})
 
 
 async def _outranked(session: AsyncSession, event: Event, above: tuple[Source, ...]) -> bool:

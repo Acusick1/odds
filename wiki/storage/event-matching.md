@@ -3,10 +3,10 @@ type: reference
 title: Event matching across sources
 description: The matcher each ingest path uses to find its events row (window, team comparison, ambiguity rule) and the duplicates and NULL event ids that follow.
 sources:
-  - odds_lambda.oddsportal_common.find_existing_event
   - odds_lambda.storage.event_resolver.resolve_event
   - odds_lambda.storage.event_merge.find_match_id
-  - odds_lambda.storage.event_merge.find_historical_match_id
+  - odds_lambda.storage.event_merge.find_historical_candidates
+  - odds_lambda.storage.event_resolver.MatchWindow
   - odds_lambda.storage.event_merge.EventMerger.adopt_twins
   - odds_lambda.storage.injury_writer.InjuryWriter._match_event
   - odds_lambda.storage.game_log_writer.GameLogWriter._match_event
@@ -36,7 +36,7 @@ There is no shared matcher for deciding which `events` row a piece of incoming d
 
 | Matcher | Used by | Window | Teams | Ambiguity |
 |---|---|---|---|---|
-| `odds_lambda.oddsportal_common.find_existing_event` | historical OddsPortal and FDUK ingest scripts | commence time ±24 h | exact home and away as stored, same sport | one candidate matches; several match only through those within ±2 h, as the canonical one, else `None` (logged) |
+| `odds_lambda.storage.event_resolver.resolve_event` with `odds_lambda.storage.event_resolver.MatchWindow.HISTORICAL` | historical OddsPortal and FDUK ingest scripts | commence time ±24 h | `odds_core.team.normalize_team_name` applied first; same sport | one candidate matches; several match only through the nearest within ±2 h, else no match and the row creates its own event (logged) ([Event resolver](event-resolver.md#steps)) |
 | `odds_lambda.storage.event_resolver.resolve_event` | live OddsPortal scrape and Betfair jobs, through `odds_lambda.live_events.LiveEventFinder` | MLB: the event holding the row's `gamePk`, else the source's id, else ±2 h among events with none; other sports: the source's id, else ±2 h | `odds_core.team.normalize_team_name` applied first; sport filter | the nearest candidate, ties to the one stored first ([Event resolver](event-resolver.md#steps)) |
 | `odds_lambda.storage.injury_writer.InjuryWriter._match_event` | [NBA injury reports](../collection/nba-injuries-and-stats.md) | ET `game_date` 10:00 to next day 06:00, converted to UTC | team is home or away | `None` |
 | `odds_lambda.storage.game_log_writer.GameLogWriter._match_event` | [NBA game logs](../collection/nba-injuries-and-stats.md) | same ET window (a verbatim copy) | team is home or away | `None` |
@@ -46,10 +46,9 @@ There is no shared matcher for deciding which `events` row a piece of incoming d
 ## Consequences of the differences
 
 - **Create on miss.** If `odds_lambda.storage.event_resolver.resolve_event` finds nothing it creates an event, so for EPL a name or window mismatch there yields a duplicate event rather than a miss. An MLB event is found by its `gamePk` first, so sources that list one game at different times land on one event ([live MLB events](#live-mlb-events)). A game absent from `events` gets an `op_`/`fduk_` row from the historical scripts, so cross-source joins depend on the matchers agreeing.
-- **Different windows.** `odds_lambda.storage.event_resolver.resolve_event` uses ±2 h and `odds_lambda.oddsportal_common.find_existing_event` ±24 h; both reuse an existing event (including a hex-id one) on a team match.
-- **Finders never merge.** `odds_lambda.storage.event_merge.find_match_id` and `odds_lambda.storage.event_merge.find_historical_match_id` only read: with several candidates they return the canonical one, or `None` for historical rows no candidate within ±2 h explains, so neighbouring fixtures of the same teams (an NBA back-to-back) are never conflated. Merging is explicit ([Event merge](event-merge.md)).
+- **Different windows.** `odds_lambda.storage.event_resolver.resolve_event` uses ±2 h for live listings and ±24 h for historical ones (`odds_lambda.storage.event_resolver.MatchWindow`); both reuse an existing event (including a hex-id one) on a team match.
+- **Finders never merge.** `odds_lambda.storage.event_merge.find_match_id` only reads, and returns the canonical candidate. The resolver's historical match takes the nearest candidate within ±2 h when there are several, and none when no candidate is within ±2 h, so neighbouring fixtures of the same teams (an NBA back-to-back) are never conflated. Merging is explicit ([Event merge](event-merge.md)).
 - **Odds API sync merges.** Event sync upserts under the API id without matching, then `odds_lambda.storage.event_merge.EventMerger.adopt_twins` merges every non-Odds-API event for the same sport, teams and ±2 h into it, so a match scraped before the API listed it ends up as one event.
-- **No normalization in the historical matcher.** `odds_lambda.oddsportal_common.find_existing_event` compares names as stored, so the historical path depends on names already being canonical.
 - **Alias gaps become NULL.** Injury and game-log matching fall back to the raw team name when `odds_lambda.polymarket_matching.normalize_team` returns `None` (the game-log writer tries its abbreviation map first), so an alias gap shows up as a NULL `event_id`. Injury reports are league-wide, so unmatched pairs are expected for teams not playing that day. Unmatched NBA rows keep `event_id` NULL and are invisible to per-event readers.
 - **Manual Polymarket linking.** Polymarket linking is manual and the fetch job does not call it ([Polymarket pipeline and tables](../collection/polymarket.md)).
 
@@ -85,7 +84,7 @@ The same module reads a game's slots for the jobs that follow it after resolutio
 
 When a run drops any game, the job sends `mlb_games_dropped:<job>` with the count and the matchups (`odds_lambda.live_events.alert_dropped_games`, [Alerts](../operations/alerts.md#alert-history)) and still completes with its heartbeat.
 
-`odds_lambda.storage.event_resolver.ListedGame` raises `ValueError` for an MLB game without its `gamePk`, so the resolver never creates one. The other paths that create events do not run for MLB: Odds API event sync and ingestion (`fetch-odds`) are limited to EPL by `odds_lambda.scheduling.jobs._JOB_SPORTS`, and the historical loaders (`scripts/ingest_oddsportal.py`, `scripts/ingest_football_data_uk.py`) cover only NBA and EPL. A manual `odds discover` or `odds fetch` for MLB would create Odds API events with no `gamePk`; merging a live twin into one carries the twin's `gamePk` over ([Event merge](event-merge.md#merging)).
+`odds_lambda.storage.event_resolver.ListedGame` raises `ValueError` for an MLB game without its `gamePk` or with the historical window, so the resolver never creates one. The other paths that create events do not run for MLB: Odds API event sync and ingestion (`fetch-odds`) are limited to EPL by `odds_lambda.scheduling.jobs._JOB_SPORTS`, and the historical loaders (`scripts/ingest_oddsportal.py`, `scripts/ingest_football_data_uk.py`) cover only NBA and EPL. A manual `odds discover` or `odds fetch` for MLB would create Odds API events with no `gamePk`; merging a live twin into one carries the twin's `gamePk` over ([Event merge](event-merge.md#merging)).
 
 How twins are merged and detected is on [Event merge](event-merge.md). The resolver's lookup order, lock and the ids it records are on [Event resolver](event-resolver.md).
 
