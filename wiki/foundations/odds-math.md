@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Odds arithmetic helpers
-description: The odds_core.odds_math functions, their edge cases, their consumers, and and the two `raw_data` price encodings.
+description: The odds_core.odds_math functions, their edge cases, their consumers, and the two `raw_data` price encodings.
 sources:
   - odds_core.odds_math
   - odds_core.odds_math.devig_probabilities

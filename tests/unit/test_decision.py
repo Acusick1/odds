@@ -351,6 +351,23 @@ class TestCloseLead:
         assert decision.next_execution == kickoff - timedelta(minutes=5)
 
     @pytest.mark.asyncio
+    async def test_a_close_kickoff_lookup_replaces_the_stored_kickoffs(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        kickoff = NOW + timedelta(minutes=50)
+        betfair_start = NOW + timedelta(minutes=12)
+        self._kickoffs(monkeypatch, [kickoff])
+
+        async def earlier(sport_key: str, *, now: datetime) -> datetime | None:
+            return betfair_start if betfair_start > now else None
+
+        decision = await decide_forward_resilient(
+            ["baseball_mlb"], self.CLOSE_CADENCE, now=NOW, close_kickoff_lookup=earlier
+        )
+
+        assert decision.next_execution == betfair_start - timedelta(minutes=5)
+
+    @pytest.mark.asyncio
     async def test_without_close_lead_cadence_is_unchanged(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

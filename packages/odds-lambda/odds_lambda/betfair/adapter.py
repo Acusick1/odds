@@ -15,6 +15,7 @@ The pipeline's canonical bookmaker entry is::
       "betfair_meta": {  # optional, supplemental
         "market_id": "1.123",
         "market_status": "OPEN",
+        "market_start_time": "2026-04-25T14:00:00+00:00",  # Betfair's, not the event's
         "inplay": false,
         "total_matched": 385702,
         "runners": [
@@ -222,6 +223,9 @@ def betfair_book_to_bookmaker_entry(
         "betfair_meta": {
             "market_id": book.market_id,
             "market_status": book.market_status,
+            "market_start_time": (
+                book.market_start_time.isoformat() if book.market_start_time else None
+            ),
             "inplay": book.inplay,
             "total_matched": book.total_matched,
             "runners": [asdict(r) for r in book.runners],

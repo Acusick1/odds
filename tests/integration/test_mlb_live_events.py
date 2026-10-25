@@ -965,8 +965,9 @@ class TestBetfairUnpricedBooks:
         assert stats.accounted_fixtures == {MlbGameKey(813001)}
         assert (stats.books_in_play, stats.snapshots_stored) == (1, 0)
         assert await _mlb_events(job_session) == []
+        assert await _snapshot_event_ids(job_session) == []
 
-    async def test_a_pre_play_book_past_its_betfair_start_is_not_stored(
+    async def test_a_pre_play_book_past_its_betfair_start_is_stored_against_the_game(
         self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
     ) -> None:
         mlb_schedule.schedule = [_game(813001, EVENING, YANKEES, RED_SOX)]
@@ -975,9 +976,56 @@ class TestBetfairUnpricedBooks:
             _book(LISTED, self.BETFAIR_START, YANKEES, RED_SOX), snapshot_time=self.SNAPSHOT
         )
 
-        assert stats.snapshots_stored == 0
-        assert stats.accounted_fixtures == {MlbGameKey(813001)}
-        assert await _snapshot_event_ids(job_session) == []
+        assert (stats.snapshots_stored, stats.books_pre_play_past_start) == (1, 1)
+        assert stats.accounted_fixtures == set()
+        snapshot = (await job_session.execute(select(OddsSnapshot))).scalar_one()
+        assert snapshot.hours_until_commence == pytest.approx(0.5)
+        assert snapshot.fetch_tier == FetchTier.CLOSING.value
+        meta = snapshot.raw_data["bookmakers"][0]["betfair_meta"]
+        assert meta["market_start_time"] == self.BETFAIR_START.isoformat()
+        assert meta["inplay"] is False
+
+    async def test_a_priceless_open_book_past_its_betfair_start_fails_the_empty_run_check(
+        self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
+    ) -> None:
+        mlb_schedule.schedule = [_game(813001, EVENING, YANKEES, RED_SOX)]
+        job_session.add(
+            MlbProbablePitchers(
+                game_pk=813001,
+                commence_time=EVENING,
+                fetched_at=self.SNAPSHOT - timedelta(hours=1),
+                home_team=YANKEES,
+                away_team=RED_SOX,
+                game_type="R",
+            )
+        )
+        await job_session.commit()
+
+        stats = await _ingest_betfair(
+            _book(LISTED, self.BETFAIR_START, YANKEES, RED_SOX, priced=False),
+            snapshot_time=self.SNAPSHOT,
+        )
+
+        assert (stats.snapshots_stored, stats.accounted_fixtures) == (0, set())
+        with pytest.raises(EmptyCollectionError, match="with 1 fixture"):
+            await require_rows_for_fixtures(
+                fetch_betfair_exchange.SOURCE,
+                {MLB: stats.snapshots_stored},
+                accounted_by_sport={MLB: stats.accounted_fixtures},
+                now=self.SNAPSHOT,
+            )
+
+    async def test_a_closed_book_past_its_betfair_start_accounts_for_its_game(
+        self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
+    ) -> None:
+        mlb_schedule.schedule = [_game(813001, EVENING, YANKEES, RED_SOX)]
+
+        stats = await _ingest_betfair(
+            _book(LISTED, self.BETFAIR_START, YANKEES, RED_SOX, status="CLOSED"),
+            snapshot_time=self.SNAPSHOT,
+        )
+
+        assert (stats.snapshots_stored, stats.accounted_fixtures) == (0, {MlbGameKey(813001)})
 
     async def test_a_suspended_book_with_no_prices_accounts_for_its_game(
         self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
