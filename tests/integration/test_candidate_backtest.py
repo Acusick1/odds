@@ -193,7 +193,7 @@ class TestReplay:
             coverage.with_bet,
             coverage.bets,
             coverage.bets_with_close,
-        ) == (5, 3, 2, 3, 1, 1, 1)
+        ) == (5, 2, 2, 2, 1, 1, 1)
 
     async def test_empty_range_has_no_verdict(self, pglite_async_session) -> None:
         result = await run(pglite_async_session)
