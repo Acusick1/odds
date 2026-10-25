@@ -5,11 +5,13 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+import yaml
 from odds_lambda.fetch_tier import FetchTier
-from odds_lambda.jobs.fetch_oddsportal import CADENCE, main
+from odds_lambda.jobs.fetch_oddsportal import CADENCE, candidate_scrape_leads, main
 from odds_lambda.scheduling.decision import DORMANCY_HORIZON_DAYS
 from odds_lambda.scheduling.jobs import JobContext
 
@@ -33,6 +35,41 @@ class TestCadenceBands:
 
     def test_db_fallback(self) -> None:
         assert CADENCE.db_fallback == 1.0
+
+
+class TestCandidateScrapeLeads:
+    @pytest.fixture
+    def registry(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        monkeypatch.setattr("odds_lambda.jobs.fetch_oddsportal.candidates_dir", lambda: tmp_path)
+        return tmp_path
+
+    def test_scrapes_five_minutes_before_each_decision(self, registry: Path) -> None:
+        fields = {
+            "name": "gap",
+            "description": "d",
+            "kind": "mechanical",
+            "sport": "soccer_epl",
+            "version": 1,
+            "issue": 1,
+            "start_date": "2026-11-09",
+            "status": "active",
+            "rule": "exchange_gap",
+            "rule_sha256": "0" * 64,
+            "params": {
+                "threshold": 0.01,
+                "minutes_before_kickoff": 60,
+                "max_input_age_minutes": 10,
+            },
+        }
+        (registry / "gap.yaml").write_text(yaml.safe_dump(fields))
+
+        assert candidate_scrape_leads("soccer_epl") == [timedelta(minutes=65)]
+        assert candidate_scrape_leads("baseball_mlb") == []
+
+    def test_unreadable_registry_adds_no_runs(self, registry: Path) -> None:
+        (registry / "broken.yaml").write_text("name: [")
+
+        assert candidate_scrape_leads("soccer_epl") == []
 
 
 class TestProximityScheduling:

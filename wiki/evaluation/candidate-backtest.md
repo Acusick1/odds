@@ -28,11 +28,11 @@ A file loaded by path may be an unregistered draft. `odds_core.candidates.load_c
 
 1. **Events.** `odds_analytics.candidate_backtest.final_events` selects the candidate's sport's `FINAL` events with both scores and a kick-off within the days, ordered by kick-off and id. `odds_lambda.storage.event_merge.canonical_events` then keeps one event per match, the one `odds_lambda.storage.event_merge.find_match_id` names, which is the same helper the [run-candidates job](run-candidates-job.md#one-run) uses, so the replay decides the events the job decides. A match whose canonical event lacks scores or is not `FINAL` drops out.
 2. **Decision time.** `odds_lambda.candidate_rules.rules.decision_time` of the event's kick-off. A completed event has only its final kick-off, so a rescheduled fixture is decided against its final time and not the one a live run saw ([parity check](candidate-parity.md) uses the recorded one).
-3. **State.** `odds_lambda.candidate_rules.rules.run_rule` loads the state with `known_at=None`, so a snapshot counts when it is stamped at or before the decision time, whenever it was stored: backfilled rows were created long after their snapshot times ([as-of rules](candidate-rules.md#market-state)). The live runner and the parity check decide through the same function.
+3. **State.** `odds_lambda.candidate_rules.rules.run_rule` loads the state with `known_at=None`, so a snapshot counts when it is stamped at or before the decision time, whenever it was stored: backfilled rows were created long after their snapshot times ([as-of rules](candidate-rules.md#market-state)). The live runner and the parity check decide through the same function. Only a snapshot carrying UK retail prices and a Betfair Exchange row together is an input (in practice live OddsPortal snapshots, and live Odds API ones that quote the exchange), so a range before that collection, or one whose snapshots fall outside the params' maximum input age, has no inputs and no bets. An event without inputs is what the live runner records as missed; the replay counts it in coverage.
 4. **Bets.** The rule's bets, in kick-off order and then rule order. Each is settled from the final score with `odds_core.odds_math.determine_h2h_winner` and `odds_core.odds_math.calculate_profit_from_decimal`, as `odds_lambda.paper_trading.settle_trades` does.
 5. **Close.** Each `1x2` bet's `p_close` comes from `odds_analytics.candidate_report.selection_close_probability` over the snapshots `odds_analytics.candidate_report.close_candidate_snapshots` selects. An `h2h` bet, every MLB bet, has none.
 
-Events are processed in batches of `odds_analytics.candidate_backtest.EVENT_BATCH_SIZE`, with the session's loaded snapshots dropped after each batch: one query per event reads only the `odds_lambda.candidate_rules.market_state.SNAPSHOT_LOOKBACK` before its decision time, and the close snapshots are read once per batch for events that have a bet.
+Events are processed in batches of `odds_analytics.candidate_backtest.EVENT_BATCH_SIZE`, with the session's loaded snapshots dropped after each batch: one query per event reads only the maximum input age before its decision time, and the close snapshots are read once per batch for events that have a bet.
 
 ## Scoring
 
@@ -47,12 +47,13 @@ The checkpoint is the verdict's: the first 100, 200, … 500 bets with a close, 
 | Field | Counts |
 |---|---|
 | `events` | Canonical events in range |
+| `with_input` | Events with a snapshot within the maximum input age at the decision time |
 | `with_exchange` | Events with an exchange price at the decision time |
 | `with_retail` | Events with at least one UK retail quote at that time |
 | `with_bet` | Events where the rule took at least one bet |
 | `bets`, `bets_with_close` | Bets, and those with a close |
 
-The command prints the verdict as `meets_promote_bar` (with "development data, not a promotion"), `kill`, `continue` or `not_yet`, never `promote`, and `--json` writes the same strings (`odds_cli.commands.candidates._backtest_verdict`). It prints these beside the no-close and pending counts, k, the checkpoint and overall estimates with their 95% interval and promote interval (the promote level is 1 − 0.01/k), stake, P&L and ROI. A low `with_exchange` or `with_retail` count says the range lacks the data for the rule's decision time, which no verdict can repair.
+The command prints the verdict as `meets_promote_bar` (with "development data, not a promotion"), `kill`, `continue` or `not_yet`, never `promote`, and `--json` writes the same strings (`odds_cli.commands.candidates._backtest_verdict`). It prints these beside the no-close and pending counts, k, the checkpoint and overall estimates with their 95% interval and promote interval (the promote level is 1 − 0.01/k), stake, P&L and ROI, and the coverage table's title names the maximum input age the params set, so a draft that widened it says so. A low `with_input`, `with_exchange` or `with_retail` count says the range lacks the data for the rule's decision time, which no verdict can repair.
 
 ## JSON output
 

@@ -47,7 +47,7 @@ def candidate(**overrides: Any) -> MechanicalCandidate:
         "status": "active",
         "rule": "exchange_gap",
         "rule_sha256": rule_sha256("exchange_gap"),
-        "params": {"threshold": 0.02, "minutes_before_kickoff": 60},
+        "params": {"threshold": 0.02, "minutes_before_kickoff": 60, "max_input_age_minutes": 10},
         **overrides,
     }
     return MechanicalCandidate.model_validate(fields)
@@ -71,7 +71,8 @@ async def add_event(
     scores: tuple[int, int] | None = (2, 1),
     **fields: Any,
 ) -> None:
-    """An event with retail and exchange snapshots 10 and 5 minutes before the decision."""
+    """An event with an OddsPortal snapshot of its retail and exchange prices 5 minutes before
+    the decision, and a Betfair close."""
     t = kickoff - timedelta(minutes=60)
     event = make_epl_event(
         event_id,
@@ -82,22 +83,14 @@ async def add_event(
         **fields,
     )
     session.add(event)
-    if retail is not None:
+    books = [
+        *([three_way_bookmaker("bet365", retail)] if retail is not None else []),
+        *([betfair(exchange)] if exchange is not None else []),
+    ]
+    if books:
         session.add(
             make_tagged_snapshot(
-                event_id,
-                t - timedelta(minutes=10) + snapshot_offset,
-                [three_way_bookmaker("bet365", retail)],
-                "oddsportal_live",
-            )
-        )
-    if exchange is not None:
-        session.add(
-            make_tagged_snapshot(
-                event_id,
-                t - timedelta(minutes=5) + snapshot_offset,
-                [betfair(exchange)],
-                "betfair_api",
+                event_id, t - timedelta(minutes=5) + snapshot_offset, books, "oddsportal_live"
             )
         )
     if close is not None:
@@ -148,7 +141,9 @@ class TestReplay:
         # A snapshot 30 minutes before the 15:00 kick-off is invisible at 14:00 but would be
         # visible had the event been decided 60 minutes before 15:30.
         await add_event(pglite_async_session, "moved", snapshot_offset=timedelta(minutes=30))
-        later = candidate(params={"threshold": 0.02, "minutes_before_kickoff": 30})
+        later = candidate(
+            params={"threshold": 0.02, "minutes_before_kickoff": 30, "max_input_age_minutes": 10}
+        )
 
         assert (await run(pglite_async_session, later)).coverage.bets == 1
         assert (await run(pglite_async_session)).coverage.bets == 0
@@ -184,17 +179,21 @@ class TestReplay:
         await add_event(
             pglite_async_session, "nothing", KICKOFF + 3 * day, retail=None, exchange=None
         )
+        await add_event(
+            pglite_async_session, "stale", KICKOFF + 4 * day, snapshot_offset=-timedelta(minutes=6)
+        )
 
         coverage = (await run(pglite_async_session)).coverage
 
         assert (
             coverage.events,
+            coverage.with_input,
             coverage.with_exchange,
             coverage.with_retail,
             coverage.with_bet,
             coverage.bets,
             coverage.bets_with_close,
-        ) == (4, 2, 3, 1, 1, 1)
+        ) == (5, 3, 2, 3, 1, 1, 1)
 
     async def test_empty_range_has_no_verdict(self, pglite_async_session) -> None:
         result = await run(pglite_async_session)

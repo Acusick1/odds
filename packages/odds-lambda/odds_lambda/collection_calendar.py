@@ -224,12 +224,14 @@ async def decide_collection_run(
     now: datetime | None = None,
     stored_only: bool = False,
     stored_kickoff: KickoffLookup | None = None,
+    leads: Sequence[timedelta] = (),
 ) -> ScheduleDecision:
     """Next run of a collector, dormant while no fixture is within ``DORMANCY_HORIZON_DAYS``.
 
     ``stored_only`` looks at stored events alone, for a job that only pairs
     with events other jobs create. ``stored_kickoff`` replaces the stored events'
-    ``commence_time`` as their kickoff, for the cadence and the close run.
+    ``commence_time`` as their kickoff, for the cadence and the lead runs.
+    ``leads`` adds a run that long before each kickoff.
     """
     lookup: KickoffLookup | None = None if stored_only else next_fixture_kickoff
     if stored_kickoff is not None:
@@ -246,7 +248,8 @@ async def decide_collection_run(
         lookahead_days=DORMANCY_HORIZON_DAYS,
         now=now,
         next_kickoff_lookup=lookup,
-        close_kickoff_lookup=stored_kickoff,
+        leads=leads,
+        lead_kickoff_lookup=stored_kickoff,
     )
 
 

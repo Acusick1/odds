@@ -36,8 +36,8 @@ class CandidateDecision(SQLModel, table=True):
 
     Written even when the rule places no bet, so a decision is never taken twice and a replay
     can compare a zero-bet decision, and records the snapshots it used so a replay needs no
-    guess at what the run saw. A missed decision (the run came too late) is recorded
-    with ``missed`` set and places nothing.
+    guess at what the run saw. A missed decision (the run came too late, or no snapshot was
+    recent enough to decide from) is recorded with ``missed`` set and places nothing.
     """
 
     __tablename__ = "candidate_decisions"
@@ -61,13 +61,16 @@ class CandidateDecision(SQLModel, table=True):
     input_snapshot_ids: list[int] = Field(
         default_factory=list,
         sa_column=Column(ARRAY(Integer), nullable=False, server_default=text("'{}'")),
-        description="Ids of every snapshot the rule's market state was built from; empty when missed",
+        description="Id of the snapshot the rule's market state was built from; empty when missed",
     )
     bets_placed: int = Field(default=0)
     missed: bool = Field(
         default=False,
         sa_column=Column(Boolean, nullable=False, server_default=text("false")),
-        description="The run came later than the allowed lateness, so nothing was placed",
+        description=(
+            "The run came later than the allowed lateness, or no snapshot was within the "
+            "rule's maximum input age, so nothing was placed"
+        ),
     )
 
     __table_args__ = (

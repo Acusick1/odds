@@ -26,7 +26,7 @@ MECHANICAL: dict[str, object] = {
     "status": "active",
     "rule": "exchange_gap",
     "rule_sha256": rule_sha256("exchange_gap"),
-    "params": {"threshold": 0.02, "minutes_before_kickoff": 60},
+    "params": {"threshold": 0.02, "minutes_before_kickoff": 60, "max_input_age_minutes": 10},
 }
 
 AGENT: dict[str, object] = {
@@ -55,7 +55,11 @@ class TestLoadCandidates:
 
         assert [c.name for c in loaded] == ["back-longest", "epl-agent"]
         assert isinstance(loaded[0], MechanicalCandidate)
-        assert loaded[0].params == {"threshold": 0.02, "minutes_before_kickoff": 60}
+        assert loaded[0].params == {
+            "threshold": 0.02,
+            "minutes_before_kickoff": 60,
+            "max_input_age_minutes": 10,
+        }
         assert isinstance(loaded[1], AgentCandidate)
 
     def test_a_draft_file_may_lack_the_hash_but_the_registry_may_not(self, tmp_path: Path) -> None:

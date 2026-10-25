@@ -160,18 +160,16 @@ async def _decide(
     session.add(decision)
     await session.flush()
     if decision.missed:
-        logger.warning(
-            "candidate_decision_missed",
-            candidate=candidate.name,
-            event_id=event.id,
-            decision_time=t.isoformat(),
-            now=now.isoformat(),
-        )
+        _log_missed(decision, "late", now)
         return decision
 
     state, intents = await run_rule(
         session, RULES[candidate.rule], item.params, event, t, known_at=now
     )
+    if not state.has_input:
+        decision.missed = True
+        _log_missed(decision, "no_input", now)
+        return decision
     for intent in intents:
         await place_trade(
             session,
@@ -187,8 +185,20 @@ async def _decide(
             decision_id=decision.id,
         )
     decision.bets_placed = len(intents)
-    decision.input_snapshot_ids = list(state.snapshot_ids)
+    assert state.snapshot_id is not None  # noqa: S101
+    decision.input_snapshot_ids = [state.snapshot_id]
     return decision
+
+
+def _log_missed(decision: CandidateDecision, reason: str, now: datetime) -> None:
+    logger.warning(
+        "candidate_decision_missed",
+        candidate=decision.candidate_name,
+        event_id=decision.event_id,
+        decision_time=decision.decision_time.isoformat(),
+        now=now.isoformat(),
+        reason=reason,
+    )
 
 
 async def _is_decided(session: AsyncSession, item: RunnableCandidate, event_id: str) -> bool:

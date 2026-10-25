@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Scheduling decision engine
-description: decide_forward and decide_backward and their resilient wrappers, CadenceConfig and per-job cadences, overnight windows, and the self_schedule and kickoff helpers.
+description: decide_forward and decide_backward and their resilient wrappers, CadenceConfig and per-job cadences, lead runs before kickoffs, overnight windows, and the self_schedule and kickoff helpers.
 sources:
   - odds_lambda.scheduling.decision.decide_forward
   - odds_lambda.scheduling.decision.decide_forward_resilient
@@ -13,6 +13,9 @@ sources:
   - odds_lambda.scheduling.decision.classify_tier
   - odds_lambda.scheduling.decision.DORMANCY_HORIZON_DAYS
   - odds_lambda.scheduling.decision.KickoffLookup
+  - odds_lambda.scheduling.decision.LeadRun
+  - odds_lambda.scheduling.decision.next_lead_run
+  - odds_lambda.scheduling.decision.MIN_LEAD_RUN_GAP
   - odds_lambda.collection_calendar.decide_collection_run
   - odds_lambda.collection_calendar.next_fixture_kickoff
   - odds_lambda.collection_calendar.published_schedule_kickoff
@@ -22,6 +25,8 @@ sources:
   - odds_lambda.jobs.fetch_odds.CADENCE
   - odds_lambda.jobs.fetch_oddsportal.CADENCE
   - odds_lambda.jobs.fetch_betfair_exchange.CADENCE
+  - odds_lambda.jobs.fetch_betfair_exchange.CLOSE_LEAD
+  - odds_lambda.jobs.fetch_oddsportal.candidate_scrape_leads
   - odds_lambda.jobs.fetch_polymarket_odds.CADENCE
   - odds_lambda.jobs.agent_run.CADENCE
   - odds_lambda.jobs.agent_run.schedule_next
@@ -44,12 +49,12 @@ status: stable
 Used by odds, scrapes, Betfair and the agent.
 
 - `decide_forward(sport_key, cadence, overnight=None, lookahead_days=7, ...)` takes the next SCHEDULED kickoff for the sport (`odds_lambda.scheduling.helpers.get_next_kickoff`). No kickoff within `lookahead_days` gives `should_execute=False` and a check-in at the earlier of `cadence.no_game` hours from now and the moment a known later kickoff enters `lookahead_days`; the check-in ignores the overnight window. Otherwise `odds_lambda.scheduling.decision.classify_tier(hours_until)` picks a [fetch tier](../storage/fetch-tier.md) and the cadence interval. `odds_lambda.scheduling.decision.classify_tier` uses strict `<` on `odds_lambda.fetch_tier.FetchTier.max_hours` where stored tiers use `<=`, so a kickoff exactly 3.0 h away is PREGAME here and CLOSING when stored (#446, [boundary encodings](../storage/fetch-tier.md#boundary-encodings)).
-- `odds_lambda.scheduling.decision.decide_forward_resilient(sport_keys, cadence, ..., next_kickoff_lookup=None)` uses the soonest kickoff across sports, from `odds_lambda.scheduling.helpers.get_next_kickoff` unless a `odds_lambda.scheduling.decision.KickoffLookup` is given; if the kickoff query raises it returns `should_execute=True` at `cadence.db_fallback` (default 1 h) so the chain survives a database outage.
+- `odds_lambda.scheduling.decision.decide_forward_resilient(sport_keys, cadence, ..., next_kickoff_lookup=None, leads=())` uses the soonest kickoff across sports, from `odds_lambda.scheduling.helpers.get_next_kickoff` unless a `odds_lambda.scheduling.decision.KickoffLookup` is given, and moves the next run earlier for any of `leads` ([lead runs](#lead-runs)); if the kickoff query raises it returns `should_execute=True` at `cadence.db_fallback` (default 1 h) so the chain survives a database outage.
 - `fetch-oddsportal`, `fetch-betfair-exchange` and `fetch-polymarket-odds` run only while `should_execute` holds and otherwise only book a check-in ([Dormancy](#dormancy)). `agent-run` uses `odds_lambda.scheduling.decision.decide_forward_resilient` for its cadence, ignores the gate and uses only `next_execution`; a requested wake-up overrides it ([wake-up requests](../agent/agent-run-job.md#wake-up-requests)).
 
 ## Dormancy
 
-A collector that creates its own events cannot be gated on stored events alone: stopped, it would never see the next season. `odds_lambda.collection_calendar.decide_collection_run` is `odds_lambda.scheduling.decision.decide_forward_resilient` with `lookahead_days` set to `odds_lambda.scheduling.decision.DORMANCY_HORIZON_DAYS` (28, longer than the roughly 20-day gaps between two Premier League fixtures) and `odds_lambda.collection_calendar.next_fixture_kickoff` as the lookup. Its `stored_kickoff` argument replaces the stored events' `commence_time` in that lookup and in the close run; only `fetch-betfair-exchange` passes one ([close run](#close-run)). That is the earlier of the stored SCHEDULED events and the sport's published schedule (`odds_lambda.collection_calendar.published_schedule_kickoff`):
+A collector that creates its own events cannot be gated on stored events alone: stopped, it would never see the next season. `odds_lambda.collection_calendar.decide_collection_run` is `odds_lambda.scheduling.decision.decide_forward_resilient` with `lookahead_days` set to `odds_lambda.scheduling.decision.DORMANCY_HORIZON_DAYS` (28, longer than the roughly 20-day gaps between two Premier League fixtures) and `odds_lambda.collection_calendar.next_fixture_kickoff` as the lookup. Its `stored_kickoff` argument replaces the stored events' `commence_time` in that lookup and in the lead runs; only `fetch-betfair-exchange` passes one ([lead runs](#lead-runs)). That is the earlier of the stored SCHEDULED events and the sport's published schedule (`odds_lambda.collection_calendar.published_schedule_kickoff`):
 
 - EPL: the ESPN Premier League fixtures that are not postponed, written by the daily `fetch-espn-fixtures` cron.
 - MLB: the MLB Stats API games of the latest `fetch-mlb-probables` fetch, under the same freshness and game-type rules as the [stale-data calendar](../operations/health-monitor.md#stale-data-check). The feed covers about four days, so MLB wakes that far ahead.
@@ -76,9 +81,14 @@ Hours per tier:
 
 Values are each job module's cadence constant (`odds_lambda.jobs.fetch_odds.CADENCE`, `odds_lambda.jobs.fetch_oddsportal.CADENCE`, `odds_lambda.jobs.fetch_betfair_exchange.CADENCE`, `odds_lambda.jobs.fetch_polymarket_odds.CADENCE`, `odds_lambda.jobs.agent_run.CADENCE`); they replace the `interval_hours` argument of `odds_lambda.scheduling.helpers.self_schedule`, which is only logged. `odds_lambda.scheduling.decision.CadenceConfig.interval_for` maps `IN_PLAY` to `closing`. Scores: 3-day window, 6 h active, 12 h idle. Status: 4 h window, 1 h active, 6 h idle.
 
-## Close run
+## Lead runs
 
-`odds_lambda.scheduling.decision.CadenceConfig.close_lead`, when set, adds a run just before each kickoff. The forward decisions look up the earliest kickoff more than `close_lead` away, through the `close_kickoff_lookup` of `odds_lambda.scheduling.decision.decide_forward_resilient` (the stored events' `commence_time` by default; `odds_lambda.collection_calendar.decide_collection_run` passes its `stored_kickoff`). If the cadence's next time falls after that kickoff minus `close_lead`, the run moves to that time, and the overnight skip does not apply to it. A close run less than `odds_lambda.scheduling.decision.MIN_CLOSE_RUN_GAP` (60 s) away is dropped, because the run deciding it is already at the close. Only `odds_lambda.jobs.fetch_betfair_exchange.CADENCE` sets it, at 5 min, so the Betfair close does not depend on where the 15-minute cadence happens to fall. That job's kickoffs come from `odds_lambda.betfair.kickoff.next_betfair_kickoff`, which adds an earlier Betfair start as a target while it is ahead, so an event can get a close run before it as well as before its `commence_time` ([Betfair job](../collection/betfair-exchange.md#flow)).
+A lead is a time before kickoff at which a job must run whatever its cadence. `odds_lambda.scheduling.decision.decide_forward_resilient` and `odds_lambda.collection_calendar.decide_collection_run` take a sequence of `leads`. For each lead and sport, `odds_lambda.scheduling.decision.next_lead_run` looks up the earliest kickoff whose run, the kickoff minus the lead, is at least `odds_lambda.scheduling.decision.MIN_LEAD_RUN_GAP` (60 s) after now, so a run at its own lead time books the next kickoff's run rather than itself again. Kickoffs come from the `lead_kickoff_lookup` of `odds_lambda.scheduling.decision.decide_forward_resilient`: the stored SCHEDULED events' `commence_time` (`odds_lambda.scheduling.helpers.get_next_kickoff`) by default, and the `stored_kickoff` that `odds_lambda.collection_calendar.decide_collection_run` is given. The earliest of those runs is an `odds_lambda.scheduling.decision.LeadRun`. If the cadence's next time falls after it, the run moves to it, and the overnight skip does not apply to it. A dormant decision has no lead run. `odds_lambda.scheduling.decision.decide_forward` takes no leads.
+
+Two jobs pass leads:
+
+- `fetch-betfair-exchange` passes `odds_lambda.jobs.fetch_betfair_exchange.CLOSE_LEAD` (5 min), so the Betfair close does not depend on where the 15-minute cadence happens to fall. Its kickoffs come from `odds_lambda.betfair.kickoff.next_betfair_kickoff`, which adds an earlier Betfair start as a target while it is ahead, so an event can get a close run before it as well as before its `commence_time` ([Betfair job](../collection/betfair-exchange.md#flow)).
+- `fetch-oddsportal` passes `odds_lambda.jobs.fetch_oddsportal.candidate_scrape_leads`: each active mechanical candidate's decision time plus 5 min, so every candidate decision reads a snapshot taken just before it ([fetch-oddsportal job](../collection/fetch-oddsportal-job.md#flow)).
 
 ## Overnight windows
 

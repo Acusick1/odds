@@ -16,6 +16,9 @@ Interval table:
   12h+              → 2h
   no fixture in 28d → 6h check-in, no scrape
   DB unreachable    → 1h (fallback)
+
+A run is also added ``SCRAPE_LEAD`` before each active mechanical candidate's
+decision time, so the decision reads a snapshot taken just before it.
 """
 
 from __future__ import annotations
@@ -24,9 +27,11 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
 import structlog
+from odds_core.candidates import candidates_dir, load_candidates
 from odds_core.database import async_session_maker
 from odds_core.snapshot_sources import SnapshotSource
 
+from odds_lambda.candidate_rules import decision_leads
 from odds_lambda.collection_calendar import (
     CollectionSource,
     decide_collection_run,
@@ -60,6 +65,10 @@ CADENCE = CadenceConfig(
     no_game=6.0,
     db_fallback=1.0,
 )
+
+# A league scrape takes about a minute (two minutes at most, October 2026), so a run this
+# long before a decision time has stored its snapshots by then.
+SCRAPE_LEAD = timedelta(minutes=5)
 
 LIVE_REQUEST_ID_PREFIX = "oddsportal_live_"
 
@@ -300,6 +309,19 @@ async def ingest_league(
     return stats
 
 
+def candidate_scrape_leads(sport_key: str) -> list[timedelta]:
+    """``SCRAPE_LEAD`` before each active mechanical candidate's decision time, before kickoff.
+
+    An unreadable registry gives none, so collection keeps its cadence.
+    """
+    try:
+        candidates = load_candidates(candidates_dir())
+    except ValueError as e:
+        logger.error("candidate_registry_invalid", error=str(e))
+        return []
+    return [lead + SCRAPE_LEAD for lead in decision_leads(candidates, sport_key)]
+
+
 async def main(ctx: JobContext) -> None:
     """Main job execution — scrapes configured league(s), then self-schedules.
 
@@ -321,9 +343,12 @@ async def main(ctx: JobContext) -> None:
     compound_job_name = make_compound_job_name("fetch-oddsportal", sport)
     overnight = (spec.overnight_start_utc, spec.overnight_resume_utc)
     sport_keys = [spec.sport_key]
+    leads = candidate_scrape_leads(spec.sport_key)
 
     async def _reschedule(label: str) -> ScheduleDecision:
-        decision = await decide_collection_run(sport_keys, CADENCE, overnight=overnight)
+        decision = await decide_collection_run(
+            sport_keys, CADENCE, overnight=overnight, leads=leads
+        )
         assert decision.next_execution is not None  # noqa: S101
         try:
             await self_schedule(

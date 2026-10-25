@@ -38,6 +38,7 @@ from tests.test_helpers import make_epl_event, make_tagged_snapshot, three_way_b
 pytestmark = pytest.mark.integration
 
 NOW = datetime.now(UTC).replace(microsecond=0)
+EXCHANGE_ROW = three_way_bookmaker("betfair_exchange", (2.0, 4.0, 4.0))
 EPL = "soccer_epl"
 
 
@@ -46,7 +47,7 @@ class _Params(RuleParams):
 
 
 def _bet_home(state: MarketState, params: _Params) -> list[BetIntent]:
-    return [BetIntent(Outcome.HOME, "bet365", state.retail["bet365"].prices[Outcome.HOME], 1.0)]
+    return [BetIntent(Outcome.HOME, "bet365", state.retail["bet365"][Outcome.HOME], 1.0)]
 
 
 def _no_bet(state: MarketState, params: _Params) -> list[BetIntent]:
@@ -83,7 +84,7 @@ def write_candidate(directory: Path, name: str = "cand", **fields: Any) -> None:
         "status": "active",
         "rule": rule,
         "rule_sha256": rule_sha256(rule) if rule in RULES else "0" * 64,
-        "params": {"minutes_before_kickoff": 60},
+        "params": {"minutes_before_kickoff": 60, "max_input_age_minutes": 120},
         **fields,
     }
     (directory / f"{name}.yaml").write_text(yaml.safe_dump(data))
@@ -96,7 +97,7 @@ async def add_event(
     snapshot = make_tagged_snapshot(
         event_id,
         NOW - timedelta(hours=1),
-        [three_way_bookmaker("bet365", (2.0, 3.4, 4.0))],
+        [three_way_bookmaker("bet365", (2.0, 3.4, 4.0)), EXCHANGE_ROW],
         "oddsportal_live",
     )
     snapshot.created_at = NOW - timedelta(hours=1)
@@ -166,7 +167,28 @@ class TestDecisions:
         assert decision.input_snapshot_ids == []
         [missed] = [log for log in logs if log["event"] == "candidate_decision_missed"]
         assert missed["log_level"] == "warning"
-        assert (missed["candidate"], missed["event_id"]) == ("cand", "e1")
+        assert (missed["candidate"], missed["event_id"], missed["reason"]) == ("cand", "e1", "late")
+
+    async def test_decision_without_a_recent_snapshot_is_recorded_as_missed(
+        self, pglite_async_session, registry
+    ) -> None:
+        write_candidate(
+            registry, params={"minutes_before_kickoff": 60, "max_input_age_minutes": 10}
+        )
+        await add_event(pglite_async_session, "e1", DUE)
+
+        with structlog.testing.capture_logs() as logs:
+            summary = await run(pglite_async_session)
+
+        assert (summary.missed, summary.placed) == (1, 0)
+        [decision] = await all_of(pglite_async_session, CandidateDecision)
+        assert (decision.missed, decision.bets_placed, decision.input_snapshot_ids) == (
+            True,
+            0,
+            [],
+        )
+        [missed] = [log for log in logs if log["event"] == "candidate_decision_missed"]
+        assert missed["reason"] == "no_input"
 
     async def test_rerun_places_nothing_new(self, pglite_async_session, registry) -> None:
         write_candidate(registry)
@@ -236,7 +258,7 @@ class TestDecisions:
                 make_tagged_snapshot(
                     event_id,
                     NOW - timedelta(minutes=30),
-                    [three_way_bookmaker("bet365", (2.0, 3.4, 4.0))],
+                    [three_way_bookmaker("bet365", (2.0, 3.4, 4.0)), EXCHANGE_ROW],
                     "oddsportal_live",
                 )
             )
@@ -287,8 +309,9 @@ class TestDecisions:
 
         await run(pglite_async_session)
 
-        assert spy.await_args.args[3] == NOW
         assert spy.await_args.args[2] == DUE - timedelta(minutes=60)
+        assert spy.await_args.args[3] == timedelta(minutes=120)
+        assert spy.await_args.args[4] == NOW
 
     async def test_failed_decision_is_not_recorded_and_others_run(
         self, pglite_async_session, registry
@@ -354,7 +377,7 @@ def _event(kickoff: datetime) -> Any:
 
 
 def _runnable(minutes: int) -> Any:
-    return SimpleNamespace(params=_Params(minutes_before_kickoff=minutes))
+    return SimpleNamespace(params=_Params(minutes_before_kickoff=minutes, max_input_age_minutes=10))
 
 
 class TestNextRunTime:

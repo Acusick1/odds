@@ -23,7 +23,7 @@ Each external source has a fetcher, a job (or manual script) that runs it, and a
 - [Results and status jobs](results-jobs.md) — update-status, fetch-scores, fetch-oddsportal-results, fetch-mlb-results and odds fetch scores: cadence, flow, heartbeats, failure handling.
 - [Sport, market and bookmaker keys](sport-and-market-keys.md) — SportKey, job-name suffixes, the market-key dialects per writer, bookmaker key maps, and DataCollectionConfig defaults.
 - [The fetch-odds job](fetch-odds-job.md) — Event sync, gate, pre/post-schedule and log events of odds_lambda.jobs.fetch_odds.
-- [The fetch-oddsportal job](fetch-oddsportal-job.md) — LEAGUE_SPECS, flow, cadence, alerts, heartbeats of odds_lambda.jobs.fetch_oddsportal.
+- [The fetch-oddsportal job](fetch-oddsportal-job.md) — LEAGUE_SPECS, flow, cadence, runs before candidate decision times, alerts, heartbeats of odds_lambda.jobs.fetch_oddsportal.
 - [The Odds API client and key rotation](odds-api-client.md) — TheOddsAPIClient methods, retry and key rotation with the SSM index, and unit cost per endpoint.
 
 ### Explanation

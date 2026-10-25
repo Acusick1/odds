@@ -24,6 +24,7 @@ from odds_lambda.candidate_rules import (
     RuleSpec,
     apply_rule,
     build_market_state,
+    max_input_age,
     resolve_rule,
     run_rule,
 )
@@ -105,7 +106,7 @@ async def _recorded_inputs(
         )
         snapshots = list(rows.scalars().all())
     missing = tuple(sorted(set(ids) - {s.id for s in snapshots}))
-    state = build_market_state(event, snapshots, decision.decision_time)
+    state = build_market_state(event, snapshots, decision.decision_time, max_input_age(params))
     _, intents = apply_rule(spec, params, state, decision.kickoff_at_decision)
     return intent_keys(intents), missing
 

@@ -13,7 +13,7 @@ Every data job is registered once, decides its own next run, and books that run 
 - [Job registry](job-registry.md) — Which jobs exist in the registry, the bootstrap and smoke maps, which jobs are per sport and how compound names are built, and what JobContext carries.
 - [Local scheduler](local-scheduler.md) — The APScheduler-on-Postgres backend, its scheduling primitives, the odds scheduler commands, bootstrap jobs and the cron table.
 - [Scheduler backends](scheduler-backends.md) — The SchedulerBackend interface and selection, the AWS EventBridge backend and its env contract, the Railway shim, health checks, and the Lambda handler EventBridge invokes.
-- [Scheduling decision engine](decision-engine.md) — decide_forward and decide_backward and their resilient wrappers, CadenceConfig and per-job cadences, overnight windows, and the self_schedule and kickoff helpers.
+- [Scheduling decision engine](decision-engine.md) — decide_forward and decide_backward and their resilient wrappers, CadenceConfig and per-job cadences, lead runs before kickoffs, overnight windows, and the self_schedule and kickoff helpers.
 - [Where each job runs](job-deployment-matrix.md) — The production host and its job set, the per-job sport and schedule table, the dormant AWS rules, heartbeat writers, and how to check deployed AWS state.
 
 ### Explanation

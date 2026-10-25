@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from odds_core import as_of
-from odds_core.candidates import Candidate, MechanicalCandidate
+from odds_core.candidates import Candidate, CandidateStatus, MechanicalCandidate
 from odds_core.market_prices import Outcome, market_outcomes
 from odds_core.models import Event
 from pydantic import BaseModel, ConfigDict, PositiveFloat, PositiveInt, ValidationError
@@ -29,15 +29,24 @@ class BetIntent:
 
 
 class RuleParams(BaseModel):
-    """Params every rule takes; ``minutes_before_kickoff`` sets its decision time."""
+    """Params every rule takes.
+
+    ``minutes_before_kickoff`` sets the decision time, and a decision whose latest snapshot
+    is older than ``max_input_age_minutes`` at it has no inputs.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     minutes_before_kickoff: PositiveInt
+    max_input_age_minutes: PositiveInt
 
 
 def decision_time(kickoff: datetime, params: RuleParams) -> datetime:
     return kickoff - timedelta(minutes=params.minutes_before_kickoff)
+
+
+def max_input_age(params: RuleParams) -> timedelta:
+    return timedelta(minutes=params.max_input_age_minutes)
 
 
 class ExchangeGapParams(RuleParams):
@@ -52,8 +61,8 @@ def exchange_gap(state: MarketState, params: ExchangeGapParams) -> list[BetInten
     for outcome in market_outcomes(state.market):
         quotes = [
             (price, book)
-            for book, quote in state.retail.items()
-            if (price := quote.prices.get(outcome)) is not None
+            for book, prices in state.retail.items()
+            if (price := prices.get(outcome)) is not None
         ]
         if not quotes:
             continue
@@ -90,29 +99,36 @@ async def run_rule(
     ``kickoff`` overrides the event's current kick-off with the one a recorded decision saw.
     The returned state's ``snapshot_ids`` are the decision's inputs.
     """
-    state = await load_market_state(session, event, at, known_at)
+    state = await load_market_state(session, event, at, max_input_age(params), known_at)
     return apply_rule(spec, params, state, kickoff)
 
 
 def apply_rule(
     spec: RuleSpec, params: RuleParams, state: MarketState, kickoff: datetime | None = None
 ) -> tuple[MarketState, list[BetIntent]]:
-    """The rule's bets on ``state``, whose kick-off ``kickoff`` replaces when given."""
+    """The rule's bets on ``state``, whose kick-off ``kickoff`` replaces when given.
+
+    A state without inputs gives no bets, whatever the rule.
+    """
     if kickoff is not None:
         state = replace(state, kickoff=kickoff)
+    if not state.has_input:
+        return state, []
     return state, spec.function(state, params)
 
 
 def rule_sha256(rule_name: str) -> str:
     """Hash of the code a rule's bets depend on, in a fixed order.
 
-    The rule function, its params model, the market state module and the as-of module.
+    The rule function, its params model, the params every rule takes, the market state
+    module and the as-of module.
     """
     spec = RULES[rule_name]
     digest = hashlib.sha256()
     for source in (
         inspect.getsource(spec.function),
         inspect.getsource(spec.params_model),
+        inspect.getsource(RuleParams),
         inspect.getsource(market_state),
         inspect.getsource(as_of),
     ):
@@ -158,3 +174,25 @@ def validate_candidate_rules(candidates: Sequence[Candidate]) -> None:
                 f"a new candidate version must record the new hash "
                 f"(`odds candidates rule-hash {candidate.rule}` prints it)"
             )
+
+
+def decision_leads(candidates: Sequence[Candidate], sport: str) -> list[timedelta]:
+    """How long before kick-off each active mechanical candidate of ``sport`` decides.
+
+    A candidate whose rule or params do not resolve is left out; the run-candidates job
+    alerts on it.
+    """
+    leads: list[timedelta] = []
+    for candidate in candidates:
+        if (
+            not isinstance(candidate, MechanicalCandidate)
+            or candidate.sport != sport
+            or candidate.status != CandidateStatus.ACTIVE
+        ):
+            continue
+        try:
+            _, params = resolve_rule(candidate)
+        except ValueError:
+            continue
+        leads.append(timedelta(minutes=params.minutes_before_kickoff))
+    return leads

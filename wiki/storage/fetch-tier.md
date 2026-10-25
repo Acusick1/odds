@@ -35,7 +35,7 @@ A fetch tier labels an odds snapshot by how long before kickoff it was taken. `o
 | closing | 0-3 | 0.5 | critical line movement |
 | in_play | after kickoff | 0.5 | incidental collection |
 
-The boundaries in the table are `odds_lambda.fetch_tier.FetchTier.max_hours` and the intervals are `odds_lambda.fetch_tier.FetchTier.interval_hours`; the interval is read only by `odds_analytics.quality_metrics.QualityMetrics`; schedulers use each job's `odds_lambda.scheduling.decision.CadenceConfig`, which keeps these boundaries but sets its own intervals and its own check-in for a sport with no fixture ([Decision engine](../scheduling/decision-engine.md#cadence)).
+The boundaries in the table are `odds_lambda.fetch_tier.FetchTier.max_hours` and the intervals are `odds_lambda.fetch_tier.FetchTier.interval_hours`; the interval is read only by `odds_analytics.quality_metrics.QualityMetrics`; schedulers use each job's `odds_lambda.scheduling.decision.CadenceConfig`, which keeps these boundaries but sets its own intervals and its own check-in for a sport with no fixture ([Decision engine](../scheduling/decision-engine.md#cadence)); a job's extra runs before kickoffs are [lead runs](../scheduling/decision-engine.md#lead-runs), outside the cadence.
 
 ## Where tiers are written and read
 

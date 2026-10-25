@@ -51,6 +51,7 @@ class Coverage:
     """How much of the range the rule could act on."""
 
     events: int
+    with_input: int
     with_exchange: int
     with_retail: int
     with_bet: int
@@ -130,7 +131,7 @@ async def replay(
     events = await final_events(session, candidate.sport, start, end)
 
     bets: list[ScoredBet] = []
-    events_with_exchange = events_with_retail = events_with_bet = 0
+    events_with_input = events_with_exchange = events_with_retail = events_with_bet = 0
     for offset in range(0, len(events), EVENT_BATCH_SIZE):
         batch = events[offset : offset + EVENT_BATCH_SIZE]
         decided = []
@@ -138,6 +139,7 @@ async def replay(
             state, intents = await run_rule(
                 session, spec, params, event, decision_time(event.commence_time, params), None
             )
+            events_with_input += state.has_input
             events_with_exchange += state.exchange is not None
             events_with_retail += bool(state.retail)
             events_with_bet += bool(intents)
@@ -174,6 +176,7 @@ async def replay(
 
     coverage = Coverage(
         events=len(events),
+        with_input=events_with_input,
         with_exchange=events_with_exchange,
         with_retail=events_with_retail,
         with_bet=events_with_bet,
