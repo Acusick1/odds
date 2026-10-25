@@ -96,7 +96,7 @@ A single-market envelope (OddsPortal, Betfair, FDUK, Polymarket) is one snapshot
 |---|---|---|
 | `inserted` | no snapshot holds the key | the snapshot and its prices are added |
 | `identical` | the stored snapshot has the same time basis, market metadata and set of prices | nothing is written |
-| `conflicting` | anything differs | nothing is written; `odds_lambda.storage.data_quality.record_issue` logs `snapshot_key_conflict` and adds a `data_quality_logs` row naming the kept snapshot |
+| `conflicting` | anything differs | nothing is written; `odds_lambda.storage.data_quality.record_issue` logs `snapshot_key_conflict` (`odds_lambda.price_rows.RowIssueType.SNAPSHOT_KEY_CONFLICT`) and adds a `data_quality_logs` row naming the kept snapshot |
 
 Prices compare by value (`odds_lambda.storage.snapshot_store.PriceRow`, `odds_lambda.storage.snapshot_store.SnapshotMarketState`), so a float price equal to a stored decimal is the same price. The insert runs in a savepoint: when a concurrent writer stores the key first, the unique violation rolls back only this insert and the snapshot is compared with the stored one. It flushes and never commits.
 

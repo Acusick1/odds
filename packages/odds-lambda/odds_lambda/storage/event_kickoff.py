@@ -100,6 +100,34 @@ async def move_kickoff(
         and await _observed_by_another(session, event, source)
     ):
         return False
+    return await _move(session, event, source, start, now)
+
+
+async def settle_merged_kickoff(
+    session: AsyncSession,
+    event: Event,
+    starts: Mapping[Source, datetime],
+    *,
+    now: datetime,
+) -> Source | None:
+    """Give an event that twins were merged into the kick-off of the highest-ranked source in
+    its sport's order among ``starts`` (each source that observed one of the twins, with that
+    twin's stored kick-off). Twins' kick-offs are stored, not listings, so neither the
+    after-kick-off rule nor the outranking rule of ``move_kickoff`` applies. Returns the source
+    followed, ``None`` when no source in ``starts`` is in the order; re-times the snapshots and
+    returns a postponed event to scheduled as ``move_kickoff`` does when the start changes."""
+    order = KICKOFF_AUTHORITY.get(event.sport_key, ())  # type: ignore[call-overload]
+    source = next((s for s in order if s in starts), None)
+    if source is None:
+        return None
+    if ensure_utc(event.commence_time) != ensure_utc(starts[source]):
+        await _move(session, event, source, starts[source], now)
+    return source
+
+
+async def _move(
+    session: AsyncSession, event: Event, source: Source, start: datetime, now: datetime
+) -> bool:
     event_id = event.id
     moved_from = ensure_utc(event.commence_time)
     event.commence_time = start

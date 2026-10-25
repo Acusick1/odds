@@ -33,11 +33,11 @@ status: stable
    ```
 
 3. **Read the preflight.**
-   - The twin groups, the events to mark UNMATCHED and the external-id counts are what the event steps will write.
+   - The twin groups, the events to mark UNMATCHED and the external-id counts are what the event steps will write. A twin line with `deleted=` naming `candidate_decisions` or `paper_trades` stops the apply; decide on those decisions first, or pass `--allow-merge-drops` to let the merge delete them.
    - `duplicates over the new key` lists each snapshot whose key another holds; that market is dropped and archived ([duplicates](shape-backfill.md#snapshots)).
    - `referenced by decisions` must be 0: a decision's input that would be split or deleted stops the run.
    - Events with unmatched outcome names: run `odds events repair-names` for their sport, dry run first ([Event merge](event-merge.md#command)), then the preflight again. A backfilled snapshot is not read again.
-4. **Apply.** Batches commit one at a time and lock only their own rows, so the scheduler can keep running. `--map-out` keeps the old and new ids of every split snapshot.
+4. **Apply.** It plans again and stops before writing if a gate fails ([plan and gates](shape-backfill.md#plan-and-gates)). Batches commit one at a time, skip rows a live job holds and wait at most a moment for a lock, so the scheduler can keep running. `--map-out` keeps the old and new ids of every split snapshot. Its counts should equal the preflight's.
 
    ```bash
    uv run odds data backfill-shape --apply --oddsportal-dir data/external/oddsportal \
@@ -50,7 +50,7 @@ status: stable
    uv run odds data verify-shape > shape-verify.txt; echo "exit $?"
    ```
 
-6. **Run the backfill again.** Every count should be 0 or `held`/`already`: nothing is left to write. Then verify again.
+6. **Run the backfill again.** Every count should be 0 or `held`/`already`: nothing is left to write, including the snapshots a live job kept locked during step 4 (`left pending`). Then verify again.
 
    ```bash
    uv run odds data backfill-shape --apply > shape-apply-2.txt
@@ -59,7 +59,8 @@ status: stable
 
 ## When something fails
 
-- **The apply stops part-way** (an error, a lost connection, `Stopped: candidate decisions recorded snapshots …`): what it committed stays, and running it again continues from there. For a decision stop, find the decision with the listed snapshot ids and decide on it before rerunning.
+- **The apply stops before writing** (`Stopped: candidate decisions recorded snapshots …`, or twin merges that would delete decisions or trades): nothing was written. Find the decisions named and decide on them before rerunning.
+- **The apply stops part-way** (an error, a lost connection): what it committed stays, and running it again continues from there.
 - **Verify reports `no_source` or `no_payload`:** the backfill has not reached those snapshots; run it again.
 - **Verify reports another check:** the listed snapshots disagree with their `raw_data`. Leave the data in place, read the examples against [the checks](shape-backfill.md#verify), and fix the code before running anything else.
 - **The data is wrong and must be undone:** stop the scheduler, restore the dump into an empty `odds` database and start it again ([run the scheduler service](../scheduling/howto-run-scheduler-service.md)). Everything collected since the dump is lost.

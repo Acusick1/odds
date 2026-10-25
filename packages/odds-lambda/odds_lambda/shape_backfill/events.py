@@ -6,15 +6,16 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter, defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 
 from odds_core.event_ids import is_odds_api_event_id
-from odds_core.event_source import EventSource, canonical_event_id
-from odds_core.models import Event, EventExternalId, HealthCheckAcknowledgement
+from odds_core.event_source import canonical_event_id
+from odds_core.models import Event, EventExternalId, HealthCheckAcknowledgement, OddsSnapshot
+from odds_core.snapshot_sources import SnapshotSource
 from odds_core.time import ensure_utc
 from odds_core.vocabulary import HealthCheck, Source
 from sqlalchemy import select, text
@@ -22,32 +23,44 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.oddsportal_common import event_id_from_match_link, parse_match_date
 from odds_lambda.polymarket_matching import normalize_team
-from odds_lambda.storage.event_kickoff import KICKOFF_AUTHORITY
-from odds_lambda.storage.event_merge import EventMerger, retime_snapshots
+from odds_lambda.storage.event_kickoff import KICKOFF_AUTHORITY, settle_merged_kickoff
+from odds_lambda.storage.event_merge import EventMerger
 from odds_lambda.storage.event_resolver import (
+    IdDecision,
     ListedGame,
     MatchWindow,
     attach_events,
+    check_external_id,
     event_lock_key,
     lock_fixture,
     record_external_id,
 )
-from odds_lambda.storage.event_unmatched import events_holding_game_pks, mark_unmatched
+from odds_lambda.storage.event_unmatched import mark_unmatched
 
-# Fixtures whose locks one transaction takes before it commits.
-EVENTS_PER_COMMIT = 200
+# Fixtures whose locks one transaction holds before it commits, so a live writer waiting on one
+# waits for a few events only.
+EVENTS_PER_COMMIT = 50
+# Rows a merge deletes that record what a candidate did; deleting them needs --allow-merge-drops.
+DECISION_TABLES: frozenset[str] = frozenset({"candidate_decisions", "paper_trades"})
 
-_SOURCE_OF_ID: dict[EventSource, Source] = {
-    EventSource.ODDS_API: Source.ODDS_API,
-    EventSource.ODDSPORTAL_HISTORICAL: Source.ODDSPORTAL,
-    EventSource.ODDSPORTAL_LIVE: Source.ODDSPORTAL,
-    EventSource.FOOTBALL_DATA_UK: Source.FOOTBALL_DATA_UK,
+_TAG_SOURCES: dict[str | None, Source] = {
+    None: Source.ODDS_API,
+    SnapshotSource.ODDSPORTAL.value: Source.ODDSPORTAL,
+    SnapshotSource.ODDSPORTAL_LIVE.value: Source.ODDSPORTAL,
+    SnapshotSource.BETFAIR_API.value: Source.BETFAIR,
+    SnapshotSource.FOOTBALL_DATA_UK.value: Source.FOOTBALL_DATA_UK,
+    SnapshotSource.POLYMARKET.value: Source.POLYMARKET,
 }
+
+
+class MergeDropsRefused(RuntimeError):
+    """A twin merge would delete candidate decisions or paper trades."""
 
 
 @dataclass(frozen=True)
 class TwinMerge:
-    """One twin group: the event kept, the events merged into it, and its kick-off."""
+    """One twin group: the event kept, the events merged into it, its kick-off, the rows that
+    move to the kept event and the rows the merge deletes, per table."""
 
     kept_id: str
     merged_ids: tuple[str, ...]
@@ -58,77 +71,137 @@ class TwinMerge:
     rows_deleted: dict[str, int] = field(default_factory=dict)
     error: str | None = None
 
-
-def kickoff_source(event: Event, holds_game_pk: bool) -> Source:
-    """The source whose schedule an event's stored kick-off came from: the MLB Stats API for an
-    event holding a ``gamePk``, else the source that minted its id."""
-    if holds_game_pk:
-        return Source.MLB_STATS_API
-    return _SOURCE_OF_ID[EventSource.of(event.id)]
+    @property
+    def drops_decisions(self) -> bool:
+        return any(self.rows_deleted.get(table) for table in DECISION_TABLES)
 
 
-def plan_twin_merge(group: Sequence[Event], game_pk_holders: set[str]) -> TwinMerge:
-    """Keep the canonical event and give it the kick-off of the twin whose source ranks highest
-    in its sport's ``KICKOFF_AUTHORITY`` order (ties to the lowest surrogate id); with no twin
-    from a source in the order, the kept event's own."""
+async def observed_sources(session: AsyncSession, event: Event) -> set[Source]:
+    """The sources that hold an id on the event or stored a snapshot of it."""
+    held = await session.execute(
+        select(EventExternalId.source).where(EventExternalId.event_id == event.surrogate_id)
+    )
+    sources = set(held.scalars())
+    if event.mlb_game_pk is not None:
+        sources.add(Source.MLB_STATS_API)
+    stored = await session.execute(
+        select(OddsSnapshot.source, OddsSnapshot.raw_data["source"].as_string())  # type: ignore[index]
+        .where(OddsSnapshot.event_id == event.id)
+        .distinct()
+    )
+    for source, tag in stored.all():
+        if source is not None:
+            sources.add(source)
+        elif tag in _TAG_SOURCES:
+            sources.add(_TAG_SOURCES[tag])
+    return sources
+
+
+def kickoff_starts(
+    group: Sequence[Event], sources: Mapping[str, set[Source]]
+) -> dict[Source, datetime]:
+    """For each source that observed a twin, that twin's stored kick-off (the twin stored first
+    when several did)."""
+    starts: dict[Source, datetime] = {}
+    for event in sorted(group, key=lambda e: _stored_key(e)):
+        for source in sources[event.id]:
+            starts.setdefault(source, ensure_utc(event.commence_time))
+    return starts
+
+
+def _stored_key(event: Event) -> int:
+    if event.surrogate_id is None:
+        raise ValueError(f"event {event.id} is not stored")
+    return event.surrogate_id
+
+
+async def plan_twin_merge(merger: EventMerger, group: Sequence[Event]) -> TwinMerge:
+    """Keep the canonical event and give it the kick-off of the highest-ranked source in its
+    sport's ``KICKOFF_AUTHORITY`` order that observed a twin (``settle_merged_kickoff``); count
+    the rows that would move and those the merge would delete. Read-only."""
     keep_id = canonical_event_id([e.id for e in group])
     keep = next(e for e in group if e.id == keep_id)
+    duplicates = [e for e in group if e.id != keep_id]
+    sources = {e.id: await observed_sources(merger.session, e) for e in group}
+    starts = kickoff_starts(group, sources)
     order = KICKOFF_AUTHORITY.get(keep.sport_key, ())  # type: ignore[call-overload]
-    ranked = sorted(
-        (order.index(src), e.surrogate_id or 0, e, src)
-        for e in group
-        if (src := kickoff_source(e, e.id in game_pk_holders)) in order
-    )
-    source, start = (
-        (ranked[0][3], ranked[0][2].commence_time) if ranked else (None, keep.commence_time)
-    )
+    source = next((s for s in order if s in starts), None)
+    moved: dict[str, int] = {}
+    for duplicate in duplicates:
+        for table, count in (await merger.reference_counts(duplicate.id)).items():
+            moved[table] = moved.get(table, 0) + count
     return TwinMerge(
         kept_id=keep_id,
-        merged_ids=tuple(sorted(e.id for e in group if e.id != keep_id)),
+        merged_ids=tuple(sorted(e.id for e in duplicates)),
         kickoff_source=source,
         commence_from=ensure_utc(keep.commence_time),
-        commence_to=ensure_utc(start),
+        commence_to=starts[source] if source is not None else ensure_utc(keep.commence_time),
+        rows_moved=moved,
+        rows_deleted=await merger.merge_drops(keep, duplicates),
     )
 
 
-async def merge_twins(session: AsyncSession, *, apply: bool) -> list[TwinMerge]:
-    """Merge every twin group (same sport and teams within ±2 h) with ``EventMerger``, its clash
-    handling included, each group under its fixture lock in its own transaction. A group that
-    fails (different ``gamePk``s, a snapshot key both events hold) is rolled back and reported
-    with its error; the rest go ahead. Without ``apply`` nothing is written."""
+async def plan_twin_merges(session: AsyncSession) -> list[TwinMerge]:
+    """``plan_twin_merge`` for every twin group (same sport and teams within ±2 h). Read-only."""
     merger = EventMerger(session)
-    groups = [[e.id for e in group] for group in await merger.find_twin_groups()]
+    plans = [await plan_twin_merge(merger, group) for group in await merger.find_twin_groups()]
     await session.rollback()
-    merges: list[TwinMerge] = []
-    for ids in groups:
-        events = list(
-            (await session.execute(select(Event).where(Event.id.in_(ids)))).scalars()  # type: ignore[attr-defined]
+    return plans
+
+
+async def merge_twins(
+    session: AsyncSession, plans: Sequence[TwinMerge], *, allow_drops: bool
+) -> list[TwinMerge]:
+    """Merge the planned twin groups with ``EventMerger``, its clash handling included, each
+    under its fixture lock in its own transaction, and settle each kept event's kick-off through
+    ``settle_merged_kickoff``. A group that fails (different ``gamePk``s, a snapshot key both
+    events hold) is rolled back and reported with its error; the rest go ahead.
+
+    Raises:
+        MergeDropsRefused: before any merge, when a planned merge would delete candidate
+            decisions or paper trades and ``allow_drops`` is not set.
+    """
+    if not allow_drops and any(plan.drops_decisions for plan in plans):
+        raise MergeDropsRefused(
+            "twin merges would delete candidate decisions or paper trades: "
+            + "; ".join(
+                f"{p.kept_id} <- {p.merged_ids}: {p.rows_deleted}"
+                for p in plans
+                if p.drops_decisions
+            )
         )
-        if len(events) < 2:
-            await session.rollback()
-            continue
-        if apply:
+    merger = EventMerger(session)
+    merges: list[TwinMerge] = []
+    for planned in plans:
+        ids = [planned.kept_id, *planned.merged_ids]
+        try:
+            events = list(
+                (await session.execute(select(Event).where(Event.id.in_(ids)))).scalars()  # type: ignore[attr-defined]
+            )
+            if len(events) < 2:
+                await session.rollback()
+                continue
             await lock_fixture(session, events[0])
             for event in events:
                 await session.refresh(event)
-        plan = plan_twin_merge(events, await events_holding_game_pks(session, events))
-        if not apply:
-            merges.append(plan)
-            await session.rollback()
-            continue
-        try:
+            plan = await plan_twin_merge(merger, events)
+            if plan.drops_decisions and not allow_drops:
+                raise MergeDropsRefused(f"{plan.kept_id} <- {plan.merged_ids}: {plan.rows_deleted}")
+            sources = {e.id: await observed_sources(session, e) for e in events}
+            starts = kickoff_starts(events, sources)
             keep = next(e for e in events if e.id == plan.kept_id)
-            keep.commence_time = plan.commence_to
             report = await merger.merge(keep, [e for e in events if e.id != plan.kept_id])
-            if plan.commence_to != plan.commence_from:
-                await retime_snapshots(session, keep.id, plan.commence_to)
+            await settle_merged_kickoff(session, keep, starts, now=datetime.now(UTC))
             await session.commit()
             merges.append(
                 replace(plan, rows_moved=report.rows_moved, rows_deleted=report.rows_deleted)
             )
+        except MergeDropsRefused:
+            await session.rollback()
+            raise
         except Exception as exc:  # noqa: BLE001 - reported per group, the others go ahead
             await session.rollback()
-            merges.append(replace(plan, error=repr(exc)))
+            merges.append(replace(planned, error=repr(exc)))
     return merges
 
 
@@ -141,16 +214,18 @@ class UnmatchedReport:
 async def migrate_unmatched(session: AsyncSession, *, apply: bool) -> UnmatchedReport:
     """Give every event carrying ``no_game_pk_reason`` the UNMATCHED status and its reason as a
     ``missing_mlb_game_pk`` acknowledgement (``mark_unmatched``; a final event keeps its status).
-    An event already acknowledged with the same reason is left alone. The column stays until
-    settlement and the health check read the status. Without ``apply`` nothing is written."""
+    An event already acknowledged with the same reason is left alone. The column is left in
+    place. Without ``apply`` nothing is written."""
     report = UnmatchedReport()
-    events = list(
-        (
+    events = [
+        event
+        for event in (
             await session.execute(
                 select(Event).where(Event.no_game_pk_reason.is_not(None)).order_by(Event.id)  # type: ignore[union-attr]
             )
         ).scalars()
-    )
+        if event.no_game_pk_reason is not None
+    ]
     acknowledged = {
         (row.event_id, row.reason)
         for row in (
@@ -164,7 +239,8 @@ async def migrate_unmatched(session: AsyncSession, *, apply: bool) -> UnmatchedR
     for event in sorted(
         events, key=lambda e: event_lock_key(e.sport_key, e.home_team, e.away_team)
     ):
-        reason = (event.no_game_pk_reason or "").strip()
+        assert event.no_game_pk_reason is not None
+        reason = event.no_game_pk_reason.strip()
         if (event.surrogate_id, reason) in acknowledged:
             report.already += 1
             continue
@@ -282,7 +358,7 @@ async def record_stored_ids(
             await lock_fixture(session, event)
         assert event.surrogate_id is not None
         for stored in by_event[event.id]:
-            outcome = await _id_outcome(session, event.surrogate_id, stored, holders, held_sources)
+            outcome = await _id_outcome(session, event, stored, holders, held_sources)
             report.outcomes[(stored.source, outcome)] += 1
             if outcome is IdOutcome.REFUSED:
                 report.refused.append(stored)
@@ -304,28 +380,26 @@ async def record_stored_ids(
 
 async def _id_outcome(
     session: AsyncSession,
-    event_key: int,
+    event: Event,
     stored: StoredId,
-    holders: dict[tuple[Source, str], int],
+    holders: Mapping[tuple[Source, str], int],
     held_sources: set[tuple[int, Source]],
 ) -> IdOutcome:
+    """The resolver's decision (``check_external_id``), with what this run recorded before
+    ``stored`` laid over it so that a run writing nothing counts as one that writes."""
+    assert event.surrogate_id is not None
     holder = holders.get((stored.source, stored.external_id))
-    if holder is None:
-        row = await session.get(EventExternalId, (stored.source, stored.external_id))
-        holder = row.event_id if row is not None else None
-    if holder == event_key:
+    if holder is not None:
+        return IdOutcome.HELD if holder == event.surrogate_id else IdOutcome.REFUSED
+    check = await check_external_id(session, event, stored.source, stored.external_id)
+    if check.decision is IdDecision.HELD:
         return IdOutcome.HELD
-    holds_source = (event_key, stored.source) in held_sources or (
-        await session.execute(
-            select(EventExternalId.external_id).where(
-                EventExternalId.event_id == event_key, EventExternalId.source == stored.source
-            )
-        )
-    ).first() is not None
-    if holds_source and stored.source is Source.ODDS_API and holder is None:
-        return IdOutcome.KEPT_CURRENT
-    if holder is not None or holds_source:
+    if check.refused:
         return IdOutcome.REFUSED
+    if check.decision is IdDecision.REPLACES:
+        return IdOutcome.KEPT_CURRENT
+    if (event.surrogate_id, stored.source) in held_sources:
+        return IdOutcome.KEPT_CURRENT if stored.source is Source.ODDS_API else IdOutcome.REFUSED
     return IdOutcome.NEW
 
 

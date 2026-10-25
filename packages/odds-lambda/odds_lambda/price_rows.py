@@ -83,6 +83,8 @@ class RowIssueType(StrEnum):
     UNMATCHED_OUTCOME = "unmatched_outcome"
     UNKNOWN_MARKET = "unknown_market"
     UNKNOWN_MARKET_STATUS = "unknown_market_status"
+    # A market whose snapshot key another snapshot already holds.
+    SNAPSHOT_KEY_CONFLICT = "snapshot_key_conflict"
 
 
 @dataclass(frozen=True)

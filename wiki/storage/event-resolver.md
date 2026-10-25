@@ -70,7 +70,7 @@ Code that changes a stored event's identity outside the resolver takes the same 
 
 ## Refused ids
 
-An id is recorded only when neither the event nor the id is already taken. The resolver refuses it, logging `external_id_refused` and adding a `data_quality_logs` row through `odds_lambda.storage.data_quality.record_issue`, when:
+An id is recorded only when neither the event nor the id is already taken. `odds_lambda.storage.event_resolver.check_external_id` decides, read-only, what recording an id would do (`odds_lambda.storage.event_resolver.IdDecision`), and the resolver acts on it. It refuses the id, logging `external_id_refused` and adding a `data_quality_logs` row through `odds_lambda.storage.data_quality.record_issue`, when:
 
 - the event already holds a different id from that source (except the Odds API, below), or
 - another event holds the id.

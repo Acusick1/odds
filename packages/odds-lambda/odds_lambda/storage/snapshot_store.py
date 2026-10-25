@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from odds_lambda.price_rows import RowIssueType
 from odds_lambda.storage.data_quality import record_issue
 
 
@@ -154,7 +155,7 @@ def _log_conflict(session: AsyncSession, held: OddsSnapshot, snapshot: OddsSnaps
     record_issue(
         session,
         snapshot.event_id,
-        "snapshot_key_conflict",
+        RowIssueType.SNAPSHOT_KEY_CONFLICT.value,
         f"{snapshot.source} {snapshot.market} snapshot at {snapshot_time} differs from stored "
         f"snapshot {held.id}; the stored one is kept",
         {

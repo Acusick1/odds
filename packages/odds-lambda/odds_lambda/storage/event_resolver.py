@@ -439,6 +439,53 @@ async def _record_game_pk(session: AsyncSession, event: Event, game_pk: int) -> 
             await session.flush()
 
 
+class IdDecision(StrEnum):
+    """What recording an id a source issued would do to a stored event."""
+
+    HELD = "held"
+    NEW = "new"
+    # The Odds API reissues ids; the event's current one replaces the old.
+    REPLACES = "replaces"
+    HELD_ELSEWHERE = "held_elsewhere"
+    OTHER_ID = "other_id"
+
+
+@dataclass(frozen=True)
+class ExternalIdCheck:
+    """``decision``, with the other event's key (``HELD_ELSEWHERE``) or the event's current id
+    from the source (``REPLACES``, ``OTHER_ID``)."""
+
+    decision: IdDecision
+    other: int | str | None = None
+
+    @property
+    def refused(self) -> bool:
+        return self.decision in (IdDecision.HELD_ELSEWHERE, IdDecision.OTHER_ID)
+
+
+async def check_external_id(
+    session: AsyncSession, event: Event, source: Source, external_id: str
+) -> ExternalIdCheck:
+    """What recording ``external_id`` as ``source``'s id for ``event`` would do: one id per
+    source per event (the Odds API's replaces the old) and one event per id. Read-only."""
+    held = await session.get(EventExternalId, (source, external_id))
+    if held is not None:
+        if held.event_id == event.surrogate_id:
+            return ExternalIdCheck(IdDecision.HELD)
+        return ExternalIdCheck(IdDecision.HELD_ELSEWHERE, held.event_id)
+    result = await session.execute(
+        select(EventExternalId.external_id).where(
+            EventExternalId.event_id == event.surrogate_id, EventExternalId.source == source
+        )
+    )
+    current = result.scalar_one_or_none()
+    if current is None:
+        return ExternalIdCheck(IdDecision.NEW)
+    if source is Source.ODDS_API:
+        return ExternalIdCheck(IdDecision.REPLACES, current)
+    return ExternalIdCheck(IdDecision.OTHER_ID, current)
+
+
 async def _record_external_id(
     session: AsyncSession,
     event: Event,
@@ -447,25 +494,29 @@ async def _record_external_id(
     *,
     log_repeats: bool = True,
 ) -> bool:
-    """Record ``external_id`` as ``source``'s id for ``event``; whether the event now holds it.
-    A refusal already logged for the event is logged again only with ``log_repeats``."""
-    held = await session.get(EventExternalId, (source, external_id))
-    if held is not None:
-        if held.event_id == event.surrogate_id:
-            return True
+    """Record ``external_id`` as ``source``'s id for ``event`` (``check_external_id``'s rules);
+    whether the event now holds it. A refusal already logged for the event is logged again only
+    with ``log_repeats``."""
+    check = await check_external_id(session, event, source, external_id)
+    if check.decision is IdDecision.HELD:
+        return True
+    if check.decision is IdDecision.HELD_ELSEWHERE:
         await _refuse(
-            session, event, source, external_id, f"held by event key {held.event_id}", log_repeats
+            session, event, source, external_id, f"held by event key {check.other}", log_repeats
         )
         return False
-    result = await session.execute(
-        select(EventExternalId.external_id).where(
-            EventExternalId.event_id == event.surrogate_id, EventExternalId.source == source
+    if check.decision is IdDecision.OTHER_ID:
+        await _refuse(
+            session,
+            event,
+            source,
+            external_id,
+            f"the event holds {source.value} id {check.other}",
+            log_repeats,
         )
-    )
-    current = result.scalar_one_or_none()
-    if current is not None and source is Source.ODDS_API:
-        # The API reissues ids; the event's current one replaces the old.
-        stale = await session.get(EventExternalId, (source, current))
+        return False
+    if check.decision is IdDecision.REPLACES:
+        stale = await session.get(EventExternalId, (source, check.other))
         assert stale is not None
         await session.delete(stale)
         await session.flush()
@@ -473,19 +524,9 @@ async def _record_external_id(
             session,
             event.id,
             "external_id_replaced",
-            f"{source.value} id {current} replaced by {external_id}",
-            {"source": source.value, "old_external_id": current, "external_id": external_id},
+            f"{source.value} id {check.other} replaced by {external_id}",
+            {"source": source.value, "old_external_id": check.other, "external_id": external_id},
         )
-    elif current is not None:
-        await _refuse(
-            session,
-            event,
-            source,
-            external_id,
-            f"the event holds {source.value} id {current}",
-            log_repeats,
-        )
-        return False
     assert event.surrogate_id is not None
     session.add(
         EventExternalId(source=source, external_id=external_id, event_id=event.surrogate_id)

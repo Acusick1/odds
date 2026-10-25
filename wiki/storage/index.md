@@ -54,7 +54,7 @@ Every table is a SQLModel class in `packages/odds-core/odds_core/`; migrations a
 - [OddsReader](odds-reader.md) — Every OddsReader query, which read normalized rows and which re-parse raw_data, and the time-window semantics.
 - [OddsWriter](odds-writer.md) — store_odds_snapshot (envelope, odds rows and price rows), event status updates, logging helpers, and their edge cases.
 - [Prices and snapshot payloads tables](price-tables.md) — The prices and snapshot_payloads tables, the closed sets their text columns take, how writers fill them from each source's envelope, and the policy store_snapshot applies when a snapshot's key is already stored.
-- [Shape backfill and verify](shape-backfill.md) — What odds data backfill-shape writes for stored history (twin merges, UNMATCHED events, external ids, snapshot source, market, time basis, payloads, price rows and Odds API splits, legacy Polymarket prices), how it tells sources apart, its duplicate and decision rules, and what odds data verify-shape checks.
+- [Shape backfill and verify](shape-backfill.md) — What odds data backfill-shape writes for stored history (twin merges, UNMATCHED events, external ids, snapshot source, market, time basis, payloads, price rows and Odds API splits, legacy Polymarket prices), how it tells sources apart, the read-only plan and the gates that stop it before any write, its duplicate rule, and what odds data verify-shape checks.
 - [Storage layer](storage-layer.md) — The odds_lambda.storage module map, the commit and flush contract, and the upsert/insert/store verbs.
 
 ### Explanation

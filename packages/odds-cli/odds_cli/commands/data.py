@@ -10,6 +10,7 @@ from typing import Annotated
 import typer
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
+from odds_lambda.shape_backfill.events import MergeDropsRefused
 from odds_lambda.shape_backfill.run import BackfillRun, run_backfill
 from odds_lambda.shape_backfill.snapshots import SplitSnapshotReferenced, capture_cutoff
 from odds_lambda.shape_backfill.verify import VerifyReport, verify_shape
@@ -112,10 +113,12 @@ def _print_run(run: BackfillRun, apply: bool) -> None:
             ("odds rows deleted", s.odds_deleted),
             ("odds rows of no stored market", s.odds_unplaced),
             ("referenced by decisions (split or deleted)", len(s.referenced)),
+            ("malformed raw_data (left, not shaped)", len(s.malformed)),
+            ("left pending (locked by a live writer)", s.pending_left),
         ]
         + [(f"kind {src.value}/{basis.value}", n) for (src, basis), n in sorted(s.by_kind.items())]
         + [(f"market {src.value}/{m.value}", n) for (src, m), n in sorted(s.by_market.items())]
-        + [(f"issue {kind}", n) for kind, n in sorted(s.issues.items())],
+        + [(f"issue {kind.value}", n) for kind, n in sorted(s.issues.items())],
     )
     for conflict in s.conflicts[:50]:
         console.print(
@@ -132,6 +135,8 @@ def _print_run(run: BackfillRun, apply: bool) -> None:
             console.print(f"    {event_id} ({source.value}): {n}")
     if s.referenced:
         console.print(f"  [red]referenced snapshots: {s.referenced[:50]}[/red]")
+    if s.malformed:
+        console.print(f"  [red]malformed snapshots: {s.malformed[:50]}[/red]")
 
     p = run.legacy_polymarket
     _counts(
@@ -162,6 +167,7 @@ async def _backfill(
     limit: int | None,
     oddsportal_dir: Path | None,
     map_out: Path | None,
+    allow_merge_drops: bool,
 ) -> None:
     started = time.monotonic()
     if apply:
@@ -173,6 +179,7 @@ async def _backfill(
                 limit=limit,
                 oddsportal_dir=oddsportal_dir,
                 map_out=map_out,
+                allow_merge_drops=allow_merge_drops,
             )
     else:
         async with _read_only_session() as session:
@@ -206,6 +213,13 @@ def backfill_shape(
         Path | None,
         typer.Option(help="Append each split snapshot's old and new ids here as JSON lines"),
     ] = None,
+    allow_merge_drops: Annotated[
+        bool,
+        typer.Option(
+            "--allow-merge-drops",
+            help="Let twin merges delete clashing candidate decisions and paper trades",
+        ),
+    ] = False,
 ) -> None:
     """Move stored history into the new snapshot, price and event-identity shape.
 
@@ -224,8 +238,8 @@ def backfill_shape(
             f"{oddsportal_dir} is not a directory", param_hint="--oddsportal-dir"
         )
     try:
-        asyncio.run(_backfill(apply, batch_size, limit, oddsportal_dir, map_out))
-    except SplitSnapshotReferenced as exc:
+        asyncio.run(_backfill(apply, batch_size, limit, oddsportal_dir, map_out, allow_merge_drops))
+    except (SplitSnapshotReferenced, MergeDropsRefused) as exc:
         console.print(f"[red]Stopped: {exc}[/red]")
         raise typer.Exit(2) from exc
 
@@ -238,6 +252,9 @@ def _print_verify(report: VerifyReport) -> None:
             ("price rows", report.prices),
             ("odds rows", report.odds_rows),
             ("empty envelopes (no market)", report.empty),
+            ("archived envelopes checked", report.payloads_checked),
+            ("payloads not checked (run lists, unreferenced)", report.payloads_unchecked),
+            ("odds rows without a snapshot", report.orphan_odds),
         ]
         + [
             (f"{source.value if source else 'no source'}/{market.value if market else '-'}", n)
