@@ -22,7 +22,7 @@ Every move of an [event](events.md)'s `commence_time` on behalf of a source goes
 | `soccer_epl` | OddsPortal (`oddsportal`), then Odds API (`odds_api`), then football-data.co.uk (`football_data_uk`) |
 | `basketball_nba` | OddsPortal (`oddsportal`), then Odds API (`odds_api`) |
 
-A source outside its sport's order never moves an event: Betfair, Polymarket and ESPN move no EPL or NBA event, and football-data.co.uk moves no NBA event. A source in the order moves an event only when no source ranked above it holds an external id on that event ([external ids](events.md#external-ids)), so the Odds API moves an EPL or NBA event only while it holds no OddsPortal id, and football-data.co.uk moves an EPL event only while it holds neither an OddsPortal nor an Odds API id.
+A source outside its sport's order never moves an event: Betfair, Polymarket and ESPN move no EPL or NBA event, and football-data.co.uk moves no NBA event. A source in the order moves an event only when no source ranked above it holds an external id on that event ([external ids](events.md#external-ids)), so the Odds API moves an EPL or NBA event only while it holds no OddsPortal id, and football-data.co.uk moves an EPL event only while it holds neither an OddsPortal nor an Odds API id and no other source has a snapshot on it (see [Before and after the stored kick-off](#before-and-after-the-stored-kick-off)).
 
 ## Basis for the EPL and NBA order
 
@@ -49,7 +49,7 @@ For every source except those in `odds_lambda.storage.event_kickoff.PLAYED_START
 - **Before the stored kick-off** (`now` earlier), the rank rule above applies.
 - **Once it has passed**, a start at or before `now` is refused, since a live feed reports the actual start. A start still ahead is accepted from any source in the order, whatever ids the event holds, so a postponement the top source stopped listing is still followed.
 
-The MLB Stats API and football-data.co.uk are the sources in `odds_lambda.storage.event_kickoff.PLAYED_START_SOURCES`. The MLB schedule dates a postponed game by when it was played, and football-data.co.uk records the kick-off of a match already played, so each may move an event to a start in the past and skips the after-kick-off rule. The rank rule still applies to them.
+The MLB Stats API and football-data.co.uk are the sources in `odds_lambda.storage.event_kickoff.PLAYED_START_SOURCES`. The MLB schedule dates a postponed game by when it was played, and football-data.co.uk records the kick-off of a match already played, so each may move an event to a start in the past and skips the after-kick-off rule. The rank rule still applies to them. A source in that set that the order ranks below another (football-data.co.uk for EPL) moves only an event no other source has observed, because the events stored before external ids were recorded hold none: every snapshot of the event must have `source` equal to it, or, for a snapshot with no `source`, a `raw_data` tag equal to it (`odds_lambda.storage.event_kickoff._observed_by_another`; no tag is the Odds API). An event with no snapshots qualifies.
 
 ## A move
 

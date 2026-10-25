@@ -303,9 +303,7 @@ class TestMatchedAndAmbiguousEvents:
         assert stats.events_matched == 1
 
     @pytest.mark.asyncio
-    async def test_moves_the_kickoff_of_an_event_no_higher_source_holds_an_id_on(
-        self, pglite_async_session
-    ) -> None:
+    async def test_moves_the_kickoff_of_an_fduk_only_event(self, pglite_async_session) -> None:
         session = pglite_async_session
         session.add(_event(FDUK_ID, datetime(2024, 8, 17, 12, 30, tzinfo=UTC)))
         await session.flush()
@@ -318,6 +316,24 @@ class TestMatchedAndAmbiguousEvents:
         assert event.commence_time == datetime(2024, 8, 17, 11, 30, tzinfo=UTC)
         closes = [s for s in await _snaps(session, FDUK_ID) if s.time_basis is TimeBasis.CLOSE]
         assert [s.snapshot_time for s in closes] == [event.commence_time]
+
+    @pytest.mark.asyncio
+    async def test_leaves_the_kickoff_of_an_oddsportal_only_event_that_holds_no_id(
+        self, pglite_async_session
+    ) -> None:
+        session = pglite_async_session
+        listed = datetime(2024, 8, 17, 12, 30, tzinfo=UTC)
+        session.add(_event(OP_ID, listed))
+        session.add(_snapshot(OP_ID, "oddsportal", listed - timedelta(hours=5)))
+        await session.flush()
+
+        stats = FdukStats()
+        await ingest_row(session, ROW, "2024-2025", stats)
+        await session.flush()
+
+        event = await session.get(Event, OP_ID)
+        assert event is not None and event.commence_time == listed
+        assert stats.kickoff_mismatches == 1
 
     @pytest.mark.asyncio
     async def test_leaves_the_kickoff_of_an_event_oddsportal_holds_an_id_on(

@@ -44,7 +44,7 @@ Then it records the ids and moves the kick-off:
 
 - The source's id, when the game has one.
 - For MLB, the `gamePk` as an `mlb_stats_api` id; an event recording it that has no `mlb_game_pk` also takes it there (`odds_core.models.Event.assign_game_pk`).
-- `odds_lambda.storage.event_kickoff.move_kickoff` once, with the current time as the clock (the MLB Stats API and football-data.co.uk may move an event to a past start): for MLB with the MLB Stats API and the schedule's start; for other sports with the source and its listed start. `odds_lambda.storage.event_kickoff.move_kickoff` alone decides whether it moves: only a sport's schedule authority moves the event, and an in-play start after the stored kick-off is refused ([Kick-off authority](kickoff-authority.md)).
+- `odds_lambda.storage.event_kickoff.move_kickoff` once, with the current time as the clock (the MLB Stats API and football-data.co.uk may move an event to a past start): for MLB with the MLB Stats API and the schedule's start; for other sports with the source and its listed start. `odds_lambda.storage.event_kickoff.move_kickoff` alone decides whether it moves: only a sport's schedule authority moves the event, and an in-play start after the stored kick-off is refused, and football-data.co.uk moves only an event no other source has a snapshot on ([Kick-off authority](kickoff-authority.md)).
 
 It flushes and never commits ([Commit contract](storage-layer.md#commit-contract)).
 
