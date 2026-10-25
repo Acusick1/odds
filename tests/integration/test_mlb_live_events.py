@@ -792,7 +792,10 @@ class TestRescheduledGame:
             (
                 await job_session.execute(
                     select(OddsSnapshot)
-                    .where(OddsSnapshot.snapshot_time < postponed_slot)
+                    .where(
+                        OddsSnapshot.snapshot_time >= postponed_slot - timedelta(minutes=20),
+                        OddsSnapshot.snapshot_time < postponed_slot,
+                    )
                     .order_by(OddsSnapshot.snapshot_time)
                 )
             )
