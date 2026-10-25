@@ -29,7 +29,7 @@ It requires `ctx.sport` (a missing sport raises `ValueError` before any work) an
 3. **Pre-schedule** under the compound name; a failed booking sends a `scheduling_warning:<job>` warning when another booking is still to come or has succeeded, and a `scheduling_failure:<job>` critical when none survives (a skipped run's only booking, or a post-fetch booking after a failed pre-schedule; [alerts](../operations/alerts.md#delivery)). The rest of the run is inside [`odds_core.alerts.job_alert_context`](../operations/alerts.md#delivery) under that name, so a gated run also writes a heartbeat.
 4. **Skip** if the gate says so; otherwise **ingest**: `odds_lambda.ingestion.OddsIngestionService.ingest_sports`.
 5. **Quota alerts**: none; the health monitor is the only writer ([odds-api-quota](odds-api-quota.md)).
-6. **Empty-run check**: `odds_lambda.collection_calendar.require_rows_for_fixtures` raises `odds_lambda.collection_calendar.EmptyCollectionError` for an EPL run that stored no snapshot while a SCHEDULED fixture lies within 48 hours (`odds_lambda.jobs.fetch_odds.SOURCE`; sports it does not cover are skipped); the failure handler below sends the critical.
+6. **Empty-run check**: `odds_lambda.collection_calendar.require_rows_for_fixtures` raises `odds_lambda.collection_calendar.EmptyCollectionError` for an EPL run that stored no snapshot while a SCHEDULED fixture lies within 48 hours (`odds_lambda.jobs.fetch_odds.SOURCE`; sports it does not cover are skipped, and it passes no `accounted_by_sport`); the failure handler below sends the critical.
 7. **Post-schedule** after re-querying the next kickoff.
 
 ## Failure behaviour
