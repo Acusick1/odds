@@ -3,8 +3,8 @@ type: explanation
 title: Decision time and look-ahead bias
 description: The as-of instant for bets and training rows, the no-future-data rule per layer, and where it breaks.
 sources:
-  - odds_analytics.backtesting.config.BacktestConfig
-  - odds_analytics.backtesting.services.BacktestEngine
+  - odds_analytics.candidate_backtest.replay
+  - odds_lambda.candidate_rules.market_state.load_market_state
   - odds_analytics.feature_groups.TierSampler
   - odds_analytics.feature_groups.TimeRangeSampler
   - odds_analytics.retail_ev.build_event_rows
@@ -21,7 +21,7 @@ Decision time is the instant a prediction or bet is assumed to be made. Everythi
 
 ## Backtests
 
-`odds_analytics.backtesting.config.BacktestConfig.decision_hours_before_game` sets the lead time ([backtest engine](../evaluation/backtest-engine.md#event-loop) has the default). `odds_analytics.backtesting.services.BacktestEngine.run` computes the decision time as the commence time minus `odds_analytics.backtesting.config.BacktestConfig.decision_hours_before_game` and calls `odds_lambda.storage.readers.OddsReader.get_odds_at_time` with a hard-coded tolerance ([odds at a point in time](../storage/odds-reader.md#odds-at-a-point-in-time)). The CLI exposes no flag for the lead time.
+`odds_analytics.candidate_backtest.replay` decides each event at `odds_lambda.candidate_rules.rules.decision_time` before its kick-off and builds the market state with `odds_lambda.candidate_rules.market_state.load_market_state`, which reads only snapshots stamped at or before that time ([replay backtest](../evaluation/candidate-backtest.md#replay)). `odds_lambda.storage.readers.OddsReader.get_odds_at_time` is a separate reader for other analyses ([odds at a point in time](../storage/odds-reader.md#odds-at-a-point-in-time)).
 
 ## Training
 
@@ -34,7 +34,7 @@ The pregame window is the documented default because sharp-retail divergence pea
 
 ## No future data, layer by layer
 
-- **Backtest odds.** As above: `odds_lambda.storage.readers.OddsReader.get_odds_at_time` within its tolerance of the decision time.
+- **Backtest odds.** As above: snapshots stamped at or before the decision time, within `odds_lambda.candidate_rules.market_state.SNAPSHOT_LOOKBACK` of it.
 - **Polymarket odds.** `odds_lambda.storage.polymarket_reader.PolymarketReader.get_price_at_time` and `odds_lambda.storage.polymarket_reader.PolymarketReader.get_orderbook_at_time` only return snapshots at or before the target.
 - **Sampling.** `odds_analytics.feature_groups.TierSampler` excludes `IN_PLAY` snapshots unless that is the decision tier. Including them leaked post-kickoff odds and produced a spurious R² of +0.45 (commit 2a84d88).
 - **Retail-EV rows.** `odds_analytics.retail_ev.build_event_rows` takes each row's retail prices from the row's own snapshot at t, the exchange and Polymarket prices from the latest snapshots at or before t, and the lagged prices of the `dynamics` group from the latest snapshots of the same source at or before t − Δ; only the target's close, a live Betfair snapshot priced for every outcome within `odds_core.betfair_close.LIVE_CLOSE_WINDOW` before kick-off or the FDUK closing price (`odds_core.betfair_close.event_close`), lies after t. The FDUK closing price is treated as taken at kick-off, so it never stands in for a price at t. The schedule and standings groups count a match only once its result is known at t (`odds_analytics.as_of_team_features.results_known_before`). An FDUK opening row's t is FDUK's latest documented collection time, an upper bound: the price was taken at or before it, possibly a day or more earlier ([historical ingest scripts](../collection/historical-ingest-scripts.md#snapshot-shape)). So such a row takes no other source's price at t: its exchange price, for the baseline too, is its own snapshot's or the row is dropped (a `residual` arm takes that same `odds_analytics.retail_ev.BASELINE_FEATURE` value as its base margin), and it gets no Polymarket price, lagged exchange price, schedule or standings (`odds_core.as_of.UPPER_BOUND_TIME_KINDS`). #548 shows the leak this rule prevents: Polymarket prices at the FDUK stamp predicted those rows' residual, and shifting them back 3 hours removed the gain. Unit tests in `tests/unit/test_retail_ev.py` rebuild the groups from truncated data and require the same features: `TestNoLookAhead` rebuilds the rows and price groups at every retail snapshot time in the window from the snapshots at or before it plus the close; `TestTeamFeaturesAsOfT` rebuilds the schedule and standings groups at a fixed set of decision times, including times during and just after a match played between t and kick-off, from only the matches finished by then. The event-level feature groups are refused for `retail_ev` (next item), and walk-forward folds leave a 7-day gap so no training close falls after a validation decision ([cross-validation](cross-validation.md#how-folds-are-built), [target functions](clv-target-functions.md#retail-ev-rows)).
@@ -44,14 +44,13 @@ The pregame window is the documented default because sharp-retail divergence pea
 
 ## Where the rule breaks
 
-- **`odds_lambda.storage.readers.OddsReader.get_odds_at_time` is symmetric.** It searches either side of the target and returns the closest `odds_timestamp` by absolute distance, so it can return odds up to the tolerance after the decision time. The backtest engine passes a tolerance that is a large share of its default lead time, so post-decision odds can win (#435; [odds reader](../storage/odds-reader.md#odds-at-a-point-in-time)). The Polymarket readers are backward-only and their docstrings claim the same guarantee as the main reader.
-- **Strategies get an unfenced session**, so a strategy can query any time ([backtest engine](../evaluation/backtest-engine.md), #435).
+- **`odds_lambda.storage.readers.OddsReader.get_odds_at_time` is symmetric.** It searches either side of the target and returns the closest `odds_timestamp` by absolute distance, so it can return odds up to the tolerance after the decision time (#435; [odds reader](../storage/odds-reader.md#odds-at-a-point-in-time)). The replay backtest does not use it. The Polymarket readers are backward-only and their docstrings claim the same guarantee as the main reader.
 - **Tier fallback dilutes the window.** A `pregame` request also accepts sharp, early and opening snapshots, so an event with no pregame snapshot is sampled at an earlier tier.
-- **Backtest and training differ.** Backtests default to a short lead time ([backtest engine](../evaluation/backtest-engine.md#event-loop)) while a model is trained on the windows above. A model-driven strategy evaluated at its short lead time sees inputs unlike its training rows `(inferred)` ([line-movement models](line-movement-models.md)).
+- **Backtest and training differ.** A rule replays at its own lead time ([replay backtest](../evaluation/candidate-backtest.md)) while a model is trained on the windows above, so a model evaluated at a different lead time sees inputs unlike its training rows `(inferred)`.
 - **Lineup features cannot be used.** They would need the starting XI, which is public about an hour before kick-off, after every training decision tier (#481, [ADR-0006](../../docs/adr/0006-lineups-from-web-research.md)).
 
 ## Related
 
 - [Cross-validation](cross-validation.md): training-side temporal ordering
 - [NBA injuries and stats](../collection/nba-injuries-and-stats.md): injury timing
-- [Run a backtest](../evaluation/howto-run-backtest.md): data prerequisites
+- [Replay backtest](../evaluation/candidate-backtest.md): the decision state a replay builds

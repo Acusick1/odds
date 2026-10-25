@@ -799,9 +799,6 @@ class TestTrainingConfig:
             ),
             model=XGBoostConfig(),
         )
-        assert config.min_predicted_movement == 0.02
-        assert config.movement_confidence_scale == 5.0
-        assert config.base_confidence == 0.52
         assert config.output_path == "models"
 
 

@@ -44,8 +44,9 @@ class Verdict(StrEnum):
 
 
 @dataclass(frozen=True)
-class ScoredTrade:
-    """A non-void candidate trade and the devigged close probability of its selection."""
+class ScoredBet:
+    """A non-void candidate bet, a paper trade or a replayed one, with the devigged close
+    probability of its selection."""
 
     candidate_name: str
     candidate_version: int
@@ -97,21 +98,21 @@ class CandidateSummary:
 
 
 def selection_close_probability(
-    trade: PaperTrade, event: Event, snapshots: Sequence[OddsSnapshot]
+    market: str, selection: str, event: Event, snapshots: Sequence[OddsSnapshot]
 ) -> float | None:
-    """Close probability of the trade's selection; None where no close is defined or exists.
+    """Close probability of the selection; None where no close is defined or exists.
 
     Only the 1x2 market has a close (MLB's two-way market has none).
     """
-    if trade.market != THREE_WAY_MARKET:
+    if market != THREE_WAY_MARKET:
         return None
-    close = event_close(event, snapshots, trade.market)
+    close = event_close(event, snapshots, market)
     if close is None:
         return None
-    return close.fair[Outcome(trade.selection)]
+    return close.fair[Outcome(selection)]
 
 
-def checkpoint_at(scored: Sequence[ScoredTrade], n: int, n_boot: int, seed: int) -> Checkpoint:
+def checkpoint_at(scored: Sequence[ScoredBet], n: int, n_boot: int, seed: int) -> Checkpoint:
     """Score the first ``n`` of ``scored``, which are trades with a close in placement order."""
     head = scored[:n]
     estimate = event_clustered_ratio(
@@ -130,9 +131,7 @@ def checkpoint_at(scored: Sequence[ScoredTrade], n: int, n_boot: int, seed: int)
     )
 
 
-def judge(
-    scored: Sequence[ScoredTrade], n_boot: int, seed: int
-) -> tuple[Verdict, Checkpoint | None]:
+def judge(scored: Sequence[ScoredBet], n_boot: int, seed: int) -> tuple[Verdict, Checkpoint | None]:
     """The first promote or kill at checkpoints 100, 200, ... 500, and the checkpoint it fired at.
 
     A verdict stands once reached, so later bets cannot reverse it. Without one, the verdict
@@ -148,14 +147,14 @@ def judge(
     return (Verdict.NOT_YET if checkpoint is None else Verdict.CONTINUE), checkpoint
 
 
-def scoreable_prefix(trades: Sequence[ScoredTrade], now: datetime) -> tuple[list[ScoredTrade], int]:
+def scoreable_prefix(trades: Sequence[ScoredBet], now: datetime) -> tuple[list[ScoredBet], int]:
     """The bets with a close in the settled, final prefix of ``trades``, and its length.
 
     ``trades`` must be in placement order. The prefix stops at the first trade that is
     unsettled, or has no close and kicked off less than ``CLOSE_GRACE`` ago. Final
     no-close trades inside it are skipped.
     """
-    with_close: list[ScoredTrade] = []
+    with_close: list[ScoredBet] = []
     length = 0
     for trade in trades:
         if not trade.settled:
@@ -172,7 +171,7 @@ def summarize_candidate(
     name: str,
     version: int,
     status: CandidateStatus | None,
-    trades: Sequence[ScoredTrade],
+    trades: Sequence[ScoredBet],
     now: datetime,
     n_boot: int = DEFAULT_BOOTSTRAP_SAMPLES,
     seed: int = BOOTSTRAP_SEED,
@@ -197,7 +196,7 @@ def summarize_candidate(
 
 
 def summarize_candidates(
-    trades: Sequence[ScoredTrade],
+    trades: Sequence[ScoredBet],
     registry: Sequence[Candidate],
     now: datetime,
     n_boot: int = DEFAULT_BOOTSTRAP_SAMPLES,
@@ -207,7 +206,7 @@ def summarize_candidates(
 
     ``trades`` must be in placement order. A version other than the registry's has no status.
     """
-    by_key: dict[tuple[str, int], list[ScoredTrade]] = defaultdict(list)
+    by_key: dict[tuple[str, int], list[ScoredBet]] = defaultdict(list)
     for trade in trades:
         by_key[(trade.candidate_name, trade.candidate_version)].append(trade)
     status = {(c.name, c.version): c.status for c in registry}
@@ -242,7 +241,7 @@ def close_candidate_snapshots(event_ids: set[str]) -> Select[tuple[OddsSnapshot]
     )
 
 
-async def load_scored_trades(session: AsyncSession) -> list[ScoredTrade]:
+async def load_scored_trades(session: AsyncSession) -> list[ScoredBet]:
     """Non-void candidate trades in placement order, each with its close probability."""
     stmt = (
         select(PaperTrade, Event)
@@ -259,11 +258,11 @@ async def load_scored_trades(session: AsyncSession) -> list[ScoredTrade]:
         for snapshot in snapshot_rows.scalars():
             snapshots[snapshot.event_id].append(snapshot)
 
-    scored: list[ScoredTrade] = []
+    scored: list[ScoredBet] = []
     for trade, event in rows:
         assert trade.candidate_name is not None and trade.candidate_version is not None
         scored.append(
-            ScoredTrade(
+            ScoredBet(
                 candidate_name=trade.candidate_name,
                 candidate_version=trade.candidate_version,
                 event_id=trade.event_id,
@@ -271,7 +270,9 @@ async def load_scored_trades(session: AsyncSession) -> list[ScoredTrade]:
                 stake=trade.stake,
                 pnl=trade.pnl,
                 price_decimal=trade.price_decimal,
-                p_close=selection_close_probability(trade, event, snapshots[event.id]),
+                p_close=selection_close_probability(
+                    trade.market, trade.selection, event, snapshots[event.id]
+                ),
             )
         )
     return scored

@@ -10,13 +10,12 @@ sources:
   - odds_analytics.backfill_executor.BackfillExecutor
   - odds_lambda.storage.tier_validator.TierCoverageValidator
   - odds_lambda.fetch_tier.FetchTier
-  - odds_analytics.backtesting.services.BacktestEngine
 status: stable
 ---
 
 # Odds API historical backfill
 
-Fills in historical Odds API snapshots (the paid `/historical/odds` endpoint, 10 units per region per market per call; the free tier has no historical endpoints; [odds-api-client](odds-api-client.md#cost-per-call)) and final scores. Backtests need FINAL events plus snapshots near decision time (`odds_analytics.backtesting.services.BacktestEngine._get_events_with_results` selects FINAL events; [backtest-engine](../evaluation/backtest-engine.md)). It is also the recovery path for collection gaps (`odds_cli.commands.backfill.detect_and_plan_gaps`). Code: `packages/odds-cli/odds_cli/commands/{discover,backfill}.py` with logic in odds-analytics. The steps are on [howto-backfill-odds-api-history](howto-backfill-odds-api-history.md). It is separate from the EPL scripts ([historical-ingest-scripts](historical-ingest-scripts.md)); neither is scheduled.
+Fills in historical Odds API snapshots (the paid `/historical/odds` endpoint, 10 units per region per market per call; the free tier has no historical endpoints; [odds-api-client](odds-api-client.md#cost-per-call)) and final scores. A replay backtest needs FINAL events plus snapshots before decision time (`odds_analytics.candidate_backtest.final_events` selects the events; [replay backtest](../evaluation/candidate-backtest.md)). It is also the recovery path for collection gaps (`odds_cli.commands.backfill.detect_and_plan_gaps`). Code: `packages/odds-cli/odds_cli/commands/{discover,backfill}.py` with logic in odds-analytics. The steps are on [howto-backfill-odds-api-history](howto-backfill-odds-api-history.md). It is separate from the EPL scripts ([historical-ingest-scripts](historical-ingest-scripts.md)); neither is scheduled.
 
 ## Commands
 

@@ -42,8 +42,7 @@ from odds_core.utils import raw_data_has_market
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_analytics.backtesting import BacktestEvent
-from odds_analytics.feature_extraction import TabularFeatureExtractor
+from odds_analytics.feature_extraction import FeatureEvent, TabularFeatureExtractor
 from odds_analytics.polymarket_features import (
     CrossSourceFeatureExtractor,
     CrossSourceFeatures,
@@ -385,14 +384,14 @@ def filter_completed_events(events: list[Event]) -> list[Event]:
     ]
 
 
-def make_backtest_event(event: Event) -> BacktestEvent:
-    """Convert Event to BacktestEvent for feature extraction.
+def make_feature_event(event: Event) -> FeatureEvent:
+    """Convert Event to FeatureEvent for feature extraction.
 
     Scores are passed through as-is; SCHEDULED events at inference time
     will have ``None`` scores. Feature extractors do not consume score
     fields, so this is safe.
     """
-    return BacktestEvent(
+    return FeatureEvent(
         id=event.id,
         commence_time=event.commence_time,
         home_team=event.home_team,
@@ -516,7 +515,7 @@ def _extract_static_feature_parts(
     event = bundle.event
     market = config.primary_market
     outcome = resolve_outcome_name(config, event)
-    backtest_event = make_backtest_event(event)
+    feature_event = make_feature_event(event)
     tab_extractor = TabularFeatureExtractor.from_config(config)
 
     parts: list[np.ndarray] = []
@@ -528,7 +527,7 @@ def _extract_static_feature_parts(
             return None
         try:
             tab_feats = tab_extractor.extract_features(
-                event=backtest_event,
+                event=feature_event,
                 odds_data=snap_odds,
                 outcome=outcome,
                 market=market,
@@ -582,7 +581,7 @@ def _extract_static_feature_parts(
                     if sb_odds_at_time:
                         try:
                             sb_feats = tab_extractor.extract_features(
-                                event=backtest_event,
+                                event=feature_event,
                                 odds_data=sb_odds_at_time,
                                 outcome=outcome,
                                 market=market,

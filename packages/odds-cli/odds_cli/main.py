@@ -8,7 +8,6 @@ from rich.console import Console
 from odds_cli.commands import (
     agent,
     backfill,
-    backtest,
     candidates,
     copy_from_prod,
     discover,
@@ -39,7 +38,6 @@ app.add_typer(events.app, name="events", help="Event identity maintenance")
 app.add_typer(fetch.app, name="fetch", help="Fetch odds data")
 app.add_typer(status.app, name="status", help="System status and monitoring")
 app.add_typer(backfill.app, name="backfill", help="Historical data backfill")
-app.add_typer(backtest.app, name="backtest", help="Backtest betting strategies")
 app.add_typer(train.app, name="train", help="Train ML models from configuration")
 app.add_typer(evaluate.app, name="evaluate", help="Run pre-registered model evaluations")
 app.add_typer(scheduler.app, name="scheduler", help="Scheduler management (local testing)")

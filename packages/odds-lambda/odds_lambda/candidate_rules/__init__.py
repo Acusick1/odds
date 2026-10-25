@@ -13,9 +13,12 @@ from odds_lambda.candidate_rules.rules import (
     ExchangeGapParams,
     RuleParams,
     RuleSpec,
+    apply_rule,
     decision_time,
     exchange_gap,
+    resolve_rule,
     rule_sha256,
+    run_rule,
     validate_candidate_rules,
 )
 
@@ -28,10 +31,13 @@ __all__ = [
     "RetailQuote",
     "RuleParams",
     "RuleSpec",
+    "apply_rule",
     "build_market_state",
     "decision_time",
     "exchange_gap",
     "load_market_state",
+    "resolve_rule",
     "rule_sha256",
+    "run_rule",
     "validate_candidate_rules",
 ]

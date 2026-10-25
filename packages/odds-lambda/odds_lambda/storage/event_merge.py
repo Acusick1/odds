@@ -81,6 +81,18 @@ async def find_match_id(
     return canonical_event_id([e.id for e in events]) if events else None
 
 
+async def canonical_events(session: AsyncSession, events: Sequence[Event]) -> list[Event]:
+    """``events`` with each match's twins collapsed to its canonical event, order kept. Read-only."""
+    canonical: list[Event] = []
+    for event in events:
+        match_id = await find_match_id(
+            session, event.home_team, event.away_team, event.commence_time, event.sport_key
+        )
+        if match_id == event.id:
+            canonical.append(event)
+    return canonical
+
+
 async def find_match_candidates(
     session: AsyncSession,
     home_team: str,

@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from odds_analytics.candidate_report import (
     CLOSE_GRACE,
-    ScoredTrade,
+    ScoredBet,
     Verdict,
     candidate_report,
     checkpoint_at,
@@ -41,9 +41,9 @@ def trade(
     name: str = "cand",
     version: int = 1,
     commence_time: datetime = LONG_AGO,
-) -> ScoredTrade:
+) -> ScoredBet:
     """A trade at price 3.0 whose EV is ``ev`` (p_close = (1 + ev) / 3), None for no close."""
-    return ScoredTrade(
+    return ScoredBet(
         candidate_name=name,
         candidate_version=version,
         event_id=event_id or f"e{index}",
@@ -55,15 +55,15 @@ def trade(
     )
 
 
-def trades(n: int, ev: float = 0.5, start: int = 0) -> list[ScoredTrade]:
+def trades(n: int, ev: float = 0.5, start: int = 0) -> list[ScoredBet]:
     return [trade(start + i, ev) for i in range(n)]
 
 
-def noise(n: int, start: int = 0) -> list[ScoredTrade]:
+def noise(n: int, start: int = 0) -> list[ScoredBet]:
     return [trade(start + i, 1.0 if i % 2 else -1.0) for i in range(n)]
 
 
-def summary_of(sequence: list[ScoredTrade], now: datetime = NOW):
+def summary_of(sequence: list[ScoredBet], now: datetime = NOW):
     return summarize_candidates(sequence, [], now, N_BOOT)[0]
 
 
@@ -82,7 +82,7 @@ def registry_entry(name: str = "cand", version: int = 1) -> AgentCandidate:
 
 class TestEv:
     def test_ev_is_close_probability_times_price_minus_one(self) -> None:
-        t = ScoredTrade("c", 1, "e", LONG_AGO, 2.0, 0.0, price_decimal=2.5, p_close=0.5)
+        t = ScoredBet("c", 1, "e", LONG_AGO, 2.0, 0.0, price_decimal=2.5, p_close=0.5)
         assert t.ev == pytest.approx(0.25)
 
     def test_no_close_has_no_ev(self) -> None:
@@ -278,7 +278,7 @@ def _paper_trade(event_id: str, minutes: int, **fields) -> PaperTrade:
     return PaperTrade(**{**defaults, **fields})
 
 
-class TestLoadScoredTrades:
+class TestLoadScoredBets:
     @pytest.mark.asyncio
     async def test_report_from_database(self, test_session: AsyncSession) -> None:
         session = test_session

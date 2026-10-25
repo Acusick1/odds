@@ -22,18 +22,19 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, fields
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from odds_core.models import Odds
+from odds_core.models import EventStatus, Odds
 from odds_core.time import to_eastern
-
-from odds_analytics.backtesting import BacktestEvent
+from pydantic import BaseModel, field_validator
 
 if TYPE_CHECKING:
     from odds_analytics.training.config import FeatureConfig
 
 __all__ = [
+    "FeatureEvent",
     "FeatureExtractor",
     "TabularFeatureExtractor",
     "TabularFeatures",
@@ -47,6 +48,28 @@ __all__ = [
     "calculate_sharp_retail_metrics",
     "select_sharp_odds",
 ]
+
+
+class FeatureEvent(BaseModel):
+    """The event fields feature extraction reads.
+
+    Scores are ``None`` for events not yet played, scored at inference time.
+    """
+
+    id: str
+    commence_time: datetime
+    home_team: str
+    away_team: str
+    home_score: int | None
+    away_score: int | None
+    status: EventStatus
+
+    @field_validator("commence_time")
+    @classmethod
+    def _must_be_aware(cls, v: datetime) -> datetime:
+        if v.tzinfo is None:
+            raise ValueError("commence_time must be timezone-aware")
+        return v
 
 
 # =============================================================================
@@ -225,7 +248,7 @@ class FeatureExtractor(ABC):
     @abstractmethod
     def extract_features(
         self,
-        event: BacktestEvent,
+        event: FeatureEvent,
         odds_data: list[Odds] | list[list[Odds]],
         outcome: str | None = None,
         **kwargs,
@@ -337,7 +360,7 @@ class TabularFeatureExtractor(FeatureExtractor):
 
     def extract_features(
         self,
-        event: BacktestEvent,
+        event: FeatureEvent,
         odds_data: list[Odds],
         outcome: str | None = None,
         market: str = "h2h",

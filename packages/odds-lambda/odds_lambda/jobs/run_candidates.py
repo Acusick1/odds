@@ -33,13 +33,13 @@ from odds_lambda.candidate_rules import (
     RULES,
     RuleParams,
     decision_time,
-    load_market_state,
+    run_rule,
     validate_candidate_rules,
 )
 from odds_lambda.paper_trading import place_trade, settle_trades
 from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
-from odds_lambda.storage.event_merge import find_match_id
+from odds_lambda.storage.event_merge import canonical_events
 
 logger = structlog.get_logger()
 
@@ -121,14 +121,7 @@ async def candidate_events(session: AsyncSession, sport: SportKey, now: datetime
             (Event.commence_time <= now) | (Event.status == EventStatus.SCHEDULED),
         )
     )
-    events: list[Event] = []
-    for event in result.scalars().all():
-        canonical = await find_match_id(
-            session, event.home_team, event.away_team, event.commence_time, sport
-        )
-        if canonical == event.id:
-            events.append(event)
-    return events
+    return await canonical_events(session, result.scalars().all())
 
 
 def due_event_ids(item: RunnableCandidate, events: Sequence[Event], now: datetime) -> list[str]:
@@ -176,8 +169,9 @@ async def _decide(
         )
         return decision
 
-    state = await load_market_state(session, event, t, known_at=now)
-    intents = RULES[candidate.rule].function(state, item.params)
+    state, intents = await run_rule(
+        session, RULES[candidate.rule], item.params, event, t, known_at=now
+    )
     for intent in intents:
         await place_trade(
             session,
@@ -193,6 +187,7 @@ async def _decide(
             decision_id=decision.id,
         )
     decision.bets_placed = len(intents)
+    decision.input_snapshot_ids = list(state.snapshot_ids)
     return decision
 
 

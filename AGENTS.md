@@ -4,7 +4,7 @@ Single-user, sport-agnostic betting odds pipeline with per-sport LLM betting age
 
 ## Goal
 
-The goal is profit. Any approach that might get there is fair game, and candidates run in parallel; mechanical rules are the current focus. Development data generates ideas and never promotes one. A candidate is promoted or killed at fixed checkpoints of a live paper-trading forward test, scored by EV at the price taken against the Betfair Exchange close. No candidate can be scored yet (#604). See [goal and strategy](wiki/foundations/goal-and-strategy.md).
+The goal is profit. Any approach that might get there is fair game, and candidates run in parallel; mechanical rules are the current focus. Development data generates ideas and never promotes one. A candidate is promoted or killed at fixed checkpoints of a live paper-trading forward test, scored by EV at the price taken against the Betfair Exchange close. See [goal and strategy](wiki/foundations/goal-and-strategy.md); the steps from an idea to a verdict are in [take an idea to a verdict](wiki/evaluation/howto-take-an-idea-to-a-verdict.md).
 
 ## Documentation
 

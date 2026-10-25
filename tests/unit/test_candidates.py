@@ -9,9 +9,10 @@ from odds_core.candidates import (
     AgentCandidate,
     MechanicalCandidate,
     candidates_dir,
+    load_candidate_file,
     load_candidates,
 )
-from odds_lambda.candidate_rules import rule_sha256
+from odds_lambda.candidate_rules import resolve_rule, rule_sha256
 from typer.testing import CliRunner
 
 MECHANICAL: dict[str, object] = {
@@ -56,6 +57,16 @@ class TestLoadCandidates:
         assert isinstance(loaded[0], MechanicalCandidate)
         assert loaded[0].params == {"threshold": 0.02, "minutes_before_kickoff": 60}
         assert isinstance(loaded[1], AgentCandidate)
+
+    def test_a_draft_file_may_lack_the_hash_but_the_registry_may_not(self, tmp_path: Path) -> None:
+        draft = {k: v for k, v in MECHANICAL.items() if k != "rule_sha256"}
+        write(tmp_path, draft)
+
+        loaded = load_candidate_file(tmp_path / "back-longest.yaml")
+
+        assert isinstance(loaded, MechanicalCandidate) and loaded.rule_sha256 is None
+        with pytest.raises(ValueError, match="must record rule_sha256"):
+            load_candidates(tmp_path)
 
     def test_missing_directory_is_empty(self, tmp_path: Path) -> None:
         assert load_candidates(tmp_path / "absent") == []
@@ -159,3 +170,16 @@ class TestListCommand:
             app, ["candidates", "rule-hash", "no_such_rule"]
         )
         assert result.exit_code == 1
+
+
+class TestDraftExample:
+    def test_the_how_to_example_validates(self, tmp_path: Path) -> None:
+        page = Path(__file__).parents[2] / "wiki/evaluation/howto-take-an-idea-to-a-verdict.md"
+        block = page.read_text().split("```yaml\n", 1)[1].split("```", 1)[0]
+        draft = tmp_path / "draft.yaml"
+        draft.write_text("\n".join(line.removeprefix("     ") for line in block.splitlines()))
+
+        loaded = load_candidate_file(draft)
+
+        assert isinstance(loaded, MechanicalCandidate) and loaded.rule_sha256 is None
+        resolve_rule(loaded)

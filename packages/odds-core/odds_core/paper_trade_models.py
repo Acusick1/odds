@@ -4,27 +4,22 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    ARRAY,
     Boolean,
     CheckConstraint,
     Column,
     DateTime,
     Float,
     Index,
+    Integer,
     UniqueConstraint,
     text,
 )
 from sqlmodel import Field, SQLModel
 
 from odds_core.models import utc_now
-from odds_core.odds_math import decimal_to_american
-
-if TYPE_CHECKING:
-    from odds_analytics.backtesting.models import BetRecord
-
-    from odds_core.models import Event
 
 
 class TradeResult(str, Enum):
@@ -40,7 +35,8 @@ class CandidateDecision(SQLModel, table=True):
     """One run of a mechanical candidate's rule on one event, with the inputs it used.
 
     Written even when the rule places no bet, so a decision is never taken twice and a replay
-    can compare a zero-bet decision. A missed decision (the run came too late) is recorded
+    can compare a zero-bet decision, and records the snapshots it used so a replay needs no
+    guess at what the run saw. A missed decision (the run came too late) is recorded
     with ``missed`` set and places nothing.
     """
 
@@ -61,6 +57,11 @@ class CandidateDecision(SQLModel, table=True):
     known_at: datetime = Field(
         sa_column=Column(DateTime(timezone=True), nullable=False),
         description="Run time: only snapshots stored by then were visible to the rule",
+    )
+    input_snapshot_ids: list[int] = Field(
+        default_factory=list,
+        sa_column=Column(ARRAY(Integer), nullable=False, server_default=text("'{}'")),
+        description="Ids of every snapshot the rule's market state was built from; empty when missed",
     )
     bets_placed: int = Field(default=0)
     missed: bool = Field(
@@ -88,7 +89,7 @@ class PaperTrade(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     event_id: str = Field(foreign_key="events.id", index=True)
 
-    # Bet details (aligned with BetRecord)
+    # Bet details
     market: str = Field(description="Market type: h2h")
     selection: str = Field(description="Selection: home, draw, or away")
     bookmaker: str = Field(index=True, description="Bookmaker key")
@@ -163,32 +164,3 @@ class PaperTrade(SQLModel, table=True):
             name="ck_paper_trades_bankroll_or_candidate",
         ),
     )
-
-    def to_bet_record(self, event: Event) -> BetRecord:
-        """Convert a settled PaperTrade to a BetRecord for backtest analysis tools."""
-        from odds_analytics.backtesting.models import BetRecord
-
-        assert self.id is not None
-        assert self.bankroll_before is not None, "flat-stake trades have no bankroll"
-        return BetRecord(
-            bet_id=self.id,
-            event_id=self.event_id,
-            event_date=event.commence_time,
-            home_team=event.home_team,
-            away_team=event.away_team,
-            market=self.market,
-            outcome=self.selection,
-            bookmaker=self.bookmaker,
-            odds=decimal_to_american(self.price_decimal),
-            line=None,
-            decision_time=self.placed_at,
-            stake=self.stake,
-            bankroll_before=self.bankroll_before,
-            strategy_confidence=self.confidence,
-            result=self.result.value if self.result else None,
-            profit=self.pnl,
-            bankroll_after=self.bankroll_after,
-            home_score=event.home_score,
-            away_score=event.away_score,
-            bet_rationale=self.reasoning,
-        )

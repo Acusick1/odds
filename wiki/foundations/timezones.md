@@ -13,7 +13,6 @@ sources:
   - odds_lambda.oddsportal_common.parse_odds_timestamp
   - odds_lambda.oddsportal_common.fix_odds_timestamp
   - odds_lambda.injury_fetcher._to_naive_et
-  - odds_cli.commands.backtest.parse_date
   - odds_cli.commands.quality
   - odds_cli.commands.discover
   - odds_cli.commands.pbpstats
@@ -49,7 +48,6 @@ Helpers in `odds_core.time`:
 ## Naive datetimes in current code
 
 - `odds_lambda.scheduling.backends.aws.AWSEventBridgeBackend._parse_schedule_expression` builds `datetime(year=..., ...)` with no tzinfo from a cron expression; the formatter next to it strips tzinfo deliberately after converting to UTC ([Scheduler backends](../scheduling/scheduler-backends.md)).
-- `odds_cli.commands.backtest.parse_date` returns a naive datetime from `strptime`, so `odds backtest run --start/--end` are naive, while `odds_cli.commands.quality` and `odds_cli.commands.discover` attach `tzinfo=UTC` after the same call (#461; [Backtest engine](../evaluation/backtest-engine.md)).
 - `odds_lambda.oddsportal_common.parse_odds_timestamp` returns a naive datetime by design (OddsPortal odds-history stamps carry no zone and a wrong year); `odds_lambda.oddsportal_common.fix_odds_timestamp` repairs the year ([OddsPortal scraper](../collection/oddsportal-scraper.md)).
 - `odds_lambda.injury_fetcher._to_naive_et` converts to naive Eastern time on purpose because the `nbainjuries` API requires it ([NBA feeds](../collection/nba-injuries-and-stats.md)).
 - `odds_cli.commands.pbpstats` and `odds_cli.commands.nba_stats` derive the NBA season from `date.today()` (local date, not UTC) (#461).

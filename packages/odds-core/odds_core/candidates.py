@@ -37,7 +37,8 @@ class _CandidateBase(BaseModel):
 class MechanicalCandidate(_CandidateBase):
     kind: Literal["mechanical"]
     rule: str
-    rule_sha256: str = Field(pattern=SHA256_PATTERN)
+    # Absent only in a draft file; the registry requires it.
+    rule_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)
     params: dict[str, JsonValue] = {}
 
 
@@ -54,18 +55,25 @@ def candidates_dir() -> Path:
     return get_settings().project_root / "candidates"
 
 
+def load_candidate_file(path: Path) -> Candidate:
+    """Parse one candidate file; a draft may lack ``rule_sha256`` and have any file name."""
+    try:
+        return _candidate_adapter.validate_python(yaml.safe_load(path.read_text()))
+    except (ValueError, yaml.YAMLError) as exc:
+        raise ValueError(f"{path}: {exc}") from exc
+
+
 def load_candidates(directory: Path) -> list[Candidate]:
     if not directory.is_dir():
         return []
 
     candidates: list[Candidate] = []
     for path in sorted(directory.glob("*.yaml")):
-        try:
-            candidate = _candidate_adapter.validate_python(yaml.safe_load(path.read_text()))
-        except (ValueError, yaml.YAMLError) as exc:
-            raise ValueError(f"{path}: {exc}") from exc
+        candidate = load_candidate_file(path)
         if candidate.name != path.stem:
             raise ValueError(f"{path}: name {candidate.name!r} must match the file name")
+        if isinstance(candidate, MechanicalCandidate) and candidate.rule_sha256 is None:
+            raise ValueError(f"{path}: a registered mechanical candidate must record rule_sha256")
         candidates.append(candidate)
 
     live_agents_per_sport = Counter(
