@@ -15,7 +15,7 @@ status: stable
 
 # Candidate rules
 
-A mechanical [candidate](candidate-registry.md)'s `rule` names a function in the rule registry. The [run-candidates job](run-candidates-job.md) and the replay backtest are meant to call that one function, so a backtest and a forward test of one version run the same code ([goal and strategy](../foundations/goal-and-strategy.md#what-exists-today) lists what exists). The job exists; the replay backtest does not yet.
+A mechanical [candidate](candidate-registry.md)'s `rule` names a function in the rule registry. The [run-candidates job](run-candidates-job.md), the [replay backtest](candidate-backtest.md) and the [parity check](candidate-parity.md) decide through `odds_lambda.candidate_rules.rules.run_rule`, so a backtest and a forward test of one version run the same code.
 
 A mechanical candidate records the hash of its rule's code, so the YAML version check forces a new version when that code changes ([rule pinning](#rule-pinning)).
 
@@ -41,7 +41,7 @@ As-of-t rules:
 
 ### known_at
 
-`odds_lambda.candidate_rules.market_state.load_market_state` takes an optional `known_at`. When given, it also drops snapshots whose `created_at` is later than `known_at`: the data the system had stored by then. The [run-candidates job](run-candidates-job.md#decisions) passes its run time and the parity check passes the decision's recorded `known_at`, so neither sees a snapshot stamped before t but stored afterwards. A historical backtest passes `None`, because backfilled rows were created long after their snapshot times.
+`odds_lambda.candidate_rules.market_state.load_market_state` takes an optional `known_at`. When given, it also drops snapshots whose `created_at` is later than `known_at`: the data the system had stored by then. The [run-candidates job](run-candidates-job.md#decisions) passes its run time and the parity check passes the decision's recorded `known_at`, so neither sees a snapshot stamped before t but stored afterwards. The replay backtest passes `None`, because backfilled rows were created long after their snapshot times.
 
 ## Rule interface
 
@@ -49,13 +49,17 @@ A rule is a function `(MarketState, params) -> list[BetIntent]`. `odds_lambda.ca
 
 `odds_lambda.candidate_rules.rules.RULES` maps each rule name to an `odds_lambda.candidate_rules.RuleSpec`: the function and its params model. A params model subclasses `odds_lambda.candidate_rules.RuleParams`, which is frozen, rejects unknown fields and requires `minutes_before_kickoff`, a positive integer.
 
+## Running a rule
+
+`odds_lambda.candidate_rules.rules.run_rule` loads the state of an event at a time as known at a `known_at` and returns the state and the rule's bets. Its optional `kickoff` replaces the event's kick-off in the state, for a replay of a decision that saw an earlier one.
+
 ## Decision times
 
-`odds_lambda.candidate_rules.rules.decision_time` returns the kick-off minus the params' `minutes_before_kickoff`. The [run-candidates job](run-candidates-job.md#decisions) and the backtest both use it.
+`odds_lambda.candidate_rules.rules.decision_time` returns the kick-off minus the params' `minutes_before_kickoff`. The [run-candidates job](run-candidates-job.md#decisions) and the [replay backtest](candidate-backtest.md#replay) both use it.
 
 ## Params validation
 
-`odds_lambda.candidate_rules.validate_candidate_rules` checks every `odds_core.candidates.MechanicalCandidate`: the sport has a market (`odds_lambda.candidate_rules.market_state.sport_market`), the rule name is in the registry, the recorded `odds_core.candidates.MechanicalCandidate.rule_sha256` is current ([rule pinning](#rule-pinning)) and the candidate's raw parameters validate against the rule's params model. It raises a `ValueError` naming the candidate otherwise. `odds candidates list` and `odds candidates report` call it after loading the registry, so an invalid rule fails there with exit code 1, and a unit test runs it over the `candidates/` directory.
+`odds_lambda.candidate_rules.resolve_rule` checks an `odds_core.candidates.MechanicalCandidate`: the sport has a market (`odds_lambda.candidate_rules.market_state.sport_market`), the rule name is in the registry and the candidate's raw parameters validate against the rule's params model. It returns the rule and its validated params, and raises a `ValueError` naming the candidate otherwise. A draft backtest uses it alone. `odds_lambda.candidate_rules.validate_candidate_rules` does that for every mechanical candidate and also checks that the recorded `odds_core.candidates.MechanicalCandidate.rule_sha256` is current ([rule pinning](#rule-pinning)). `odds candidates list` and `odds candidates report` call it after loading the registry, so an invalid rule fails there with exit code 1, and a unit test runs it over the `candidates/` directory.
 
 ## Rule pinning
 

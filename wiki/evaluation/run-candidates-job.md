@@ -10,7 +10,8 @@ mentions:
   - odds_lambda.paper_trading.settle_trades
   - odds_core.alerts.job_alert_context
   - odds_lambda.scheduling.jobs._CANDIDATE_JOBS
-  - odds_lambda.storage.event_merge.find_match_id
+  - odds_lambda.storage.event_merge.canonical_events
+  - odds_lambda.candidate_rules.rules.run_rule
 status: stable
 ---
 
@@ -31,9 +32,9 @@ At its run time `now`:
 
 ## Decisions
 
-`odds_lambda.jobs.run_candidates.candidate_events` selects the events of the sport that are scheduled with a kick-off after `now`, or whose kick-off is at most `odds_lambda.jobs.run_candidates.MISSED_LOOKBACK` (7 days) before `now`. Twins of one match ([event merge](../storage/event-merge.md#canonical-event)) are collapsed to the canonical event, found with `odds_lambda.storage.event_merge.find_match_id`, so a match is decided once whichever twin was selected. For each candidate and event the decision time is `odds_lambda.candidate_rules.rules.decision_time` of the event's kick-off and the candidate's params. A decision is due when that time is at or before `now` and not before the candidate's `start_date`, and the candidate version has no `odds_core.paper_trade_models.CandidateDecision` row for the event. Each due decision commits on its own:
+`odds_lambda.jobs.run_candidates.candidate_events` selects the events of the sport that are scheduled with a kick-off after `now`, or whose kick-off is at most `odds_lambda.jobs.run_candidates.MISSED_LOOKBACK` (7 days) before `now`. Twins of one match ([event merge](../storage/event-merge.md#canonical-event)) are collapsed to the canonical event by `odds_lambda.storage.event_merge.canonical_events`, so a match is decided once whichever twin was selected. The [replay backtest](candidate-backtest.md#replay) selects its events through the same function. For each candidate and event the decision time is `odds_lambda.candidate_rules.rules.decision_time` of the event's kick-off and the candidate's params. A decision is due when that time is at or before `now` and not before the candidate's `start_date`, and the candidate version has no `odds_core.paper_trade_models.CandidateDecision` row for the event. Each due decision commits on its own:
 
-- **On time.** When `now` is at most `odds_lambda.jobs.run_candidates.MAX_LATENESS` (10 minutes) after the decision time and the event has not kicked off, `odds_lambda.candidate_rules.load_market_state` builds the state at the decision time with `known_at=now`, so only snapshots stored by the run are visible. The rule's bets are placed with `odds_lambda.paper_trading.place_trade`: flat stake, no bankroll, the candidate's name and version, and the decision's id.
+- **On time.** When `now` is at most `odds_lambda.jobs.run_candidates.MAX_LATENESS` (10 minutes) after the decision time and the event has not kicked off, `odds_lambda.candidate_rules.rules.run_rule` builds the state at the decision time with `known_at=now`, so only snapshots stored by the run are visible. The rule's bets are placed with `odds_lambda.paper_trading.place_trade`: flat stake, no bankroll, the candidate's name and version, and the decision's id.
 - **Missed.** Beyond `odds_lambda.jobs.run_candidates.MAX_LATENESS`, or once the event has kicked off, nothing is placed. The decision is recorded as missed and logged as `candidate_decision_missed` (a warning with the candidate, event and decision time). Recording it stops later runs from taking, or logging, it again, and an event that kicked off within `odds_lambda.jobs.run_candidates.MISSED_LOOKBACK` without a decision gets its missed record this way.
 - **Already decided.** A unique violation on the decision row means a concurrent run committed it first. The decision is rolled back and counted as already decided, with no failure and no alert. A unique violation on a trade of this decision, with no decision row behind it, is a failure.
 - **Failed.** A decision that raises (a rejected bet, a duplicate bet from one rule call) is rolled back whole, with no decision row, and logged as `candidate_decision_failed`. The run goes on with the other decisions and raises at the end. The next run retries it only while within `odds_lambda.jobs.run_candidates.MAX_LATENESS`.

@@ -1,11 +1,29 @@
 """CLI commands for the betting candidate registry."""
 
 import asyncio
+import dataclasses
+import json
+from datetime import date
+from pathlib import Path
 from typing import Annotated
 
 import typer
-from odds_analytics.candidate_report import CandidateSummary, Verdict, candidate_report
-from odds_core.candidates import Candidate, CandidateStatus, candidates_dir, load_candidates
+from odds_analytics.candidate_backtest import BacktestResult, HashStatus, replay
+from odds_analytics.candidate_parity import ParityReport, ParityStatus, check_parity
+from odds_analytics.candidate_report import (
+    CandidateSummary,
+    Checkpoint,
+    Verdict,
+    candidate_report,
+)
+from odds_core.candidates import (
+    Candidate,
+    CandidateStatus,
+    MechanicalCandidate,
+    candidates_dir,
+    load_candidate_file,
+    load_candidates,
+)
 from odds_core.database import async_session_maker
 from odds_lambda.candidate_rules import RULES, rule_sha256, validate_candidate_rules
 from rich.console import Console
@@ -138,3 +156,174 @@ def _report_table(summaries: list[CandidateSummary]) -> Table:
             f"[{style}]{s.verdict}[/{style}]",
         )
     return table
+
+
+def _fail(message: str) -> typer.Exit:
+    console.print(f"[red]{message}[/red]", soft_wrap=True)
+    return typer.Exit(1)
+
+
+def _parse_day(value: str) -> date:
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise _fail(f"{value!r} is not a YYYY-MM-DD date") from exc
+
+
+def _mechanical(candidate: Candidate) -> MechanicalCandidate:
+    if not isinstance(candidate, MechanicalCandidate):
+        raise _fail(f"candidate {candidate.name!r} is {candidate.kind}, not mechanical")
+    return candidate
+
+
+def _resolve(name_or_path: str) -> MechanicalCandidate:
+    """A registered candidate by name, or a candidate file (possibly a draft) by path."""
+    try:
+        path = Path(name_or_path)
+        if path.is_file():
+            return _mechanical(load_candidate_file(path))
+        registry = load_candidates(candidates_dir())
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
+    for candidate in registry:
+        if candidate.name == name_or_path:
+            return _mechanical(candidate)
+    raise _fail(f"no registered candidate {name_or_path!r} and no such file")
+
+
+def _checkpoint_row(table: Table, label: str, cp: Checkpoint | None) -> None:
+    if cp is None:
+        table.add_row(label, "-", "-", "-", "-")
+        return
+    table.add_row(label, str(cp.n), f"{cp.mean_ev:+.4f}", _interval(cp.ci95), _interval(cp.ci99))
+
+
+def _backtest_tables(result: BacktestResult) -> list[Table]:
+    cov, summary = result.coverage, result.summary
+    coverage = Table(
+        title=f"{result.name} v{result.version} ({result.rule}), {result.start} to {result.end}"
+    )
+    coverage.add_column("Events", justify="right")
+    coverage.add_column("With exchange", justify="right")
+    coverage.add_column("With UK retail", justify="right")
+    coverage.add_column("With a bet", justify="right")
+    coverage.add_column("Bets", justify="right")
+    coverage.add_column("With close", justify="right")
+    coverage.add_column("No close", justify="right")
+    coverage.add_column("Pending", justify="right")
+    coverage.add_row(
+        str(cov.events),
+        str(cov.with_exchange),
+        str(cov.with_retail),
+        str(cov.with_bet),
+        str(cov.bets),
+        str(cov.bets_with_close),
+        str(summary.bets_without_close),
+        str(summary.pending_bets),
+    )
+    verdict = Table(title="Checkpoint verdict")
+    verdict.add_column("Estimate")
+    verdict.add_column("n", justify="right")
+    verdict.add_column("Mean EV", justify="right")
+    verdict.add_column("95% CI", justify="right")
+    verdict.add_column("99% CI", justify="right")
+    _checkpoint_row(verdict, "Checkpoint", summary.checkpoint)
+    _checkpoint_row(verdict, "All bets with close", result.overall)
+    style = _VERDICT_STYLE[summary.verdict]
+    verdict.caption = (
+        f"[{style}]{summary.verdict}[/{style}]  staked {summary.total_stake:.2f}  "
+        f"P&L {summary.pnl:+.2f}  ROI {summary.roi:+.1%}"
+    )
+    return [coverage, verdict]
+
+
+@app.command("backtest")
+def backtest(
+    candidate: Annotated[str, typer.Argument(help="Registered candidate name, or a YAML path")],
+    start: Annotated[str, typer.Option("--from", help="First kick-off day, YYYY-MM-DD")],
+    end: Annotated[str, typer.Option("--to", help="Last kick-off day, YYYY-MM-DD")],
+    json_path: Annotated[
+        Path | None, typer.Option("--json", help="Write the summary to this file")
+    ] = None,
+) -> None:
+    """Replay a mechanical candidate over completed events and score it like the report.
+
+    Development data can kill an idea, never promote one.
+    """
+    resolved = _resolve(candidate)
+    first, last = _parse_day(start), _parse_day(end)
+    if last < first:
+        raise _fail("--to is before --from")
+
+    async def run() -> BacktestResult:
+        async with async_session_maker() as session:
+            return await replay(session, resolved, first, last)
+
+    try:
+        result = asyncio.run(run())
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
+
+    if result.hash_status is not HashStatus.MATCH:
+        console.print(
+            f"[yellow]rule_sha256 {result.hash_status}: this is a draft, not a registrable "
+            f"candidate (`odds candidates rule-hash {result.rule}` prints the current hash)"
+            f"[/yellow]",
+            soft_wrap=True,
+        )
+    for table in _backtest_tables(result):
+        console.print(table)
+    if json_path is not None:
+        json_path.write_text(json.dumps(dataclasses.asdict(result), indent=2, default=str) + "\n")
+
+
+@app.command("parity")
+def parity(
+    name: Annotated[str, typer.Argument(help="Registered candidate name")],
+    version: Annotated[
+        int | None, typer.Option("--version", help="Candidate version; default the registry's")
+    ] = None,
+) -> None:
+    """Replay each recorded decision and compare with the paper trades it placed.
+
+    Exits 1 when a decision differs for a reason other than storage lag.
+    """
+    resolved = _mechanical(
+        next((c for c in _load_registry() if c.name == name), None) or _missing(name)
+    )
+
+    async def run() -> ParityReport:
+        async with async_session_maker() as session:
+            return await check_parity(session, resolved, version)
+
+    try:
+        report = asyncio.run(run())
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
+
+    console.print(
+        f"{report.name} v{report.version}: {report.checked} decisions checked, "
+        f"{len(report.of(ParityStatus.MATCH))} matched, "
+        f"{len(report.of(ParityStatus.STORAGE_LAG))} storage lag, "
+        f"{len(report.of(ParityStatus.MISMATCH))} mismatches",
+        soft_wrap=True,
+    )
+    for status, style in ((ParityStatus.STORAGE_LAG, "yellow"), (ParityStatus.MISMATCH, "red")):
+        for d in report.of(status):
+            console.print(
+                f"[{style}]{status} decision {d.decision_id} ({d.event_id}, "
+                f"{d.decision_time.isoformat()})[/{style}]\n  live:     {list(d.live)}\n"
+                f"  replayed: {list(d.replayed)}"
+                + (
+                    f"\n  reproduced with known_at {d.lag_known_at.isoformat()}"
+                    if d.lag_known_at
+                    else ""
+                ),
+                soft_wrap=True,
+            )
+    if not report.ok:
+        raise typer.Exit(1)
+
+
+def _missing(name: str) -> Candidate:
+    raise _fail(f"no registered candidate {name!r}")

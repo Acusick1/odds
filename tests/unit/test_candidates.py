@@ -9,6 +9,7 @@ from odds_core.candidates import (
     AgentCandidate,
     MechanicalCandidate,
     candidates_dir,
+    load_candidate_file,
     load_candidates,
 )
 from odds_lambda.candidate_rules import rule_sha256
@@ -56,6 +57,16 @@ class TestLoadCandidates:
         assert isinstance(loaded[0], MechanicalCandidate)
         assert loaded[0].params == {"threshold": 0.02, "minutes_before_kickoff": 60}
         assert isinstance(loaded[1], AgentCandidate)
+
+    def test_a_draft_file_may_lack_the_hash_but_the_registry_may_not(self, tmp_path: Path) -> None:
+        draft = {k: v for k, v in MECHANICAL.items() if k != "rule_sha256"}
+        write(tmp_path, draft)
+
+        loaded = load_candidate_file(tmp_path / "back-longest.yaml")
+
+        assert isinstance(loaded, MechanicalCandidate) and loaded.rule_sha256 is None
+        with pytest.raises(ValueError, match="must record rule_sha256"):
+            load_candidates(tmp_path)
 
     def test_missing_directory_is_empty(self, tmp_path: Path) -> None:
         assert load_candidates(tmp_path / "absent") == []

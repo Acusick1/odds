@@ -42,21 +42,25 @@ No candidate is running; mechanical rules are the current focus. The repo also h
 
 ## What exists today
 
-Most of the workflow's tooling does not exist (#608). What does:
+The workflow for a mechanical rule exists end to end, from idea to verdict ([From idea to verdict](../evaluation/howto-take-an-idea-to-a-verdict.md), #608):
 
-- The [candidate registry](../evaluation/candidate-registry.md), with no candidate in it.
+- The [candidate registry](../evaluation/candidate-registry.md), with no candidate in it yet.
 - The candidate, its version and the git commit on each paper trade (`odds_core.paper_trade_models.PaperTrade`), with the candidate checked against the registry when the bet is placed through `odds_mcp.server.paper_bet` ([paper trading](../agent/paper-trading.md#candidate-fields)).
 - The close, computed from stored snapshots when a report runs, so a trade stores none. MLB has no close defined, so its trades are reported without EV.
 - `odds candidates report`, which gives the checkpoint verdict ([Candidate registry](../evaluation/candidate-registry.md#odds-candidates-report)).
 - The [mechanical rule interface](../evaluation/candidate-rules.md) and its first rule, the exchange gap, with the market state at decision time and a code hash that each mechanical candidate records.
 - The [run-candidates job](../evaluation/run-candidates-job.md), which places each active mechanical candidate's flat-stake paper trades at its decision times and records every decision.
 
+- The [replay backtest](../evaluation/candidate-backtest.md), which scores a rule on stored data with the report's code, and the [parity check](../evaluation/candidate-parity.md), which compares the runner's decisions with their replay.
+
 Missing:
 
-- A replay backtest of a rule on stored data, and the parity check against the runner's decisions (#621).
+- The stake-capacity gate, which has no rule until a candidate is promoted.
+- A close for MLB, so MLB candidates are scored on P&L only.
 
 ## Related
 
+- [Take an idea to a verdict](../evaluation/howto-take-an-idea-to-a-verdict.md)
 - [About the system and its pivots](project-overview.md)
 - [Paper trading](../agent/paper-trading.md)
 - [Retail-EV evaluation](../evaluation/retail-ev-evaluation.md)

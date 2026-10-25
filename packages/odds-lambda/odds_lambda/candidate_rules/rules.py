@@ -5,17 +5,19 @@ from __future__ import annotations
 import hashlib
 import inspect
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any
 
 from odds_core import as_of
 from odds_core.candidates import Candidate, MechanicalCandidate
 from odds_core.market_prices import Outcome, market_outcomes
+from odds_core.models import Event
 from pydantic import BaseModel, ConfigDict, PositiveFloat, PositiveInt, ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.candidate_rules import market_state
-from odds_lambda.candidate_rules.market_state import MarketState, sport_market
+from odds_lambda.candidate_rules.market_state import MarketState, load_market_state, sport_market
 
 
 @dataclass(frozen=True)
@@ -73,6 +75,26 @@ RULES: dict[str, RuleSpec] = {
 }
 
 
+async def run_rule(
+    session: AsyncSession,
+    spec: RuleSpec,
+    params: RuleParams,
+    event: Event,
+    at: datetime,
+    known_at: datetime | None,
+    kickoff: datetime | None = None,
+) -> tuple[MarketState, list[BetIntent]]:
+    """The state of ``event`` at ``at`` as known at ``known_at``, and the bets the rule takes.
+
+    The live runner, the replay backtest and the parity check all decide through this.
+    ``kickoff`` overrides the event's current kick-off with the one a recorded decision saw.
+    """
+    state = await load_market_state(session, event, at, known_at)
+    if kickoff is not None:
+        state = replace(state, kickoff=kickoff)
+    return state, spec.function(state, params)
+
+
 def rule_sha256(rule_name: str) -> str:
     """Hash of the code a rule's bets depend on, in a fixed order.
 
@@ -91,21 +113,36 @@ def rule_sha256(rule_name: str) -> str:
     return digest.hexdigest()
 
 
+def resolve_rule(candidate: MechanicalCandidate) -> tuple[RuleSpec, RuleParams]:
+    """The candidate's rule and validated params; ``ValueError`` names what is invalid.
+
+    Does not check ``rule_sha256``, which a draft may lack.
+    """
+    spec = RULES.get(candidate.rule)
+    if spec is None:
+        raise ValueError(
+            f"candidate {candidate.name!r}: unknown rule {candidate.rule!r}, "
+            f"known rules {sorted(RULES)}"
+        )
+    try:
+        sport_market(candidate.sport)
+    except ValueError as exc:
+        raise ValueError(f"candidate {candidate.name!r}: {exc}") from exc
+    try:
+        params = spec.params_model.model_validate(candidate.params)
+    except ValidationError as exc:
+        raise ValueError(
+            f"candidate {candidate.name!r}: invalid params for rule {candidate.rule!r}: {exc}"
+        ) from exc
+    return spec, params
+
+
 def validate_candidate_rules(candidates: Sequence[Candidate]) -> None:
     """Raise ``ValueError`` naming a mechanical candidate that is invalid or whose rule code changed."""
     for candidate in candidates:
         if not isinstance(candidate, MechanicalCandidate):
             continue
-        spec = RULES.get(candidate.rule)
-        if spec is None:
-            raise ValueError(
-                f"candidate {candidate.name!r}: unknown rule {candidate.rule!r}, "
-                f"known rules {sorted(RULES)}"
-            )
-        try:
-            sport_market(candidate.sport)
-        except ValueError as exc:
-            raise ValueError(f"candidate {candidate.name!r}: {exc}") from exc
+        resolve_rule(candidate)
         if candidate.rule_sha256 != (current := rule_sha256(candidate.rule)):
             raise ValueError(
                 f"candidate {candidate.name!r}: the code of rule {candidate.rule!r} changed "
@@ -113,9 +150,3 @@ def validate_candidate_rules(candidates: Sequence[Candidate]) -> None:
                 f"a new candidate version must record the new hash "
                 f"(`odds candidates rule-hash {candidate.rule}` prints it)"
             )
-        try:
-            spec.params_model.model_validate(candidate.params)
-        except ValidationError as exc:
-            raise ValueError(
-                f"candidate {candidate.name!r}: invalid params for rule {candidate.rule!r}: {exc}"
-            ) from exc

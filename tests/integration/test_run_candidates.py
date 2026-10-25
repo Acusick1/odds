@@ -17,6 +17,7 @@ from odds_core.market_prices import Outcome
 from odds_core.models import Event, EventStatus
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from odds_lambda.candidate_rules import RULES, BetIntent, MarketState, RuleParams, RuleSpec
+from odds_lambda.candidate_rules import rules as rules_module
 from odds_lambda.candidate_rules.rules import rule_sha256
 from odds_lambda.jobs import run_candidates
 from odds_lambda.jobs.run_candidates import (
@@ -279,12 +280,12 @@ class TestDecisions:
     ) -> None:
         write_candidate(registry)
         await add_event(pglite_async_session, "e1", DUE)
-        spy = AsyncMock(side_effect=run_candidates.load_market_state)
-        monkeypatch.setattr(run_candidates, "load_market_state", spy)
+        spy = AsyncMock(side_effect=rules_module.load_market_state)
+        monkeypatch.setattr(rules_module, "load_market_state", spy)
 
         await run(pglite_async_session)
 
-        assert spy.await_args.kwargs["known_at"] == NOW
+        assert spy.await_args.args[3] == NOW
         assert spy.await_args.args[2] == DUE - timedelta(minutes=60)
 
     async def test_failed_decision_is_not_recorded_and_others_run(
