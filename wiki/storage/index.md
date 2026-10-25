@@ -54,6 +54,7 @@ Every table is a SQLModel class in `packages/odds-core/odds_core/`; migrations a
 - [OddsReader](odds-reader.md) — Every OddsReader query, which read normalized rows and which re-parse raw_data, and the time-window semantics.
 - [OddsWriter](odds-writer.md) — store_odds_snapshot (envelope, odds rows and price rows), event status updates, logging helpers, and their edge cases.
 - [Prices and snapshot payloads tables](price-tables.md) — The prices and snapshot_payloads tables, the closed sets their text columns take, how writers fill them from each source's envelope, and the policy store_snapshot applies when a snapshot's key is already stored.
+- [Shape backfill and verify](shape-backfill.md) — What odds data backfill-shape writes for stored history (twin merges, UNMATCHED events, external ids, snapshot source, market, time basis, payloads, price rows and Odds API splits, legacy Polymarket prices), how it tells sources apart, its duplicate and decision rules, and what odds data verify-shape checks.
 - [Storage layer](storage-layer.md) — The odds_lambda.storage module map, the commit and flush contract, and the upsert/insert/store verbs.
 
 ### Explanation
@@ -63,5 +64,6 @@ Every table is a SQLModel class in `packages/odds-core/odds_core/`; migrations a
 ### How-to guides
 
 - [Assign MLB events their gamePk](howto-assign-mlb-game-pks.md) — Steps to give stored MLB events without a gamePk their MLB Stats API gamePk, merge the events of one game, and settle the events the backfill cannot resolve.
+- [Backfill and verify the new shape](howto-backfill-the-new-shape.md) — Steps to move production's stored history into the new snapshot, price and event-identity shape with odds data backfill-shape, check it with odds data verify-shape, and recover when either fails.
 - [Delete same-time snapshot pairs](howto-delete-same-time-pairs.md) — Steps to delete the MLB snapshot pairs that hold two games' prices and the duplicate snapshots of one fetch, with their odds rows, and to check that every odds row then names its snapshot.
 <!-- pages:end -->

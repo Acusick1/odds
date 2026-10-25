@@ -226,6 +226,22 @@ async def resolve_unscheduled_mlb_event(
     return ResolvedEvent(event, Resolution.MATCHED)
 
 
+async def lock_fixture(session: AsyncSession, event: Event) -> None:
+    """Take the stored event's fixture lock until the transaction ends, as the resolver does
+    before reading or changing a fixture's events. Raises ``LockOrderError`` as
+    ``resolve_event``."""
+    await _lock(session, event_lock_key(event.sport_key, event.home_team, event.away_team))
+
+
+async def record_external_id(
+    session: AsyncSession, event: Event, source: Source, external_id: str
+) -> bool:
+    """Record an id ``source`` issued for a stored event; whether the event now holds it. The
+    caller holds the event's fixture lock (``lock_fixture``). Refusals follow ``resolve_event``
+    and are logged once per event and id. Flushes; the caller commits."""
+    return await _record_external_id(session, event, source, external_id, log_repeats=False)
+
+
 def _lock_key(game: ListedGame) -> int:
     return event_lock_key(
         game.sport_key, normalize_team_name(game.home_team), normalize_team_name(game.away_team)

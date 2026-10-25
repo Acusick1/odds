@@ -16,7 +16,7 @@ status: stable
 
 # Prices and snapshot payloads tables
 
-`prices` holds one row per price in a snapshot, and `snapshot_payloads` holds what a source returned. They sit beside the `odds` table and `odds_snapshots.raw_data` ([Odds snapshot and odds tables](odds-tables.md)), which every reader uses. The OddsPortal live and Betfair jobs and the historical OddsPortal and football-data.co.uk ingest scripts fill them alongside those ([Writing price rows](#writing-price-rows)); the other writers leave them empty. The snapshot columns they rely on (`source`, `market`, `time_basis` and the market metadata) are on [odds_snapshots](odds-tables.md#odds_snapshots).
+`prices` holds one row per price in a snapshot, and `snapshot_payloads` holds what a source returned. They sit beside the `odds` table and `odds_snapshots.raw_data` ([Odds snapshot and odds tables](odds-tables.md)), which every reader uses. Every snapshot writer fills them alongside those ([Writing price rows](#writing-price-rows)), and `odds data backfill-shape` fills them for the snapshots stored before the writers did ([Shape backfill and verify](shape-backfill.md)). The snapshot columns they rely on (`source`, `market`, `time_basis` and the market metadata) are on [odds_snapshots](odds-tables.md#odds_snapshots).
 
 ## prices
 

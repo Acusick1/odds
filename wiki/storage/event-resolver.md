@@ -66,6 +66,8 @@ A historical game (`odds_lambda.storage.event_resolver.MatchWindow.HISTORICAL`) 
 
 The fixture lock is released only when the caller's transaction commits or rolls back. Two transactions that each hold one fixture lock and wait for the other's would deadlock, so within one transaction `odds_lambda.storage.event_resolver.resolve_event` takes fixture locks in ascending key order: a new lock below one the transaction already holds raises `odds_lambda.storage.event_resolver.LockOrderError` before it is requested. Re-taking a held lock is allowed. A caller resolving several fixtures in one transaction passes them to `odds_lambda.storage.event_resolver.resolve_events`, which resolves them in key order and returns the results in input order. A caller that commits after each fixture can use `odds_lambda.storage.event_resolver.resolve_event` in any order.
 
+Code that changes a stored event's identity outside the resolver takes the same lock with `odds_lambda.storage.event_resolver.lock_fixture`, under the same order rule, and records an id the event's stored data holds with `odds_lambda.storage.event_resolver.record_external_id`, which applies the rules of [Refused ids](#refused-ids) and logs each refusal once per event and id. The [shape backfill](shape-backfill.md#steps) uses both.
+
 ## Refused ids
 
 An id is recorded only when neither the event nor the id is already taken. The resolver refuses it, logging `external_id_refused` and adding a `data_quality_logs` row through `odds_lambda.storage.data_quality.record_issue`, when:
