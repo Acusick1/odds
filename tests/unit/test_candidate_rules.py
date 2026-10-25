@@ -87,6 +87,25 @@ class TestBuildMarketState:
         new = _snap(10, three_way_bookmaker("betway", (2.2, 3.2, 4.2)))
         assert set(_state([old, new]).retail) == {"betway"}
 
+    def test_a_later_snapshot_of_another_market_is_skipped(self) -> None:
+        one_x_two = _snap(10, three_way_bookmaker("bet365", (2.0, 3.0, 4.0)))
+        totals = _snap(
+            9,
+            {
+                "key": "bet365",
+                "markets": [
+                    {
+                        "key": "totals",
+                        "outcomes": [
+                            {"name": "Over", "price_decimal": 1.8, "point": 2.5},
+                            {"name": "Under", "price_decimal": 2.0, "point": 2.5},
+                        ],
+                    }
+                ],
+            },
+        )
+        assert _state([one_x_two, totals]).retail["bet365"].prices[HOME] == 2.0
+
     def test_two_kinds_quoting_a_book_take_the_more_recent_snapshot(self) -> None:
         older = _snap(
             30,
