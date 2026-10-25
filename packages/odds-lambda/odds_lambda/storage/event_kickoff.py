@@ -24,8 +24,8 @@ logger = structlog.get_logger()
 KICKOFF_AUTHORITY: Mapping[SportKey, tuple[Source, ...]] = MappingProxyType(
     {
         "baseball_mlb": (Source.MLB_STATS_API,),
-        "soccer_epl": (),
-        "basketball_nba": (),
+        "soccer_epl": (Source.ODDSPORTAL, Source.ODDS_API),
+        "basketball_nba": (Source.ODDSPORTAL, Source.ODDS_API),
     }
 )
 

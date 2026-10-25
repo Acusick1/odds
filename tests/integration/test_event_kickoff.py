@@ -9,7 +9,7 @@ from odds_core.models import Event, EventExternalId, EventStatus, OddsSnapshot
 from odds_core.vocabulary import Source
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.storage import event_kickoff
-from odds_lambda.storage.event_kickoff import move_kickoff
+from odds_lambda.storage.event_kickoff import KICKOFF_AUTHORITY, move_kickoff
 
 from tests.test_helpers import TWIN_KICKOFF
 
@@ -67,12 +67,31 @@ class TestMoveKickoff:
         assert mlb_event.status is EventStatus.POSTPONED
 
     @pytest.mark.asyncio
-    async def test_a_sport_with_no_authority_never_moves(
+    async def test_a_source_outside_the_epl_order_never_moves(
         self, pglite_async_session, stored_epl_event
     ) -> None:
-        for source in Source:
+        for source in set(Source) - set(KICKOFF_AUTHORITY["soccer_epl"]):
             assert not await move_kickoff(pglite_async_session, stored_epl_event, source, MOVED)
         assert stored_epl_event.commence_time == TWIN_KICKOFF
+
+    @pytest.mark.asyncio
+    async def test_odds_api_yields_to_oddsportal_on_an_epl_event(
+        self, pglite_async_session, stored_epl_event
+    ) -> None:
+        pglite_async_session.add(
+            EventExternalId(
+                source=Source.ODDSPORTAL,
+                external_id="op-1",
+                event_id=stored_epl_event.surrogate_id,
+            )
+        )
+        await pglite_async_session.flush()
+
+        assert not await move_kickoff(
+            pglite_async_session, stored_epl_event, Source.ODDS_API, MOVED
+        )
+        assert await move_kickoff(pglite_async_session, stored_epl_event, Source.ODDSPORTAL, MOVED)
+        assert stored_epl_event.commence_time == MOVED
 
     @pytest.mark.asyncio
     async def test_no_start_or_the_same_start_is_no_move(
