@@ -268,7 +268,7 @@ def _refit_table(result: BacktestResult) -> Table:
     table = Table(
         title=(
             f"Model refits: {result.range_events} matches in range, the first "
-            f"{result.params['training_matches']} training only"
+            f"{result.range_events - len(result.decided_event_ids or ())} training only"
         )
     )
     table.add_column("Refit", justify="right")
@@ -300,8 +300,11 @@ def _tuning_table(result: BacktestResult) -> Table:
     table.add_column("Value", justify="right")
     for name, value in tuning.params.items():
         table.add_row(name, f"{value:.4g}" if isinstance(value, float) else str(value))
+    versions = ", ".join(f"{k} {v}" for k, v in (result.library_versions or {}).items())
     table.caption = (
-        f"mean fold weighted MSE {tuning.cv_wmse:.6f}, baseline {tuning.baseline_cv_wmse:.6f}"
+        f"{tuning.tuning_matches} tuning matches, validation rows per fold "
+        f"{list(tuning.validation_rows)}; mean fold weighted MSE {tuning.cv_wmse:.6f}, "
+        f"baseline {tuning.baseline_cv_wmse:.6f}; {versions}"
     )
     return table
 

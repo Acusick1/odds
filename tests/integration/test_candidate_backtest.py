@@ -438,6 +438,51 @@ class TestModelReplay:
 
         assert seen == set(ids[:3])
 
+    async def _tuned_on(
+        self, session: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> tuple[set[str], Any]:
+        from odds_analytics import candidate_model
+
+        real = candidate_model.choose_hyperparameters
+        seen: set[str] = set()
+
+        def tune(market: str, folds: Any, params: Any) -> Any:
+            seen.update(r.event_id for train, val in folds for r in [*train, *val])
+            return real(market, folds, params)
+
+        monkeypatch.setattr(candidate_model, "choose_hyperparameters", tune)
+        return seen, await run_model(session, model_candidate())
+
+    async def test_a_match_tied_with_the_last_training_match_is_training_only(
+        self, pglite_async_session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for i, kickoff in enumerate([KICKOFF, KICKOFF + WEEK, *[KICKOFF + 2 * WEEK] * 2]):
+            await add_event(pglite_async_session, f"m{i}", kickoff, away_team=f"T{i}")
+        await add_event(pglite_async_session, "m4", KICKOFF + 3 * WEEK, away_team="T4")
+
+        seen, result = await self._tuned_on(pglite_async_session, monkeypatch)
+
+        assert result.decided_event_ids == ("m4",)
+        assert seen == {"m0", "m1", "m2", "m3"}
+
+    async def test_tuning_ends_before_the_first_scored_decision(
+        self, pglite_async_session, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # m2 kicks off after m3's KO-60 decision, so its close is not known then.
+        await add_event(pglite_async_session, "m0", KICKOFF, away_team="T0")
+        await add_event(pglite_async_session, "m1", KICKOFF + WEEK, away_team="T1")
+        await add_event(pglite_async_session, "m2", KICKOFF + 2 * WEEK, away_team="T2")
+        await add_event(
+            pglite_async_session, "m3", KICKOFF + 2 * WEEK + timedelta(minutes=30), away_team="T3"
+        )
+
+        seen, result = await self._tuned_on(pglite_async_session, monkeypatch)
+
+        assert result.decided_event_ids == ("m3",)
+        assert seen == {"m0", "m1"}
+        assert result.tuning is not None and result.tuning.tuning_matches == 2
+        assert set(result.library_versions or {}) == {"xgboost", "optuna", "numpy"}
+
     async def test_labels_come_only_from_a_live_close(self, pglite_async_session) -> None:
         # Closed only by FDUK, published after the refit, no training match has a label.
         for i in range(5):

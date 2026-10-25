@@ -34,7 +34,7 @@ from odds_lambda.storage.event_merge import canonical_events
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_analytics.candidate_model import ModelReplay, Refit, Tuning
+from odds_analytics.candidate_model import ModelReplay, Refit, Tuning, library_versions
 from odds_analytics.candidate_report import (
     BOOTSTRAP_SEED,
     DEFAULT_BOOTSTRAP_SAMPLES,
@@ -79,7 +79,8 @@ class BacktestResult:
     """``overall`` is the estimate over every bet with a close in the scoreable prefix,
     beyond the checkpoint cap of the verdict. ``range_events`` counts the canonical events in
     the range, a model rule's training prefix included; ``tuning`` and ``refits`` record a model
-    rule's hyperparameters chosen on that prefix and its fits. ``comparison`` is another candidate replayed on the same decided events."""
+    rule's hyperparameters chosen on that prefix and its fits, and ``library_versions`` the
+    versions of the libraries that fitted and tuned it. ``comparison`` is another candidate replayed on the same decided events."""
 
     name: str
     version: int
@@ -94,6 +95,7 @@ class BacktestResult:
     range_events: int = 0
     tuning: Tuning | None = None
     refits: tuple[Refit, ...] = ()
+    library_versions: dict[str, str] | None = None
     comparison: BacktestResult | None = None
 
     @property
@@ -280,7 +282,13 @@ async def replay(
         n_boot,
         seed,
     )
-    return replace(result, range_events=range_events, tuning=tuning, refits=tuple(refits))
+    return replace(
+        result,
+        range_events=range_events,
+        tuning=tuning,
+        refits=tuple(refits),
+        library_versions=library_versions() if isinstance(spec, ModelRuleSpec) else None,
+    )
 
 
 def score(

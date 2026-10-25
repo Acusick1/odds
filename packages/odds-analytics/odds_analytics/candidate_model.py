@@ -16,7 +16,7 @@ whose closing prices are published days later, gives no rows.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -171,16 +171,34 @@ class TuningFold:
     validate: tuple[Event, ...]
 
 
-def tuning_folds(prefix: Sequence[Event], params: RetailEvModelParams) -> list[TuningFold]:
-    """Expanding walk-forward folds over the training matches, in kick-off order."""
+def tuning_folds(matches: Sequence[Event], params: RetailEvModelParams) -> list[TuningFold]:
+    """Expanding walk-forward folds over the tuning matches, in kick-off order."""
     folds: list[TuningFold] = []
-    starts = range(params.tuning_min_train_matches, len(prefix), params.tuning_step_matches)
+    starts = range(params.tuning_min_train_matches, len(matches), params.tuning_step_matches)
     for index, start in enumerate(starts):
-        validate = tuple(prefix[start : start + params.tuning_step_matches])
+        validate = tuple(matches[start : start + params.tuning_step_matches])
         cutoff = validate[0].commence_time - DECISION_WINDOW
-        train = tuple(e for e in prefix[:start] if e.commence_time <= cutoff)
+        train = tuple(e for e in matches[:start] if e.commence_time <= cutoff)
         folds.append(TuningFold(index, train, validate))
     return folds
+
+
+def at_decision_times(row: RetailEvRow, params: RetailEvModelParams) -> bool:
+    """Whether the row's snapshot could be the input of one of the rule's decisions: stamped
+    within ``max_input_age_minutes`` before a decision time."""
+    age = timedelta(minutes=params.max_input_age_minutes)
+    return any(
+        t - age <= row.decision_time <= t for _, t in decision_times(row.commence_time, params)
+    )
+
+
+def training_prefix(events: Sequence[Event], params: RetailEvModelParams) -> int:
+    """How many of ``events`` (kick-off order) are training only: the first
+    ``training_matches``, and any later match kicking off with the last of them."""
+    n = min(params.training_matches, len(events))
+    while 0 < n < len(events) and events[n].commence_time == events[n - 1].commence_time:
+        n += 1
+    return n
 
 
 @dataclass(frozen=True)
@@ -189,6 +207,8 @@ class Tuning:
 
     ``cv_wmse`` and ``baseline_cv_wmse`` are mean fold loss-weighted MSE of the chosen model and
     of the exchange-at-t baseline, over the ``folds`` folds with training and validation rows.
+    ``tuning_matches`` were tuned on, and ``validation_rows`` counts each scored fold's
+    validation rows.
     """
 
     params: dict[str, Any]
@@ -196,6 +216,8 @@ class Tuning:
     baseline_cv_wmse: float
     folds: int
     trials: int
+    tuning_matches: int = 0
+    validation_rows: tuple[int, ...] = ()
 
 
 def choose_hyperparameters(
@@ -214,7 +236,11 @@ def choose_hyperparameters(
         (_matrix(features, train), _matrix(features, val)) for train, val in folds if train and val
     ]
     if not usable:
-        raise ValueError("no tuning fold has both training and validation rows")
+        counts = [(len(train), len(val)) for train, val in folds]
+        raise ValueError(
+            "no tuning fold has both training and validation rows "
+            f"(training and validation rows per fold: {counts})"
+        )
 
     def objective(trial: optuna.Trial) -> float:
         xgb = xgboost_params(
@@ -241,6 +267,7 @@ def choose_hyperparameters(
         ),
         folds=len(usable),
         trials=params.tuning_trials,
+        validation_rows=tuple(len(val.y) for _, val in usable),
     )
 
 
@@ -255,7 +282,7 @@ class RefitBlock:
 
 def refit_blocks(events: Sequence[Event], params: RetailEvModelParams) -> list[RefitBlock]:
     """The scored matches of ``events`` (kick-off order) in blocks, after the training prefix."""
-    scored = events[params.training_matches :]
+    scored = events[training_prefix(events, params) :]
     blocks: list[RefitBlock] = []
     for index, start in enumerate(range(0, len(scored), params.refit_every_matches)):
         block = tuple(scored[start : start + params.refit_every_matches])
@@ -306,15 +333,31 @@ class ModelReplay:
         return sport_market(self._events[0].sport_key)
 
     async def tuned_hyperparameters(self) -> Tuning | None:
-        """``None`` when the range has no match to score; ``ValueError`` when nothing can tune."""
-        if len(self._events) <= self._params.training_matches:
+        """Hyperparameters chosen on the training matches whose close exists before the first
+        scored decision: those that kicked off before it, as a refit's training matches did.
+
+        Validation rows are those at the rule's decision times (``at_decision_times``); training
+        rows cover the whole decision window. ``None`` when the range has no match to score;
+        ``ValueError`` when nothing can tune.
+        """
+        blocks = refit_blocks(self._events, self._params)
+        if not blocks:
             return None
-        prefix = self._events[: self._params.training_matches]
+        prefix = self._events[: training_prefix(self._events, self._params)]
+        matches = [e for e in prefix if e.commence_time < blocks[0].at]
         folds = [
-            (await self._training_rows(fold.train), await self._training_rows(fold.validate))
-            for fold in tuning_folds(prefix, self._params)
+            (
+                await self._training_rows(fold.train),
+                [
+                    row
+                    for row in await self._training_rows(fold.validate)
+                    if at_decision_times(row, self._params)
+                ],
+            )
+            for fold in tuning_folds(matches, self._params)
         ]
-        return choose_hyperparameters(self._market(), folds, self._params)
+        tuning = choose_hyperparameters(self._market(), folds, self._params)
+        return replace(tuning, tuning_matches=len(matches))
 
     async def blocks(
         self, tuning: Tuning
@@ -336,3 +379,11 @@ class ModelReplay:
                 event_ids=tuple(e.id for e in block.events),
             )
             yield refit, self._spec.bind(predictor), block.events
+
+
+def library_versions() -> dict[str, str]:
+    """Versions of the libraries that fit and tune the model, which the rule hash does not pin."""
+    import optuna
+    import xgboost
+
+    return {"xgboost": xgboost.__version__, "optuna": optuna.__version__, "numpy": np.__version__}

@@ -10,9 +10,11 @@ import pytest
 from odds_analytics.candidate_model import (
     FIXED_XGBOOST_PARAMS,
     SEARCH_SPACES,
+    at_decision_times,
     choose_hyperparameters,
     refit_blocks,
     state_inputs,
+    training_prefix,
     training_rows,
     tuning_folds,
 )
@@ -223,3 +225,44 @@ class TestTune:
     def test_without_a_usable_fold_it_refuses(self) -> None:
         with pytest.raises(ValueError, match="no tuning fold"):
             choose_hyperparameters("1x2", [([], [])], _params())
+
+
+class TestTrainingPrefix:
+    def test_is_the_first_training_matches(self) -> None:
+        assert training_prefix(_events(5), _params()) == 3
+
+    def test_takes_matches_tied_with_the_last_one(self) -> None:
+        events = [
+            *_events(3),
+            make_epl_event("tie", KICKOFF + timedelta(hours=2)),
+            make_epl_event("later", KICKOFF + timedelta(hours=5)),
+        ]
+        assert training_prefix(events, _params()) == 4
+
+    def test_is_at_most_the_range(self) -> None:
+        assert training_prefix(_events(2), _params()) == 2
+
+
+class TestAtDecisionTimes:
+    @pytest.mark.parametrize(
+        ("before_kickoff", "usable"),
+        [
+            (timedelta(minutes=90), True),
+            (timedelta(minutes=100), True),
+            (timedelta(minutes=101), False),
+            (timedelta(minutes=35), True),
+            (timedelta(minutes=29), False),
+            (timedelta(hours=3), False),
+        ],
+    )
+    def test_rows_within_the_max_input_age_before_a_decision_time(
+        self, before_kickoff: timedelta, usable: bool
+    ) -> None:
+        snapshot = _snap(
+            before_kickoff,
+            three_way_bookmaker("bet365", (2.2, 3.4, 3.8)),
+            _betfair(),
+            source="oddsportal_live",
+        )
+        [row, *_] = training_rows(EVENT, [snapshot, CLOSE])
+        assert at_decision_times(row, _params()) is usable
