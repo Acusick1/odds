@@ -169,3 +169,92 @@ class TestMoveKickoffAfterTheStoredKickoff:
             pglite_async_session, stored_epl_event, Source.ODDSPORTAL, MOVED, now=IN_PLAY
         )
         assert stored_epl_event.status == EventStatus.SCHEDULED
+
+
+def _snapshot(event: Event, tag: str | None, source: Source | None = None) -> OddsSnapshot:
+    return OddsSnapshot(
+        event_id=event.id,
+        snapshot_time=TWIN_KICKOFF - timedelta(hours=1),
+        raw_data={} if tag is None else {"source": tag},
+        bookmaker_count=0,
+        source=source,
+    )
+
+
+class TestFootballDataUkMovesOnlyEventsOnlyItObserved:
+    PAST_NOW = TWIN_KICKOFF + timedelta(days=400)
+
+    @pytest.mark.asyncio
+    async def test_an_event_with_no_snapshots_moves(
+        self, pglite_async_session, stored_epl_event
+    ) -> None:
+        assert await move_kickoff(
+            pglite_async_session,
+            stored_epl_event,
+            Source.FOOTBALL_DATA_UK,
+            MOVED,
+            now=self.PAST_NOW,
+        )
+
+    @pytest.mark.asyncio
+    async def test_an_event_with_only_its_own_snapshots_moves(
+        self, pglite_async_session, stored_epl_event
+    ) -> None:
+        pglite_async_session.add_all(
+            [
+                _snapshot(stored_epl_event, "football_data_uk"),
+                _snapshot(stored_epl_event, None, Source.FOOTBALL_DATA_UK),
+            ]
+        )
+        await pglite_async_session.flush()
+
+        assert await move_kickoff(
+            pglite_async_session,
+            stored_epl_event,
+            Source.FOOTBALL_DATA_UK,
+            MOVED,
+            now=self.PAST_NOW,
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("tag", "source"),
+        [
+            ("oddsportal", None),
+            ("oddsportal_live", None),
+            (None, None),
+            (None, Source.ODDSPORTAL),
+            ("football_data_uk", Source.BETFAIR),
+        ],
+        ids=["legacy-oddsportal", "legacy-live", "legacy-odds-api", "shaped", "shaped-over-tag"],
+    )
+    async def test_an_event_another_source_observed_does_not_move(
+        self, pglite_async_session, stored_epl_event, tag: str | None, source: Source | None
+    ) -> None:
+        pglite_async_session.add_all(
+            [
+                _snapshot(stored_epl_event, "football_data_uk"),
+                _snapshot(stored_epl_event, tag, source),
+            ]
+        )
+        await pglite_async_session.flush()
+
+        assert not await move_kickoff(
+            pglite_async_session,
+            stored_epl_event,
+            Source.FOOTBALL_DATA_UK,
+            MOVED,
+            now=self.PAST_NOW,
+        )
+        assert stored_epl_event.commence_time == TWIN_KICKOFF
+
+    @pytest.mark.asyncio
+    async def test_the_top_source_is_not_held_to_it(
+        self, pglite_async_session, stored_epl_event
+    ) -> None:
+        pglite_async_session.add(_snapshot(stored_epl_event, "football_data_uk"))
+        await pglite_async_session.flush()
+
+        assert await move_kickoff(
+            pglite_async_session, stored_epl_event, Source.ODDSPORTAL, MOVED, now=BEFORE
+        )

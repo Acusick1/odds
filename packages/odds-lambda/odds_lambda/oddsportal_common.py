@@ -10,9 +10,6 @@ from typing import Any
 
 import structlog
 from odds_core.odds_math import PRICE_DECIMAL_KEY
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from odds_lambda.storage.event_merge import find_historical_match_id
 
 log = logging.getLogger(__name__)
 logger = structlog.get_logger()
@@ -64,6 +61,27 @@ def slugify(name: str) -> str:
 def normalize_bookmaker_key(name: str) -> str:
     """Map OddsPortal bookmaker name to pipeline key."""
     return BOOKMAKER_KEY_MAP.get(name, slugify(name))
+
+
+_EVENT_ID = re.compile(r"[A-Za-z0-9]{8}")
+_MATCH_LINK_ID = re.compile(r"-([A-Za-z0-9]{8})/?$")
+
+
+def event_id_from_match_link(match_link: str | None) -> str | None:
+    """The OddsPortal event id of a match page link, or ``None`` when it names none.
+
+    A match link ends with it (``.../arsenal-wolves-AbCd1234/``). A head-to-head link
+    (``/h2h/<home>-ID/<away>-ID/#AbCd1234``) ends with the team ids instead and carries the
+    event id in its fragment, so without a fragment it names none.
+    """
+    if not match_link:
+        return None
+    url, _, fragment = match_link.partition("#")
+    path = url.split("?")[0]
+    if "/h2h/" in path:
+        return fragment if _EVENT_ID.fullmatch(fragment) else None
+    found = _MATCH_LINK_ID.search(path)
+    return found.group(1) if found else None
 
 
 def parse_match_date(date_str: str) -> datetime:
@@ -234,14 +252,3 @@ class IngestionStats:
     injuries_linked: int = 0
     seasons_downloaded: int = 0
     errors: list[str] = field(default_factory=list)
-
-
-async def find_existing_event(
-    session: AsyncSession,
-    home_team: str,
-    away_team: str,
-    commence_time: datetime,
-    sport_key: str,
-) -> str | None:
-    """Find the Event for a historical row, without merging or creating anything."""
-    return await find_historical_match_id(session, home_team, away_team, commence_time, sport_key)

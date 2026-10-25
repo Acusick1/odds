@@ -14,6 +14,7 @@ from sqlalchemy import and_, delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.storage.data_quality import record_issue
+from odds_lambda.storage.event_unmatched import clear_unmatched, holds_game_pk
 from odds_lambda.tier_utils import calculate_hours_until_commence, calculate_tier_from_timestamps
 
 logger = structlog.get_logger()
@@ -107,37 +108,18 @@ async def find_match_candidates(
     )
 
 
-async def find_historical_match_id(
+async def find_historical_candidates(
     session: AsyncSession,
     home_team: str,
     away_team: str,
     commence_time: datetime,
     sport_key: str,
-) -> str | None:
-    """The event for a historical row, whose recorded kick-off may be a day off.
-
-    A lone candidate within ``HISTORICAL_MATCH_WINDOW`` matches. Several
-    candidates match only through those within ``EVENT_MATCH_WINDOW``, which are
-    twins, so neighbouring fixtures of the same teams are never conflated.
-    Read-only.
-    """
-    events = await _candidates(
+) -> list[Event]:
+    """Every event of the same sport and teams within ``HISTORICAL_MATCH_WINDOW``, for a
+    historical row whose recorded kick-off may be a day off. Read-only."""
+    return await _candidates(
         session, home_team, away_team, commence_time, HISTORICAL_MATCH_WINDOW, sport_key
     )
-    if len(events) <= 1:
-        return events[0].id if events else None
-    commence = ensure_utc(commence_time)
-    twins = [e for e in events if abs(ensure_utc(e.commence_time) - commence) <= EVENT_MATCH_WINDOW]
-    if twins:
-        return canonical_event_id([e.id for e in twins])
-    logger.warning(
-        "ambiguous_historical_match",
-        home=home_team,
-        away=away_team,
-        commence_time=commence.isoformat(),
-        candidates=[e.id for e in events],
-    )
-    return None
 
 
 async def retime_snapshots(session: AsyncSession, event_id: str, commence_time: datetime) -> int:
@@ -268,6 +250,9 @@ class EventMerger:
             # The duplicate's row must be gone before the kept event takes its unique gamePk.
             await self.session.flush()
             keep.assign_game_pk(game_pks.pop())
+        if await holds_game_pk(self.session, keep):
+            # An acknowledgement that the event has no game moved with a duplicate's rows.
+            await clear_unmatched(self.session, keep)
         report = MergeReport(keep.id, tuple(d.id for d in duplicates), rows_moved, rows_deleted)
         logger.info(
             "events_merged",

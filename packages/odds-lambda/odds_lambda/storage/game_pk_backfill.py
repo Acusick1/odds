@@ -36,6 +36,7 @@ from odds_lambda.mlb_game_resolver import (
 from odds_lambda.mlb_stats_fetcher import MlbStatsFetcher
 from odds_lambda.storage.event_kickoff import move_kickoff
 from odds_lambda.storage.event_merge import EventMerger
+from odds_lambda.storage.event_unmatched import clear_unmatched, mark_unmatched
 from odds_lambda.storage.same_time_pairs import SnapshotPairs, event_same_time_pairs
 from odds_lambda.storage.writers import OddsWriter
 
@@ -357,6 +358,7 @@ async def apply_assignment(
         rows_moved = report.rows_moved
     if kept.mlb_game_pk is None:
         kept.assign_game_pk(assignment.game_pk)
+        await clear_unmatched(session, kept)
     await move_kickoff(
         session, kept, Source.MLB_STATS_API, assignment.target_start(), now=datetime.now(UTC)
     )
@@ -516,11 +518,15 @@ async def plan_hand_assignment(
 
 
 async def mark_no_game_pk(session: AsyncSession, event_id: str, reason: str) -> Event:
-    """Record why an MLB event has no ``gamePk``, so the health check stops listing it. Caller
-    commits."""
+    """Record why an MLB event has no ``gamePk``, so the health check stops listing it: the event
+    becomes ``UNMATCHED`` with the reason as its acknowledgement (``mark_unmatched``), and the
+    reason is still written to ``no_game_pk_reason``, which the filters read. Caller commits."""
     if not reason.strip():
         raise GamePkRefused("a reason is required")
     event = await _mlb_event_without_game_pk(session, event_id)
+    try:
+        await mark_unmatched(session, event, reason)
+    except ValueError as e:
+        raise GamePkRefused(str(e)) from e
     event.no_game_pk_reason = reason.strip()
-    await session.flush()
     return event

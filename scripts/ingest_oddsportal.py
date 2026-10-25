@@ -39,13 +39,16 @@ from zoneinfo import ZoneInfo
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.team import team_abbrev
+from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.oddsportal_common import (
     IngestionStats,
     build_raw_data,
-    find_existing_event,
+    event_id_from_match_link,
     hours_to_tier,
     parse_match_date,
 )
+from odds_lambda.storage.event_resolver import ListedGame, MatchWindow, Resolution, resolve_event
+from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload, store_shaped_snapshot
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -277,23 +280,24 @@ async def ingest_season(
     async with async_session_maker() as session:
         for record in records:
             try:
-                await _ingest_one_game(
-                    session,
-                    record,
-                    season,
-                    stats,
-                    sport_config=sport_config,
-                    market_config=market_config,
-                    json_market_key=json_market_key,
-                    normalize_fn=normalize_fn,
-                    canonical_to_abbrev=canonical_to_abbrev,
-                )
+                async with session.begin_nested():
+                    await _ingest_one_game(
+                        session,
+                        record,
+                        season,
+                        stats,
+                        sport_config=sport_config,
+                        market_config=market_config,
+                        json_market_key=json_market_key,
+                        normalize_fn=normalize_fn,
+                        canonical_to_abbrev=canonical_to_abbrev,
+                    )
             except Exception as e:
                 msg = f"{record.get('home_team', '?')} vs {record.get('away_team', '?')}: {e}"
                 stats.errors.append(msg)
                 log.error(f"  Error: {msg}")
-
-        await session.commit()
+            # One commit per game releases the fixture lock the resolver took.
+            await session.commit()
 
     return stats
 
@@ -340,40 +344,37 @@ async def _ingest_one_game(
     match_dt = parse_match_date(match_date_str)
 
     # --- Match or create Event ---
-    event_id = await find_existing_event(session, home_team, away_team, match_dt, sport_key)
-
-    if event_id:
-        stats.events_matched += 1
+    resolved = await resolve_event(
+        session,
+        ListedGame(
+            source=Source.ODDSPORTAL,
+            sport_key=sport_key,
+            sport_title=sport_title,
+            home_team=home_team,
+            away_team=away_team,
+            commence_time=match_dt,
+            legacy_id=build_event_id(
+                season, home_team, away_team, match_dt.date(), canonical_to_abbrev
+            ),
+            external_id=event_id_from_match_link(record.get("match_link")),
+            match_window=MatchWindow.HISTORICAL,
+        ),
+    )
+    event = resolved.event
+    if resolved.resolution is Resolution.CREATED:
+        home_score_str = record.get("home_score", "")
+        away_score_str = record.get("away_score", "")
+        home_score = int(home_score_str) if home_score_str.isdigit() else None
+        away_score = int(away_score_str) if away_score_str.isdigit() else None
+        if home_score is not None and away_score is not None:
+            event.status = EventStatus.FINAL
+            event.home_score = home_score
+            event.away_score = away_score
+            event.completed_at = match_dt
+        stats.events_created += 1
     else:
-        event_id = build_event_id(
-            season, home_team, away_team, match_dt.date(), canonical_to_abbrev
-        )
-
-        # Check if this OddsPortal event already exists (idempotency)
-        existing = await session.get(Event, event_id)
-        if existing:
-            stats.events_matched += 1
-        else:
-            home_score_str = record.get("home_score", "")
-            away_score_str = record.get("away_score", "")
-            home_score = int(home_score_str) if home_score_str.isdigit() else None
-            away_score = int(away_score_str) if away_score_str.isdigit() else None
-            is_final = home_score is not None and away_score is not None
-
-            event = Event(
-                id=event_id,
-                sport_key=sport_key,
-                sport_title=sport_title,
-                commence_time=match_dt,
-                home_team=home_team,
-                away_team=away_team,
-                status=EventStatus.FINAL if is_final else EventStatus.SCHEDULED,
-                home_score=home_score,
-                away_score=away_score,
-                completed_at=match_dt if is_final else None,
-            )
-            session.add(event)
-            stats.events_created += 1
+        stats.events_matched += 1
+    event_id = event.id
 
     # --- Build and insert OddsSnapshots ---
     # Tag with market-specific source for deduplication
@@ -392,6 +393,7 @@ async def _ingest_one_game(
     if existing_check.scalars().first() is not None:
         return  # Already ingested
 
+    envelopes: list[tuple[dict[str, Any], datetime]] = []
     for use_opening in (True, False):
         raw_data = build_raw_data(
             market_data,
@@ -410,22 +412,31 @@ async def _ingest_one_game(
         snapshot_time_str = raw_data.pop("_snapshot_time", None)
         if not snapshot_time_str:
             continue
+        envelopes.append(
+            (raw_data, datetime.fromisoformat(snapshot_time_str.replace("Z", "+00:00")))
+        )
+    if not envelopes:
+        return
 
-        snapshot_time = datetime.fromisoformat(snapshot_time_str.replace("Z", "+00:00"))
-        hours_before = (match_dt - snapshot_time).total_seconds() / 3600
-        tier = hours_to_tier(hours_before)
-
+    shape = SnapshotShape(
+        Source.ODDSPORTAL,
+        TimeBasis.SOURCE_STAMPED,
+        await store_payload(session, [raw_data for raw_data, _ in envelopes]),
+    )
+    commence_time = event.commence_time
+    for raw_data, snapshot_time in envelopes:
+        hours_before = (commence_time - snapshot_time).total_seconds() / 3600
         snapshot = OddsSnapshot(
             event_id=event_id,
             snapshot_time=snapshot_time,
             raw_data=raw_data,
             bookmaker_count=len(raw_data["bookmakers"]),
             api_request_id=source_tag,
-            fetch_tier=tier,
+            fetch_tier=hours_to_tier(hours_before),
             hours_until_commence=max(0.0, hours_before),
         )
-        session.add(snapshot)
-        stats.snapshots_inserted += 1
+        if (await store_shaped_snapshot(session, snapshot, event, shape)).inserted:
+            stats.snapshots_inserted += 1
 
 
 # ---------------------------------------------------------------------------

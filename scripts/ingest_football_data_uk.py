@@ -35,17 +35,18 @@ from urllib.request import urlopen
 from zoneinfo import ZoneInfo
 
 from odds_core.database import async_session_maker
-from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
+from odds_core.models import EventStatus, Odds, OddsSnapshot, SnapshotPayload
 from odds_core.odds_math import PRICE_DECIMAL_KEY
+from odds_core.paper_trade_models import CandidateDecision
 from odds_core.snapshot_sources import FdukTimeBasis, SnapshotSource
 from odds_core.team import team_abbrev
+from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.fetch_tier import FetchTier
-from odds_lambda.oddsportal_common import (
-    IngestionStats,
-    find_existing_event,
-    hours_to_tier,
-)
-from sqlalchemy import and_, delete, select
+from odds_lambda.oddsportal_common import IngestionStats, hours_to_tier
+from odds_lambda.storage.data_quality import record_issue
+from odds_lambda.storage.event_resolver import ListedGame, MatchWindow, Resolution, resolve_event
+from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload, store_shaped_snapshot
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from team_names import normalize_team as _normalize_team_central
 
@@ -142,6 +143,7 @@ class FdukStats(IngestionStats):
     openings_withheld: int = 0
     kickoff_mismatches: int = 0
     results_filled: int = 0
+    replacements_refused: int = 0
 
 
 def normalize_team(name: str) -> str:
@@ -414,8 +416,8 @@ async def ingest_season(
     async with async_session_maker() as session:
         for row in rows:
             await ingest_row(session, row, season, stats)
-
-        await session.commit()
+            # One commit per match releases the fixture lock the resolver took.
+            await session.commit()
 
     return stats
 
@@ -470,37 +472,27 @@ async def _ingest_one_match(
     away_team = normalize_team(away_raw)
     kickoff = parse_kickoff(row)
 
-    event_id = await find_existing_event(
-        session, home_team, away_team, kickoff.commence_time, SPORT_KEY
-    )
-    if event_id is None:
-        event_id = build_event_id(season, home_team, away_team, kickoff.commence_time)
-    event = await session.get(Event, event_id)
-    if event is None:
-        home_score = _safe_int(row.get("FTHG"))
-        away_score = _safe_int(row.get("FTAG"))
-        is_final = home_score is not None and away_score is not None
-        event = Event(
-            id=event_id,
+    resolved = await resolve_event(
+        session,
+        ListedGame(
+            source=Source.FOOTBALL_DATA_UK,
             sport_key=SPORT_KEY,
             sport_title=SPORT_TITLE,
-            commence_time=kickoff.commence_time,
             home_team=home_team,
             away_team=away_team,
-            status=EventStatus.FINAL if is_final else EventStatus.SCHEDULED,
-            home_score=home_score,
-            away_score=away_score,
-            completed_at=kickoff.commence_time + timedelta(hours=2) if is_final else None,
-        )
-        session.add(event)
+            commence_time=kickoff.commence_time,
+            legacy_id=build_event_id(season, home_team, away_team, kickoff.commence_time),
+            match_window=MatchWindow.HISTORICAL,
+        ),
+    )
+    event = resolved.event
+    event_id = event.id
+    created = resolved.resolution is Resolution.CREATED
+    if created:
         stats.events_created += 1
     else:
         stats.events_matched += 1
-        if event_id.startswith(f"{EVENT_ID_PREFIX}_"):
-            event.commence_time = kickoff.commence_time
-            if event.completed_at is not None:
-                event.completed_at = kickoff.commence_time + timedelta(hours=2)
-        elif abs(event.commence_time - kickoff.commence_time) > KICKOFF_MISMATCH_TOLERANCE:
+        if abs(event.commence_time - kickoff.commence_time) > KICKOFF_MISMATCH_TOLERANCE:
             stats.kickoff_mismatches += 1
             log.warning(
                 f"  {event_id}: FDUK kick-off {kickoff.commence_time.isoformat()} differs "
@@ -515,9 +507,10 @@ async def _ingest_one_match(
             event.home_score = home_score
             event.away_score = away_score
             event.completed_at = commence_time + timedelta(hours=2)
-            stats.results_filled += 1
+            if not created:
+                stats.results_filled += 1
 
-    new_snapshots: list[OddsSnapshot] = []
+    new_snapshots: list[tuple[OddsSnapshot, TimeBasis]] = []
     for use_closing in (False, True):
         raw_data = _build_snapshot_raw_data(
             row,
@@ -540,28 +533,33 @@ async def _ingest_one_match(
         for bk in raw_data["bookmakers"]:
             bk["last_update"] = snapshot_time.isoformat().replace("+00:00", "Z")
         new_snapshots.append(
-            OddsSnapshot(
-                event_id=event_id,
-                snapshot_time=snapshot_time,
-                raw_data=raw_data,
-                bookmaker_count=len(raw_data["bookmakers"]),
-                api_request_id=SOURCE_TAG,
-                fetch_tier=hours_to_tier(hours_before)
-                if use_closing
-                else opening_fetch_tier(hours_before),
-                hours_until_commence=hours_before,
+            (
+                OddsSnapshot(
+                    event_id=event_id,
+                    snapshot_time=snapshot_time,
+                    raw_data=raw_data,
+                    bookmaker_count=len(raw_data["bookmakers"]),
+                    api_request_id=SOURCE_TAG,
+                    fetch_tier=hours_to_tier(hours_before)
+                    if use_closing
+                    else opening_fetch_tier(hours_before),
+                    hours_until_commence=hours_before,
+                ),
+                TimeBasis.CLOSE if use_closing else TimeBasis.UPPER_BOUND,
             )
         )
 
+    # Snapshots stored before the redesign carry no source, only the request-id tag.
     existing_snaps = list(
         (
             await session.execute(
                 select(OddsSnapshot)
                 .where(
-                    and_(
-                        OddsSnapshot.event_id == event_id,
+                    OddsSnapshot.event_id == event_id,
+                    or_(
+                        OddsSnapshot.source == Source.FOOTBALL_DATA_UK,
                         OddsSnapshot.api_request_id == SOURCE_TAG,
-                    )
+                    ),
                 )
                 .order_by(OddsSnapshot.snapshot_time)
             )
@@ -569,27 +567,76 @@ async def _ingest_one_match(
         .scalars()
         .all()
     )
-    if [_snapshot_content(snap) for snap in existing_snaps] == [
-        _snapshot_content(snap) for snap in new_snapshots
+    if [_snapshot_content(snap, snap.source, snap.time_basis) for snap in existing_snaps] == [
+        _snapshot_content(snap, Source.FOOTBALL_DATA_UK, basis) for snap, basis in new_snapshots
     ]:
         return
     if existing_snaps:
-        existing_ids = [snap.id for snap in existing_snaps]
-        await session.execute(delete(Odds).where(Odds.snapshot_id.in_(existing_ids)))
-        await session.execute(delete(OddsSnapshot).where(OddsSnapshot.id.in_(existing_ids)))
+        referenced = await _referenced_by_decisions(session, [snap.id for snap in existing_snaps])
+        if referenced:
+            stats.replacements_refused += 1
+            record_issue(
+                session,
+                event_id,
+                "fduk_replace_refused",
+                f"{SOURCE_TAG} snapshots {sorted(referenced)} are inputs of candidate decisions; "
+                "the event's snapshots are not replaced",
+                {"snapshot_ids": sorted(referenced)},
+            )
+            log.warning(f"  {event_id}: snapshots {sorted(referenced)} feed decisions, kept")
+            return
+        await _delete_snapshots(session, existing_snaps)
         stats.snapshots_updated += len(existing_snaps)
-    session.add_all(new_snapshots)
-    stats.snapshots_inserted += len(new_snapshots)
+    if not new_snapshots:
+        return
+    payload_id = await store_payload(session, [snap.raw_data for snap, _ in new_snapshots])
+    for snap, basis in new_snapshots:
+        write = await store_shaped_snapshot(
+            session, snap, event, SnapshotShape(Source.FOOTBALL_DATA_UK, basis, payload_id)
+        )
+        if write.inserted:
+            stats.snapshots_inserted += 1
 
 
-def _snapshot_content(snap: OddsSnapshot) -> tuple[Any, ...]:
+async def _delete_snapshots(session: AsyncSession, snapshots: list[OddsSnapshot]) -> None:
+    """Delete ``snapshots`` with their odds rows (prices cascade), and the payloads no other
+    snapshot references."""
+    ids = [snap.id for snap in snapshots]
+    payload_ids = {snap.payload_id for snap in snapshots if snap.payload_id is not None}
+    await session.execute(delete(Odds).where(Odds.snapshot_id.in_(ids)))
+    await session.execute(delete(OddsSnapshot).where(OddsSnapshot.id.in_(ids)))
+    if payload_ids:
+        still_used = select(OddsSnapshot.payload_id).where(OddsSnapshot.payload_id.in_(payload_ids))
+        await session.execute(
+            delete(SnapshotPayload).where(
+                SnapshotPayload.id.in_(payload_ids), SnapshotPayload.id.not_in(still_used)
+            )
+        )
+
+
+def _snapshot_content(snap: OddsSnapshot, source: Source | None, basis: TimeBasis | None) -> Any:
+    """What a re-ingest compares: the stored snapshot's, or a new one's with its intended shape."""
     return (
+        source,
+        basis,
         snap.snapshot_time,
         snap.fetch_tier,
         snap.hours_until_commence,
         snap.bookmaker_count,
         snap.raw_data,
     )
+
+
+async def _referenced_by_decisions(session: AsyncSession, snapshot_ids: list[int]) -> set[int]:
+    """The ids among ``snapshot_ids`` that a candidate decision recorded as an input, so its
+    replay needs them."""
+    inputs = select(
+        func.unnest(CandidateDecision.input_snapshot_ids).label("snapshot_id")
+    ).subquery()
+    used = await session.execute(
+        select(inputs.c.snapshot_id).where(inputs.c.snapshot_id.in_(snapshot_ids))
+    )
+    return set(used.scalars())
 
 
 def main() -> None:
@@ -680,6 +727,7 @@ async def _run(
         totals.openings_withheld += stats.openings_withheld
         totals.kickoff_mismatches += stats.kickoff_mismatches
         totals.results_filled += stats.results_filled
+        totals.replacements_refused += stats.replacements_refused
         totals.errors.extend(stats.errors)
 
         if not dry_run and not download_only:
@@ -703,6 +751,7 @@ async def _run(
         log.info(f"Openings withheld:  {totals.openings_withheld}")
         log.info(f"Kick-off mismatches: {totals.kickoff_mismatches}")
         log.info(f"Results filled:     {totals.results_filled}")
+        log.info(f"Replacements refused: {totals.replacements_refused}")
 
     if totals.errors:
         log.info(f"Errors:             {len(totals.errors)}")

@@ -10,7 +10,7 @@ import typer
 from odds_cli.commands import events as events_cli
 from odds_core.config import get_settings
 from odds_core.match_brief_models import BriefDecision, MatchBrief
-from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.models import Event, EventStatus, HealthCheckAcknowledgement, OddsSnapshot
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from odds_lambda.health_monitor import HealthMonitor
 from odds_lambda.mlb_game_resolver import UnresolvedReason
@@ -146,6 +146,15 @@ async def _count(session: AsyncSession, model: type, event_id: str) -> int:
             select(func.count()).select_from(model).where(model.event_id == event_id)
         )
     ).scalar_one()
+
+
+async def _acknowledged_reasons(session: AsyncSession, event: Event) -> list[str]:
+    rows = await session.execute(
+        select(HealthCheckAcknowledgement.reason).where(
+            HealthCheckAcknowledgement.event_id == event.surrogate_id
+        )
+    )
+    return list(rows.scalars())
 
 
 class TestAssignGamePks:
@@ -852,6 +861,23 @@ class TestMarkUnassignable:
 
         event = await session.get(Event, "orphan")
         assert (event.mlb_game_pk, event.no_game_pk_reason) == (824101, None)
+        assert event.status is EventStatus.SCHEDULED
+        assert await _acknowledged_reasons(session, event) == []
+
+    async def test_marking_makes_the_event_unmatched_with_an_acknowledgement(
+        self, pglite_async_session: AsyncSession
+    ) -> None:
+        session = pglite_async_session
+        session.add(_event("orphan", EVENING))
+        await session.commit()
+
+        await mark_no_game_pk(session, "orphan", " no MLB game matches ")
+        await session.commit()
+
+        event = await session.get(Event, "orphan")
+        assert event.status is EventStatus.UNMATCHED
+        assert event.no_game_pk_reason == "no MLB game matches"
+        assert await _acknowledged_reasons(session, event) == ["no MLB game matches"]
 
     async def test_refuses_an_event_holding_a_game_pk(
         self, pglite_async_session: AsyncSession

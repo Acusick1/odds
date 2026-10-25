@@ -8,12 +8,19 @@ import pytest
 from odds_cli.commands import events as events_cli
 from odds_core.api_models import EventsResponse
 from odds_core.match_brief_models import MatchBrief
-from odds_core.models import Event, EventStatus, Odds, OddsSnapshot, utc_now
+from odds_core.models import (
+    Event,
+    EventStatus,
+    HealthCheckAcknowledgement,
+    Odds,
+    OddsSnapshot,
+    utc_now,
+)
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from odds_lambda.event_sync import EventSyncService
-from odds_lambda.oddsportal_common import find_existing_event
 from odds_lambda.storage.event_merge import EventMerger
 from odds_lambda.storage.event_name_repair import repair_team_names
+from odds_lambda.storage.event_unmatched import mark_unmatched
 from sqlalchemy import select
 
 from tests.test_helpers import (
@@ -301,54 +308,6 @@ class TestMergeGroup:
         await session.flush()
 
         assert await EventMerger(session).find_twin_groups() == []
-
-
-class TestFindersAreReadOnly:
-    @pytest.mark.asyncio
-    async def test_historical_twins_resolve_to_canonical_without_merging(
-        self, pglite_async_session
-    ) -> None:
-        session = pglite_async_session
-        session.add_all([make_epl_event(FDUK_EVENT_ID), make_epl_event(API_EVENT_ID)])
-        await session.flush()
-
-        event_id = await find_existing_event(
-            session, "Arsenal", "Chelsea", TWIN_KICKOFF, "soccer_epl"
-        )
-
-        assert event_id == API_EVENT_ID
-        assert await _stored_event_ids(session) == {API_EVENT_ID, FDUK_EVENT_ID}
-
-    @pytest.mark.asyncio
-    async def test_historical_back_to_back_fixtures_are_never_conflated(
-        self, pglite_async_session
-    ) -> None:
-        session = pglite_async_session
-        next_day = TWIN_KICKOFF + timedelta(hours=20)
-        session.add_all(
-            [make_epl_event(API_EVENT_ID), make_epl_event(HISTORICAL_EVENT_ID, next_day)]
-        )
-        await session.flush()
-
-        near = await find_existing_event(session, "Arsenal", "Chelsea", TWIN_KICKOFF, "soccer_epl")
-        between = await find_existing_event(
-            session, "Arsenal", "Chelsea", TWIN_KICKOFF + timedelta(hours=10), "soccer_epl"
-        )
-
-        assert near == API_EVENT_ID
-        assert between is None
-        assert await _stored_event_ids(session) == {API_EVENT_ID, HISTORICAL_EVENT_ID}
-
-    @pytest.mark.asyncio
-    async def test_historical_match_is_scoped_to_sport(self, pglite_async_session) -> None:
-        session = pglite_async_session
-        session.add(make_epl_event(API_EVENT_ID))
-        await session.flush()
-
-        assert (
-            await find_existing_event(session, "Arsenal", "Chelsea", TWIN_KICKOFF, "baseball_mlb")
-            is None
-        )
 
 
 class TestFindTwinGroups:
@@ -797,3 +756,59 @@ class TestRepairGhostsFromRunnerNames:
         await repair_team_names(session, "baseball_mlb")
 
         assert await _stored_event_ids(session) == {"op_live_G1", "op_live_G2"}
+
+
+class TestMergeClearsUnmatched:
+    @staticmethod
+    def _mlb(event_id: str, game_pk: int | None = None) -> Event:
+        return Event(
+            id=event_id,
+            sport_key="baseball_mlb",
+            sport_title="MLB",
+            commence_time=TWIN_KICKOFF,
+            home_team="New York Yankees",
+            away_team="Boston Red Sox",
+            status=EventStatus.SCHEDULED,
+            mlb_game_pk=game_pk,
+        )
+
+    @staticmethod
+    async def _acknowledgements(session, event: Event) -> list[str]:
+        rows = await session.execute(
+            select(HealthCheckAcknowledgement.reason).where(
+                HealthCheckAcknowledgement.event_id == event.surrogate_id
+            )
+        )
+        return list(rows.scalars())
+
+    @pytest.mark.asyncio
+    async def test_an_unmatched_duplicate_merged_into_the_gamepk_holder_leaves_no_acknowledgement(
+        self, pglite_async_session
+    ) -> None:
+        session = pglite_async_session
+        keep, duplicate = self._mlb("holder", 777), self._mlb("orphan")
+        session.add_all([keep, duplicate])
+        await session.flush()
+        await mark_unmatched(session, duplicate, "not in the schedule")
+
+        await EventMerger(session).merge(keep, [duplicate])
+        await session.flush()
+
+        assert await self._acknowledgements(session, keep) == []
+        assert keep.status is EventStatus.SCHEDULED
+
+    @pytest.mark.asyncio
+    async def test_an_unmatched_event_that_takes_a_duplicates_gamepk_is_scheduled_again(
+        self, pglite_async_session
+    ) -> None:
+        session = pglite_async_session
+        keep, duplicate = self._mlb("orphan"), self._mlb("holder", 777)
+        session.add_all([keep, duplicate])
+        await session.flush()
+        await mark_unmatched(session, keep, "not in the schedule")
+
+        await EventMerger(session).merge(keep, [duplicate])
+        await session.flush()
+
+        assert (keep.mlb_game_pk, keep.status) == (777, EventStatus.SCHEDULED)
+        assert await self._acknowledgements(session, keep) == []

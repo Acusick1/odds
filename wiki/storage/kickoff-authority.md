@@ -19,10 +19,10 @@ Every move of an [event](events.md)'s `commence_time` on behalf of a source goes
 | Sport | Order |
 |---|---|
 | `baseball_mlb` | MLB Stats API (`mlb_stats_api`) |
-| `soccer_epl` | OddsPortal (`oddsportal`), then Odds API (`odds_api`) |
+| `soccer_epl` | OddsPortal (`oddsportal`), then Odds API (`odds_api`), then football-data.co.uk (`football_data_uk`) |
 | `basketball_nba` | OddsPortal (`oddsportal`), then Odds API (`odds_api`) |
 
-A source outside its sport's order never moves an event: Betfair, Polymarket, ESPN and football-data.co.uk move no EPL or NBA event. A source in the order moves an event only when no source ranked above it holds an external id on that event ([external ids](events.md#external-ids)), so the Odds API moves an EPL or NBA event only while it holds no OddsPortal id.
+A source outside its sport's order never moves an event: Betfair, Polymarket and ESPN move no EPL or NBA event, and football-data.co.uk moves no NBA event. A source in the order moves an event only when no source ranked above it holds an external id on that event ([external ids](events.md#external-ids)), so the Odds API moves an EPL or NBA event only while it holds no OddsPortal id, and football-data.co.uk moves an EPL event only while it holds neither an OddsPortal nor an Odds API id and no other source has a snapshot on it (see [Before and after the stored kick-off](#before-and-after-the-stored-kick-off)).
 
 ## Basis for the EPL and NBA order
 
@@ -40,7 +40,7 @@ Left out of both orders:
 - **Betfair:** `betfair_meta.market_start_time` is the market's start, which can precede the event's, and the local copy holds none.
 - **Polymarket:** the EPL start time is used for matching and not stored; the NBA `end_date` cannot be compared with OddsPortal because the copy's twins are merged and OddsPortal's own kick-off was not kept.
 - **ESPN:** team rows with no event link or id.
-- **football-data.co.uk:** the kick-off is assumed (`timing.kickoff_time_assumed`); 588 of 1597 matched events differ from ESPN.
+- **football-data.co.uk for NBA:** it covers EPL only. For EPL it ranks last: its kick-off is assumed before 2019-20 (`timing.kickoff_time_assumed`) and 588 of 1597 matched events differ from ESPN, so it moves only an event no better source holds an id on.
 
 ## Before and after the stored kick-off
 
@@ -49,7 +49,7 @@ For every source except those in `odds_lambda.storage.event_kickoff.PLAYED_START
 - **Before the stored kick-off** (`now` earlier), the rank rule above applies.
 - **Once it has passed**, a start at or before `now` is refused, since a live feed reports the actual start. A start still ahead is accepted from any source in the order, whatever ids the event holds, so a postponement the top source stopped listing is still followed.
 
-The MLB Stats API is the one source in `odds_lambda.storage.event_kickoff.PLAYED_START_SOURCES`. Its schedule dates a postponed game by when it was played, so it may move an event to a start in the past and skips the after-kick-off rule.
+The MLB Stats API and football-data.co.uk are the sources in `odds_lambda.storage.event_kickoff.PLAYED_START_SOURCES`. The MLB schedule dates a postponed game by when it was played, and football-data.co.uk records the kick-off of a match already played, so each may move an event to a start in the past and skips the after-kick-off rule. The rank rule still applies to them. A source in that set that the order ranks below another (football-data.co.uk for EPL) moves only an event no other source has observed, because the events stored before external ids were recorded hold none: every snapshot of the event must have `source` equal to it, or, for a snapshot with no `source`, a `raw_data` tag equal to it (`odds_lambda.storage.event_kickoff._observed_by_another`; no tag is the Odds API). An event with no snapshots qualifies.
 
 ## A move
 
@@ -62,7 +62,7 @@ Nothing happens when no start is given or it equals the stored kick-off. Otherwi
 
 ## Callers
 
-- `odds_lambda.storage.event_resolver.resolve_event` ([Event resolver](event-resolver.md)), for the live OddsPortal and Betfair jobs (it alone offers the start; `odds_lambda.storage.event_resolver.attach_event` offers none; [live MLB events](event-matching.md#live-mlb-events)): the MLB Stats API with the schedule's start for MLB, else the listing source with its listed start.
+- `odds_lambda.storage.event_resolver.resolve_event` ([Event resolver](event-resolver.md)), for the live OddsPortal and Betfair jobs and the historical ingest scripts (it alone offers the start; `odds_lambda.storage.event_resolver.attach_event` offers none; [live MLB events](event-matching.md#live-mlb-events)): the MLB Stats API with the schedule's start for MLB, else the listing source with its listed start. An OddsPortal historical listing is always in the past, so it never moves a played event.
 - `odds_lambda.jobs.fetch_mlb_results` ([fetch-mlb-results](../collection/results-jobs.md#fetch-mlb-results)), with the MLB Stats API.
 - `odds_lambda.storage.game_pk_backfill.apply_assignment` ([assigning gamePks](event-merge.md#assigning-gamepks)), with the MLB Stats API.
 

@@ -19,11 +19,29 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from odds_lambda.mlb_game_resolver import MLB_SPORT_KEY, ResolvedGame
 from odds_lambda.storage.data_quality import record_issue
 from odds_lambda.storage.event_kickoff import move_kickoff
-from odds_lambda.storage.event_merge import find_match_candidates
+from odds_lambda.storage.event_merge import (
+    EVENT_MATCH_WINDOW,
+    find_historical_candidates,
+    find_match_candidates,
+)
+from odds_lambda.storage.event_unmatched import (
+    clear_unmatched,
+    events_holding_game_pks,
+    holds_game_pk,
+)
 
 logger = structlog.get_logger()
 
 REFUSED_ID_ISSUE = "external_id_refused"
+
+
+class MatchWindow(StrEnum):
+    """How far a listing's start may be from a stored event's and still be the same game."""
+
+    # ±2 h: a source listing upcoming games.
+    LIVE = "live"
+    # ±24 h: a historical row whose recorded start may be a day off.
+    HISTORICAL = "historical"
 
 
 @dataclass(frozen=True)
@@ -33,7 +51,8 @@ class ListedGame:
     ``external_id`` is the id the source issued for the game, if it issues one. An MLB game comes
     resolved to its ``gamePk`` (``mlb_game``). ``legacy_id`` is the string id an event created for
     the game takes while ``events.id`` is still a string; only a game that may create an event
-    needs it.
+    needs it. ``match_window`` is how close an event's start must be to match the game
+    (``MatchWindow.HISTORICAL`` is not for MLB).
     """
 
     source: Source
@@ -46,12 +65,15 @@ class ListedGame:
     external_id: str | None = None
     mlb_game: ResolvedGame | None = None
     earliest_created_start: datetime | None = None
+    match_window: MatchWindow = MatchWindow.LIVE
 
     def __post_init__(self) -> None:
         if self.external_id is not None and self.source not in EXTERNAL_ID_SOURCES:
             raise ValueError(f"{self.source} issues no event ids")
         if self.sport_key == MLB_SPORT_KEY and self.mlb_game is None:
             raise ValueError(f"an MLB game needs its gamePk: {self.home_team} v {self.away_team}")
+        if self.sport_key == MLB_SPORT_KEY and self.match_window is MatchWindow.HISTORICAL:
+            raise ValueError("an MLB game matches by gamePk, not by a historical window")
 
 
 class Resolution(StrEnum):
@@ -109,8 +131,9 @@ async def resolve_event(session: AsyncSession, game: ListedGame) -> ResolvedEven
     writers resolving the same teams concurrently see each other's events. One transaction
     takes fixture locks in ascending key order (``resolve_events`` sorts a batch) or raises
     ``LockOrderError``. Looks an MLB game up by ``gamePk``, then any game by the source's id;
-    else matches the sport and teams within ±2 h (for MLB, only events holding no ``gamePk``);
-    else creates the event. A second id from one source for the event, or an id another event
+    else matches the sport and teams within the game's ``match_window`` (±2 h, or for a
+    historical listing ±24 h, see ``_match_historical``; for MLB, only events holding no
+    ``gamePk``); else creates the event. A second id from one source for the event, or an id another event
     holds, is refused and logged rather than recorded. The listed start is offered to
     ``move_kickoff``, which decides whether the source may move the event.
 
@@ -248,7 +271,7 @@ async def _find(
             return ResolvedEvent(held, Resolution.BY_GAME_PK)
     if game.external_id is not None:
         held = await _by_external_id(session, game.source, game.external_id)
-        if held is not None and (game.mlb_game is None or not await _holds_game_pk(session, held)):
+        if held is not None and (game.mlb_game is None or not await holds_game_pk(session, held)):
             return ResolvedEvent(held, Resolution.BY_EXTERNAL_ID)
     matched = await _match(session, game, home_team, away_team)
     return ResolvedEvent(matched, Resolution.MATCHED) if matched is not None else None
@@ -272,32 +295,17 @@ async def _by_game_pk(session: AsyncSession, game_pk: int) -> Event | None:
     return result.scalar_one_or_none()
 
 
-async def _holds_game_pk(session: AsyncSession, event: Event) -> bool:
-    return bool(await _events_holding_game_pks(session, [event]))
-
-
-async def _events_holding_game_pks(session: AsyncSession, events: Sequence[Event]) -> set[str]:
-    holding = {e.id for e in events if e.mlb_game_pk is not None}
-    by_key = {e.surrogate_id: e.id for e in events}
-    result = await session.execute(
-        select(EventExternalId.event_id).where(
-            EventExternalId.source == Source.MLB_STATS_API,
-            EventExternalId.event_id.in_(list(by_key)),  # type: ignore[attr-defined]
-        )
-    )
-    holding.update(by_key[key] for key in result.scalars())
-    return holding
-
-
 async def _match(
     session: AsyncSession, game: ListedGame, home_team: str, away_team: str
 ) -> Event | None:
     """The nearest same-fixture event within ±2 h. For MLB only an event holding no ``gamePk``
     counts, and only when no other game of the pair that day is scheduled nearer to it."""
+    if game.match_window is MatchWindow.HISTORICAL:
+        return await _match_historical(session, game, home_team, away_team)
     anchor = ensure_utc(_anchor(game))
     candidates = await find_match_candidates(session, home_team, away_team, anchor, game.sport_key)
     if game.mlb_game is not None:
-        holding = await _events_holding_game_pks(session, candidates)
+        holding = await events_holding_game_pks(session, candidates)
         candidates = [e for e in candidates if e.id not in holding]
     if not candidates:
         return None
@@ -308,13 +316,53 @@ async def _match(
     nearest_gap = min(gap(e, anchor) for e in candidates)
     nearest = min(
         (e for e in candidates if gap(e, anchor) == nearest_gap),
-        key=lambda e: e.surrogate_id or 0,
+        key=_stored_key,
     )
     if game.mlb_game is not None and any(
         gap(nearest, start) < nearest_gap for start in game.mlb_game.sibling_starts
     ):
         return None
     return nearest
+
+
+async def _match_historical(
+    session: AsyncSession, game: ListedGame, home_team: str, away_team: str
+) -> Event | None:
+    """The event of a historical row: a lone same-fixture event within ±24 h, else (several)
+    the nearest of those within ±2 h. When several lie within ±24 h and none within ±2 h the
+    row is ambiguous and matches nothing, so neighbouring fixtures of the same teams (an NBA
+    back-to-back) are never conflated."""
+    anchor = ensure_utc(game.commence_time)
+    candidates = await find_historical_candidates(
+        session, home_team, away_team, anchor, game.sport_key
+    )
+    if len(candidates) > 1:
+        within = [
+            e for e in candidates if abs(ensure_utc(e.commence_time) - anchor) <= EVENT_MATCH_WINDOW
+        ]
+        if not within:
+            logger.warning(
+                "ambiguous_historical_match",
+                home=home_team,
+                away=away_team,
+                commence_time=anchor.isoformat(),
+                candidates=[e.id for e in candidates],
+            )
+            return None
+        candidates = within
+    if not candidates:
+        return None
+    return min(
+        candidates,
+        key=lambda e: (abs(ensure_utc(e.commence_time) - anchor), _stored_key(e)),
+    )
+
+
+def _stored_key(event: Event) -> int:
+    """The tie-break order of stored events: the one stored first has the lowest key."""
+    if event.surrogate_id is None:
+        raise ValueError(f"event {event.id} is not stored")
+    return event.surrogate_id
 
 
 def _anchor(game: ListedGame) -> datetime:
@@ -364,6 +412,7 @@ async def _record_game_pk(session: AsyncSession, event: Event, game_pk: int) -> 
     if await _record_external_id(session, event, Source.MLB_STATS_API, str(game_pk)):
         if event.mlb_game_pk is None:
             event.assign_game_pk(game_pk)
+            await clear_unmatched(session, event)
             await session.flush()
 
 

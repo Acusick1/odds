@@ -84,7 +84,7 @@ The event-level groups (`tabular`, `polymarket`, `injuries` and `rest`) are reje
 
 ## Closing snapshot of a raw target
 
-`odds_analytics.feature_groups.collect_event_data` takes the latest snapshot in `closing_tier` as the closing snapshot. Because selection is by tier, the FDUK loader (`scripts/ingest_football_data_uk.py`) clamps opening snapshots out of the closing tier. `odds_analytics.feature_groups.prepare_training_data` drops events with no closing snapshot, and events whose closing snapshot has none of the `sharp_bookmakers`, whichever sampler picks the decision snapshots ([feature pipeline](feature-pipeline.md)). `retail_ev` selects no closing snapshot here.
+`odds_analytics.feature_groups.collect_event_data` takes the latest snapshot in `closing_tier` as the closing snapshot. Because selection is by tier, the FDUK loader (`scripts/ingest_football_data_uk.py`) clamps opening snapshots out of the closing tier, and stamps them `upper_bound` where it stamps the close `close`. A re-ingest leaves an event's snapshots in place when a candidate decision used one as an input. `odds_analytics.feature_groups.prepare_training_data` drops events with no closing snapshot, and events whose closing snapshot has none of the `sharp_bookmakers`, whichever sampler picks the decision snapshots ([feature pipeline](feature-pipeline.md)). `retail_ev` selects no closing snapshot here.
 
 ## Config fields
 

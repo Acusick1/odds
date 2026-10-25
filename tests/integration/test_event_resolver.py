@@ -5,14 +5,21 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from odds_core.models import DataQualityLog, Event, EventExternalId
-from odds_core.vocabulary import Source
+from odds_core.models import (
+    DataQualityLog,
+    Event,
+    EventExternalId,
+    EventStatus,
+    HealthCheckAcknowledgement,
+)
+from odds_core.vocabulary import HealthCheck, Source
 from odds_lambda.mlb_game_resolver import ResolutionRule, ResolvedGame
 from odds_lambda.storage import event_resolver
 from odds_lambda.storage.event_resolver import (
     EventIdTaken,
     ListedGame,
     LockOrderError,
+    MatchWindow,
     Resolution,
     StaleListing,
     attach_event,
@@ -21,6 +28,7 @@ from odds_lambda.storage.event_resolver import (
     resolve_event,
     resolve_events,
 )
+from odds_lambda.storage.event_unmatched import clear_unmatched, mark_unmatched
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -667,3 +675,255 @@ class TestAttachEvents:
         attached = await attach_events(pglite_async_session, games)
 
         assert [a.event.id if a else None for a in attached] == ["e0", "e1", "e2", None]
+
+
+def historical_listing(
+    commence_time: datetime = TWIN_KICKOFF, source: Source = Source.FOOTBALL_DATA_UK
+) -> ListedGame:
+    return ListedGame(
+        source=source,
+        sport_key="soccer_epl",
+        sport_title="EPL",
+        home_team="Arsenal",
+        away_team="Chelsea",
+        commence_time=commence_time,
+        legacy_id="fduk_ARS_CHE",
+        match_window=MatchWindow.HISTORICAL,
+    )
+
+
+class TestHistoricalWindow:
+    @pytest.mark.asyncio
+    async def test_a_lone_event_a_day_off_matches(
+        self, pglite_async_session, stored_epl_event
+    ) -> None:
+        resolved = await resolve_event(
+            pglite_async_session, historical_listing(TWIN_KICKOFF + timedelta(hours=20))
+        )
+
+        assert resolved.resolution is Resolution.MATCHED
+        assert resolved.event.id == stored_epl_event.id
+
+    @pytest.mark.asyncio
+    async def test_the_live_window_does_not_reach_a_day_off(
+        self, pglite_async_session, stored_epl_event
+    ) -> None:
+        resolved = await resolve_event(
+            pglite_async_session,
+            epl_listing(commence_time=TWIN_KICKOFF + timedelta(hours=20), external_id=None),
+        )
+
+        assert resolved.resolution is Resolution.CREATED
+
+    @pytest.mark.asyncio
+    async def test_beyond_a_day_creates(self, pglite_async_session, stored_epl_event) -> None:
+        resolved = await resolve_event(
+            pglite_async_session, historical_listing(TWIN_KICKOFF + timedelta(hours=25))
+        )
+
+        assert resolved.resolution is Resolution.CREATED
+
+    @pytest.mark.asyncio
+    async def test_several_candidates_match_only_the_nearest_within_two_hours(
+        self, pglite_async_session
+    ) -> None:
+        session = pglite_async_session
+        near = make_epl_event("near", TWIN_KICKOFF + timedelta(minutes=30))
+        next_day = make_epl_event("next_day", TWIN_KICKOFF + timedelta(hours=20))
+        session.add_all([near, next_day])
+        await session.flush()
+
+        resolved = await resolve_event(session, historical_listing())
+
+        assert resolved.event.id == "near"
+
+    @pytest.mark.asyncio
+    async def test_twins_at_one_distance_go_to_the_one_stored_first(
+        self, pglite_async_session
+    ) -> None:
+        session = pglite_async_session
+        first = make_epl_event("first")
+        second = make_epl_event("second")
+        session.add(first)
+        await session.flush()
+        session.add(second)
+        await session.flush()
+
+        resolved = await resolve_event(session, historical_listing())
+
+        assert resolved.event.id == "first"
+
+    @pytest.mark.asyncio
+    async def test_back_to_back_fixtures_with_none_within_two_hours_are_ambiguous(
+        self, pglite_async_session
+    ) -> None:
+        session = pglite_async_session
+        session.add_all(
+            [
+                make_epl_event("before", TWIN_KICKOFF - timedelta(hours=10)),
+                make_epl_event("after", TWIN_KICKOFF + timedelta(hours=10)),
+            ]
+        )
+        await session.flush()
+
+        resolved = await resolve_event(session, historical_listing())
+
+        assert resolved.resolution is Resolution.CREATED
+        assert resolved.event.id == "fduk_ARS_CHE"
+
+    @pytest.mark.asyncio
+    async def test_is_scoped_to_the_sport(self, pglite_async_session, stored_epl_event) -> None:
+        game = historical_listing()
+        other_sport = ListedGame(
+            source=game.source,
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            home_team=game.home_team,
+            away_team=game.away_team,
+            commence_time=game.commence_time,
+            legacy_id="nba_x",
+            match_window=MatchWindow.HISTORICAL,
+        )
+
+        resolved = await resolve_event(pglite_async_session, other_sport)
+
+        assert resolved.resolution is Resolution.CREATED
+
+    @pytest.mark.asyncio
+    async def test_a_played_event_is_never_moved_by_a_historical_listing(
+        self, pglite_async_session, stored_epl_event
+    ) -> None:
+        listing = historical_listing(TWIN_KICKOFF + timedelta(hours=3), Source.ODDSPORTAL)
+
+        resolved = await resolve_event(pglite_async_session, listing)
+
+        assert resolved.event.id == stored_epl_event.id
+        assert stored_epl_event.commence_time == TWIN_KICKOFF
+
+    def test_an_mlb_game_cannot_use_the_historical_window(self) -> None:
+        with pytest.raises(ValueError, match="gamePk"):
+            ListedGame(
+                source=Source.ODDSPORTAL,
+                sport_key=MLB,
+                sport_title="MLB",
+                home_team=YANKEES,
+                away_team=RED_SOX,
+                commence_time=GAME_1_START,
+                legacy_id="x",
+                mlb_game=ResolvedGame(1, ResolutionRule.GAME_NUMBER, GAME_1_START, ()),
+                match_window=MatchWindow.HISTORICAL,
+            )
+
+
+async def acknowledgements(session: AsyncSession, event: Event) -> list[HealthCheckAcknowledgement]:
+    await session.flush()
+    rows = await session.execute(
+        select(HealthCheckAcknowledgement).where(
+            HealthCheckAcknowledgement.event_id == event.surrogate_id
+        )
+    )
+    return list(rows.scalars())
+
+
+class TestUnmatched:
+    @pytest.mark.asyncio
+    async def test_marks_the_status_and_acknowledges_the_reason(self, pglite_async_session) -> None:
+        session = pglite_async_session
+        event = (await resolve_event(session, mlb_listing(1001, GAME_1_START))).event
+        # An MLB event the schedule no longer lists holds no gamePk.
+        event.mlb_game_pk = None
+        await session.execute(
+            text("DELETE FROM event_external_ids WHERE event_id = :k"), {"k": event.surrogate_id}
+        )
+
+        await mark_unmatched(session, event, "  not in the MLB schedule ")
+
+        assert event.status is EventStatus.UNMATCHED
+        [ack] = await acknowledgements(session, event)
+        assert (ack.check_name, ack.reason) == (
+            HealthCheck.MISSING_MLB_GAME_PK,
+            "not in the MLB schedule",
+        )
+
+    @pytest.mark.asyncio
+    async def test_marking_again_replaces_the_reason(self, pglite_async_session) -> None:
+        session = pglite_async_session
+        event = Event(
+            id="orphan",
+            sport_key=MLB,
+            sport_title="MLB",
+            commence_time=GAME_1_START,
+            home_team=YANKEES,
+            away_team=RED_SOX,
+        )
+        session.add(event)
+        await session.flush()
+
+        await mark_unmatched(session, event, "first")
+        await mark_unmatched(session, event, "second")
+
+        [ack] = await acknowledgements(session, event)
+        assert ack.reason == "second"
+
+    @pytest.mark.asyncio
+    async def test_a_final_event_keeps_its_status(self, pglite_async_session) -> None:
+        session = pglite_async_session
+        event = Event(
+            id="done",
+            sport_key=MLB,
+            sport_title="MLB",
+            commence_time=GAME_1_START,
+            home_team=YANKEES,
+            away_team=RED_SOX,
+            status=EventStatus.FINAL,
+        )
+        session.add(event)
+        await session.flush()
+
+        await mark_unmatched(session, event, "scores from elsewhere")
+
+        assert event.status is EventStatus.FINAL
+        assert len(await acknowledgements(session, event)) == 1
+
+    @pytest.mark.asyncio
+    async def test_refuses_an_empty_reason_a_non_mlb_event_and_a_game_pk_holder(
+        self, pglite_async_session, stored_epl_event
+    ) -> None:
+        session = pglite_async_session
+        held = (await resolve_event(session, mlb_listing(1001, GAME_1_START))).event
+
+        with pytest.raises(ValueError, match="reason"):
+            await mark_unmatched(session, held, " ")
+        with pytest.raises(ValueError, match="soccer_epl"):
+            await mark_unmatched(session, stored_epl_event, "why")
+        with pytest.raises(ValueError, match="holds a gamePk"):
+            await mark_unmatched(session, held, "why")
+
+    @pytest.mark.asyncio
+    async def test_finding_the_game_schedules_the_event_again(self, pglite_async_session) -> None:
+        session = pglite_async_session
+        event = Event(
+            id="orphan",
+            sport_key=MLB,
+            sport_title="MLB",
+            commence_time=GAME_1_START,
+            home_team=YANKEES,
+            away_team=RED_SOX,
+        )
+        session.add(event)
+        await session.flush()
+        await mark_unmatched(session, event, "not listed yet")
+
+        resolved = await resolve_event(session, mlb_listing(1001, GAME_1_START))
+
+        assert resolved.event.id == "orphan"
+        assert event.status is EventStatus.SCHEDULED
+        assert await acknowledgements(session, event) == []
+
+    @pytest.mark.asyncio
+    async def test_clearing_an_event_that_was_never_marked_changes_nothing(
+        self, pglite_async_session, stored_epl_event
+    ) -> None:
+        await clear_unmatched(pglite_async_session, stored_epl_event)
+
+        assert stored_epl_event.status is EventStatus.SCHEDULED

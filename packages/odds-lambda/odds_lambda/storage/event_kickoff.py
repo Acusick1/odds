@@ -7,11 +7,11 @@ from datetime import UTC, datetime
 from types import MappingProxyType
 
 import structlog
-from odds_core.models import Event, EventExternalId, EventStatus
+from odds_core.models import Event, EventExternalId, EventStatus, OddsSnapshot
 from odds_core.sports import SportKey
 from odds_core.time import ensure_utc
 from odds_core.vocabulary import Source
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.storage.event_merge import retime_snapshots
@@ -24,14 +24,14 @@ logger = structlog.get_logger()
 KICKOFF_AUTHORITY: Mapping[SportKey, tuple[Source, ...]] = MappingProxyType(
     {
         "baseball_mlb": (Source.MLB_STATS_API,),
-        "soccer_epl": (Source.ODDSPORTAL, Source.ODDS_API),
+        "soccer_epl": (Source.ODDSPORTAL, Source.ODDS_API, Source.FOOTBALL_DATA_UK),
         "basketball_nba": (Source.ODDSPORTAL, Source.ODDS_API),
     }
 )
 
-# Sources whose schedule dates a postponed game by when it was played, so they may move an event
-# to a start in the past. Every other source is held to the after-kick-off guard in move_kickoff.
-PLAYED_START_SOURCES: frozenset[Source] = frozenset({Source.MLB_STATS_API})
+# Sources whose schedule dates a game by when it was played, so they may move an event to a start
+# in the past. Every other source is held to the after-kick-off guard in move_kickoff.
+PLAYED_START_SOURCES: frozenset[Source] = frozenset({Source.MLB_STATS_API, Source.FOOTBALL_DATA_UK})
 
 
 async def _outranked(session: AsyncSession, event: Event, above: tuple[Source, ...]) -> bool:
@@ -44,6 +44,27 @@ async def _outranked(session: AsyncSession, event: Event, above: tuple[Source, .
         )
     )
     return held.first() is not None
+
+
+async def _observed_by_another(session: AsyncSession, event: Event, source: Source) -> bool:
+    """Whether a snapshot of the event came from a source other than ``source``: one with a
+    different ``source``, or a stored one with none whose ``raw_data`` tag is not ``source``
+    (no tag is the Odds API)."""
+    result = await session.execute(
+        select(OddsSnapshot.id)
+        .where(
+            OddsSnapshot.event_id == event.id,
+            or_(
+                OddsSnapshot.source != source,
+                and_(
+                    OddsSnapshot.source.is_(None),  # type: ignore[union-attr]
+                    func.coalesce(OddsSnapshot.raw_data["source"].as_string(), "") != source.value,
+                ),
+            ),
+        )
+        .limit(1)
+    )
+    return result.first() is not None
 
 
 async def move_kickoff(
@@ -60,6 +81,8 @@ async def move_kickoff(
     ahead is accepted from any source in the order, so a postponement the top source stopped
     listing is still followed. A source in ``PLAYED_START_SOURCES`` skips the
     after-kick-off rule: it dates a postponed game by when it was played, which is in the past.
+    Such a source that the order ranks below another moves only an event no other source has
+    observed (``_observed_by_another``), since ids alone do not show which sources saw the event.
     """
     order = KICKOFF_AUTHORITY.get(event.sport_key, ())  # type: ignore[call-overload]
     if source not in order or start is None:
@@ -70,6 +93,12 @@ async def move_kickoff(
         if ensure_utc(start) <= ensure_utc(now):
             return False
     elif await _outranked(session, event, order[: order.index(source)]):
+        return False
+    if (
+        source in PLAYED_START_SOURCES
+        and source is not order[0]
+        and await _observed_by_another(session, event, source)
+    ):
         return False
     event_id = event.id
     moved_from = ensure_utc(event.commence_time)

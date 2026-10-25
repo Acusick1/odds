@@ -13,7 +13,7 @@ status: stable
 
 # Load historical EPL odds
 
-The scripts load `odds_core.models.Event` and `odds_core.models.OddsSnapshot` ([columns and constraints](../storage/odds-tables.md#odds_snapshots)) rows only, so the events they load have no normalized `odds` or `prices` rows and their snapshots carry no source, market or time basis and backtests skip them (#435). What each script reads, matches and writes is on [historical-ingest-scripts](historical-ingest-scripts.md). Run against the local database only: never set `DATABASE_URL` to production ([databases-and-environments](../foundations/databases-and-environments.md#environments)).
+The scripts load `odds_core.models.Event` rows with `odds_core.models.OddsSnapshot` ([columns and constraints](../storage/odds-tables.md#odds_snapshots)), `odds_core.models.Price` and payload rows, and no normalized `odds` rows (#435). What each script reads, matches and writes is on [historical-ingest-scripts](historical-ingest-scripts.md). Run against the local database only: never set `DATABASE_URL` to production ([databases-and-environments](../foundations/databases-and-environments.md#environments)).
 
 1. Scrape OddsPortal history.
    ```bash
@@ -37,10 +37,10 @@ The scripts load `odds_core.models.Event` and `odds_core.models.OddsSnapshot` ([
    ```
    - Use the same seasons as step 2, or `--all`. Check the dry-run counts, then run without `--dry-run`.
    - It downloads `E0.csv` per season and writes an opening and a closing snapshot per match, except that the opening snapshot is skipped when its documented deadline is at or after kick-off.
-   - Matches that already have an `op_` event of the same sport within 24 hours get no new event; their snapshots are still written.
+   - Matches that already have an event of the same sport within 24 hours get no new event and keep its kick-off; their snapshots are still written.
    - Prices are stored as the CSV decimal (`price_decimal`). Snapshots loaded before the decimal price migration keep the old American `price` until this script is re-run ([Price encodings](../foundations/odds-math.md#price-encodings)).
 4. Rerun any step to fill gaps.
-   - OddsPortal snapshots are skipped if one with the same `api_request_id` already exists. FDUK snapshots are replaced from the CSV when it changed, so reruns do not duplicate and pick up refreshed files; a rerun also fills the scores of matched events that have none. Each snapshot's `raw_data.timing.basis` is an `odds_core.snapshot_sources.FdukTimeBasis` value.
+   - OddsPortal snapshots are skipped if one with the same `api_request_id` already exists. FDUK snapshots are replaced from the CSV when it changed, except those of an event a candidate decision used as an input (logged as `fduk_replace_refused`), so reruns do not duplicate and pick up refreshed files; a rerun also fills the scores of matched events that have none. Each FDUK snapshot's `time_basis` is `upper_bound` (opening) or `close`, and its `raw_data.timing.basis` an `odds_core.snapshot_sources.FdukTimeBasis` value.
 5. Check the load with the database, not the repo: event and snapshot counts per season are data facts.
 
 ## Related

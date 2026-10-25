@@ -13,7 +13,7 @@ class TestKickoffAuthorityOrder:
         ("sport", "order"),
         [
             ("baseball_mlb", (Source.MLB_STATS_API,)),
-            ("soccer_epl", (Source.ODDSPORTAL, Source.ODDS_API)),
+            ("soccer_epl", (Source.ODDSPORTAL, Source.ODDS_API, Source.FOOTBALL_DATA_UK)),
             ("basketball_nba", (Source.ODDSPORTAL, Source.ODDS_API)),
         ],
     )
@@ -22,8 +22,12 @@ class TestKickoffAuthorityOrder:
 
     @pytest.mark.parametrize("sport", ["soccer_epl", "basketball_nba"])
     def test_sources_without_a_stored_kickoff_are_left_out(self, sport: SportKey) -> None:
-        unranked = {Source.BETFAIR, Source.POLYMARKET, Source.ESPN, Source.FOOTBALL_DATA_UK}
+        unranked = {Source.BETFAIR, Source.POLYMARKET, Source.ESPN}
         assert not unranked & set(KICKOFF_AUTHORITY[sport])
+
+    def test_football_data_uk_ranks_last_for_epl_only(self) -> None:
+        assert KICKOFF_AUTHORITY["soccer_epl"][-1] is Source.FOOTBALL_DATA_UK
+        assert Source.FOOTBALL_DATA_UK not in KICKOFF_AUTHORITY["basketball_nba"]
 
     def test_no_source_repeats_within_an_order(self) -> None:
         for order in KICKOFF_AUTHORITY.values():
@@ -31,5 +35,5 @@ class TestKickoffAuthorityOrder:
 
 
 class TestPlayedStartSources:
-    def test_only_the_mlb_stats_api_dates_games_by_when_played(self) -> None:
-        assert PLAYED_START_SOURCES == {Source.MLB_STATS_API}
+    def test_the_mlb_stats_api_and_football_data_uk_date_games_by_when_played(self) -> None:
+        assert PLAYED_START_SOURCES == {Source.MLB_STATS_API, Source.FOOTBALL_DATA_UK}
