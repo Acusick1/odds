@@ -12,7 +12,7 @@ status: stable
 
 # Copy production data locally
 
-`odds copy from-prod START END` copies events (in kick-off order), odds snapshots and odds rows for one sport and date range from the production database into the local database, so local work runs on real data; no other table is copied. The CLI wrapper is `odds_cli.commands.copy_from_prod`; the logic is in `odds_lambda.copy_from_production` (`odds_lambda.copy_from_production.copy_from_prod`, `odds_lambda.copy_from_production.ProductionDataCopier`). Environments are described in [Databases and environments](databases-and-environments.md#environments).
+`odds copy from-prod START END` copies events (in kick-off order), odds snapshots and odds rows for one sport and date range from the production database into the local database, so local work runs on real data; no other table is copied. Both databases must be at the same migration, because the copier reads and writes every model column ([what it copies](databases-and-environments.md#copying-production-data)). The CLI wrapper is `odds_cli.commands.copy_from_prod`; the logic is in `odds_lambda.copy_from_production` (`odds_lambda.copy_from_production.copy_from_prod`, `odds_lambda.copy_from_production.ProductionDataCopier`). Environments are described in [Databases and environments](databases-and-environments.md#environments).
 
 ## Steps
 

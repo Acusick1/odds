@@ -12,7 +12,7 @@ sources:
   - odds_analytics.training.config.FeatureConfig
   - odds_mcp.server.find_retail_edges
   - packages/odds-mcp/agents/common.md
-  - odds_core.models.Odds
+  - odds_core.models.Odds.implied_probability
   - odds_core.bookmakers.UK_RETAIL_BOOKMAKERS
 status: stable
 ---

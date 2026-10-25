@@ -12,7 +12,7 @@ sources:
   - odds_lambda.storage.polymarket_writer.PolymarketWriter
   - odds_lambda.storage.injury_writer.InjuryWriter
   - odds_lambda.storage.mlb_pitcher_writer.MlbPitcherWriter
-  - odds_lambda.storage.writers.OddsWriter.bulk_insert_odds
+  - odds_lambda.storage.same_time_pairs.delete_same_time_pairs
   - odds_lambda.storage.injury_writer.InjuryWriter.upsert_injury_reports
   - odds_lambda.storage.mlb_pitcher_writer.MlbPitcherWriter.insert_snapshots
   - odds_lambda.ingestion.OddsIngestionService.ingest_sport
@@ -29,6 +29,7 @@ status: stable
 |---|---|---|
 | `odds_lambda.storage.writers` / `odds_lambda.storage.readers` | [`odds_lambda.storage.writers.OddsWriter`](odds-writer.md) / [`odds_lambda.storage.readers.OddsReader`](odds-reader.md) | Events (status and scores, live-twin merges, MLB `gamePk`s), snapshots, odds (stored as decimal prices), fetch logs, including their API quota, and data-quality logs |
 | `odds_lambda.storage.validators` | `odds_lambda.storage.validators.OddsValidator` | [Odds validation](odds-validator.md) (zero-margin books skip the vig floor; prices are checked as decimals) |
+| `odds_lambda.storage.same_time_pairs` | functions | [Same-time pairs](odds-tables.md#same-time-pairs): finds them and, through `odds_lambda.storage.same_time_pairs.delete_same_time_pairs`, deletes snapshots and odds rows without committing |
 | `odds_lambda.storage.tier_validator` | `odds_lambda.storage.tier_validator.TierCoverageValidator` | [Coverage and completeness checks](coverage-checks.md) |
 | `odds_lambda.storage.polymarket_writer` / `odds_lambda.storage.polymarket_reader` | `odds_lambda.storage.polymarket_writer.PolymarketWriter` | [Polymarket](../collection/polymarket.md) (price snapshot inserts skip an existing market and time) |
 | `espn_*`, `fpl_availability_*` | per-source pairs | [EPL context](../collection/epl-context-data.md) |
@@ -38,14 +39,14 @@ status: stable
 
 ## Commit contract
 
-- `odds_lambda.storage.writers.OddsWriter` never calls `commit()`. It only adds, deletes or executes statements, except that `odds_lambda.storage.writers.OddsWriter.find_or_create_event` writes an MLB event's `gamePk` inside a savepoint, which flushes ([OddsWriter](odds-writer.md#find_or_create_event)). `odds_lambda.storage.event_merge.EventMerger` also leaves committing to its caller for its foreign-key and snapshot-timing `UPDATE`s and its deletes (duplicate events, and the clashing candidate decisions with their trades), flushing only to delete a duplicate before the kept event takes its `gamePk` and to re-time snapshots; the caller commits, as `odds_lambda.ingestion.OddsIngestionService.ingest_sport` does, once per event.
+- `odds_lambda.storage.writers.OddsWriter` never calls `commit()`. It only adds, deletes or executes statements, except that `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` flushes each snapshot so its odds rows can carry its id, and `odds_lambda.storage.writers.OddsWriter.find_or_create_event` writes an MLB event's `gamePk` inside a savepoint, which flushes ([OddsWriter](odds-writer.md#find_or_create_event)). `odds_lambda.storage.event_merge.EventMerger` also leaves committing to its caller for its foreign-key and snapshot-timing `UPDATE`s and its deletes (duplicate events, and the clashing candidate decisions with their trades), flushing only to delete a duplicate before the kept event takes its `gamePk` and to re-time snapshots; the caller commits, as `odds_lambda.ingestion.OddsIngestionService.ingest_sport` does, once per event.
 - Every per-source writer except `odds_lambda.storage.writers.OddsWriter` and the Polymarket snapshot/log methods flushes after its bulk upsert (for example `odds_lambda.storage.injury_writer.InjuryWriter.upsert_injury_reports`) but still does not commit.
 - Each unit of work gets its own session, never one shared across tasks ([Databases and environments](../foundations/databases-and-environments.md)).
 
 ## Verb conventions
 
 - `upsert_*`: Postgres `ON CONFLICT DO UPDATE`, usually with a dynamically built `set_` excluding the key columns (`odds_lambda.storage.writers.OddsWriter.bulk_upsert_events` also leaves `created_at`, `mlb_game_pk`, `no_game_pk_reason`, status, scores and `completed_at` out). Each per-source writer has its own copy of this loop.
-- `insert_*` / `bulk_insert_*`: `ON CONFLICT DO NOTHING` (`odds_lambda.storage.mlb_pitcher_writer.MlbPitcherWriter.insert_snapshots`, `odds_lambda.storage.writers.OddsWriter.bulk_insert_odds`).
+- `insert_*` / `bulk_insert_*`: `ON CONFLICT DO NOTHING` (`odds_lambda.storage.mlb_pitcher_writer.MlbPitcherWriter.insert_snapshots`).
 - `store_*`: plain `session.add()`.
 - The rule is not enforced anywhere; check the method body before relying on conflict behaviour.
 

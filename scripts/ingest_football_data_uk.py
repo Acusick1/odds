@@ -35,7 +35,7 @@ from urllib.request import urlopen
 from zoneinfo import ZoneInfo
 
 from odds_core.database import async_session_maker
-from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
 from odds_core.odds_math import PRICE_DECIMAL_KEY
 from odds_core.snapshot_sources import FdukTimeBasis, SnapshotSource
 from odds_core.team import team_abbrev
@@ -574,9 +574,9 @@ async def _ingest_one_match(
     ]:
         return
     if existing_snaps:
-        await session.execute(
-            delete(OddsSnapshot).where(OddsSnapshot.id.in_([snap.id for snap in existing_snaps]))
-        )
+        existing_ids = [snap.id for snap in existing_snaps]
+        await session.execute(delete(Odds).where(Odds.snapshot_id.in_(existing_ids)))
+        await session.execute(delete(OddsSnapshot).where(OddsSnapshot.id.in_(existing_ids)))
         stats.snapshots_updated += len(existing_snaps)
     session.add_all(new_snapshots)
     stats.snapshots_inserted += len(new_snapshots)

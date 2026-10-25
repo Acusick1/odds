@@ -7,15 +7,13 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
-from itertools import combinations
 
 import structlog
 from odds_core.event_source import canonical_event_id
-from odds_core.models import Event, EventStatus, OddsSnapshot
-from odds_core.snapshot_utils import extract_odds_from_snapshot
+from odds_core.models import Event, EventStatus
 from odds_core.team import normalize_team_name
 from odds_core.time import ensure_utc
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.mlb_game_resolver import (
@@ -36,13 +34,13 @@ from odds_lambda.mlb_game_resolver import (
 )
 from odds_lambda.mlb_stats_fetcher import MlbStatsFetcher
 from odds_lambda.storage.event_merge import EventMerger, follow_schedule
+from odds_lambda.storage.same_time_pairs import SnapshotPairs, event_same_time_pairs
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
 
 READ_ONLY_TABLES = frozenset({"paper_trades", "match_briefs", "candidate_decisions"})
 
-_PriceKey = tuple[str | None, str | None, str | None, float | None]
 _PairDate = tuple[tuple[str, str], date]
 
 
@@ -131,16 +129,6 @@ class GamePkPlan:
     unresolved: tuple[UnresolvedEvent, ...]
     ghost_ids: tuple[str, ...]
     marked: dict[str, str]
-
-
-@dataclass(frozen=True)
-class SnapshotPairs:
-    """Pairs of one event's snapshots taken at the same time. A pair is identical when both
-    price the same bookmakers, markets, outcomes and points at the same prices; otherwise it
-    conflicts."""
-
-    identical: int = 0
-    conflicting: int = 0
 
 
 @dataclass(frozen=True)
@@ -332,41 +320,6 @@ async def plan_game_pks(
     )
 
 
-def _prices(snapshot: OddsSnapshot) -> dict[_PriceKey, float]:
-    return {
-        (o.bookmaker_key, o.market_key, o.outcome_name, o.point): o.price_decimal
-        for o in extract_odds_from_snapshot(snapshot, snapshot.event_id)
-    }
-
-
-async def same_time_snapshot_pairs(session: AsyncSession, event_id: str) -> SnapshotPairs:
-    """Count the event's same-time snapshot pairs, identical and conflicting. Read-only."""
-    shared_times = (
-        select(OddsSnapshot.snapshot_time)
-        .where(OddsSnapshot.event_id == event_id)
-        .group_by(OddsSnapshot.snapshot_time)
-        .having(func.count() > 1)
-    )
-    snapshots = (
-        await session.execute(
-            select(OddsSnapshot)
-            .where(OddsSnapshot.event_id == event_id, OddsSnapshot.snapshot_time.in_(shared_times))
-            .order_by(OddsSnapshot.snapshot_time, OddsSnapshot.id)
-        )
-    ).scalars()
-    by_time: dict[datetime, list[dict[_PriceKey, float]]] = defaultdict(list)
-    for snapshot in snapshots:
-        by_time[snapshot.snapshot_time].append(_prices(snapshot))
-    identical = conflicting = 0
-    for prices in by_time.values():
-        for a, b in combinations(prices, 2):
-            if a == b:
-                identical += 1
-            else:
-                conflicting += 1
-    return SnapshotPairs(identical, conflicting)
-
-
 async def _settle(
     session: AsyncSession, kept: Event, final: Score | None
 ) -> tuple[Settlement | None, str]:
@@ -427,7 +380,7 @@ async def apply_assignment(
         tuple(e.id for e in assignment.merged),
         assignment.rule,
         rows_moved=rows_moved,
-        pairs=await same_time_snapshot_pairs(session, kept_id),
+        pairs=await event_same_time_pairs(session, kept_id),
         moved_from=moved_from if moved_to != moved_from else None,
         moved_to=moved_to if moved_to != moved_from else None,
         start_tbd=assignment.played is not None and assignment.played.tbd,

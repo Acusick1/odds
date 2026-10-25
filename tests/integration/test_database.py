@@ -93,6 +93,7 @@ class TestDatabaseIntegration:
         assert any(odds.market_key == "h2h" for odds in odds_records)
         assert any(odds.market_key == "spreads" for odds in odds_records)
         assert any(odds.market_key == "totals" for odds in odds_records)
+        assert {odds.snapshot_id for odds in odds_records} == {snapshot.id}
 
     @pytest.mark.asyncio
     async def test_update_event_status(self, test_session):

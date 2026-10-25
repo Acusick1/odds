@@ -6,7 +6,6 @@ sources:
   - odds_lambda.storage.writers.OddsWriter
   - odds_lambda.storage.writers.OddsWriter.store_odds_snapshot
   - odds_lambda.storage.writers.OddsWriter._parse_and_store_odds
-  - odds_lambda.storage.writers.OddsWriter.bulk_insert_odds
   - odds_lambda.storage.writers.OddsWriter.find_or_create_event
   - odds_lambda.storage.writers.OddsWriter.find_unscheduled_mlb_event
   - odds_lambda.storage.event_merge.EVENT_MATCH_WINDOW
@@ -24,7 +23,7 @@ status: stable
 
 # OddsWriter
 
-`odds_lambda.storage.writers.OddsWriter` owns an `AsyncSession` and an `odds_lambda.storage.validators.OddsValidator` (its vig floor skips zero-margin books, `odds_core.bookmakers.ZERO_MARGIN_BOOKMAKERS`). It never commits, and flushes only for MLB events, in the savepoint below and when an event moving to its game's scheduled start has its snapshots re-timed; callers commit ([Commit contract](storage-layer.md#commit-contract)). The tables it writes are on [Odds snapshot and odds tables](odds-tables.md) and [Events table](events.md).
+`odds_lambda.storage.writers.OddsWriter` owns an `AsyncSession` and an `odds_lambda.storage.validators.OddsValidator` (its vig floor skips zero-margin books, `odds_core.bookmakers.ZERO_MARGIN_BOOKMAKERS`). It never commits. It flushes each snapshot it stores, to give the snapshot's odds rows its id, and for MLB events in the savepoint below and when an event moving to its game's scheduled start has its snapshots re-timed; callers commit ([Commit contract](storage-layer.md#commit-contract)). The tables it writes are on [Odds snapshot and odds tables](odds-tables.md) and [Events table](events.md).
 
 ## store_odds_snapshot
 
@@ -32,8 +31,8 @@ status: stable
 
 1. Loads the event and computes `hours_until_commence` and the fetch tier from `snapshot_time` and the event's own `commence_time` (`odds_lambda.tier_utils.calculate_tier_from_timestamps`). The tier is per event, not per job run. If the event row is missing, both `fetch_tier` and `hours_until_commence` are stored as NULL ([Fetch tier](fetch-tier.md)).
 2. If `validate`, runs the validator and writes one `odds_core.models.DataQualityLog` row for any warnings; storage proceeds regardless ([Odds validation](odds-validator.md)). `odds_lambda.ingestion.OddsIngestionService.ingest_sport` is the only caller that passes `validate`: the `validate` argument of that method or of `odds_lambda.ingestion.OddsIngestionService.ingest_sports` when given, else `odds_core.config.DataQualityConfig.enable_validation`. Every other caller of `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` uses the default `True`.
-3. Adds an `odds_core.models.OddsSnapshot` ([columns and indexes](odds-tables.md#odds_snapshots)) with the full `raw_data` and `bookmaker_count`.
-4. `odds_lambda.storage.writers.OddsWriter._parse_and_store_odds` adds one `odds_core.models.Odds` row per bookmaker/market/outcome. Bookmakers without a key are skipped; `last_update` falls back to `snapshot_time` if unparseable; `odds_timestamp` is `snapshot_time`. It stores the decimal price (it must exceed 1.0, `ck_odds_price_decimal_gt_one`) from `odds_core.odds_math.outcome_price_decimal`, which raises `KeyError` for an outcome with neither `price_decimal` nor `price`; the validator flags such an outcome as an error.
+3. Adds an `odds_core.models.OddsSnapshot` ([columns and indexes](odds-tables.md#odds_snapshots)) with the full `raw_data` and `bookmaker_count`, and flushes it to get its id.
+4. `odds_lambda.storage.writers.OddsWriter._parse_and_store_odds` adds one `odds_core.models.Odds` row per bookmaker/market/outcome, each with `snapshot_id` set to that snapshot. Bookmakers without a key are skipped; `last_update` falls back to `snapshot_time` if unparseable; `odds_timestamp` is `snapshot_time`. It stores the decimal price (it must exceed 1.0, `ck_odds_price_decimal_gt_one`) from `odds_core.odds_math.outcome_price_decimal`, which raises `KeyError` for an outcome with neither `price_decimal` nor `price`; the validator flags such an outcome as an error.
 
 Returns `(OddsSnapshot, list[Odds])`.
 
@@ -51,10 +50,6 @@ Event upserts (`odds_lambda.storage.writers.OddsWriter.upsert_event`, `odds_lamb
 `odds_lambda.storage.writers.OddsWriter.find_unscheduled_mlb_event` is the lookup the live jobs use for MLB when the MLB schedule is unavailable; it creates nothing.
 
 New ids are `op_live_{HOME}_{AWAY}_{YYYY-MM-DDTHHMM}` (`odds_lambda.storage.writers.OddsWriter._build_event_id`), so a rescheduled kickoff creates a new id unless the 2 h window (or, for MLB, the `gamePk`) matches an existing event. For other sports an existing event with that id is returned instead of created; for MLB that id goes to a new event with `_<gamePk>` appended. Creation raises `ValueError` if the match started more than `LIVE_EVENT_STALE_THRESHOLD` (1 hour) ago. Used by the [OddsPortal](../collection/oddsportal-scraper.md) and [Betfair](../collection/betfair-exchange.md) jobs; matcher comparison on [Event matching across sources](event-matching.md).
-
-## Bulk insert
-
-`odds_lambda.storage.writers.OddsWriter.bulk_insert_odds` uses `ON CONFLICT DO NOTHING`, which has no conflict target to hit because `odds` has no unique constraint besides `id`, so it inserts duplicates; it has no caller outside tests (#448).
 
 ## Log helpers
 

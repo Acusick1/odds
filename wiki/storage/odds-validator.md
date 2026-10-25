@@ -18,7 +18,7 @@ status: stable
 
 # Odds validation
 
-`odds_lambda.storage.validators.OddsValidator` checks one payload for plausibility as it is written and logs findings to `data_quality_logs` (`odds_core.models.DataQualityLog`); it never blocks a write. It is called by [OddsWriter](odds-writer.md#store_odds_snapshot) inside `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot`. The completeness checks that share the word "quality" are separate ([Coverage and completeness checks](coverage-checks.md)).
+`odds_lambda.storage.validators.OddsValidator` checks one payload for plausibility as it is written and logs findings to `data_quality_logs` (`odds_core.models.DataQualityLog`); it never blocks a write. It is called by [OddsWriter](odds-writer.md#store_odds_snapshot) inside `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot`, before the snapshot and its odds rows are added. The completeness checks that share the word "quality" are separate ([Coverage and completeness checks](coverage-checks.md)).
 
 ## Checks
 

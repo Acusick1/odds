@@ -175,6 +175,13 @@ class Odds(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     event_id: str = Field(foreign_key="events.id", index=True, description="Event reference")
+    snapshot_id: int | None = Field(
+        default=None,
+        foreign_key="odds_snapshots.id",
+        index=True,
+        description="Snapshot the row was parsed from; null only for legacy rows whose snapshot "
+        "was ambiguous",
+    )
 
     # Bookmaker information
     bookmaker_key: str = Field(index=True, description="Bookmaker identifier")

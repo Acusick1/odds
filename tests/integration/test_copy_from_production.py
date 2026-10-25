@@ -113,10 +113,12 @@ async def _seed_prod_event(
                 hours_until_commence=1.0,
             )
         )
+        await session.flush()
         for outcome, price in (("Home", 150), ("Away", 200), ("Draw", 230)):
             session.add(
                 Odds(
                     event_id=event_id,
+                    snapshot_id=first_snapshot_id + 2,
                     bookmaker_key="bet365",
                     bookmaker_title="Bet365",
                     market_key="1x2",
@@ -317,6 +319,24 @@ class TestOverwriteReplacesLocalRows:
         async with local_session_maker() as session:
             local_count = len((await session.execute(select(Odds))).scalars().all())
         assert prod_count == local_count == 3
+
+    @pytest.mark.asyncio
+    async def test_odds_rows_link_to_the_local_copy_of_their_snapshot(
+        self,
+        prod_session_maker: async_sessionmaker[AsyncSession],
+        local_session_maker: async_sessionmaker[AsyncSession],
+    ) -> None:
+        await _seed_prod_event(prod_session_maker, "evt_a", first_snapshot_id=500)
+        await _copier(prod_session_maker, local_session_maker).copy_events(*WINDOW, SPORT)
+
+        async with local_session_maker() as session:
+            snapshot_ids = (
+                (await session.execute(select(OddsSnapshot.id).order_by(OddsSnapshot.id)))
+                .scalars()
+                .all()
+            )
+            linked = set((await session.execute(select(Odds.snapshot_id))).scalars().all())
+        assert linked == {snapshot_ids[2]}
 
     @pytest.mark.asyncio
     async def test_old_untagged_local_snapshot_is_replaced(

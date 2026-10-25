@@ -43,6 +43,7 @@ class TestConvertMarket:
         assert match is not None
         assert match.raw_data == {
             "source": "oddsportal_live",
+            "oddsportal_event_id": "abc12345",
             "bookmakers": [
                 {
                     "key": "bet365",
