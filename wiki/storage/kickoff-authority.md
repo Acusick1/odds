@@ -44,12 +44,12 @@ Left out of both orders:
 
 ## Before and after the stored kick-off
 
-For a sport whose order lists several sources (EPL, NBA):
+For every source except those in `odds_lambda.storage.event_kickoff.PLAYED_START_SOURCES`:
 
 - **Before the stored kick-off** (`now` earlier), the rank rule above applies.
 - **Once it has passed**, a start at or before `now` is refused, since a live feed reports the actual start. A start still ahead is accepted from any source in the order, whatever ids the event holds, so a postponement the top source stopped listing is still followed.
 
-MLB's order is one schedule source and skips both rules: its schedule dates a postponed game by when it was played, which is in the past.
+The MLB Stats API is the one source in `odds_lambda.storage.event_kickoff.PLAYED_START_SOURCES`. Its schedule dates a postponed game by when it was played, so it may move an event to a start in the past and skips the after-kick-off rule.
 
 ## A move
 

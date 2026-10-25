@@ -151,7 +151,7 @@ class TestMoveKickoffAfterTheStoredKickoff:
         )
 
     @pytest.mark.asyncio
-    async def test_the_lone_mlb_schedule_may_move_to_a_played_start_in_the_past(
+    async def test_a_played_start_source_may_move_to_a_start_in_the_past(
         self, pglite_async_session, mlb_event
     ) -> None:
         assert await move_kickoff(

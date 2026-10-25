@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from odds_core.sports import SportKey
 from odds_core.vocabulary import Source
-from odds_lambda.storage.event_kickoff import KICKOFF_AUTHORITY
+from odds_lambda.storage.event_kickoff import KICKOFF_AUTHORITY, PLAYED_START_SOURCES
 
 
 class TestKickoffAuthorityOrder:
@@ -28,3 +28,8 @@ class TestKickoffAuthorityOrder:
     def test_no_source_repeats_within_an_order(self) -> None:
         for order in KICKOFF_AUTHORITY.values():
             assert len(set(order)) == len(order)
+
+
+class TestPlayedStartSources:
+    def test_only_the_mlb_stats_api_dates_games_by_when_played(self) -> None:
+        assert PLAYED_START_SOURCES == {Source.MLB_STATS_API}
