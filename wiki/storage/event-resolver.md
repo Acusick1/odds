@@ -40,7 +40,7 @@ Then it records the ids and moves the kick-off:
 
 - The source's id, when the game has one.
 - For MLB, the `gamePk` as an `mlb_stats_api` id; an event recording it that has no `mlb_game_pk` also takes it there (`odds_core.models.Event.assign_game_pk`).
-- `odds_lambda.storage.event_kickoff.move_kickoff` once: for MLB with the MLB Stats API and the schedule's start, for other sports with the source and its listed start. Only a sport's schedule authority moves the event ([Kick-off authority](kickoff-authority.md)).
+- `odds_lambda.storage.event_kickoff.move_kickoff` once, with the current time as the clock: for MLB with the MLB Stats API and the schedule's start, for other sports with the source and its listed start. Only a sport's schedule authority moves the event ([Kick-off authority](kickoff-authority.md)).
 
 It flushes and never commits ([Commit contract](storage-layer.md#commit-contract)).
 

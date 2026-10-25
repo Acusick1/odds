@@ -10,7 +10,7 @@ status: stable
 
 # Kick-off authority
 
-Every move of an [event](events.md)'s `commence_time` on behalf of a source goes through `odds_lambda.storage.event_kickoff.move_kickoff(session, event, source, start)`. It moves the event only when `source` is the sport's schedule authority, and returns whether it moved.
+Every move of an [event](events.md)'s `commence_time` on behalf of a source goes through `odds_lambda.storage.event_kickoff.move_kickoff(session, event, source, start, now=...)`. It moves the event only when `source` is the sport's schedule authority, and returns whether it moved. The caller injects the clock as `now`.
 
 ## Authority order
 
@@ -26,21 +26,30 @@ A source outside its sport's order never moves an event: Betfair, Polymarket, ES
 
 ## Basis for the EPL and NBA order
 
-Measured on the local database copy of 2026-10-25, read-only. The sources store kick-offs differently, and the copy holds no pair of events for one game under two sources, so the comparison uses ESPN fixtures (team-level, EPL only) and the minute of the hour.
+Measured read-only on a copy of the local database taken 2026-10-25. The copy holds one event per game, the source twins already merged, so sources are compared with ESPN fixtures (team rows, EPL only) and, for NBA, the minute of the hour. Each count is a `SELECT` over `events`, `odds_snapshots.raw_data->>'commence_time'` (Odds API), `polymarket_events.end_date` and `espn_fixtures.date`.
 
 - **EPL, OddsPortal against ESPN:** 1659 of 1663 matched events equal; the four differences are 10 to 30 minutes.
-- **EPL, Odds API against ESPN:** 10 of 10 equal, but only 10 of its 83 events fall in ESPN's loaded range. Its pre-game kick-off differed from the stored one on 1 of 167 events: it listed a day earlier for six days (2026-04-20 to 2026-04-26) while ESPN and OddsPortal held the original time.
-- **NBA, minute of the hour:** tip-offs fall on :00 and :30. OddsPortal's event rows use them on 4972 of 5001, Polymarket's `end_date` on 891 of 891, the Odds API's first pre-game value on 148 of 813; the other 664 sit 10 minutes later (:10 and :40).
-- **Odds API in-play value:** it reports the actual start once a game is live. An in-play value differed from the stored kick-off on 78 of 623 NBA events (up to 14 minutes) and 7 of 135 EPL events (up to 2 minutes). A kick-off taken from an in-play snapshot moves the event off its scheduled start.
+- **EPL, Odds API against ESPN:** 10 of 10 equal, though only 10 of its 83 events fall in ESPN's loaded range. Before kick-off it differed from the stored time on 1 of 167 events, a day early for six days while ESPN and OddsPortal held the original time.
+- **NBA, minute of the hour:** the Odds API's first pre-game value falls on :00 or :30 for 148 of 813 events, the rest 10 minutes later; OddsPortal's event rows do for 4972 of 5001 and Polymarket's `end_date` for 891 of 891. That :00 and :30 are the true tip-offs, so the Odds API is the one that is late, is a reading of those three sources (inferred).
+- **Odds API in-play:** once a game is live it reports the actual start: 78 of 623 NBA events differ from the stored kick-off (up to 14 minutes), 7 of 135 EPL events (up to 2).
 
-OddsPortal ranks above the Odds API on these differences (NBA grid, the EPL reversal). That the Odds API ranks second, and OddsPortal's response to a real postponement, rest on one EPL event and no postponement data (inferred).
+OddsPortal above the Odds API rests on the NBA grid and the one EPL reversal, and OddsPortal's response to a postponement was not measured (inferred).
 
-Left out for lack of a stored kick-off or of a comparison:
+Left out of both orders:
 
-- **Betfair:** `betfair_meta.market_start_time` is the market's start, which can precede the event's; the local copy holds none to measure.
-- **Polymarket:** the EPL start time is used for matching and not stored; the NBA `end_date` has no game shared with OddsPortal to compare against.
-- **ESPN:** its fixtures are team rows with no event link or id.
-- **football-data.co.uk:** its kick-off is assumed (`timing.kickoff_time_assumed`), and 588 of 1597 matched events differ from ESPN, 549 by an hour or more.
+- **Betfair:** `betfair_meta.market_start_time` is the market's start, which can precede the event's, and the local copy holds none.
+- **Polymarket:** the EPL start time is used for matching and not stored; the NBA `end_date` cannot be compared with OddsPortal because the copy's twins are merged and OddsPortal's own kick-off was not kept.
+- **ESPN:** team rows with no event link or id.
+- **football-data.co.uk:** the kick-off is assumed (`timing.kickoff_time_assumed`); 588 of 1597 matched events differ from ESPN.
+
+## Before and after the stored kick-off
+
+For a sport whose order lists several sources (EPL, NBA):
+
+- **Before the stored kick-off** (`now` earlier), the rank rule above applies.
+- **Once it has passed**, a start at or before `now` is refused, since a live feed reports the actual start. A start still ahead is accepted from any source in the order, whatever ids the event holds, so a postponement the top source stopped listing is still followed.
+
+MLB's order is one schedule source and skips both rules: its schedule dates a postponed game by when it was played, which is in the past.
 
 ## A move
 

@@ -110,7 +110,9 @@ async def _fetch_slots(
 
 async def _apply(writer: OddsWriter, event: Event, game_pk: int, outcome: GameOutcome) -> Applied:
     """Move the event to its game's played slot, then set the outcome's status. Caller commits."""
-    moves = await move_kickoff(writer.session, event, Source.MLB_STATS_API, outcome.start)
+    moves = await move_kickoff(
+        writer.session, event, Source.MLB_STATS_API, outcome.start, now=datetime.now(UTC)
+    )
     if outcome.status is EventStatus.FINAL and outcome.score is not None:
         await writer.update_event_status(
             event.id, EventStatus.FINAL, home_score=outcome.score[0], away_score=outcome.score[1]

@@ -294,9 +294,9 @@ class TestResolveMlbEvent:
         moves: list[tuple[Source, datetime | None]] = []
         real_move = event_resolver.move_kickoff
 
-        async def recording_move(session, event, source, start):  # type: ignore[no-untyped-def]
+        async def recording_move(session, event, source, start, **kwargs):  # type: ignore[no-untyped-def]
             moves.append((source, start))
-            return await real_move(session, event, source, start)
+            return await real_move(session, event, source, start, **kwargs)
 
         monkeypatch.setattr(event_resolver, "move_kickoff", recording_move)
         listing = ListedGame(

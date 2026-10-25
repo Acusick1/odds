@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
 import structlog
@@ -116,11 +116,12 @@ async def resolve_event(session: AsyncSession, game: ListedGame) -> ResolvedEven
     event = resolved.event
     if game.external_id is not None:
         await _record_external_id(session, event, game.source, game.external_id)
+    now = datetime.now(UTC)
     if game.mlb_game is not None:
         await _record_game_pk(session, event, game.mlb_game.game_pk)
-        await move_kickoff(session, event, Source.MLB_STATS_API, game.mlb_game.start)
+        await move_kickoff(session, event, Source.MLB_STATS_API, game.mlb_game.start, now=now)
     else:
-        await move_kickoff(session, event, game.source, game.commence_time)
+        await move_kickoff(session, event, game.source, game.commence_time, now=now)
     return resolved
 
 

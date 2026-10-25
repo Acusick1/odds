@@ -43,20 +43,28 @@ async def _outranked(session: AsyncSession, event: Event, above: tuple[Source, .
 
 
 async def move_kickoff(
-    session: AsyncSession, event: Event, source: Source, start: datetime | None
+    session: AsyncSession, event: Event, source: Source, start: datetime | None, *, now: datetime
 ) -> bool:
     """Move ``event`` to ``start`` as reported by ``source`` when that source is the event's
     schedule authority, re-timing its stored snapshots; a postponed event becomes scheduled.
 
-    Returns whether the event moved: never for a source outside its sport's authority order, one
-    outranked by a source holding an id on the event, a ``None`` start or an unchanged one.
+    Returns whether the event moved: never for a source outside its sport's authority order, a
+    ``None`` start or an unchanged one. Before the stored kick-off (``now`` earlier) a source
+    outranked by one holding an id on the event does not move it. Once the stored kick-off has
+    passed, a start at or before ``now`` is refused (an in-play "actual start"), and a start still
+    ahead is accepted from any source in the order, so a postponement the top source stopped
+    listing is still followed. A sport whose order is one schedule source (MLB) skips both rules:
+    that schedule dates a postponed game by when it was played, which is in the past.
     """
     order = KICKOFF_AUTHORITY.get(event.sport_key, ())  # type: ignore[call-overload]
     if source not in order or start is None:
         return False
     if ensure_utc(event.commence_time) == ensure_utc(start):
         return False
-    if await _outranked(session, event, order[: order.index(source)]):
+    if len(order) > 1 and ensure_utc(now) >= ensure_utc(event.commence_time):
+        if ensure_utc(start) <= ensure_utc(now):
+            return False
+    elif await _outranked(session, event, order[: order.index(source)]):
         return False
     event_id = event.id
     moved_from = ensure_utc(event.commence_time)
