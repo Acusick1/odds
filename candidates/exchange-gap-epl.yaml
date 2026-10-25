@@ -4,7 +4,7 @@ kind: mechanical
 sport: soccer_epl
 version: 1
 issue: 626
-start_date: 2026-10-26
+start_date: 2026-11-09
 status: active
 rule: exchange_gap
 rule_sha256: 15ea06dd93b473f0ab3e692e3bb9e35d6f9f979b6cac9d3b758a01aaa7c378ba
