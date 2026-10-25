@@ -39,7 +39,7 @@ What a candidate is and when it is promoted or killed is on [Goal and strategy](
    - Development data can kill an idea and never promotes one: the output says `meets_promote_bar`, not `promote`, and the range has been examined many times.
 3. **Register it** with a pull request that adds `candidates/<name>.yaml`.
    - Take the hash from `uv run odds candidates rule-hash <rule>`, and set `version: 1`, the issue, a `start_date` and `status: active` ([file format](candidate-registry.md#file-format)).
-   - `uv run odds candidates list` validates the file, and the `candidate-versions` hook checks that a later change carries a new version ([version check](candidate-registry.md#version-check)). A rule's code change reaches the file as a new hash, so it needs a new version.
+   - `uv run odds candidates list` validates the file, and the `candidate-versions` hook checks that a later change carries a new version once the start date has arrived ([version check](candidate-registry.md#version-check)). A rule's code change reaches the file as a new hash, so it needs a new version.
 4. **Deploy.** The [run-candidates job](run-candidates-job.md) places the candidate's paper trades from its start date and records every decision. Nothing else is needed.
 5. **Read the report on the production host.** `odds copy from-prod` copies no trades or decisions, so a local database cannot show them ([report](candidate-registry.md#odds-candidates-report)).
    - `ssh` to the production host, `cd ~/odds`, then run `uv run odds candidates report`.

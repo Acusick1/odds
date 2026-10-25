@@ -2,6 +2,7 @@
 
 import subprocess
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -109,3 +110,74 @@ class TestCheckCandidateVersions:
         self.edit(repo, "version: 2", 'version: "3"')
         result = self.run(repo)
         assert result.returncode == 1 and "non-integer" in result.stderr
+
+
+class TestUnstartedCandidates:
+    @pytest.fixture
+    def repo(self, tmp_path: Path) -> Path:
+        git(tmp_path, "init", "-q", "-b", "main")
+        git(tmp_path, "config", "user.email", "t@example.com")
+        git(tmp_path, "config", "user.name", "t")
+        (tmp_path / "candidates").mkdir()
+        return tmp_path
+
+    def commit_base(self, repo: Path, start_offset_days: int) -> Path:
+        start = datetime.now(UTC).date() + timedelta(days=start_offset_days)
+        path = repo / "candidates" / "back-longest.yaml"
+        path.write_text(BASE_YAML + f"start_date: {start.isoformat()}\n")
+        git(repo, "add", "candidates")
+        git(repo, "commit", "-q", "-m", "base")
+        return path
+
+    def run(self, repo: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(SCRIPT), "--base", "HEAD"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_unstarted_base_allows_in_place_change(self, repo: Path) -> None:
+        path = self.commit_base(repo, start_offset_days=7)
+        old = path.read_text()
+        later = (datetime.now(UTC).date() + timedelta(days=14)).isoformat()
+        start_line = old.splitlines()[-1]
+        path.write_text(old.replace("0.02", "0.05").replace(start_line, f"start_date: {later}"))
+        result = self.run(repo)
+        assert result.returncode == 0 and result.stderr == ""
+
+    @pytest.mark.parametrize("offset", [0, -3])
+    def test_base_started_today_or_earlier_still_fails(self, repo: Path, offset: int) -> None:
+        path = self.commit_base(repo, start_offset_days=offset)
+        path.write_text(path.read_text().replace("0.02", "0.05"))
+        result = self.run(repo)
+        assert result.returncode == 1 and "params" in result.stderr
+
+    def test_unstarted_version_decrease_still_fails(self, repo: Path) -> None:
+        path = self.commit_base(repo, start_offset_days=7)
+        path.write_text(path.read_text().replace("version: 2", "version: 1"))
+        result = self.run(repo)
+        assert result.returncode == 1 and "decreased" in result.stderr
+
+    def test_unstarted_deletion_still_fails(self, repo: Path) -> None:
+        path = self.commit_base(repo, start_offset_days=7)
+        path.unlink()
+        result = self.run(repo)
+        assert result.returncode == 1 and "status: killed" in result.stderr
+
+    def test_string_start_date_does_not_apply_exception(self, repo: Path) -> None:
+        start = (datetime.now(UTC).date() + timedelta(days=7)).isoformat()
+        path = repo / "candidates" / "back-longest.yaml"
+        path.write_text(BASE_YAML + f'start_date: "{start}"\n')
+        git(repo, "add", "candidates")
+        git(repo, "commit", "-q", "-m", "base")
+        path.write_text(path.read_text().replace("0.02", "0.05"))
+        assert self.run(repo).returncode == 1
+
+    def test_missing_start_date_does_not_apply_exception(self, repo: Path) -> None:
+        path = repo / "candidates" / "back-longest.yaml"
+        path.write_text(BASE_YAML)
+        git(repo, "add", "candidates")
+        git(repo, "commit", "-q", "-m", "base")
+        path.write_text(BASE_YAML.replace("0.02", "0.05"))
+        assert self.run(repo).returncode == 1
