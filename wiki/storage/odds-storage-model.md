@@ -10,6 +10,8 @@ sources:
   - odds_lambda.storage.readers.OddsReader
   - scripts/ingest_oddsportal.py
   - scripts/ingest_football_data_uk.py
+mentions:
+  - odds_core.models.Event
 status: stable
 ---
 

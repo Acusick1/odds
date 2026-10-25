@@ -40,7 +40,7 @@ Every table is a SQLModel class in `packages/odds-core/odds_core/`; migrations a
 
 - [Coverage and completeness checks](coverage-checks.md) — TierCoverageValidator, odds validate, odds quality, QualityMetrics, the daily-validation workflow and the read-only scripts/check_*.py.
 - [Event matching across sources](event-matching.md) — The matcher each ingest path uses to find its events row (window, team comparison, ambiguity rule) and the duplicates and NULL event ids that follow.
-- [Event merge](event-merge.md) — How events for one match are merged into one canonical event, which event is kept, who merges, how twins and rescheduled duplicates are detected, and the odds events merge-twins and repair-names commands.
+- [Event merge](event-merge.md) — How events for one match are merged into one canonical event, which event is kept, who merges, how twins and rescheduled duplicates are detected, how stored MLB events get their gamePk, and the odds events merge-twins, repair-names, assign-game-pks, set-game-pk and mark-unassignable commands.
 - [Events table](events.md) — The events columns and statuses, id prefixes by source, team-name normalizers, and the upsert verbs that write events.
 - [Fetch tier](fetch-tier.md) — The FetchTier enum and bounds, where tiers are written and read, and the boundary encodings.
 - [Odds snapshot and odds tables](odds-tables.md) — The odds_snapshots and odds columns and indexes, the raw_data format, and the provenance tags.
@@ -52,4 +52,8 @@ Every table is a SQLModel class in `packages/odds-core/odds_core/`; migrations a
 ### Explanation
 
 - [How odds are stored](odds-storage-model.md) — Why odds are stored as raw snapshots plus normalized rows, which sources lack the normalized half, and which readers use which.
+
+### How-to guides
+
+- [Assign MLB events their gamePk](howto-assign-mlb-game-pks.md) — Steps to give stored MLB events without a gamePk their MLB Stats API gamePk, merge the events of one game, and settle the events the backfill cannot resolve.
 <!-- pages:end -->

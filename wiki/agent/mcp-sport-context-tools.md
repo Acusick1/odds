@@ -11,6 +11,8 @@ sources:
   - odds_core.team.normalize_team_name
   - odds_analytics.standings_features.build_league_table
   - odds_lambda.scheduling.jobs._JOB_CRON_MAP
+mentions:
+  - odds_core.models.Event
 status: stable
 ---
 

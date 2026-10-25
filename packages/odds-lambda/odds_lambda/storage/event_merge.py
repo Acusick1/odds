@@ -3,11 +3,11 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import structlog
 from odds_core.event_source import EventSource, canonical_event_id
-from odds_core.models import Event, OddsSnapshot
+from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from odds_core.time import ensure_utc
 from sqlalchemy import and_, delete, select, text
@@ -35,6 +35,7 @@ class MergeReport:
     kept_id: str
     merged_ids: tuple[str, ...]
     rows_moved: dict[str, int] = field(default_factory=dict)
+    rows_deleted: dict[str, int] = field(default_factory=dict)
 
 
 def source_pair(group: Sequence[Event]) -> tuple[EventSource, ...]:
@@ -143,6 +144,30 @@ async def retime_snapshots(session: AsyncSession, event_id: str, commence_time: 
     return len(snapshots)
 
 
+async def follow_schedule(
+    session: AsyncSession, event: Event, game_pk: int, start: datetime | None
+) -> None:
+    """Move the event to its game's scheduled ``start`` and re-time its stored snapshots; a
+    postponed event becomes scheduled. No-op when ``start`` is ``None`` or unchanged."""
+    if start is None or ensure_utc(event.commence_time) == ensure_utc(start):
+        return
+    event_id = event.id
+    moved_from = ensure_utc(event.commence_time)
+    event.commence_time = start
+    event.updated_at = datetime.now(UTC)
+    if event.status == EventStatus.POSTPONED:
+        event.status = EventStatus.SCHEDULED
+    retimed = await retime_snapshots(session, event_id, start)
+    logger.info(
+        "mlb_event_rescheduled",
+        event_id=event_id,
+        game_pk=game_pk,
+        commence_time=moved_from.isoformat(),
+        scheduled_start=ensure_utc(start).isoformat(),
+        snapshots_retimed=retimed,
+    )
+
+
 class EventMerger:
     """The one way to collapse several events for one match into a single event.
 
@@ -239,9 +264,11 @@ class EventMerger:
                 f"they hold different MLB gamePks {sorted(game_pks)}"
             )
         rows_moved: dict[str, int] = {}
+        rows_deleted: dict[str, int] = {}
         for duplicate in duplicates:
             await self._rebase_snapshot_timing(duplicate, keep)
-            await self._drop_clashing_decisions(duplicate, keep)
+            for table, count in (await self._drop_clashing_decisions(duplicate, keep)).items():
+                rows_deleted[table] = rows_deleted.get(table, 0) + count
             for table, count in (
                 await self._repoint_event_references(duplicate.id, keep.id)
             ).items():
@@ -251,8 +278,8 @@ class EventMerger:
         if keep.mlb_game_pk is None and game_pks:
             # The duplicate's row must be gone before the kept event takes its unique gamePk.
             await self.session.flush()
-            keep.mlb_game_pk = game_pks.pop()
-        report = MergeReport(keep.id, tuple(d.id for d in duplicates), rows_moved)
+            keep.assign_game_pk(game_pks.pop())
+        report = MergeReport(keep.id, tuple(d.id for d in duplicates), rows_moved, rows_deleted)
         logger.info(
             "events_merged",
             kept_id=report.kept_id,
@@ -267,7 +294,7 @@ class EventMerger:
             return
         await retime_snapshots(self.session, duplicate.id, keep.commence_time)
 
-    async def _drop_clashing_decisions(self, duplicate: Event, keep: Event) -> None:
+    async def _drop_clashing_decisions(self, duplicate: Event, keep: Event) -> dict[str, int]:
         """Delete the duplicate's decisions, and their trades, that the kept event has too.
 
         A candidate version decides an event once (``uq_candidate_decisions_candidate_event``),
@@ -295,7 +322,7 @@ class EventMerger:
             if (decision.candidate_name, decision.candidate_version) in kept
         ]
         if not clashing:
-            return
+            return {}
         trades = await self.session.execute(
             delete(PaperTrade).where(PaperTrade.decision_id.in_(clashing))  # type: ignore[union-attr]
         )
@@ -309,6 +336,8 @@ class EventMerger:
             decisions=len(clashing),
             trades=trades.rowcount,
         )
+        deleted = {"candidate_decisions": len(clashing), "paper_trades": trades.rowcount}
+        return {table: count for table, count in deleted.items() if count}
 
     @staticmethod
     def _carry_result(keep: Event, duplicate: Event) -> None:
@@ -370,6 +399,24 @@ class EventMerger:
             )
         )
         return [(row[0], row[1], row[2]) for row in result.all()]
+
+    async def reference_counts(self, event_id: str) -> dict[str, int]:
+        """Rows referencing the event, per table, leaving out tables with none."""
+        quote = self.session.get_bind().dialect.identifier_preparer.quote
+        counts: dict[str, int] = {}
+        for schema, table, column in await self._event_reference_columns():
+            count = (
+                await self.session.execute(
+                    text(
+                        f"SELECT count(*) FROM {quote(schema)}.{quote(table)}"
+                        f" WHERE {quote(column)} = :event_id"
+                    ),
+                    {"event_id": event_id},
+                )
+            ).scalar_one()
+            if count:
+                counts[table] = counts.get(table, 0) + count
+        return counts
 
     async def _repoint_event_references(self, from_id: str, to_id: str) -> dict[str, int]:
         quote = self.session.get_bind().dialect.identifier_preparer.quote

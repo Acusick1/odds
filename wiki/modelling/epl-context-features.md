@@ -8,6 +8,8 @@ sources:
   - odds_analytics.standings_features.get_prior_events_from_cache
   - odds_analytics.epl_schedule_features.extract_epl_schedule_features
   - odds_analytics.as_of_team_features.TeamHistory
+mentions:
+  - odds_core.models.Event
 status: stable
 ---
 
