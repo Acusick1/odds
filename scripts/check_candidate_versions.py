@@ -1,5 +1,8 @@
 """Fail when a candidate file changes without a version bump, or is deleted.
 
+A candidate whose start_date at the base is later than today (UTC) has made no
+decisions yet, so it may change in place at the same version.
+
 Compares candidates/*.yaml in the working tree with the base: --base, else the
 merge-base of HEAD with origin/main, else with main, else HEAD.
 Only stdlib and yaml are imported: the pre-commit hook env has no project install.
@@ -8,6 +11,7 @@ Only stdlib and yaml are imported: the pre-commit hook env has no project instal
 import argparse
 import subprocess
 import sys
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -45,7 +49,14 @@ def _load(text: str) -> dict[str, Any]:
     return loaded if isinstance(loaded, dict) else {}
 
 
-def check(base: str) -> list[str]:
+def _not_started(candidate: dict[str, Any], today: date) -> bool:
+    start = candidate.get("start_date")
+    # yaml parses an unquoted ISO date to a date; anything else is malformed.
+    return isinstance(start, date) and not isinstance(start, datetime) and start > today
+
+
+def check(base: str, today: date | None = None) -> list[str]:
+    today = today or datetime.now(UTC).date()
     root = Path(_git("rev-parse", "--show-toplevel").strip())
     listing = _git("ls-tree", "-r", "--name-only", base, "--", f"{CANDIDATES_DIR}/")
     errors: list[str] = []
@@ -75,6 +86,8 @@ def check(base: str) -> list[str]:
         elif old_version != new_version:
             errors.append(f"{rel}: version changed to a non-integer value")
             continue
+        if _not_started(old, today):
+            continue
         changed = sorted(
             k
             for k in old.keys() | new.keys()
@@ -83,7 +96,7 @@ def check(base: str) -> list[str]:
         if changed:
             errors.append(
                 f"{rel}: {', '.join(changed)} changed without a version bump "
-                f"(still {old_version}); only status and description may change at the same version"
+                f"(still {old_version}); only status and description may change at the same version once the start date has arrived"
             )
     return errors
 
