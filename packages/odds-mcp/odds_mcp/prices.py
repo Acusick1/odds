@@ -13,7 +13,6 @@ from odds_core.quotes import Quote, quotes
 from odds_core.vocabulary import Market, PriceOutcome, Side, Source
 from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import col
 
 OUTCOME_LABELS: dict[PriceOutcome, str] = {
     PriceOutcome.DRAW: "Draw",
@@ -82,17 +81,17 @@ async def latest_priced_snapshot(
 ) -> OddsSnapshot | None:
     """The newest snapshot of ``market`` that holds a book price."""
     has_book_price = exists().where(
-        col(Price.snapshot_id) == col(OddsSnapshot.id),
-        col(Price.side).in_(BOOK_SIDES),
+        Price.snapshot_id == OddsSnapshot.id,  # type: ignore[arg-type]
+        Price.side.in_(BOOK_SIDES),  # type: ignore[attr-defined]
     )
     result = await session.execute(
         select(OddsSnapshot)
         .where(
-            col(OddsSnapshot.event_id) == event_id,
-            col(OddsSnapshot.market) == market,
+            OddsSnapshot.event_id == event_id,  # type: ignore[arg-type]
+            OddsSnapshot.market == market,  # type: ignore[arg-type]
             has_book_price,
         )
-        .order_by(col(OddsSnapshot.snapshot_time).desc(), col(OddsSnapshot.id))
+        .order_by(OddsSnapshot.snapshot_time.desc(), OddsSnapshot.id)  # type: ignore[attr-defined,arg-type]
         .limit(1)
     )
     return result.scalar_one_or_none()
