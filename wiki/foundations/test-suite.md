@@ -22,7 +22,7 @@ How to run the tests is in [Set up and run locally](howto-develop-locally.md#run
 
 ```
 tests/unit/         ~110 flat files across all five packages; `conftest.py` holds the OddsPortal feed fixtures
-tests/integration/  shared fixtures in conftest.py (e.g. events with opening and closing snapshots and `odds_core.models.Odds` rows priced through `price_decimal`, an `op_live_` event with child rows, among them a paper trade priced through `price_decimal`, an EPL event with a Betfair `1x2` snapshot in the redesigned columns, and `job_session`, the test session handed to the OddsPortal and Betfair jobs as their session factory)
+tests/integration/  shared fixtures in conftest.py (e.g. events with opening and closing snapshots and `odds_core.models.Odds` rows priced through `price_decimal`, an `op_live_` event with child rows, among them a paper trade priced through `price_decimal`, an EPL event with a Betfair `1x2` snapshot in the redesigned columns, `mixed_source_event` (an EPL event with an Odds API snapshot and a later Polymarket one carrying mid, ask and bid price rows), and `job_session`, the test session handed to the OddsPortal and Betfair jobs as their session factory)
 tests/migration/    schema and CLI checks against a real database
 tests/fixtures/     sample Odds API JSON
 ```

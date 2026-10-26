@@ -11,6 +11,7 @@ sources:
   - odds_analytics.feature_groups.TierSampler
   - odds_analytics.training.config.FeatureConfig
   - odds_mcp.server.find_retail_edges
+  - odds_mcp.prices.resolve_sharp_prices
   - packages/odds-mcp/agents/common.md
   - odds_core.models.Odds.implied_probability
   - odds_core.bookmakers.UK_RETAIL_BOOKMAKERS
@@ -33,7 +34,7 @@ The sharp reference anchors the `retail_sharp_diff` feature, the retail-sharp di
 
 - Features: `odds_analytics.feature_extraction.TabularFeatureExtractor` and `odds_analytics.feature_extraction.calculate_sharp_retail_metrics` both pick the sharp bookmaker with `odds_analytics.feature_extraction.select_sharp_odds`, which filters to the requested outcome itself. Neither reads the target fields, and the extractor's `odds_analytics.feature_extraction.FeatureEvent` carries no prices.
 - Sampling: `odds_analytics.feature_groups.TierSampler` keeps only snapshots containing any (not all) of `required_bookmakers`, and `odds_analytics.feature_groups.prepare_training_data` drops events lacking every sharp bookmaker at close (a check that does not depend on the sampler), after `odds_analytics.feature_groups.collect_event_data` has already loaded the event's group data. That function leaves out snapshots whose only bookmaker is a prediction market (`odds_core.bookmakers.is_reference_only_snapshot`), so no sampler can pick a `polymarket` snapshot as a decision row; the retail-EV builder reads its own snapshots and takes `polymarket` ones only for its `polymarket_at_t` features, never as a decision row, baseline or close ([retail-EV features](clv-target-functions.md#retail-ev-features)). The sampler filter and the closing check both apply to every `raw` target ([feature pipeline](feature-pipeline.md)).
-- MCP: `odds_lambda.storage.readers.OddsReader.get_sharp_prices` scans snapshots newest first within a 2 h lookback and, per outcome, takes the first sharp book in priority order that has a price ([odds reader](../storage/odds-reader.md)); `odds_mcp.server.find_retail_edges` defaults to `[pinnacle, betfair_exchange]` and never lists `odds_core.bookmakers.NON_BETTABLE_BOOKMAKERS` (Pinnacle, `polymarket`) as retail.
+- MCP: `odds_mcp.prices.resolve_sharp_prices` scans snapshots newest first within a 2 h lookback and, per outcome and line, takes the first sharp book in priority order that has a price ([MCP market tools](../agent/mcp-market-tools.md#retail-edges)); `odds_mcp.server.find_retail_edges` compares each retail row with the sharp price at its own line and defaults to `[pinnacle, betfair_exchange]` and never lists `odds_core.bookmakers.NON_BETTABLE_BOOKMAKERS` (Pinnacle, `polymarket`) as retail.
 
 ## Why a sharp reference
 
@@ -50,7 +51,7 @@ It is the core tabular feature `retail_sharp_diff` ([feature groups](feature-gro
 
 | | Feature, tabular path | Feature, helper path | MCP screener |
 |---|---|---|---|
-| Where | `odds_analytics.feature_extraction.TabularFeatureExtractor` | `odds_analytics.feature_extraction.calculate_sharp_retail_metrics` | `odds_mcp.server.find_retail_edges`, sharp from `odds_lambda.storage.readers.OddsReader.get_sharp_prices` |
+| Where | `odds_analytics.feature_extraction.TabularFeatureExtractor` | `odds_analytics.feature_extraction.calculate_sharp_retail_metrics` | `odds_mcp.server.find_retail_edges`, sharp from `odds_mcp.prices.resolve_sharp_prices` |
 | Retail side | Mean of per-book implied probabilities for the outcome, over configured `retail_bookmakers` | Mean of per-book implied probabilities (`odds_analytics.feature_extraction.calculate_avg_probability`) | One row per book, every non-sharp book in the window |
 | Sharp side | First bookmaker in the list with odds for the requested outcome (`odds_analytics.feature_extraction.select_sharp_odds`) | Same | First bookmaker per outcome, so outcomes can resolve to different books, and sharp and retail prices can come from different snapshots |
 | Defaults | `["pinnacle"]`; retail `fanduel`, `draftkings`, `betmgm` (`odds_analytics.feature_extraction.DEFAULT_RETAIL_BOOKMAKERS`) | Same | `["pinnacle", "betfair_exchange"]`; no retail list |

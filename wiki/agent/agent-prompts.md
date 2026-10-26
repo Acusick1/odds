@@ -24,7 +24,7 @@ Every [agent](betting-agent.md) wake-up follows the same steps, defined in the p
 
 ## Steps
 
-1. **Orient.** Check the date, weekday and UTC time (`date -u`), then load upcoming fixtures with `odds_mcp.server.get_upcoming_fixtures`.
+1. **Orient.** Check the date, weekday and UTC time (`date -u`), then load upcoming fixtures with `odds_mcp.server.get_upcoming_fixtures`. The event id it returns is the id every other tool takes; the base prompts tell the agent to treat it as opaque.
 2. **Settle.** Settle finished bets (`odds_mcp.server.settle_bets`, see [settlement](paper-trading.md#settlement)).
 3. **Triage.** Read the latest brief per upcoming match (`odds_mcp.server.get_slate_briefs`) and choose what to research ([match briefs](match-briefs.md)). Briefs are append-only and do not store the market.
 4. **Pre-market read**, for new fixtures only.
@@ -39,7 +39,7 @@ The agent may ask for its next wake-up with `odds_mcp.server.schedule_next_wakeu
 The agent does not bet on qualitative team assessment. Every bet needs one of four specific bases:
 
 1. an information gap;
-2. retail or cross-venue dispersion among bettable books (`odds_mcp.server.find_retail_edges`, whose rows give each retail price as both an American quote and the source decimal; see [retail edges](mcp-market-tools.md#retail-edges));
+2. retail or cross-venue dispersion among bettable books (`odds_mcp.server.find_retail_edges`, whose rows give each retail price as both an American quote and the source decimal, with divergence against the sharp price at the same line; see [retail edges](mcp-market-tools.md#retail-edges));
 3. a structural bias (bookmaker liability management, accumulator distortion, public money on popular teams);
 4. fundamental value.
 

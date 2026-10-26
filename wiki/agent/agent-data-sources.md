@@ -38,7 +38,7 @@ The cadence column summarises code; the `odds_lambda.jobs.fetch_oddsportal.CADEN
 
 ## On-demand research
 
-Not collected on a schedule; the agent searches and browses these each wake-up with web search and Playwright (the list is in `packages/odds-mcp/agents/epl/base.md`; MLB sources are in `packages/odds-mcp/agents/mlb/base.md`). Nothing in the repo fetches these sites: what the agent does with them is defined only by the prompt files ([prompts](betting-agent.md#prompts)).
+Not collected on a schedule; the agent searches and browses these each wake-up with web search and Playwright (the list is in `packages/odds-mcp/agents/epl/base.md`; MLB sources are in `packages/odds-mcp/agents/mlb/base.md`). Nothing in the repo fetches these sites: what the agent does with them is defined only by the prompt files ([prompts](betting-agent.md#prompts)). Odds for a match come through the MCP tools under the one event id of the fixture, whichever source stored them ([market tools](mcp-market-tools.md)).
 
 | Source | Provides | Use |
 |---|---|---|

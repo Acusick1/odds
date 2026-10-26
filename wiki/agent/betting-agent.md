@@ -26,11 +26,11 @@ The runtime is a `claude` subprocess; everything it touches goes through one of 
 
 | Channel | Used for |
 |---|---|
-| `odds` MCP server (`odds_mcp.server.mcp`) | fixtures, odds, retail edges, briefs, paper bets, portfolio |
+| `odds` MCP server (`odds_mcp.server.mcp`) | fixtures, odds, retail edges (against the sharp price at the same line), briefs, paper bets, portfolio |
 | Web search | press conferences, injury news |
 | Playwright MCP (not in `.mcp.json`, so supplied by the user's Claude configuration) | club sites, lineup pages, BBC and ESPN |
 
-The MCP server reads and writes these PostgreSQL tables: `events`, `odds_snapshots`, `paper_trades`, `match_briefs` and `agent_wakeups` (`odds_core.models.Event`, `odds_core.models.OddsSnapshot` ([columns and constraints](../storage/odds-tables.md#odds_snapshots)), `odds_core.paper_trade_models.PaperTrade` (the agent's trades and the flat-stake trades of mechanical candidates, [paper trading](paper-trading.md#candidate-fields)), `odds_core.match_brief_models.MatchBrief`, `odds_core.agent_wakeup_models.AgentWakeup`). See [odds-mcp server](mcp-server.md) for the tools. No tool reads the `prices`, `snapshot_payloads` or `event_external_ids` tables, or the redesigned snapshot columns. Merging duplicate events moves their paper trades and briefs to the kept event ([Event merge](../storage/event-merge.md#merging)).
+The MCP server reads and writes these PostgreSQL tables: `events`, `odds_snapshots`, `prices`, `paper_trades`, `match_briefs` and `agent_wakeups` (`odds_core.models.Event`, `odds_core.models.OddsSnapshot` ([columns and constraints](../storage/odds-tables.md#odds_snapshots)), `odds_core.paper_trade_models.PaperTrade` (the agent's trades and the flat-stake trades of mechanical candidates, [paper trading](paper-trading.md#candidate-fields)), `odds_core.match_brief_models.MatchBrief`, `odds_core.agent_wakeup_models.AgentWakeup`). See [odds-mcp server](mcp-server.md) for the tools. The market tools read the `prices` table and the snapshot's `source`, `market` and `time_basis` ([market tools](mcp-market-tools.md)); no tool reads `snapshot_payloads` or `event_external_ids`. Merging duplicate events moves their paper trades and briefs to the kept event ([Event merge](../storage/event-merge.md#merging)).
 
 ## Prompts
 

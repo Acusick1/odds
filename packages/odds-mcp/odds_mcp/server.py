@@ -20,11 +20,11 @@ from odds_core.bookmakers import NON_BETTABLE_BOOKMAKERS
 from odds_core.candidates import candidates_dir, load_candidates
 from odds_core.database import async_session_maker
 from odds_core.match_brief_models import BriefDecision, MatchBrief, SharpPriceMap
-from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
+from odds_core.models import Event, EventStatus
 from odds_core.paper_trade_models import PaperTrade
-from odds_core.snapshot_utils import extract_odds_from_snapshot
+from odds_core.quotes import Quote
 from odds_core.sports import SportKey
-from odds_core.utils import raw_data_has_market
+from odds_core.vocabulary import Market
 from odds_lambda.jobs.fetch_oddsportal import LEAGUE_SPEC_BY_NAME
 from odds_lambda.oddsportal_client import FEED_MARKETS
 from odds_lambda.paper_trading import (
@@ -33,10 +33,17 @@ from odds_lambda.paper_trading import (
     place_trade,
     settle_trades,
 )
-from odds_lambda.storage.readers import BookPriceEntry, OddsReader
+from odds_lambda.storage.readers import OddsReader
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+from odds_mcp.prices import (
+    BookPrice,
+    book_quotes,
+    latest_book_prices,
+    latest_priced_snapshot,
+    resolve_sharp_prices,
+)
 from odds_mcp.tools.epl import epl_mcp
 from odds_mcp.tools.mlb import mlb_mcp
 
@@ -99,52 +106,25 @@ def _event_to_dict(event: Event) -> dict[str, Any]:
     }
 
 
-def _odds_to_dict(odds: Odds) -> dict[str, Any]:
-    """Serialize an Odds object to a JSON-safe dict.
+def _odds_to_dict(price: BookPrice) -> dict[str, Any]:
+    """Serialize a book's price to a JSON-safe dict.
 
-    Includes ``last_update`` (the bookmaker's self-reported update time from
-    ``raw_data``) so callers can judge per-book freshness independently of
-    the contributing snapshot's wall-clock time.
+    Includes ``last_update`` (the book's own change time, else the snapshot's) so callers can
+    judge per-book freshness independently of the contributing snapshot's wall-clock time.
     """
     return {
-        "bookmaker_key": odds.bookmaker_key,
-        "bookmaker_title": odds.bookmaker_title,
-        "market_key": odds.market_key,
-        "outcome_name": odds.outcome_name,
-        "price": odds.american_price,
-        "price_decimal": odds.price_decimal,
-        "point": odds.point,
-        "last_update": odds.last_update.isoformat() if odds.last_update else None,
+        "bookmaker_key": price.bookmaker,
+        "market_key": price.market.value,
+        "outcome_name": price.outcome_name,
+        "price": price.american_price,
+        "price_decimal": price.price_decimal,
+        "point": price.line,
+        "last_update": price.last_update.isoformat(),
     }
 
 
-def _snapshot_to_dict(
-    snapshot: OddsSnapshot,
-    *,
-    include_raw_data: bool = False,
-    extracted_odds: list[Odds] | None = None,
-) -> dict[str, Any]:
-    """Serialize an OddsSnapshot to a JSON-safe dict.
-
-    Args:
-        snapshot: The snapshot to serialize.
-        include_raw_data: If True, include the full raw_data blob (for single-snapshot views).
-        extracted_odds: If provided, include structured odds instead of raw_data.
-    """
-    result: dict[str, Any] = {
-        "id": snapshot.id,
-        "event_id": snapshot.event_id,
-        "snapshot_time": snapshot.snapshot_time.isoformat(),
-        "created_at": snapshot.created_at.isoformat(),
-        "bookmaker_count": snapshot.bookmaker_count,
-        "fetch_tier": snapshot.fetch_tier,
-        "hours_until_commence": snapshot.hours_until_commence,
-    }
-    if include_raw_data:
-        result["raw_data"] = snapshot.raw_data
-    if extracted_odds is not None:
-        result["odds"] = [_odds_to_dict(o) for o in extracted_odds]
-    return result
+def _hours_until_commence(event: Event, at: datetime) -> float:
+    return (event.commence_time - at).total_seconds() / 3600
 
 
 def _trade_to_dict(trade: PaperTrade) -> dict[str, Any]:
@@ -205,13 +185,12 @@ async def get_upcoming_fixtures(
 async def get_current_odds(
     event_id: str,
     market: MarketKey,
-    include_raw_data: bool = False,
     lookback_hours: float = 2.0,
 ) -> dict[str, Any]:
     """Get the latest odds for an event, resolved per-bookmaker over a lookback window.
 
     For each ``(bookmaker_key, outcome_name, point)`` tuple, returns the
-    newest price within ``[latest_snapshot_time - lookback_hours,
+    newest book price within ``[latest_snapshot_time - lookback_hours,
     latest_snapshot_time]``. This is robust to multiple writer streams: when
     a Betfair Exchange direct-ingestion snapshot wins the latest-snapshot
     race but contains only BFE, retail prices from an older snapshot in the
@@ -220,14 +199,17 @@ async def get_current_odds(
     The top-level ``snapshot_time`` is the newest contributing snapshot in
     the window (max of surfaced book snapshot times). Each bookmaker entry
     additionally surfaces the contributing snapshot's ``snapshot_time``
-    alongside its ``last_update`` from ``raw_data`` so callers can judge
-    per-book staleness.
+    alongside its ``last_update`` (the book's own change time, else the
+    snapshot's) so callers can judge per-book staleness.
 
     Anchor metadata (``anchor_snapshot_id``, ``anchor_created_at``,
-    ``anchor_fetch_tier``, ``anchor_hours_until_commence``) describes the
-    latest snapshot used to anchor the lookback window. It is **not**
-    aggregated across surfaced rows — surfaced ``odds`` may span several
-    older snapshots. ``bookmaker_count`` is derived from the surfaced rows
+    ``anchor_source``, ``anchor_time_basis``, ``anchor_hours_until_commence``)
+    describes the latest snapshot used to anchor the lookback window. It is
+    **not** aggregated across surfaced rows — surfaced ``odds`` may span
+    several older snapshots. ``anchor_time_basis`` says what the snapshot's
+    time means: ``observed`` (when we fetched it), ``source_stamped`` (the
+    source's own stamp), ``upper_bound`` (the last snapshot at or before the
+    time) or ``close``. ``bookmaker_count`` is derived from the surfaced rows
     (count of distinct ``bookmaker_key`` values) so it always matches what
     the caller sees.
 
@@ -235,8 +217,6 @@ async def get_current_odds(
         event_id: Event identifier.
         market: Market type — "h2h" (2-way moneyline), "1x2" (3-way with
             draw), "totals", or "spreads".
-        include_raw_data: If True, also include the full raw_data JSON blob
-            of the anchor (newest) snapshot.
         lookback_hours: How far back to search for per-bookmaker prices
             (default 2.0 h).
 
@@ -252,30 +232,27 @@ async def get_current_odds(
 
         # Anchor the lookback window on the latest snapshot time so the
         # window is data-relative, not clock-relative.
-        latest_snapshot = await reader.get_latest_snapshot(event_id, market=market)
-        if latest_snapshot is None:
+        anchor = await latest_priced_snapshot(session, event_id, Market(market))
+        if anchor is None:
             return {
                 "event": _event_to_dict(event),
                 "snapshot": None,
                 "message": "No odds snapshots available for this event",
             }
 
-        book_result = await reader.get_latest_book_prices(
-            event_id,
-            market=market,
-            lookback_hours=lookback_hours,
-            now=latest_snapshot.snapshot_time,
+        book_prices = await latest_book_prices(
+            session, event, Market(market), anchor.snapshot_time, lookback_hours
         )
 
         # Capture all data we need from ORM objects while the session is open.
-        anchor_snapshot_id = latest_snapshot.id
-        anchor_snapshot_created_at = latest_snapshot.created_at
-        anchor_fetch_tier = latest_snapshot.fetch_tier
-        anchor_hours_until_commence = latest_snapshot.hours_until_commence
-        anchor_raw_data = latest_snapshot.raw_data if include_raw_data else None
+        anchor_snapshot_id = anchor.id
+        anchor_snapshot_created_at = anchor.created_at
+        anchor_source = anchor.source
+        anchor_time_basis = anchor.time_basis
+        anchor_hours_until_commence = _hours_until_commence(event, anchor.snapshot_time)
         event_dict = _event_to_dict(event)
 
-    if not book_result.entries:
+    if not book_prices:
         return {
             "event": event_dict,
             "snapshot": None,
@@ -283,21 +260,21 @@ async def get_current_odds(
         }
 
     # Determine the newest contributing snapshot in the window.
-    newest_snapshot_time = max(entry.meta.snapshot_time for entry in book_result.entries.values())
+    newest_snapshot_time = max(p.snapshot_time for p in book_prices.values())
 
     # Serialize per-bookmaker odds with provenance fields. Sorted by
     # bookmaker key, outcome name, point (None last) for deterministic output.
     odds_dicts: list[dict[str, Any]] = []
     for key in sorted(
-        book_result.entries.keys(),
+        book_prices.keys(),
         key=lambda k: (k[0], k[1], math.inf if k[2] is None else k[2]),
     ):
-        entry = book_result.entries[key]
+        price = book_prices[key]
         odds_dicts.append(
             {
-                **_odds_to_dict(entry.odds),
-                "snapshot_time": entry.meta.snapshot_time.isoformat(),
-                "book_age_seconds": entry.meta.age_seconds,
+                **_odds_to_dict(price),
+                "snapshot_time": price.snapshot_time.isoformat(),
+                "book_age_seconds": price.age_seconds,
             }
         )
 
@@ -306,23 +283,20 @@ async def get_current_odds(
     # snapshot, which can be misleading when retail rows span older snapshots.
     bookmaker_count = len({o["bookmaker_key"] for o in odds_dicts})
 
-    snapshot_dict: dict[str, Any] = {
-        "anchor_snapshot_id": anchor_snapshot_id,
-        "event_id": event_id,
-        "snapshot_time": newest_snapshot_time.isoformat(),
-        "anchor_created_at": anchor_snapshot_created_at.isoformat(),
-        "bookmaker_count": bookmaker_count,
-        "anchor_fetch_tier": anchor_fetch_tier,
-        "anchor_hours_until_commence": anchor_hours_until_commence,
-        "lookback_hours": lookback_hours,
-        "odds": odds_dicts,
-    }
-    if include_raw_data:
-        snapshot_dict["raw_data"] = anchor_raw_data
-
     return {
         "event": event_dict,
-        "snapshot": snapshot_dict,
+        "snapshot": {
+            "anchor_snapshot_id": anchor_snapshot_id,
+            "event_id": event_id,
+            "snapshot_time": newest_snapshot_time.isoformat(),
+            "anchor_created_at": anchor_snapshot_created_at.isoformat(),
+            "bookmaker_count": bookmaker_count,
+            "anchor_source": anchor_source.value,
+            "anchor_time_basis": anchor_time_basis.value,
+            "anchor_hours_until_commence": anchor_hours_until_commence,
+            "lookback_hours": lookback_hours,
+            "odds": odds_dicts,
+        },
     }
 
 
@@ -330,8 +304,8 @@ async def get_current_odds(
 async def get_odds_history(event_id: str, market: MarketKey) -> dict[str, Any]:
     """Get the full odds movement timeline for an event (all snapshots).
 
-    Returns structured bookmaker odds per snapshot instead of raw JSON blobs
-    to keep response size manageable.
+    Returns structured bookmaker back prices per snapshot to keep response
+    size manageable. Each snapshot carries its ``source`` and ``time_basis``.
 
     Args:
         event_id: Event identifier.
@@ -346,20 +320,34 @@ async def get_odds_history(event_id: str, market: MarketKey) -> dict[str, Any]:
         if event is None:
             return {"error": f"Event '{event_id}' not found"}
 
-        snapshots = [
-            s
-            for s in await reader.get_snapshots_for_event(event_id)
-            if raw_data_has_market(s.raw_data, market)
-        ]
+        history = await book_quotes(session, event_id, Market(market))
+        event_dict = _event_to_dict(event)
+
+    by_snapshot: dict[int, list[Quote]] = {}
+    for quote in history:
+        by_snapshot.setdefault(quote.snapshot_id, []).append(quote)
 
     serialized = []
-    for s in snapshots:
-        odds = extract_odds_from_snapshot(s, event_id, market=market)
-        serialized.append(_snapshot_to_dict(s, extracted_odds=odds))
+    for snapshot_quotes in by_snapshot.values():
+        head = snapshot_quotes[0]
+        prices = [BookPrice.from_quote(event, q, q.snapshot_time) for q in snapshot_quotes]
+        serialized.append(
+            {
+                "id": head.snapshot_id,
+                "event_id": head.event_id,
+                "snapshot_time": head.snapshot_time.isoformat(),
+                "created_at": head.created_at.isoformat(),
+                "bookmaker_count": len({p.bookmaker for p in prices}),
+                "source": head.source.value,
+                "time_basis": head.time_basis.value,
+                "hours_until_commence": _hours_until_commence(event, head.snapshot_time),
+                "odds": [_odds_to_dict(p) for p in prices],
+            }
+        )
 
     return {
-        "event": _event_to_dict(event),
-        "snapshot_count": len(snapshots),
+        "event": event_dict,
+        "snapshot_count": len(serialized),
         "snapshots": serialized,
     }
 
@@ -716,16 +704,17 @@ async def save_match_brief(
         # Snapshot sharp prices via lookback across recent snapshots.
         # Anchor on the latest snapshot and use a generous window — we just
         # want the best available price for stamping the brief.
-        latest_snapshot = await reader.get_latest_snapshot(event_id, market=market)
+        latest_snapshot = await latest_priced_snapshot(session, event_id, Market(market))
         if latest_snapshot is not None:
-            sharp_result = await reader.get_sharp_prices(
-                event_id,
-                market=market,
-                sharp_bookmakers=_DEFAULT_SHARP_BOOKMAKERS,
-                lookback_hours=24.0,
-                now=latest_snapshot.snapshot_time,
+            sharp_result = await resolve_sharp_prices(
+                session,
+                event,
+                Market(market),
+                _DEFAULT_SHARP_BOOKMAKERS,
+                24.0,
+                latest_snapshot.snapshot_time,
             )
-            sharp_prices: SharpPriceMap | None = sharp_result.prices or None
+            sharp_prices: SharpPriceMap | None = sharp_result.by_outcome() or None
         else:
             sharp_prices = None
 
@@ -944,7 +933,7 @@ async def find_retail_edges(
 
         # Anchor lookback windows on the latest snapshot time so they are
         # data-relative, not clock-relative.
-        latest_snapshot = await reader.get_latest_snapshot(event_id, market=market)
+        latest_snapshot = await latest_priced_snapshot(session, event_id, Market(market))
         if latest_snapshot is None:
             return {
                 "event": _event_to_dict(event),
@@ -956,20 +945,18 @@ async def find_retail_edges(
             }
 
         # Sharp prices: lookback across recent snapshots.
-        sharp_result = await reader.get_sharp_prices(
-            event_id,
-            market=market,
-            sharp_bookmakers=sharp_bms,
-            lookback_hours=sharp_lookback_hours,
-            now=latest_snapshot.snapshot_time,
+        sharp_result = await resolve_sharp_prices(
+            session,
+            event,
+            Market(market),
+            sharp_bms,
+            sharp_lookback_hours,
+            latest_snapshot.snapshot_time,
         )
 
         # Retail prices: per-bookmaker latest within the lookback window.
-        book_result = await reader.get_latest_book_prices(
-            event_id,
-            market=market,
-            lookback_hours=lookback_hours,
-            now=latest_snapshot.snapshot_time,
+        book_prices = await latest_book_prices(
+            session, event, Market(market), latest_snapshot.snapshot_time, lookback_hours
         )
 
         event_dict = _event_to_dict(event)
@@ -978,16 +965,15 @@ async def find_retail_edges(
 
     # Build per-(outcome, point) buckets of retail odds, dropping sharp books.
     # Each retail row carries provenance from its contributing snapshot.
-    buckets: dict[tuple[str, float | None], list[BookPriceEntry]] = {}
-    for (bookmaker_key, _outcome, _point), entry in book_result.entries.items():
+    buckets: dict[tuple[str, float | None], list[BookPrice]] = {}
+    for (bookmaker_key, _outcome, _point), entry in book_prices.items():
         if bookmaker_key in sharp_set:
             continue
-        o = entry.odds
-        buckets.setdefault((o.outcome_name, o.point), []).append(entry)
+        buckets.setdefault((entry.outcome_name, entry.line), []).append(entry)
 
     if not buckets:
         # Either no odds in the window, or every book in the window is sharp.
-        if not book_result.entries:
+        if not book_prices:
             return {
                 "event": event_dict,
                 "snapshot_time": None,
@@ -998,9 +984,7 @@ async def find_retail_edges(
             }
         # All books were sharp — newest contributing snapshot is still
         # informative for the response envelope.
-        snapshot_time_iso = max(
-            e.meta.snapshot_time for e in book_result.entries.values()
-        ).isoformat()
+        snapshot_time_iso = max(e.snapshot_time for e in book_prices.values()).isoformat()
         return {
             "event": event_dict,
             "snapshot_time": snapshot_time_iso,
@@ -1011,13 +995,11 @@ async def find_retail_edges(
         }
 
     # Top-level snapshot_time = max across surfaced retail snapshot times.
-    retail_snapshot_times = [e.meta.snapshot_time for entries in buckets.values() for e in entries]
+    retail_snapshot_times = [e.snapshot_time for entries in buckets.values() for e in entries]
     snapshot_time_iso = max(retail_snapshot_times).isoformat()
 
-    sharp_by_outcome = sharp_result.prices
-
     # Flat list of all retail odds (across buckets) for per-book hold calc.
-    odds: list[Odds] = [e.odds for entries in buckets.values() for e in entries]
+    odds: list[BookPrice] = [e for entries in buckets.values() for e in entries]
 
     # Per-book market hold is only meaningful for single-line markets; totals /
     # spreads span multiple lines, so computing it event-wide would conflate them.
@@ -1027,7 +1009,7 @@ async def find_retail_edges(
     if market in ("h2h", "1x2"):
         required_outcomes = {o.outcome_name for o in odds}
         book_hold = per_book_market_holds(
-            ((o.bookmaker_key, o.outcome_name, o.price_decimal) for o in odds),
+            ((o.bookmaker, o.outcome_name, o.price_decimal) for o in odds),
             required_outcomes=required_outcomes,
         )
 
@@ -1040,19 +1022,18 @@ async def find_retail_edges(
         return (outcome_name, math.inf if point is None else point)
 
     for (outcome_name, point), outcome_entries in sorted(buckets.items(), key=_bucket_sort_key):
-        sharp_entry = sharp_by_outcome.get(outcome_name)
+        sharp_entry = sharp_result.prices.get((outcome_name, point))
         sharp_prob = sharp_entry["implied_prob"] if sharp_entry else None
-        sharp_meta = sharp_result.meta.get(outcome_name) if sharp_entry else None
+        sharp_meta = sharp_result.meta.get((outcome_name, point)) if sharp_entry else None
 
         # Build per-book retail rows for this (outcome, point) bucket.
-        # ``book_result.entries`` is already keyed by
+        # ``book_prices`` is already keyed by
         # ``(bookmaker_key, outcome_name, point)``, so each entry in this
         # bucket has a unique ``bookmaker_key`` by construction — iterate
         # directly in ``bookmaker_key`` order for deterministic output.
         retail_rows: list[dict[str, Any]] = []
-        for entry in sorted(outcome_entries, key=lambda e: e.odds.bookmaker_key):
-            o = entry.odds
-            bm_key = o.bookmaker_key
+        for o in sorted(outcome_entries, key=lambda e: e.bookmaker):
+            bm_key = o.bookmaker
             retail_prob = round(o.implied_probability, 6)
             divergence = round(retail_prob - sharp_prob, 6) if sharp_prob is not None else None
             market_hold = (
@@ -1070,8 +1051,8 @@ async def find_retail_edges(
                     # z_score filled in below once dispersion is known
                     "z_score": None,
                     "market_hold": market_hold,
-                    "snapshot_time": entry.meta.snapshot_time.isoformat(),
-                    "book_age_seconds": entry.meta.age_seconds,
+                    "snapshot_time": o.snapshot_time.isoformat(),
+                    "book_age_seconds": o.age_seconds,
                 }
             )
 
