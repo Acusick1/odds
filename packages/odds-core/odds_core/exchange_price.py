@@ -37,16 +37,19 @@ def overround(prices: dict[Outcome, float], outcomes: tuple[Outcome, ...]) -> fl
     return sum(1 / prices[o] for o in outcomes) - 1
 
 
-def exchange_price(snapshot: Sequence[Quote], market: str) -> ExchangePrice | None:
-    """The exchange price in one snapshot's quotes: its Betfair Exchange back price for every
-    outcome of ``market``, or None when any is missing."""
+def exchange_price(
+    snapshot: Sequence[Quote], market: str, line: float | None = None
+) -> ExchangePrice | None:
+    """The exchange price on ``line`` in one snapshot's quotes: its Betfair Exchange back price
+    on that line for every outcome of ``market``, or None when any is missing. A market without
+    lines has the line None."""
     outcomes = market_outcomes(market)
     backs = {
-        Outcome(q.outcome.value): q.price
+        q.outcome: q.price
         for q in snapshot
-        if q.bookmaker == EXCHANGE_BOOKMAKER and q.side is Side.BACK
+        if q.bookmaker == EXCHANGE_BOOKMAKER and q.side is Side.BACK and q.line == line
     }
-    if not snapshot or set(backs) != set(outcomes):
+    if set(backs) != set(outcomes):
         return None
     first = snapshot[0]
     return ExchangePrice(

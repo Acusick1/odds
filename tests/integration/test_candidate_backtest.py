@@ -43,6 +43,7 @@ def candidate(**overrides: Any) -> MechanicalCandidate:
         "name": "gap",
         "description": "d",
         "kind": "mechanical",
+        "market": "1x2",
         "sport": "soccer_epl",
         "version": 1,
         "issue": 626,
@@ -104,6 +105,19 @@ async def add_event(
             ),
         )
     await session.commit()
+
+
+def totals_book(key: str, lines: dict[float, tuple[float, float]]) -> dict[str, Any]:
+    """A ``raw_data`` bookmaker entry with totals (over, under) prices per line."""
+    outcomes = [
+        outcome
+        for line, (over, under) in lines.items()
+        for outcome in (
+            {"name": "Over", "price_decimal": over, "point": line},
+            {"name": "Under", "price_decimal": under, "point": line},
+        )
+    ]
+    return {"key": key, "markets": [{"key": "totals", "outcomes": outcomes}]}
 
 
 async def run(session: Any, cand: MechanicalCandidate | None = None, **kwargs: Any):
@@ -227,6 +241,38 @@ class TestReplay:
             coverage.bets,
             coverage.bets_with_close,
         ) == (5, 5, 2, 2, 2, 1, 1, 1)
+
+    async def test_totals_bets_are_settled_and_scored_on_their_line(
+        self, pglite_async_session
+    ) -> None:
+        session = pglite_async_session
+        session.add(
+            make_epl_event("e1", KICKOFF, status=EventStatus.FINAL, home_score=2, away_score=1)
+        )
+        retail = totals_book("bet365", {2.5: (2.3, 1.6), 3.5: (3.0, 1.6)})
+        exchange = totals_book("betfair_exchange", {2.5: (2.0, 2.0), 3.5: (3.2, 1.45)})
+        await store_tagged(
+            session,
+            make_tagged_snapshot(
+                "e1", T - timedelta(minutes=5), [retail, exchange], "oddsportal_live"
+            ),
+        )
+        # The close prices 2.5 only, so the bet on 3.5 has no close.
+        close = totals_book("betfair_exchange", {2.5: (2.1, 1.9)})
+        await store_tagged(
+            session,
+            make_tagged_snapshot("e1", KICKOFF, [close], "football_data_uk", FdukTimeBasis.KICKOFF),
+        )
+        await session.commit()
+
+        result = await run(session, candidate(market="totals"))
+
+        assert result.coverage.bets == 2 and result.coverage.bets_with_close == 1
+        # 3 goals: over 2.5 at 2.3 wins, under 3.5 at 1.6 wins.
+        assert result.summary.pnl == pytest.approx(1.3 + 0.6)
+        over_close = (1 / 2.1) / (1 / 2.1 + 1 / 1.9)
+        assert result.overall is not None
+        assert result.overall.mean_ev == pytest.approx(over_close * 2.3 - 1)
 
     async def test_empty_range_has_no_verdict(self, pglite_async_session) -> None:
         result = await run(pglite_async_session)

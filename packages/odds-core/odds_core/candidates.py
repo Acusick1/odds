@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, PositiveInt, TypeA
 
 from odds_core.config import get_settings
 from odds_core.sports import SportKey
+from odds_core.vocabulary import Market
 
 NAME_PATTERN = r"^[a-z0-9]+(-[a-z0-9]+)*$"
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
@@ -36,6 +37,7 @@ class _CandidateBase(BaseModel):
 
 class MechanicalCandidate(_CandidateBase):
     kind: Literal["mechanical"]
+    market: Market
     rule: str
     # Absent only in a draft file; the registry requires it.
     rule_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)

@@ -27,7 +27,7 @@ from odds_core.market_prices import Outcome, market_outcomes
 from odds_core.models import Event
 from odds_core.quotes import Quote
 from odds_core.snapshot_sources import SnapshotKind
-from odds_core.vocabulary import Source, TimeBasis
+from odds_core.vocabulary import Market, Source, TimeBasis
 from odds_lambda.candidate_rules import (
     MarketState,
     ModelRuleSpec,
@@ -37,7 +37,6 @@ from odds_lambda.candidate_rules import (
     decision_times,
 )
 from odds_lambda.candidate_rules.inputs import RETAIL_SOURCES, rule_quotes
-from odds_lambda.candidate_rules.market_state import sport_market
 
 from odds_analytics.retail_ev import (
     DECISION_CUTOFF,
@@ -89,29 +88,32 @@ RETAIL_KINDS: dict[tuple[Source, TimeBasis], SnapshotKind] = {
 
 
 def state_inputs(state: MarketState) -> list[RetailEvInput]:
-    """The state's quotes as model inputs at its snapshot's time; none without an exchange price."""
-    if state.exchange is None or state.snapshot_time is None:
+    """The state's quotes as model inputs at its snapshot's time; none without an exchange price.
+
+    The model is defined for markets without lines, whose one line is None."""
+    exchange = state.exchange.get(None)
+    if exchange is None or state.snapshot_time is None:
         return []
     return quote_inputs(
         state.event_id,
         state.kickoff,
-        RETAIL_KINDS[(state.exchange.source, state.exchange.time_basis)],
+        RETAIL_KINDS[(exchange.source, exchange.time_basis)],
         state.snapshot_time,
-        state.retail,
+        state.retail.get(None, {}),
         market_outcomes(state.market),
-        state.exchange,
+        exchange,
         polymarket=None,
         dynamics=None,
     )
 
 
-def training_rows(event: Event, quoted: Sequence[Quote]) -> list[RetailEvRow]:
+def training_rows(event: Event, market: Market, quoted: Sequence[Quote]) -> list[RetailEvRow]:
     """Rows of every co-timed snapshot in the decision window, against the live Betfair close.
 
     ``quoted`` holds the event's retail quotes and its close quotes. An event without a live
     Betfair close has none.
     """
-    close = event_close(quoted, event.commence_time, sport_market(event.sport_key))
+    close = event_close(quoted, event.commence_time, market)
     if close is None or close.source is not Source.BETFAIR:
         return []
     first = event.commence_time - DECISION_WINDOW
@@ -121,7 +123,7 @@ def training_rows(event: Event, quoted: Sequence[Quote]) -> list[RetailEvRow]:
         time = snapshot[0].snapshot_time
         if not first <= time <= last:
             continue
-        state = build_market_state(event, snapshot, time, timedelta(0))
+        state = build_market_state(event, market, snapshot, time, timedelta(0))
         rows.extend(RetailEvRow.with_close(inputs, close) for inputs in state_inputs(state))
     return rows
 
@@ -325,16 +327,18 @@ class ModelReplay:
         session: AsyncSession,
         spec: ModelRuleSpec,
         params: RetailEvModelParams,
+        market: Market,
         events: Sequence[Event],
     ) -> None:
         self._session = session
         self._spec = spec
         self._params = params
+        self._market = market
         self._events = events
         self._rows: dict[str, list[RetailEvRow]] = {}
 
     async def _training_rows(self, events: Sequence[Event]) -> list[RetailEvRow]:
-        market = self._market()
+        market = self._market
         new = [e for e in {e.id: e for e in events}.values() if e.id not in self._rows]
         closes = await close_quotes(self._session, new, market)
         for event in new:
@@ -345,11 +349,8 @@ class ModelReplay:
                 since=event.commence_time - DECISION_WINDOW,
                 until=event.commence_time - DECISION_CUTOFF,
             )
-            self._rows[event.id] = training_rows(event, retail + closes[event.id])
+            self._rows[event.id] = training_rows(event, market, retail + closes[event.id])
         return [row for event in events for row in self._rows[event.id]]
-
-    def _market(self) -> str:
-        return sport_market(self._events[0].sport_key)
 
     async def tuned_hyperparameters(self) -> Tuning | None:
         """Hyperparameters chosen on the training matches whose close exists before the first
@@ -375,7 +376,7 @@ class ModelReplay:
             )
             for fold in tuning_folds(matches, self._params)
         ]
-        tuning = choose_hyperparameters(self._market(), folds, self._params)
+        tuning = choose_hyperparameters(self._market, folds, self._params)
         return replace(tuning, tuning_matches=len(matches))
 
     async def blocks(
@@ -387,7 +388,7 @@ class ModelReplay:
             training = [e for e in self._events if e.commence_time < block.at]
             rows = await self._training_rows(training)
             try:
-                predictor = fit_model(self._market(), rows, xgb)
+                predictor = fit_model(self._market, rows, xgb)
             except ValueError as exc:
                 raise ValueError(f"refit {block.index} at {block.at.isoformat()}: {exc}") from exc
             refit = Refit(

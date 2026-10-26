@@ -23,6 +23,7 @@ from odds_core.candidates import AgentCandidate, CandidateStatus
 from odds_core.models import Event, EventStatus
 from odds_core.paper_trade_models import PaperTrade, TradeResult
 from odds_core.quotes import quotes
+from odds_core.vocabulary import Market
 from sqlalchemy.ext.asyncio import AsyncSession
 from typer.testing import CliRunner
 
@@ -265,6 +266,7 @@ def mechanical(name: str, version: int = 1, start: str = "2026-01-01", **overrid
             "name": name,
             "description": "d",
             "kind": "mechanical",
+            "market": "1x2",
             "sport": "soccer_epl",
             "version": version,
             "issue": 1,
@@ -306,7 +308,11 @@ class TestPromoteLevel:
 class TestFamilyStarts:
     def starts(self, registry, decisions=None, draft=None, draft_start=None):
         return family_starts(
-            "exchange_gap", "soccer_epl", registry, decisions or {}, draft, draft_start
+            ("exchange_gap", "soccer_epl", Market.ONE_X_TWO),
+            registry,
+            decisions or {},
+            draft,
+            draft_start,
         )
 
     def test_a_version_counts_from_its_first_decision(self) -> None:
@@ -322,13 +328,14 @@ class TestFamilyStarts:
         registry = [mechanical("a"), mechanical("b", status="killed")]
         assert len(self.starts(registry, {("a", 1): at(1), ("b", 1): at(2)})) == 2
 
-    def test_other_rule_or_sport_or_unregistered_name_is_another_family(self) -> None:
+    def test_other_rule_sport_or_market_or_unregistered_name_is_another_family(self) -> None:
         registry = [
             mechanical("a"),
             mechanical("b", rule="polymarket_gap"),
-            mechanical("c", sport="baseball_mlb"),
+            mechanical("c", sport="baseball_mlb", market="h2h"),
+            mechanical("d", market="totals"),
         ]
-        decisions = {(name, 1): at(1) for name in ("a", "b", "c", "ghost")}
+        decisions = {(name, 1): at(1) for name in ("a", "b", "c", "d", "ghost")}
         assert self.starts(registry, decisions) == [at(1)]
 
     def test_draft_counts_once_from_the_given_time(self) -> None:

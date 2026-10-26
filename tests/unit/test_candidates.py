@@ -19,6 +19,7 @@ MECHANICAL: dict[str, object] = {
     "name": "back-longest",
     "description": "Back the longest retail price.",
     "kind": "mechanical",
+    "market": "1x2",
     "sport": "soccer_epl",
     "version": 1,
     "issue": 610,

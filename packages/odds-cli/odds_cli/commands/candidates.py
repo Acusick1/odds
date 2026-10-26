@@ -15,6 +15,7 @@ from odds_analytics.candidate_report import (
     Checkpoint,
     Verdict,
     candidate_report,
+    family,
     family_size_at,
     family_starts,
     load_decision_starts,
@@ -350,8 +351,7 @@ async def _family_size(
     session: AsyncSession, candidate: MechanicalCandidate, registry: list[Candidate], now: datetime
 ) -> int:
     starts = family_starts(
-        candidate.rule,
-        candidate.sport,
+        family(candidate),
         registry,
         await load_decision_starts(session),
         draft=(candidate.name, candidate.version),

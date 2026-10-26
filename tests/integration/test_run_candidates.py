@@ -52,7 +52,7 @@ class _Params(RuleParams):
 
 
 def _bet_home(state: MarketState, params: _Params) -> list[BetIntent]:
-    return [BetIntent(Outcome.HOME, "bet365", state.retail["bet365"][Outcome.HOME], 1.0)]
+    return [BetIntent(Outcome.HOME, "bet365", state.retail[None]["bet365"][Outcome.HOME], 1.0)]
 
 
 def _no_bet(state: MarketState, params: _Params) -> list[BetIntent]:
@@ -64,7 +64,7 @@ def _twice(state: MarketState, params: _Params) -> list[BetIntent]:
 
 
 def _bet_longest(state: MarketState, params: _Params) -> list[BetIntent]:
-    prices = state.retail["bet365"]
+    prices = state.retail[None]["bet365"]
     outcome = max(prices, key=lambda o: prices[o])
     return [BetIntent(outcome, "bet365", prices[outcome], 1.0)]
 
@@ -93,6 +93,7 @@ def write_candidate(directory: Path, name: str = "cand", **fields: Any) -> None:
         "name": name,
         "description": "d",
         "kind": "mechanical",
+        "market": "1x2",
         "sport": EPL,
         "version": 1,
         "issue": 1,
@@ -336,9 +337,10 @@ class TestDecisions:
 
         await run(pglite_async_session)
 
-        assert spy.await_args.args[2] == DUE - timedelta(minutes=60)
-        assert spy.await_args.args[3] == timedelta(minutes=120)
-        assert spy.await_args.args[4] == NOW
+        assert spy.await_args.args[2] == "1x2"
+        assert spy.await_args.args[3] == DUE - timedelta(minutes=60)
+        assert spy.await_args.args[4] == timedelta(minutes=120)
+        assert spy.await_args.args[5] == NOW
 
     async def test_failed_decision_is_not_recorded_and_others_run(
         self, pglite_async_session, registry
@@ -467,7 +469,7 @@ class TestCandidateSelection:
         write_candidate(registry, "killed", status="killed")
         write_candidate(registry, "promoted", status="promoted")
         write_candidate(registry, "future", start_date=(NOW + timedelta(days=1)).date().isoformat())
-        write_candidate(registry, "mlb", sport="baseball_mlb")
+        write_candidate(registry, "mlb", sport="baseball_mlb", market="h2h")
 
         runnable = await runnable_candidates(EPL, NOW)
 
@@ -523,6 +525,21 @@ class TestCandidateSelection:
         [call] = alert.await_args_list
         assert call.args[0] == "candidate_invalid:model"
         assert "needs a fitted model" in call.args[2]
+
+    async def test_a_candidate_of_a_market_with_lines_is_skipped_with_an_alert(
+        self, registry, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        alert = AsyncMock()
+        monkeypatch.setattr(run_candidates, "send_recorded_alert", alert)
+        write_candidate(registry, "good")
+        write_candidate(registry, "totals", market="totals")
+
+        runnable = await runnable_candidates(EPL, NOW)
+
+        assert [r.candidate.name for r in runnable] == ["good"]
+        [call] = alert.await_args_list
+        assert call.args[0] == "candidate_invalid:totals"
+        assert "has lines" in call.args[2]
 
     async def test_unreadable_registry_alerts_and_runs_nothing(
         self, registry, monkeypatch: pytest.MonkeyPatch

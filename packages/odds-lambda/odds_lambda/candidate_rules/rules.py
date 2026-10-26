@@ -16,6 +16,7 @@ from odds_core import as_of, bookmakers, exchange_price
 from odds_core.candidates import Candidate, CandidateStatus, MechanicalCandidate
 from odds_core.market_prices import Outcome, market_outcomes
 from odds_core.models import Event
+from odds_core.vocabulary import Market
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -28,9 +29,20 @@ from pydantic import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_lambda.betfair.constants import SPORT_CONFIG
 from odds_lambda.candidate_rules import inputs, market_state
-from odds_lambda.candidate_rules.market_state import MarketState, load_market_state, sport_market
+from odds_lambda.candidate_rules.market_state import Line, MarketState, load_market_state
+
+# What a bet is on: an outcome on a line, the line None in a market without lines.
+Selection = tuple[Outcome, Line]
+# The markets a candidate of each sport can decide.
+SPORT_MARKETS: dict[str, frozenset[Market]] = {
+    "soccer_epl": frozenset({Market.ONE_X_TWO, Market.TOTALS}),
+    "baseball_mlb": frozenset({Market.H2H, Market.TOTALS}),
+}
+# The markets a candidate's rule can decide, in a fixed order.
+RULE_MARKETS: tuple[Market, ...] = tuple(
+    sorted({market for markets in SPORT_MARKETS.values() for market in markets})
+)
 
 
 @dataclass(frozen=True)
@@ -39,6 +51,11 @@ class BetIntent:
     bookmaker: str
     price_decimal: float
     stake: float
+    line: Line = None
+
+    @property
+    def selection(self) -> Selection:
+        return (self.outcome, self.line)
 
 
 class RuleParams(BaseModel):
@@ -77,21 +94,30 @@ class ExchangeGapParams(RuleParams):
     stake: PositiveFloat = 1.0
 
 
+def longest_retail(
+    retail: Mapping[str, Mapping[Outcome, float]], outcome: Outcome
+) -> tuple[float, str] | None:
+    """The longest retail price of ``outcome`` and its book, ties to the first book by name."""
+    quotes = [
+        (price, book)
+        for book, prices in retail.items()
+        if (price := prices.get(outcome)) is not None
+    ]
+    return min(quotes, key=lambda q: (-q[0], q[1])) if quotes else None
+
+
 def exchange_gap(state: MarketState, params: ExchangeGapParams) -> list[BetIntent]:
-    if state.exchange is None:
-        return []
+    """On each line with an exchange price, back the longest UK retail price of each outcome on
+    that line whose EV against the exchange fair price exceeds the threshold."""
     bets: list[BetIntent] = []
-    for outcome in market_outcomes(state.market):
-        quotes = [
-            (price, book)
-            for book, prices in state.retail.items()
-            if (price := prices.get(outcome)) is not None
-        ]
-        if not quotes:
-            continue
-        price, book = min(quotes, key=lambda q: (-q[0], q[1]))
-        if state.exchange.fair[outcome] * price - 1 > params.threshold:
-            bets.append(BetIntent(outcome, book, price, params.stake))
+    for line, exchange in state.exchange.items():
+        for outcome in market_outcomes(state.market):
+            longest = longest_retail(state.retail.get(line, {}), outcome)
+            if longest is None:
+                continue
+            price, book = longest
+            if exchange.fair[outcome] * price - 1 > params.threshold:
+                bets.append(BetIntent(outcome, book, price, params.stake, line))
     return bets
 
 
@@ -102,9 +128,8 @@ RULE_INPUT_MODULES: tuple[ModuleType, ...] = (inputs, market_state, as_of, excha
 def rule_input_constants() -> list[tuple[str, str]]:
     """The values outside ``RULE_INPUT_MODULES``, in a fixed order and a stable text form, that
     pick a market state's prices: the UK retail roster, the alias maps the writers give each
-    retail source's price rows their book keys by, each sport's market key and that market's
-    outcomes."""
-    markets = sorted((sport, config.market_key) for sport, config in SPORT_CONFIG.items())
+    retail source's price rows their book keys by, and the outcomes of each market a rule
+    can decide."""
     return [
         ("UK_RETAIL_BOOKMAKERS", repr(sorted(bookmakers.UK_RETAIL_BOOKMAKERS))),
         *(
@@ -114,10 +139,9 @@ def rule_input_constants() -> list[tuple[str, str]]:
             )
             for source in inputs.RETAIL_SOURCES
         ),
-        ("SPORT_MARKETS", repr(markets)),
         *(
             (f"market_outcomes({market})", repr([o.value for o in market_outcomes(market)]))
-            for market in sorted({market for _, market in markets})
+            for market in RULE_MARKETS
         ),
     ]
 
@@ -129,7 +153,7 @@ class RuleSpec:
     params_model: type[RuleParams]
 
 
-# Predicted EV of each (outcome, UK retail book) quote in a state.
+# Predicted EV of each (outcome, UK retail book) quote in a state of a market without lines.
 EvPredictor = Callable[[MarketState], Mapping[tuple[Outcome, str], float]]
 
 
@@ -140,12 +164,13 @@ class ModelRuleSpec:
     Only the replay backtest fits one (``odds_analytics.candidate_model``) and binds it; the
     live runner and the parity check refuse a model rule. ``model_modules`` name the modules
     that build, fit and query the model. They are hashed by name because this package does not
-    depend on them.
+    depend on them. ``markets`` are the markets the model is defined for.
     """
 
     function: Callable[[MarketState, Any, EvPredictor], list[BetIntent]]
     params_model: type[RuleParams]
     model_modules: tuple[str, ...]
+    markets: frozenset[Market]
 
     def bind(self, predict: EvPredictor) -> RuleSpec:
         return RuleSpec(partial(self.function, predict=predict), self.params_model)
@@ -185,19 +210,15 @@ def retail_ev_model(
     state: MarketState, params: RetailEvModelParams, predict: EvPredictor
 ) -> list[BetIntent]:
     """Back the longest UK retail price of each outcome whose predicted EV exceeds the threshold."""
-    if state.exchange is None:
+    if None not in state.exchange:
         return []
     predicted = predict(state)
     bets: list[BetIntent] = []
     for outcome in market_outcomes(state.market):
-        quotes = [
-            (price, book)
-            for book, prices in state.retail.items()
-            if (price := prices.get(outcome)) is not None
-        ]
-        if not quotes:
+        longest = longest_retail(state.retail.get(None, {}), outcome)
+        if longest is None:
             continue
-        price, book = min(quotes, key=lambda q: (-q[0], q[1]))
+        price, book = longest
         ev = predicted.get((outcome, book))
         if ev is not None and ev > params.threshold:
             bets.append(BetIntent(outcome, book, price, params.stake))
@@ -220,6 +241,7 @@ RULES: dict[str, RuleSpec | ModelRuleSpec] = {
             "odds_analytics.training.tuner",
             "odds_analytics.training.config",
         ),
+        frozenset({Market.ONE_X_TWO, Market.H2H}),
     ),
 }
 
@@ -229,19 +251,21 @@ async def run_rule(
     spec: RuleSpec,
     params: RuleParams,
     event: Event,
+    market: Market,
     at: datetime,
     known_at: datetime | None,
     kickoff: datetime | None = None,
-    bet_outcomes: Collection[Outcome] = frozenset(),
+    bet_selections: Collection[Selection] = frozenset(),
 ) -> tuple[MarketState, list[BetIntent]]:
-    """The state of ``event`` at ``at`` as known at ``known_at``, and the bets the rule takes.
+    """The state of ``event``'s ``market`` at ``at`` as known at ``known_at``, and the bets the
+    rule takes.
 
     The live runner, the replay backtest and the parity check all decide through this.
     ``kickoff`` overrides the event's current kick-off with the one a recorded decision saw.
     The returned state's ``snapshot_id`` is the decision's input.
     """
-    state = await load_market_state(session, event, at, max_input_age(params), known_at)
-    return apply_rule(spec, params, state, kickoff, bet_outcomes)
+    state = await load_market_state(session, event, market, at, max_input_age(params), known_at)
+    return apply_rule(spec, params, state, kickoff, bet_selections)
 
 
 def apply_rule(
@@ -249,27 +273,28 @@ def apply_rule(
     params: RuleParams,
     state: MarketState,
     kickoff: datetime | None = None,
-    bet_outcomes: Collection[Outcome] = frozenset(),
+    bet_selections: Collection[Selection] = frozenset(),
 ) -> tuple[MarketState, list[BetIntent]]:
     """The rule's bets on ``state``, whose kick-off ``kickoff`` replaces when given.
 
-    A state without inputs gives no bets, whatever the rule. ``bet_outcomes`` are the
-    outcomes the candidate version bet on this match at an earlier decision time; each
-    outcome is bet at most once per match, so the rule's bets on them are dropped.
+    A state without inputs gives no bets, whatever the rule. ``bet_selections`` are the
+    selections the candidate version bet on this match at an earlier decision time; each
+    selection is bet at most once per match, so the rule's bets on them are dropped.
     """
     if kickoff is not None:
         state = replace(state, kickoff=kickoff)
     if not state.has_input:
         return state, []
-    return state, [b for b in spec.function(state, params) if b.outcome not in bet_outcomes]
+    return state, [b for b in spec.function(state, params) if b.selection not in bet_selections]
 
 
 def rule_sha256(rule_name: str) -> str:
     """Hash of the code and values a rule's bets depend on, in a fixed order.
 
     The source of the rule function, its params model, the params every rule takes,
-    ``apply_rule`` (which drops outcomes already bet) and the ``RULE_INPUT_MODULES``, then the
-    values of ``rule_input_constants``. A model rule adds the source of its ``model_modules``.
+    ``longest_retail``, ``BetIntent``, ``apply_rule`` (which drops selections already bet) and
+    the ``RULE_INPUT_MODULES``, then the values of ``rule_input_constants``. A model rule adds
+    the source of its ``model_modules``.
     ``odds_core.quotes``, which other readers share, is not hashed.
     """
     spec = RULES[rule_name]
@@ -278,6 +303,8 @@ def rule_sha256(rule_name: str) -> str:
         inspect.getsource(spec.function),
         inspect.getsource(spec.params_model),
         inspect.getsource(RuleParams),
+        inspect.getsource(longest_retail),
+        inspect.getsource(BetIntent),
         inspect.getsource(apply_rule),
         *(inspect.getsource(module) for module in RULE_INPUT_MODULES),
         *(f"{name}={value}" for name, value in rule_input_constants()),
@@ -303,10 +330,17 @@ def resolve_rule(candidate: MechanicalCandidate) -> tuple[RuleSpec | ModelRuleSp
             f"candidate {candidate.name!r}: unknown rule {candidate.rule!r}, "
             f"known rules {sorted(RULES)}"
         )
-    try:
-        sport_market(candidate.sport)
-    except ValueError as exc:
-        raise ValueError(f"candidate {candidate.name!r}: {exc}") from exc
+    sport_markets = SPORT_MARKETS.get(candidate.sport, frozenset())
+    if candidate.market not in sport_markets:
+        raise ValueError(
+            f"candidate {candidate.name!r}: no rule decides market {candidate.market.value!r} "
+            f"for sport {candidate.sport!r}, its markets {sorted(m.value for m in sport_markets)}"
+        )
+    if isinstance(spec, ModelRuleSpec) and candidate.market not in spec.markets:
+        raise ValueError(
+            f"candidate {candidate.name!r}: rule {candidate.rule!r} has no model for market "
+            f"{candidate.market.value!r}, model markets {sorted(m.value for m in spec.markets)}"
+        )
     try:
         params = spec.params_model.model_validate(candidate.params)
     except ValidationError as exc:

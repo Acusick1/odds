@@ -62,9 +62,11 @@ def event_close(
     kickoff: datetime,
     market: str,
     max_exchange_overround: float = MAX_EXCHANGE_OVERROUND,
+    line: float | None = None,
 ) -> ExchangePrice | None:
-    """The devigged Betfair Exchange close of an event from its quotes (``pick_close``)."""
-    prices = (exchange_price(group, market) for group in by_snapshot(quoted))
+    """The devigged Betfair Exchange close of an event on ``line`` from its quotes
+    (``pick_close``); a market without lines has the line None."""
+    prices = (exchange_price(group, market, line) for group in by_snapshot(quoted))
     return pick_close(
         (p for p in prices if p is not None), kickoff, max_exchange_overround=max_exchange_overround
     )
