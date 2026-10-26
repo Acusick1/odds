@@ -25,7 +25,6 @@ from odds_core.config import Settings, get_settings
 from odds_core.database import async_session_maker
 from odds_core.market_prices import THREE_WAY_MARKET
 from odds_core.models import AlertHistory, Event, EventStatus, OddsSnapshot
-from odds_core.snapshot_sources import SnapshotSource
 from odds_core.vocabulary import Source
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -325,12 +324,17 @@ class HealthMonitor:
             BETFAIR_CLOSE_JOB, self.settings.data_collection.sports
         ):
             return []
-        if (
-            await latest_snapshot_time(
-                self.session, BETFAIR_CLOSE_SPORT, SnapshotSource.BETFAIR_API
+        betfair_history = (
+            await self.session.execute(
+                select(OddsSnapshot.id)
+                .join(Event, Event.id == OddsSnapshot.event_id)  # type: ignore[arg-type]
+                .where(
+                    Event.sport_key == BETFAIR_CLOSE_SPORT, OddsSnapshot.source == Source.BETFAIR
+                )
+                .limit(1)
             )
-            is None
-        ):
+        ).first()
+        if betfair_history is None:
             logger.info("betfair_close_no_history", sport=BETFAIR_CLOSE_SPORT)
             return []
         lookback = timedelta(hours=self.settings.alerts.betfair_close_lookback_hours)
@@ -370,7 +374,7 @@ class HealthMonitor:
             ).first()
             if betfair_before is None:
                 continue
-            closes = await live_close_quotes(self.session, event, THREE_WAY_MARKET)
+            closes = await live_close_quotes(self.session, [event.id], THREE_WAY_MARKET)
             if event_close(closes, kickoff, THREE_WAY_MARKET) is not None:
                 continue
             missing.append(

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from datetime import datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -70,18 +70,19 @@ def event_close(
     )
 
 
-async def live_close_quotes(session: AsyncSession, event: Event, market: str) -> list[Quote]:
-    """The Betfair Exchange backs of ``event`` from live Betfair snapshots within
-    ``LIVE_CLOSE_WINDOW`` before its kick-off."""
+async def live_close_quotes(
+    session: AsyncSession, event_ids: Collection[str], market: str
+) -> list[Quote]:
+    """The Betfair Exchange backs of the events' live Betfair snapshots within
+    ``LIVE_CLOSE_WINDOW`` before each one's kick-off, in one query."""
     return await quotes(
         session,
-        [event.id],
+        event_ids,
         Market(market),
         sources=[Source.BETFAIR],
         bookmakers=[EXCHANGE_BOOKMAKER],
         sides=[Side.BACK],
-        since=event.commence_time - LIVE_CLOSE_WINDOW,
-        until=event.commence_time,
+        before_kickoff=LIVE_CLOSE_WINDOW,
     )
 
 
@@ -93,7 +94,7 @@ async def close_quotes(
     by_event: dict[str, list[Quote]] = {e.id: [] for e in events}
     if not events:
         return by_event
-    for quote in await quotes(
+    fduk = await quotes(
         session,
         list(by_event),
         Market(market),
@@ -101,8 +102,7 @@ async def close_quotes(
         time_bases=[TimeBasis.CLOSE],
         bookmakers=[EXCHANGE_BOOKMAKER],
         sides=[Side.BACK],
-    ):
+    )
+    for quote in fduk + await live_close_quotes(session, list(by_event), market):
         by_event[quote.event_id].append(quote)
-    for event in events:
-        by_event[event.id] += await live_close_quotes(session, event, market)
     return by_event

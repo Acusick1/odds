@@ -59,7 +59,7 @@ def _rows(kickoffs: list[datetime], rows_per_event: int = 2) -> pd.DataFrame:
             "commence_time": pd.to_datetime(times),
             "horizon": "1-3d",
             "retail_source": "fduk_opening",
-            "close_source": "fduk_closing",
+            "close_source": "football_data_uk",
             "event_type": "fduk_only",
             "outcome": np.resize(["home", "draw", "away"], n),
             "y": 0.0,

@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from collections.abc import Collection
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import Float, cast, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from odds_core.models import OddsSnapshot, Price
+from odds_core.models import Event, OddsSnapshot, Price
 from odds_core.vocabulary import Market, MarketStatus, PriceOutcome, Side, Source, TimeBasis
 
 
@@ -78,12 +78,15 @@ async def quotes(
     until: datetime | None = None,
     known_at: datetime | None = None,
     snapshot_ids: Collection[int] | None = None,
+    before_kickoff: timedelta | None = None,
 ) -> list[Quote]:
     """The quotes of ``event_ids`` in ``market``, in snapshot time, snapshot id and price id order.
 
     Every other argument narrows the result when given: snapshots of those ``sources`` and
     ``time_bases``, stamped from ``since`` to ``until`` inclusive, stored (``created_at``) by
-    ``known_at``, or among ``snapshot_ids``; prices of those ``bookmakers`` and ``sides``.
+    ``known_at``, or among ``snapshot_ids``; prices of those ``bookmakers`` and ``sides``. With
+    ``before_kickoff``, each snapshot is stamped within that long before its own event's
+    current kick-off, kick-off included.
     """
     conditions: list[Any] = [
         col(OddsSnapshot.event_id).in_(list(event_ids)),
@@ -105,10 +108,17 @@ async def quotes(
         conditions.append(col(OddsSnapshot.created_at) <= known_at)
     if snapshot_ids is not None:
         conditions.append(col(OddsSnapshot.id).in_(list(snapshot_ids)))
+    query = select(*QUOTE_COLUMNS).join(Price, col(Price.snapshot_id) == col(OddsSnapshot.id))
+    if before_kickoff is not None:
+        query = query.join(Event, col(Event.id) == col(OddsSnapshot.event_id))
+        conditions.append(
+            col(OddsSnapshot.snapshot_time).between(
+                col(Event.commence_time) - before_kickoff, col(Event.commence_time)
+            )
+        )
     rows = await session.execute(
-        select(*QUOTE_COLUMNS)
-        .join(Price, col(Price.snapshot_id) == col(OddsSnapshot.id))
-        .where(*conditions)
-        .order_by(col(OddsSnapshot.snapshot_time), col(OddsSnapshot.id), col(Price.id))
+        query.where(*conditions).order_by(
+            col(OddsSnapshot.snapshot_time), col(OddsSnapshot.id), col(Price.id)
+        )
     )
     return [Quote(**row._mapping) for row in rows.all()]

@@ -592,6 +592,33 @@ class TestRuleSha256:
         monkeypatch.setattr("odds_core.bookmakers.UK_RETAIL_BOOKMAKERS", frozenset({"bet365"}))
         assert rule_sha256("exchange_gap") != before
 
+    @pytest.mark.parametrize("source", [Source.ODDS_API, Source.ODDSPORTAL])
+    def test_covers_the_write_time_alias_map_of_each_retail_source(
+        self, monkeypatch: pytest.MonkeyPatch, source: Source
+    ) -> None:
+        from odds_core import bookmakers
+
+        before = rule_sha256("exchange_gap")
+        aliases = dict(bookmakers.BOOKMAKER_ALIASES_BY_SOURCE)
+        aliases[source] = {**aliases[source], "bet365_uk": "bet365"}
+        monkeypatch.setattr(bookmakers, "BOOKMAKER_ALIASES_BY_SOURCE", aliases)
+        assert rule_sha256("exchange_gap") != before
+
+    def test_covers_each_sports_market_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from odds_lambda.betfair import constants
+
+        before = rule_sha256("exchange_gap")
+        epl = constants.SPORT_CONFIG["soccer_epl"]
+        monkeypatch.setitem(constants.SPORT_CONFIG, "soccer_epl", replace(epl, market_key="h2h"))
+        assert rule_sha256("exchange_gap") != before
+
+    def test_covers_the_outcomes_of_each_market(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from odds_lambda.candidate_rules import rules
+
+        before = rule_sha256("exchange_gap")
+        monkeypatch.setattr(rules, "market_outcomes", lambda market: (HOME, AWAY))
+        assert rule_sha256("exchange_gap") != before
+
     @pytest.mark.parametrize(
         "target",
         [

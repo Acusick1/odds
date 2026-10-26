@@ -35,6 +35,7 @@ from odds_lambda.candidate_rules import (
 )
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 BetKey = tuple[str, str, float, float]
 
@@ -108,9 +109,9 @@ async def _recorded_inputs(
     found: set[int] = set()
     if ids:
         rows = await session.execute(
-            select(OddsSnapshot.id).where(OddsSnapshot.id.in_(ids))  # type: ignore[union-attr]
+            select(col(OddsSnapshot.id)).where(col(OddsSnapshot.id).in_(ids))
         )
-        found = set(rows.scalars().all())  # type: ignore[arg-type]
+        found = {snapshot_id for snapshot_id in rows.scalars() if snapshot_id is not None}
     missing = tuple(sorted(set(ids) - found))
     state = await load_market_state(
         session, event, decision.decision_time, max_input_age(params), snapshot_ids=ids

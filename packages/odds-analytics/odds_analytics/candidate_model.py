@@ -335,17 +335,17 @@ class ModelReplay:
 
     async def _training_rows(self, events: Sequence[Event]) -> list[RetailEvRow]:
         market = self._market()
-        for event in events:
-            if event.id not in self._rows:
-                retail = await rule_quotes(
-                    self._session,
-                    event.id,
-                    market,
-                    since=event.commence_time - DECISION_WINDOW,
-                    until=event.commence_time - DECISION_CUTOFF,
-                )
-                close = (await close_quotes(self._session, [event], market))[event.id]
-                self._rows[event.id] = training_rows(event, retail + close)
+        new = [e for e in {e.id: e for e in events}.values() if e.id not in self._rows]
+        closes = await close_quotes(self._session, new, market)
+        for event in new:
+            retail = await rule_quotes(
+                self._session,
+                event.id,
+                market,
+                since=event.commence_time - DECISION_WINDOW,
+                until=event.commence_time - DECISION_CUTOFF,
+            )
+            self._rows[event.id] = training_rows(event, retail + closes[event.id])
         return [row for event in events for row in self._rows[event.id]]
 
     def _market(self) -> str:

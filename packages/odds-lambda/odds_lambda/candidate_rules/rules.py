@@ -28,6 +28,7 @@ from pydantic import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from odds_lambda.betfair.constants import SPORT_CONFIG
 from odds_lambda.candidate_rules import inputs, market_state
 from odds_lambda.candidate_rules.market_state import MarketState, load_market_state, sport_market
 
@@ -100,8 +101,25 @@ RULE_INPUT_MODULES: tuple[ModuleType, ...] = (inputs, market_state, as_of, excha
 
 def rule_input_constants() -> list[tuple[str, str]]:
     """The values outside ``RULE_INPUT_MODULES``, in a fixed order and a stable text form, that
-    pick a market state's prices."""
-    return [("UK_RETAIL_BOOKMAKERS", repr(sorted(bookmakers.UK_RETAIL_BOOKMAKERS)))]
+    pick a market state's prices: the UK retail roster, the alias maps the writers give each
+    retail source's price rows their book keys by, each sport's market key and that market's
+    outcomes."""
+    markets = sorted((sport, config.market_key) for sport, config in SPORT_CONFIG.items())
+    return [
+        ("UK_RETAIL_BOOKMAKERS", repr(sorted(bookmakers.UK_RETAIL_BOOKMAKERS))),
+        *(
+            (
+                f"BOOKMAKER_ALIASES_BY_SOURCE[{source.value}]",
+                repr(sorted(bookmakers.BOOKMAKER_ALIASES_BY_SOURCE[source].items())),
+            )
+            for source in inputs.RETAIL_SOURCES
+        ),
+        ("SPORT_MARKETS", repr(markets)),
+        *(
+            (f"market_outcomes({market})", repr([o.value for o in market_outcomes(market)]))
+            for market in sorted({market for _, market in markets})
+        ),
+    ]
 
 
 @dataclass(frozen=True)
