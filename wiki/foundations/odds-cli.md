@@ -40,6 +40,7 @@ status: stable
 | `odds status` | [odds status](../operations/health-monitor.md#odds-status), [Odds API quota](../collection/odds-api-quota.md) |
 | `validate`, `quality` | [Coverage and completeness checks](../storage/coverage-checks.md) |
 | `copy` | [Copy production data locally](howto-copy-production-data.md) |
+| `data` | [Shape backfill and verify](../storage/shape-backfill.md), [Backfill and verify the new shape](../storage/howto-backfill-the-new-shape.md) (`verify-shape` exits 1 on any mismatch, `backfill-shape` exits 2, before writing, when a candidate decision's input would be split or deleted or a twin merge would delete decisions or trades without `--allow-merge-drops`) |
 | `scheduler` | [Local scheduler](../scheduling/local-scheduler.md) |
 | `polymarket` | [Polymarket pipeline and tables](../collection/polymarket.md) (`odds_cli.commands.polymarket.link` matches an event from its ticker), [Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md#backfill-command) (`odds_cli.commands.polymarket.backfill_odds` attaches matches to events before storing history, and reports the matches that failed) |
 | `injuries`, `nba-stats`, `pbpstats` | [NBA feeds](../collection/nba-injuries-and-stats.md) |

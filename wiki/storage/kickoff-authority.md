@@ -67,6 +67,10 @@ Nothing happens when no start is given or it equals the stored kick-off. Otherwi
 - `odds_lambda.storage.game_pk_backfill.apply_assignment` ([assigning gamePks](event-merge.md#assigning-gamepks)), with the MLB Stats API.
 - `odds_lambda.odds_api_events.resolve_odds_api_event` ([events](events.md#writing-events)), for Odds API ingestion, event sync, `odds discover games` and the historical backfill (the API's reissued id replaces the recorded `odds_api` external id), through `odds_lambda.storage.event_resolver.resolve_event`: the Odds API with the listed start.
 
+## After a twin merge
+
+`odds_lambda.storage.event_kickoff.settle_merged_kickoff` sets the kick-off of an event that twins were merged into, for the [shape backfill](shape-backfill.md#steps). It takes, per source that observed one of the twins, that twin's stored kick-off, and follows the highest-ranked of those sources in the sport's order. The kick-offs are stored ones rather than listings, so neither the after-kick-off rule nor the outranking rule above applies; a move does what [A move](#a-move) describes. With no observing source in the order, the event keeps its own kick-off.
+
 ## Related
 
 - [Event resolver](event-resolver.md)

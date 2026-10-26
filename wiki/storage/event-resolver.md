@@ -54,6 +54,8 @@ A historical game (`odds_lambda.storage.event_resolver.MatchWindow.HISTORICAL`) 
 
 `odds_lambda.storage.event_resolver.attach_event(session, game)` is for a source that creates no events (Polymarket, through `odds_lambda.polymarket_odds.listed_game`). It takes the fixture lock and looks the game up as `odds_lambda.storage.event_resolver.resolve_event` does (steps 1 to 4), then records the source's id on the event it found. It returns `None`, creating nothing, when no event matches and when the id is [refused](#refused-ids): the caller writes nothing for that game. A refusal is logged once per event and description, not on every run. It does not offer the listed start to `odds_lambda.storage.event_kickoff.move_kickoff`, since such a source is not a schedule authority. `odds_lambda.storage.event_resolver.attach_events` attaches a batch in lock-key order and answers in input order, as `odds_lambda.storage.event_resolver.resolve_events` does. A game needs `legacy_id` (`odds_lambda.storage.event_resolver.ListedGame`) only for `odds_lambda.storage.event_resolver.resolve_event` to create an event; without one that raises `ValueError`. Both flush and never commit, and the [lock order](#locks-and-transactions) applies.
 
+`odds_lambda.storage.event_resolver.find_event(session, game)` is the same lookup without the lock and without recording anything, for a read-only count of what attaching would do (the [shape backfill](shape-backfill.md#steps) preflight).
+
 ## MLB without the schedule
 
 `odds_lambda.storage.event_resolver.resolve_unscheduled_mlb_event` is the lookup for an MLB game listed while the MLB schedule is unavailable. Under the same fixture lock it matches only the one event of the pair within ±2 h, and only for a row with no doubleheader game number, since without the schedule either game could be another. It records the source's id on that event, never creates one and moves no kick-off; with no match it returns `None`.
@@ -66,9 +68,11 @@ A historical game (`odds_lambda.storage.event_resolver.MatchWindow.HISTORICAL`) 
 
 The fixture lock is released only when the caller's transaction commits or rolls back. Two transactions that each hold one fixture lock and wait for the other's would deadlock, so within one transaction `odds_lambda.storage.event_resolver.resolve_event` takes fixture locks in ascending key order: a new lock below one the transaction already holds raises `odds_lambda.storage.event_resolver.LockOrderError` before it is requested. Re-taking a held lock is allowed. A caller resolving several fixtures in one transaction passes them to `odds_lambda.storage.event_resolver.resolve_events`, which resolves them in key order and returns the results in input order. A caller that commits after each fixture can use `odds_lambda.storage.event_resolver.resolve_event` in any order.
 
+Code that changes a stored event's identity outside the resolver takes the same lock with `odds_lambda.storage.event_resolver.lock_fixture`, under the same order rule, and records an id the event's stored data holds with `odds_lambda.storage.event_resolver.record_external_id`, which applies the rules of [Refused ids](#refused-ids) and logs each refusal once per event and id. The [shape backfill](shape-backfill.md#steps) uses both.
+
 ## Refused ids
 
-An id is recorded only when neither the event nor the id is already taken. The resolver refuses it, logging `external_id_refused` and adding a `data_quality_logs` row through `odds_lambda.storage.data_quality.record_issue`, when:
+An id is recorded only when neither the event nor the id is already taken. `odds_lambda.storage.event_resolver.check_external_id` decides, read-only, what recording an id would do (`odds_lambda.storage.event_resolver.IdDecision`), and the resolver acts on it. It refuses the id, logging `external_id_refused` and adding a `data_quality_logs` row through `odds_lambda.storage.data_quality.record_issue`, when:
 
 - the event already holds a different id from that source (except the Odds API, below), or
 - another event holds the id.

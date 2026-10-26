@@ -10,7 +10,8 @@ from odds_core.event_source import EventSource, canonical_event_id
 from odds_core.models import Event, EventExternalId, HealthCheckAcknowledgement, OddsSnapshot
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from odds_core.time import ensure_utc
-from sqlalchemy import and_, delete, select, text
+from odds_core.vocabulary import HealthCheck, Source
+from sqlalchemy import and_, delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.storage.data_quality import record_issue
@@ -261,6 +262,70 @@ class EventMerger:
             rows_moved=rows_moved,
         )
         return report
+
+    async def merge_drops(self, keep: Event, duplicates: Sequence[Event]) -> dict[str, int]:
+        """The rows ``merge(keep, duplicates)`` would delete, per table, leaving out tables with
+        none: the duplicates' clashing candidate decisions and their paper trades, external ids
+        and acknowledgements (``_drop_clashing_decisions``, ``_drop_clashing_identity_rows``),
+        counted as each duplicate's rows join the kept event. Read-only."""
+        versions = await self._decision_versions(keep)
+        sources = await self._id_sources(keep)
+        checks = await self._ack_checks(keep)
+        drops: dict[str, int] = {}
+
+        def add(table: str, count: int) -> None:
+            if count:
+                drops[table] = drops.get(table, 0) + count
+
+        for duplicate in duplicates:
+            decisions = (
+                await self.session.execute(
+                    select(
+                        CandidateDecision.id,
+                        CandidateDecision.candidate_name,
+                        CandidateDecision.candidate_version,
+                    ).where(CandidateDecision.event_id == duplicate.id)
+                )
+            ).all()
+            clashing = [
+                d.id for d in decisions if (d.candidate_name, d.candidate_version) in versions
+            ]
+            add("candidate_decisions", len(clashing))
+            if clashing:
+                trades = await self.session.execute(
+                    select(func.count()).where(PaperTrade.decision_id.in_(clashing))  # type: ignore[union-attr]
+                )
+                add("paper_trades", trades.scalar_one())
+            versions |= {(d.candidate_name, d.candidate_version) for d in decisions}
+            duplicate_sources = await self._id_sources(duplicate)
+            add("event_external_ids", len(duplicate_sources & sources))
+            sources |= duplicate_sources
+            duplicate_checks = await self._ack_checks(duplicate)
+            add("health_check_acknowledgements", len(duplicate_checks & checks))
+            checks |= duplicate_checks
+        return drops
+
+    async def _decision_versions(self, event: Event) -> set[tuple[str, int]]:
+        rows = await self.session.execute(
+            select(CandidateDecision.candidate_name, CandidateDecision.candidate_version).where(
+                CandidateDecision.event_id == event.id
+            )
+        )
+        return {(name, version) for name, version in rows.all()}
+
+    async def _id_sources(self, event: Event) -> set[Source]:
+        rows = await self.session.execute(
+            select(EventExternalId.source).where(EventExternalId.event_id == event.surrogate_id)
+        )
+        return set(rows.scalars())
+
+    async def _ack_checks(self, event: Event) -> set[HealthCheck]:
+        rows = await self.session.execute(
+            select(HealthCheckAcknowledgement.check_name).where(
+                HealthCheckAcknowledgement.event_id == event.surrogate_id
+            )
+        )
+        return set(rows.scalars())
 
     async def _rebase_snapshot_timing(self, duplicate: Event, keep: Event) -> None:
         """Recompute moved snapshots' hours and tier against the kept event's kick-off."""

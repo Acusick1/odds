@@ -16,7 +16,7 @@ status: stable
 
 # Prices and snapshot payloads tables
 
-`prices` holds one row per price in a snapshot, and `snapshot_payloads` holds what a source returned. They sit beside the `odds` table and `odds_snapshots.raw_data` ([Odds snapshot and odds tables](odds-tables.md)), which every reader uses. The OddsPortal live and Betfair jobs and the historical OddsPortal and football-data.co.uk ingest scripts fill them alongside those ([Writing price rows](#writing-price-rows)); the other writers leave them empty. The snapshot columns they rely on (`source`, `market`, `time_basis` and the market metadata) are on [odds_snapshots](odds-tables.md#odds_snapshots).
+`prices` holds one row per price in a snapshot, and `snapshot_payloads` holds what a source returned. They sit beside the `odds` table and `odds_snapshots.raw_data` ([Odds snapshot and odds tables](odds-tables.md)), which every reader uses. Every snapshot writer fills them alongside those ([Writing price rows](#writing-price-rows)), and `odds data backfill-shape` fills them for the snapshots stored before the writers did ([Shape backfill and verify](shape-backfill.md)). The snapshot columns they rely on (`source`, `market`, `time_basis` and the market metadata) are on [odds_snapshots](odds-tables.md#odds_snapshots).
 
 ## prices
 
@@ -96,7 +96,7 @@ A single-market envelope (OddsPortal, Betfair, FDUK, Polymarket) is one snapshot
 |---|---|---|
 | `inserted` | no snapshot holds the key | the snapshot and its prices are added |
 | `identical` | the stored snapshot has the same time basis, market metadata and set of prices | nothing is written |
-| `conflicting` | anything differs | nothing is written; `odds_lambda.storage.data_quality.record_issue` logs `snapshot_key_conflict` and adds a `data_quality_logs` row naming the kept snapshot |
+| `conflicting` | anything differs | nothing is written; `odds_lambda.storage.data_quality.record_issue` logs `snapshot_key_conflict` (`odds_lambda.price_rows.RowIssueType.SNAPSHOT_KEY_CONFLICT`) and adds a `data_quality_logs` row naming the kept snapshot |
 
 Prices compare by value (`odds_lambda.storage.snapshot_store.PriceRow`, `odds_lambda.storage.snapshot_store.SnapshotMarketState`), so a float price equal to a stored decimal is the same price. The insert runs in a savepoint: when a concurrent writer stores the key first, the unique violation rolls back only this insert and the snapshot is compared with the stored one. It flushes and never commits.
 
