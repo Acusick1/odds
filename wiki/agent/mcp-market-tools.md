@@ -9,6 +9,9 @@ sources:
   - odds_mcp.server.find_retail_edges
   - odds_mcp.prices.BOOK_SIDES
   - odds_mcp.prices.BookPrice
+  - odds_mcp.prices.BOOK_PRICE_CONDITION
+  - odds_mcp.prices.is_book_price
+  - odds_mcp.prices.SharpLines
   - odds_mcp.prices.book_quotes
   - odds_mcp.prices.latest_priced_snapshot
   - odds_mcp.prices.latest_book_prices
@@ -29,7 +32,7 @@ The tools read prices from the `prices` table through `odds_core.quotes.quotes` 
 
 `SCHEDULED` events with `commence_time` between now and now plus `days_ahead` (clamped to 1-30), ordered by kickoff, then event ID, via `odds_lambda.storage.readers.OddsReader.get_events_by_date_range`. Each item: `id`, `sport_key`, `sport_title`, `home_team`, `away_team`, `commence_time`, status, scores and `completed_at`. Live events are excluded, so a fixture disappears once the update-status job marks it `LIVE`; that job must be running for the status to change ([status lifecycle](../collection/event-status-lifecycle.md)).
 
-## `get_current_odds(event_id, market, include_raw_data=False, lookback_hours=2.0)`
+## `get_current_odds(event_id, market, lookback_hours=2.0)`
 
 Resolves the latest price per `(bookmaker_key, outcome_name, point)`:
 
@@ -40,7 +43,7 @@ Response: `event` plus `snapshot` with `anchor_snapshot_id`, `snapshot_time` (ne
 
 ## `get_odds_history(event_id, market)`
 
-Every snapshot of `market` that holds a book price, in time order, each with its prices instead of raw JSON, plus `snapshot_count`. A snapshot carries `id`, `event_id`, `snapshot_time`, `created_at`, `bookmaker_count`, `source`, `time_basis`, `hours_until_commence` and `odds[]`. There is no pagination or limit, so a long-lived event returns a large payload ([odds reader](../storage/odds-reader.md)).
+Every snapshot of `market` that holds a book price, in time order, each with its prices instead of raw JSON, plus `snapshot_count`. A snapshot carries `id`, `event_id`, `snapshot_time`, `created_at`, `bookmaker_count`, `source`, `time_basis`, `hours_until_commence` and `odds[]`. There is no pagination or limit, so a long-lived event returns a large payload; it is one `odds_core.quotes.quotes` read of the event's market ([reading quotes](../storage/price-tables.md#reading-quotes)).
 
 ## Market vocabulary
 
@@ -55,7 +58,7 @@ Inputs: `event_id`, `market` (`h2h`, `1x2`, `totals`, `spreads`), `sharp_bookmak
 Computation:
 
 1. Anchor on the event's latest snapshot of `market` holding a book price; both windows end at that snapshot's time.
-2. Sharp prices: `odds_mcp.prices.resolve_sharp_prices`, newest first, per outcome, taking the first sharp book in priority order that has a price.
+2. Sharp prices: `odds_mcp.prices.resolve_sharp_prices`, newest first, per `(outcome, line)`, taking the first sharp book in priority order that has a price.
 3. Retail prices: `odds_mcp.prices.latest_book_prices`, the newest price per `(book, outcome, point)`. Any book outside the sharp list is retail.
 4. Per `(outcome, point)` bucket: `divergence = retail_implied_prob - sharp_implied_prob` per book, with implied probabilities taken as `1 / price_decimal`; `median_divergence` and `dispersion_stddev` (population standard deviation, needs 2+ books); `z_score = (divergence - median) / stddev`, set only when the bucket has 3+ books and a nonzero stddev; `best_retail` (lowest implied probability) and `worst_retail`.
 5. `market_hold` per book, only for `h2h` and `1x2`, from `odds_analytics.utils.per_book_market_holds` over decimal prices, which drops books missing any required outcome.
@@ -64,7 +67,7 @@ Output: `event`, `snapshot_time` (newest contributing retail snapshot), `sharp_b
 
 Divergence is vig-inclusive on both sides, with no devigging ([devigging](../foundations/devigging.md)). A retail book with a larger margin looks worse on every outcome; use `market_hold` to separate margin from divergence. The same holds for the `sharp_prob` and `retail_sharp_diff` model features, and the three code copies of the sharp-price logic differ ([code copies](../modelling/sharp-benchmark.md#code-copies)).
 
-Sharp prices are keyed by outcome only, while retail rows are bucketed by `(outcome, point)`, so on `totals` and `spreads` one sharp line is compared with retail prices at other lines (#439).
+Sharp prices are keyed by `(outcome, line)` as retail rows are bucketed by `(outcome, point)`, so on `totals` and `spreads` each retail row is compared with the sharp price at its own line, and a line with no sharp price has a null divergence. `odds_mcp.server.save_match_brief` stamps one sharp price per outcome, from the outcome's lowest line (`odds_mcp.prices.SharpLines.by_outcome`).
 
 Under the default hybrid sharp list, outcomes resolve independently, so one outcome's sharp price can be Pinnacle and another's Betfair; read `sharp_snapshot_time` and `sharp_age_seconds` per row.
 
@@ -73,4 +76,4 @@ Under the default hybrid sharp list, outcomes resolve independently, so one outc
 ## Related
 
 - [Sport context tools](mcp-sport-context-tools.md), [Match briefs](match-briefs.md), [Paper trading](paper-trading.md)
-- [Odds reader](../storage/odds-reader.md)
+- [Prices tables](../storage/price-tables.md)

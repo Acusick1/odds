@@ -16,7 +16,14 @@ from odds_lambda import collection_calendar
 from odds_lambda.jobs import fetch_betfair_exchange, fetch_oddsportal
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.test_helpers import TWIN_EVENT_ID, TWIN_KICKOFF, make_epl_event
+from tests.test_helpers import (
+    TWIN_EVENT_ID,
+    TWIN_KICKOFF,
+    make_epl_event,
+    make_tagged_snapshot,
+    store_tagged,
+    three_way_bookmaker,
+)
 
 
 @pytest.fixture
@@ -320,3 +327,42 @@ async def epl_snapshot(pglite_async_session, stored_epl_event) -> OddsSnapshot:
     pglite_async_session.add(snapshot)
     await pglite_async_session.flush()
     return snapshot
+
+
+@pytest.fixture
+async def mixed_source_event(pglite_async_session):
+    """An event with an Odds API snapshot and a later Polymarket snapshot carrying mid, ask and bid."""
+    session = pglite_async_session
+    kickoff = datetime(2026, 4, 18, 15, 0, tzinfo=UTC)
+    event = make_epl_event("epl_test_mixed", kickoff)
+    session.add(event)
+    api_time = kickoff - timedelta(hours=3)
+    await store_tagged(
+        session,
+        make_tagged_snapshot(
+            event.id,
+            api_time,
+            [
+                three_way_bookmaker("bet365", (2.0, 3.5, 4.0)),
+                three_way_bookmaker("pinnacle", (2.1, 3.4, 3.9)),
+            ],
+            None,
+        ),
+    )
+    pm_time = kickoff - timedelta(hours=2)
+    probabilities = {
+        "yes_probabilities": {"home": 0.5, "draw": 0.25, "away": 0.25},
+        "best_ask": {"home": 0.52, "draw": 0.26, "away": 0.26},
+        "best_bid": {"home": 0.48, "draw": 0.24, "away": 0.24},
+    }
+    await store_tagged(
+        session,
+        make_tagged_snapshot(
+            event.id,
+            pm_time,
+            [three_way_bookmaker("polymarket", (2.0, 4.0, 4.0), polymarket_meta=probabilities)],
+            "polymarket",
+        ),
+    )
+    await session.commit()
+    return event

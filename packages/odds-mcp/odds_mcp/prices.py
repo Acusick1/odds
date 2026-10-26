@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from odds_core.match_brief_models import SharpPriceMeta, SharpPriceResult
+from odds_core.match_brief_models import SharpPriceMap, SharpPriceMeta
 from odds_core.models import Event, OddsSnapshot, Price
 from odds_core.odds_math import decimal_to_american, decimal_to_implied_probability
 from odds_core.quotes import Quote, quotes
 from odds_core.vocabulary import Market, PriceOutcome, Side, Source
-from sqlalchemy import exists, select
+from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 OUTCOME_LABELS: dict[PriceOutcome, str] = {
@@ -21,9 +22,37 @@ OUTCOME_LABELS: dict[PriceOutcome, str] = {
 }
 
 BookKey = tuple[str, str, float | None]
+SharpKey = tuple[str, float | None]
 
 # A book's price is its back price. Polymarket's back and lay are its ask and bid, so it is its mid.
 BOOK_SIDES: tuple[Side, ...] = (Side.BACK, Side.MID)
+
+
+def is_book_price(source: Source, side: Side) -> bool:
+    """Whether a price row of a snapshot from ``source`` is the book's price."""
+    return (source is Source.POLYMARKET) == (side is Side.MID) and side in BOOK_SIDES
+
+
+# The same rule in SQL, over a snapshot and one of its price rows.
+BOOK_PRICE_CONDITION = or_(
+    and_(OddsSnapshot.source == Source.POLYMARKET, Price.side == Side.MID),  # type: ignore[arg-type]
+    and_(OddsSnapshot.source != Source.POLYMARKET, Price.side == Side.BACK),  # type: ignore[arg-type]
+)
+
+
+@dataclass
+class SharpLines:
+    """Sharp prices per (outcome label, line), with the snapshot each came from."""
+
+    prices: dict[SharpKey, dict[str, object]] = field(default_factory=dict)
+    meta: dict[SharpKey, SharpPriceMeta] = field(default_factory=dict)
+
+    def by_outcome(self) -> SharpPriceMap:
+        """One price per outcome label, from its lowest line (no line first)."""
+        chosen: dict[str, SharpKey] = {}
+        for key in sorted(self.prices, key=lambda k: (k[0], -math.inf if k[1] is None else k[1])):
+            chosen.setdefault(key[0], key)
+        return {name: self.prices[key] for name, key in chosen.items()}  # type: ignore[misc]
 
 
 @dataclass(frozen=True)
@@ -82,7 +111,7 @@ async def latest_priced_snapshot(
     """The newest snapshot of ``market`` that holds a book price."""
     has_book_price = exists().where(
         Price.snapshot_id == OddsSnapshot.id,  # type: ignore[arg-type]
-        Price.side.in_(BOOK_SIDES),  # type: ignore[attr-defined]
+        BOOK_PRICE_CONDITION,
     )
     result = await session.execute(
         select(OddsSnapshot)
@@ -107,7 +136,7 @@ async def book_quotes(
 ) -> list[Quote]:
     """The book prices of ``market`` in snapshot time order: back prices, and Polymarket's mid."""
     found = await quotes(session, [event_id], market, sides=BOOK_SIDES, since=since, until=until)
-    return [q for q in found if (q.source is Source.POLYMARKET) == (q.side is Side.MID)]
+    return [q for q in found if is_book_price(q.source, q.side)]
 
 
 def newest_first(found: list[Quote]) -> list[Quote]:
@@ -149,11 +178,11 @@ async def resolve_sharp_prices(
     sharp_bookmakers: Sequence[str],
     lookback_hours: float,
     anchor_time: datetime,
-) -> SharpPriceResult:
-    """The newest sharp price per outcome within the lookback window.
+) -> SharpLines:
+    """The newest sharp price per (outcome label, line) within the lookback window.
 
-    Snapshots are walked newest first; an outcome takes the first sharp book, in the priority
-    order of ``sharp_bookmakers``, that prices it in the snapshot, and is not revisited.
+    Snapshots are walked newest first; an outcome at a line takes the first sharp book, in the
+    priority order of ``sharp_bookmakers``, that prices it in the snapshot, and is not revisited.
     """
     window = await book_quotes(
         session,
@@ -166,32 +195,28 @@ async def resolve_sharp_prices(
     for quote in newest_first(window):
         by_snapshot.setdefault(quote.snapshot_id, []).append(quote)
 
-    result = SharpPriceResult()
-    seen: set[str] = set()
+    result = SharpLines()
+    seen: set[SharpKey] = set()
     for snapshot_quotes in by_snapshot.values():
-        names = {outcome_label(event, q.outcome) for q in snapshot_quotes}
-        seen.update(names)
-        for name in names:
-            if name in result.prices:
+        keyed = [((outcome_label(event, q.outcome), q.line), q) for q in snapshot_quotes]
+        seen.update(key for key, _ in keyed)
+        for key in {key for key, _ in keyed}:
+            if key in result.prices:
                 continue
             for bookmaker in sharp_bookmakers:
                 match = next(
-                    (
-                        q
-                        for q in snapshot_quotes
-                        if q.bookmaker == bookmaker and outcome_label(event, q.outcome) == name
-                    ),
+                    (q for k, q in keyed if k == key and q.bookmaker == bookmaker),
                     None,
                 )
                 if match is None:
                     continue
-                result.prices[name] = {
+                result.prices[key] = {
                     "bookmaker": bookmaker,
                     "price": decimal_to_american(match.price),
                     "price_decimal": match.price,
                     "implied_prob": round(decimal_to_implied_probability(match.price), 6),
                 }
-                result.meta[name] = SharpPriceMeta(
+                result.meta[key] = SharpPriceMeta(
                     snapshot_id=match.snapshot_id,
                     snapshot_time=match.snapshot_time,
                     age_seconds=round((anchor_time - match.snapshot_time).total_seconds(), 1),

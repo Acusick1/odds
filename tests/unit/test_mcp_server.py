@@ -703,7 +703,7 @@ class TestFindRetailEdges:
 
     def _make_sharp_result(
         self,
-        prices: dict[str, dict[str, object]] | None = None,
+        prices: dict[str | tuple[str, float | None], dict[str, object]] | None = None,
     ) -> MagicMock:
         from odds_core.match_brief_models import SharpPriceMeta
 
@@ -712,16 +712,18 @@ class TestFindRetailEdges:
             "Chelsea": {"bookmaker": "pinnacle", "price": -110, "implied_prob": 0.524},
         }
         prices = prices if prices is not None else default_prices
+        # A bare outcome name is a price at no line.
+        keyed = {(k, None) if isinstance(k, str) else k: v for k, v in prices.items()}
 
         result = MagicMock()
-        result.prices = prices
+        result.prices = keyed
         result.meta = {
             outcome: SharpPriceMeta(
                 snapshot_id=1,
                 snapshot_time=datetime(2026, 4, 12, 10, 0, tzinfo=UTC),
                 age_seconds=0.0,
             )
-            for outcome in prices
+            for outcome in keyed
         }
         return result
 
@@ -978,8 +980,8 @@ class TestFindRetailEdges:
     async def test_market_hold_null_on_totals(self) -> None:
         sharp_result = self._make_sharp_result(
             {
-                "Over": {"bookmaker": "pinnacle", "price": -110, "implied_prob": 0.524},
-                "Under": {"bookmaker": "pinnacle", "price": -110, "implied_prob": 0.524},
+                ("Over", 2.5): {"bookmaker": "pinnacle", "price": -110, "implied_prob": 0.524},
+                ("Under", 2.5): {"bookmaker": "pinnacle", "price": -110, "implied_prob": 0.524},
             }
         )
         odds = [
@@ -1000,8 +1002,8 @@ class TestFindRetailEdges:
     async def test_market_hold_null_on_spreads(self) -> None:
         sharp_result = self._make_sharp_result(
             {
-                "Arsenal": {"bookmaker": "pinnacle", "price": -110, "implied_prob": 0.524},
-                "Chelsea": {"bookmaker": "pinnacle", "price": -110, "implied_prob": 0.524},
+                ("Arsenal", -1.5): {"bookmaker": "pinnacle", "price": -110, "implied_prob": 0.524},
+                ("Chelsea", 1.5): {"bookmaker": "pinnacle", "price": -110, "implied_prob": 0.524},
             }
         )
         odds = [

@@ -26,7 +26,7 @@ The runtime is a `claude` subprocess; everything it touches goes through one of 
 
 | Channel | Used for |
 |---|---|
-| `odds` MCP server (`odds_mcp.server.mcp`) | fixtures, odds, retail edges, briefs, paper bets, portfolio |
+| `odds` MCP server (`odds_mcp.server.mcp`) | fixtures, odds, retail edges (against the sharp price at the same line), briefs, paper bets, portfolio |
 | Web search | press conferences, injury news |
 | Playwright MCP (not in `.mcp.json`, so supplied by the user's Claude configuration) | club sites, lineup pages, BBC and ESPN |
 

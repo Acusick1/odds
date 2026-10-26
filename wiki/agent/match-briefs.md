@@ -6,7 +6,7 @@ sources:
   - odds_core.match_brief_models.MatchBrief
   - odds_core.match_brief_models.BriefDecision
   - odds_core.match_brief_models.SharpPriceMap
-  - odds_lambda.storage.readers.OddsReader.get_sharp_prices
+  - odds_mcp.prices.resolve_sharp_prices
   - odds_mcp.server.save_match_brief
   - odds_mcp.server.get_match_brief
   - odds_mcp.server.get_slate_briefs
@@ -38,7 +38,7 @@ Briefs are what the [betting agent](betting-agent.md) concluded about a match, w
 
 Three MCP tools write and read match briefs (none touches paper trades):
 
-- `odds_mcp.server.save_match_brief(event_id, market, decision, summary, brief_text)` inserts a row. It anchors on the event's latest snapshot of `market` holding a `back` or `mid` price row (`odds_mcp.prices.latest_priced_snapshot`), then calls `odds_mcp.prices.resolve_sharp_prices` with `["pinnacle", "betfair_exchange"]` and a 24-hour lookback to stamp `sharp_price_at_brief`; no snapshot gives `null`. Returns the saved row.
+- `odds_mcp.server.save_match_brief(event_id, market, decision, summary, brief_text)` inserts a row. It anchors on the event's latest snapshot of `market` holding a `back` or `mid` price row (`odds_mcp.prices.latest_priced_snapshot`), then calls `odds_mcp.prices.resolve_sharp_prices` with `["pinnacle", "betfair_exchange"]` and a 24-hour lookback to stamp `sharp_price_at_brief`, one price per outcome from its lowest line (`odds_mcp.prices.SharpLines.by_outcome`); no snapshot gives `null`. Returns the saved row.
 - `get_match_brief(event_id, limit=None)` returns briefs newest first, all of them unless `limit` is set, plus the event.
 - `get_slate_briefs(league="soccer_epl", days_ahead=7)` lists scheduled fixtures in the window (`days_ahead` clamped to 1-30), each with its latest brief's `decision`, summary and `created_at`, or `latest_brief: null`. It uses `DISTINCT ON (event_id)` ordered by newest.
 

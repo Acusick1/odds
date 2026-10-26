@@ -714,7 +714,7 @@ async def save_match_brief(
                 24.0,
                 latest_snapshot.snapshot_time,
             )
-            sharp_prices: SharpPriceMap | None = sharp_result.prices or None
+            sharp_prices: SharpPriceMap | None = sharp_result.by_outcome() or None
         else:
             sharp_prices = None
 
@@ -998,8 +998,6 @@ async def find_retail_edges(
     retail_snapshot_times = [e.snapshot_time for entries in buckets.values() for e in entries]
     snapshot_time_iso = max(retail_snapshot_times).isoformat()
 
-    sharp_by_outcome = sharp_result.prices
-
     # Flat list of all retail odds (across buckets) for per-book hold calc.
     odds: list[BookPrice] = [e for entries in buckets.values() for e in entries]
 
@@ -1024,9 +1022,9 @@ async def find_retail_edges(
         return (outcome_name, math.inf if point is None else point)
 
     for (outcome_name, point), outcome_entries in sorted(buckets.items(), key=_bucket_sort_key):
-        sharp_entry = sharp_by_outcome.get(outcome_name)
+        sharp_entry = sharp_result.prices.get((outcome_name, point))
         sharp_prob = sharp_entry["implied_prob"] if sharp_entry else None
-        sharp_meta = sharp_result.meta.get(outcome_name) if sharp_entry else None
+        sharp_meta = sharp_result.meta.get((outcome_name, point)) if sharp_entry else None
 
         # Build per-book retail rows for this (outcome, point) bucket.
         # ``book_prices`` is already keyed by

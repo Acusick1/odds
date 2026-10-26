@@ -8,10 +8,15 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
-from odds_core.match_brief_models import BriefDecision, MatchBrief, SharpPriceResult
+from odds_core.match_brief_models import BriefDecision, MatchBrief
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.vocabulary import Market
-from odds_mcp.prices import resolve_sharp_prices
+from odds_mcp.prices import (
+    SharpLines,
+    book_quotes,
+    latest_priced_snapshot,
+    resolve_sharp_prices,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -1024,16 +1029,16 @@ class TestGetSharpPrices:
             snap_new.snapshot_time,
         )
 
-        assert isinstance(result, SharpPriceResult)
-        assert "Brighton" in result.prices
-        assert result.prices["Brighton"]["bookmaker"] == "pinnacle"
-        assert result.prices["Brighton"]["price"] == -140
-        assert result.prices["Draw"]["bookmaker"] == "pinnacle"
-        assert result.prices["Wolves"]["bookmaker"] == "pinnacle"
+        assert isinstance(result, SharpLines)
+        assert ("Brighton", None) in result.prices
+        assert result.prices[("Brighton", None)]["bookmaker"] == "pinnacle"
+        assert result.prices[("Brighton", None)]["price"] == -140
+        assert result.prices[("Draw", None)]["bookmaker"] == "pinnacle"
+        assert result.prices[("Wolves", None)]["bookmaker"] == "pinnacle"
 
         # Metadata points to the older snapshot
-        assert result.meta["Brighton"].snapshot_id == snap_old.id
-        assert result.meta["Brighton"].age_seconds > 0
+        assert result.meta[("Brighton", None)].snapshot_id == snap_old.id
+        assert result.meta[("Brighton", None)].age_seconds > 0
 
     @pytest.mark.asyncio
     async def test_no_sharp_in_window(self, pglite_async_session, sharp_lookback_event):
@@ -1080,8 +1085,8 @@ class TestGetSharpPrices:
             snap_new.snapshot_time,
         )
 
-        assert result.prices["Brighton"]["bookmaker"] == "bet365"
-        assert result.prices["Brighton"]["price"] == -155
+        assert result.prices[("Brighton", None)]["bookmaker"] == "bet365"
+        assert result.prices[("Brighton", None)]["price"] == -155
 
 
 class TestFindRetailEdgesSharpLookback:
@@ -1506,45 +1511,6 @@ class TestGetCurrentOddsPerBookmakerLookback:
         assert {row["point"] for row in bet365_under} == {2.5, 3.0}
 
 
-@pytest.fixture
-async def mixed_source_event(pglite_async_session):
-    """An event with an Odds API snapshot and a later Polymarket snapshot carrying mid, ask and bid."""
-    session = pglite_async_session
-    kickoff = datetime(2026, 4, 18, 15, 0, tzinfo=UTC)
-    event = make_epl_event("epl_test_mixed", kickoff)
-    session.add(event)
-    api_time = kickoff - timedelta(hours=3)
-    await store_tagged(
-        session,
-        make_tagged_snapshot(
-            event.id,
-            api_time,
-            [
-                three_way_bookmaker("bet365", (2.0, 3.5, 4.0)),
-                three_way_bookmaker("pinnacle", (2.1, 3.4, 3.9)),
-            ],
-            None,
-        ),
-    )
-    pm_time = kickoff - timedelta(hours=2)
-    probabilities = {
-        "yes_probabilities": {"home": 0.5, "draw": 0.25, "away": 0.25},
-        "best_ask": {"home": 0.52, "draw": 0.26, "away": 0.26},
-        "best_bid": {"home": 0.48, "draw": 0.24, "away": 0.24},
-    }
-    await store_tagged(
-        session,
-        make_tagged_snapshot(
-            event.id,
-            pm_time,
-            [three_way_bookmaker("polymarket", (2.0, 4.0, 4.0), polymarket_meta=probabilities)],
-            "polymarket",
-        ),
-    )
-    await session.commit()
-    return event
-
-
 @pytest.mark.asyncio
 class TestGetCurrentOddsSources:
     async def test_polymarket_price_is_its_mid(self, patch_session_maker, mixed_source_event):
@@ -1609,3 +1575,96 @@ class TestGetOddsHistory:
         result = await get_odds_history(event_id="missing", market="1x2")
 
         assert "error" in result
+
+
+@pytest.fixture
+async def two_sharp_lines_event(pglite_async_session):
+    """Totals priced by Pinnacle at 2.5 and 3.5 and by bet365 at both lines."""
+    session = pglite_async_session
+    kickoff = datetime(2026, 4, 19, 15, 0, tzinfo=UTC)
+    event = make_epl_event("epl_test_lines", kickoff)
+    session.add(event)
+
+    def book(key: str, over_25: float, over_35: float) -> dict:
+        outcomes = [
+            {"name": "Over", "price_decimal": over_25, "point": 2.5},
+            {"name": "Under", "price_decimal": 2.0, "point": 2.5},
+            {"name": "Over", "price_decimal": over_35, "point": 3.5},
+            {"name": "Under", "price_decimal": 1.5, "point": 3.5},
+        ]
+        return {"key": key, "title": key, "markets": [{"key": "totals", "outcomes": outcomes}]}
+
+    await store_tagged(
+        session,
+        make_tagged_snapshot(
+            event.id,
+            kickoff - timedelta(hours=3),
+            [book("pinnacle", 1.9, 2.6), book("bet365", 2.0, 2.8)],
+            None,
+        ),
+    )
+    await session.commit()
+    return event
+
+
+@pytest.mark.asyncio
+class TestSharpPriceLines:
+    async def test_sharp_price_is_per_line(self, pglite_async_session, two_sharp_lines_event):
+        event = two_sharp_lines_event
+        anchor = await latest_priced_snapshot(pglite_async_session, event.id, Market.TOTALS)
+
+        result = await resolve_sharp_prices(
+            pglite_async_session, event, Market.TOTALS, ["pinnacle"], 2.0, anchor.snapshot_time
+        )
+
+        assert result.prices[("Over", 2.5)]["price_decimal"] == pytest.approx(1.9)
+        assert result.prices[("Over", 3.5)]["price_decimal"] == pytest.approx(2.6)
+        assert result.by_outcome()["Over"]["price_decimal"] == pytest.approx(1.9)
+
+    async def test_retail_rows_compare_with_the_sharp_price_at_their_line(
+        self, patch_session_maker, two_sharp_lines_event
+    ):
+        from odds_mcp.server import find_retail_edges
+
+        result = await find_retail_edges(event_id=two_sharp_lines_event.id, market="totals")
+
+        sharp = {(o["outcome"], o["point"]): o["sharp_implied_prob"] for o in result["per_outcome"]}
+        assert sharp[("Over", 2.5)] == pytest.approx(1 / 1.9, abs=1e-6)
+        assert sharp[("Over", 3.5)] == pytest.approx(1 / 2.6, abs=1e-6)
+        over_35 = next(
+            e for e in result["retail_edges"] if (e["outcome"], e["point"]) == ("Over", 3.5)
+        )
+        assert over_35["divergence"] == pytest.approx(1 / 2.8 - 1 / 2.6, abs=1e-6)
+
+
+@pytest.mark.asyncio
+class TestBookPricePredicate:
+    async def test_anchor_needs_a_quote_book_quotes_returns(
+        self, pglite_async_session, mixed_source_event
+    ):
+        """A Polymarket snapshot holding only ask and bid has no book price, so it is not the
+        anchor and book_quotes returns none of its rows."""
+        session = pglite_async_session
+        event = mixed_source_event
+        quoted_only = {
+            "best_ask": {"home": 0.52, "draw": 0.26, "away": 0.26},
+            "best_bid": {"home": 0.48, "draw": 0.24, "away": 0.24},
+        }
+        later = event.commence_time - timedelta(hours=1)
+        await store_tagged(
+            session,
+            make_tagged_snapshot(
+                event.id,
+                later,
+                [three_way_bookmaker("polymarket", (2.0, 4.0, 4.0), polymarket_meta=quoted_only)],
+                "polymarket",
+            ),
+        )
+        await session.commit()
+
+        anchor = await latest_priced_snapshot(session, event.id, Market.ONE_X_TWO)
+        found = await book_quotes(session, event.id, Market.ONE_X_TWO)
+
+        assert anchor.snapshot_time == event.commence_time - timedelta(hours=2)
+        assert later not in {q.snapshot_time for q in found}
+        assert anchor.id in {q.snapshot_id for q in found}
