@@ -981,6 +981,8 @@ class TestExternalIds:
         (tmp_path / "epl_2024-2025_links.json").write_text("[]")
 
         games = oddsportal_history_games(tmp_path)
+        preflight = await attach_oddsportal_history(session, games, apply=False)
+        assert (preflight.attached, await _count(session, EventExternalId)) == (1, 0)
         report = await attach_oddsportal_history(session, games, apply=True)
 
         assert (report.games, report.attached) == (1, 1)
@@ -1092,6 +1094,49 @@ class TestLegacyPolymarket:
         assert report.rows_skipped["total"] == 1
         assert report.order_books == 1
         assert await _count(session, SnapshotPayload) == 2
+
+    async def test_a_second_game_on_the_same_event_counts_alike_in_preflight_and_apply(
+        self, pglite_async_session: AsyncSession
+    ) -> None:
+        session = pglite_async_session
+        await _legacy_polymarket(session)
+        twin = PolymarketEvent(
+            pm_event_id="pm3",
+            ticker="nba-dal-mil-y",
+            slug="s",
+            title="t",
+            event_id="nba1",
+            start_date=KICKOFF,
+            end_date=KICKOFF,
+        )
+        session.add(twin)
+        await session.flush()
+        market = PolymarketMarket(
+            polymarket_event_id=twin.id,
+            pm_market_id="m3",
+            condition_id="c",
+            question="q",
+            clob_token_ids=["a", "b"],
+            outcomes=["Mavericks", "Bucks"],
+            market_type=PolymarketMarketType.MONEYLINE,
+        )
+        session.add(market)
+        await session.flush()
+        session.add(
+            PolymarketPriceSnapshot(
+                polymarket_market_id=market.id,
+                snapshot_time=KICKOFF - timedelta(hours=2),
+                outcome_0_price=0.41,
+                outcome_1_price=0.59,
+            )
+        )
+        await session.commit()
+
+        preflight = await migrate_legacy_polymarket(session, apply=False)
+        applied = await migrate_legacy_polymarket(session, apply=True)
+
+        assert (preflight.snapshots, preflight.duplicate_rows) == (1, 1)
+        assert (applied.snapshots, applied.duplicate_rows) == (1, 1)
 
     async def test_a_second_run_writes_nothing_and_verify_passes(
         self, pglite_async_session: AsyncSession

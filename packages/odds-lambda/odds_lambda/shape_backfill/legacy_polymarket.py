@@ -9,7 +9,7 @@ are left in place.
 
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -128,8 +128,14 @@ def legacy_envelope(
 
 
 async def _plan_event(
-    session: AsyncSession, pm_event: PolymarketEvent, event: Event, report: LegacyPolymarketReport
+    session: AsyncSession,
+    pm_event: PolymarketEvent,
+    event: Event,
+    taken: set[datetime],
+    report: LegacyPolymarketReport,
 ) -> list[_PlannedSnapshot]:
+    """The snapshots to write for one legacy game. ``taken`` holds the times this run already
+    planned for the event from another game linked to it, which count as duplicates."""
     markets = list(
         (
             await session.execute(
@@ -174,11 +180,11 @@ async def _plan_event(
             continue
         for row in rows:
             snapshot_time = ensure_utc(row.snapshot_time)
+            if snapshot_time in taken or snapshot_time in planned:
+                report.duplicate_rows += 1
+                continue
             if snapshot_time in stored:
                 report.existing += 1
-                continue
-            if snapshot_time in planned:
-                report.duplicate_rows += 1
                 continue
             envelope = legacy_envelope(pm_event, market, row, sides, event)
             if envelope is None:
@@ -206,6 +212,7 @@ async def migrate_legacy_polymarket(
         ).scalars()
     )
     report.pm_events = len(pm_events)
+    taken: dict[str, set[datetime]] = defaultdict(set)
     for pm_event in pm_events:
         event = (
             await session.get(Event, pm_event.event_id) if pm_event.event_id is not None else None
@@ -213,7 +220,8 @@ async def migrate_legacy_polymarket(
         if event is None:
             report.unmatched_games += 1
             continue
-        planned = await _plan_event(session, pm_event, event, report)
+        planned = await _plan_event(session, pm_event, event, taken[event.id], report)
+        taken[event.id] |= {s.snapshot_time for s in planned}
         prices = 0
         rows: list[tuple[_PlannedSnapshot, list[dict[str, Any]]]] = []
         for snapshot in planned:

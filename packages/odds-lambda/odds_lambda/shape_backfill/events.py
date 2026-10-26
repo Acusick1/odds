@@ -16,6 +16,7 @@ from odds_core.event_ids import is_odds_api_event_id
 from odds_core.event_source import canonical_event_id
 from odds_core.models import Event, EventExternalId, HealthCheckAcknowledgement, OddsSnapshot
 from odds_core.snapshot_sources import SnapshotSource
+from odds_core.team import normalize_team_name
 from odds_core.time import ensure_utc
 from odds_core.vocabulary import HealthCheck, Source
 from sqlalchemy import select, text
@@ -32,6 +33,7 @@ from odds_lambda.storage.event_resolver import (
     attach_events,
     check_external_id,
     event_lock_key,
+    find_event,
     lock_fixture,
     record_external_id,
 )
@@ -457,13 +459,45 @@ async def attach_oddsportal_history(
 ) -> OddsportalHistoryReport:
     """Record each historical game's OddsPortal id on its event, matched as the loader matches
     (``attach_event``, ±24 h); a game with no event or a refused id stays unattached. Nothing
-    is created. Without ``apply`` only the games are counted."""
+    is created. Without ``apply`` the same outcome is counted read-only (``find_event`` and
+    ``check_external_id``, with what the run would have recorded laid over them)."""
     report = OddsportalHistoryReport(games=len(games))
-    if not apply:
+    if apply:
+        for start in range(0, len(games), EVENTS_PER_COMMIT):
+            attached = await attach_events(session, games[start : start + EVENTS_PER_COMMIT])
+            await session.commit()
+            report.attached += sum(1 for a in attached if a is not None)
+            report.unattached += sum(1 for a in attached if a is None)
         return report
-    for start in range(0, len(games), EVENTS_PER_COMMIT):
-        attached = await attach_events(session, games[start : start + EVENTS_PER_COMMIT])
-        await session.commit()
-        report.attached += sum(1 for a in attached if a is not None)
-        report.unattached += sum(1 for a in attached if a is None)
+    holders: dict[str, int] = {}
+    held_sources: set[int] = set()
+    for game in sorted(games, key=_game_lock_key):
+        found = await find_event(session, game)
+        assert game.external_id is not None
+        if found is None:
+            report.unattached += 1
+            continue
+        key = _stored_key(found.event)
+        holder = holders.get(game.external_id)
+        if holder is not None:
+            attached = holder == key
+        else:
+            check = await check_external_id(
+                session, found.event, Source.ODDSPORTAL, game.external_id
+            )
+            attached = not check.refused and not (
+                check.decision is IdDecision.NEW and key in held_sources
+            )
+            if attached and check.decision is IdDecision.NEW:
+                holders[game.external_id] = key
+                held_sources.add(key)
+        report.attached += int(attached)
+        report.unattached += int(not attached)
+    await session.rollback()
     return report
+
+
+def _game_lock_key(game: ListedGame) -> int:
+    return event_lock_key(
+        game.sport_key, normalize_team_name(game.home_team), normalize_team_name(game.away_team)
+    )

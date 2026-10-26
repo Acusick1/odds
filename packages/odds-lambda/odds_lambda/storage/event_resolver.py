@@ -185,6 +185,14 @@ async def attach_event(session: AsyncSession, game: ListedGame) -> ResolvedEvent
     return resolved
 
 
+async def find_event(session: AsyncSession, game: ListedGame) -> ResolvedEvent | None:
+    """The existing event ``attach_event`` would find for ``game``, without the lock and without
+    recording anything. Read-only."""
+    return await _find(
+        session, game, normalize_team_name(game.home_team), normalize_team_name(game.away_team)
+    )
+
+
 async def attach_events(
     session: AsyncSession, games: Sequence[ListedGame]
 ) -> list[ResolvedEvent | None]:

@@ -148,7 +148,7 @@ def _print_run(run: BackfillRun, apply: bool) -> None:
             ("price rows", p.prices),
             ("already stored", p.existing),
             ("rows with no probability strictly between 0 and 1", p.invalid_rows),
-            ("rows at a time already taken by another market", p.duplicate_rows),
+            ("rows at a time another market or game of the event took", p.duplicate_rows),
             ("moneyline markets not naming the event's teams", len(p.unmapped_markets)),
             ("order books archived", p.order_books),
             ("order books already archived", p.order_books_existing),
