@@ -4,9 +4,11 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
+from odds_core.models import Event, EventStatus
 from odds_core.odds_math import american_to_decimal
 from odds_core.paper_trade_models import PaperTrade, TradeResult
+from odds_core.vocabulary import Market
+from odds_mcp.prices import BookPrice
 
 
 class TestToolNamespace:
@@ -141,62 +143,57 @@ class TestEventToDict:
         assert result["completed_at"] == completed.isoformat()
 
 
-class TestSnapshotToDict:
-    def _make_snapshot(self, **overrides: object) -> OddsSnapshot:
-        defaults = {
-            "id": 42,
-            "event_id": "evt-1",
-            "snapshot_time": datetime(2026, 4, 12, 10, 0, tzinfo=UTC),
-            "created_at": datetime(2026, 4, 12, 10, 1, tzinfo=UTC),
-            "bookmaker_count": 5,
-            "fetch_tier": "early",
-            "hours_until_commence": 5.0,
-            "raw_data": {"bookmakers": [{"key": "bet365"}]},
-        }
-        defaults.update(overrides)
-        snap = MagicMock(spec=OddsSnapshot)
-        for k, v in defaults.items():
-            setattr(snap, k, v)
-        return snap
+def make_book_price(
+    bookmaker: str = "bet365",
+    outcome: str = "Arsenal",
+    price_decimal: float = 1.9,
+    *,
+    market: Market = Market.H2H,
+    line: float | None = None,
+    changed_at: datetime | None = None,
+    snapshot_time: datetime = datetime(2026, 4, 12, 10, 0, tzinfo=UTC),
+) -> BookPrice:
+    return BookPrice(
+        bookmaker=bookmaker,
+        market=market,
+        outcome_name=outcome,
+        line=line,
+        price_decimal=price_decimal,
+        changed_at=changed_at,
+        snapshot_id=1,
+        snapshot_time=snapshot_time,
+        age_seconds=0.0,
+    )
 
-    def test_excludes_raw_data_by_default(self) -> None:
-        from odds_mcp.server import _snapshot_to_dict
 
-        snap = self._make_snapshot()
-        result = _snapshot_to_dict(snap)
-        assert "raw_data" not in result
-        assert result["id"] == 42
-        assert result["created_at"] is not None
-        assert result["fetch_tier"] == "early"
+class TestOddsToDict:
+    def test_serializes_price(self) -> None:
+        from odds_mcp.server import _odds_to_dict
 
-    def test_includes_raw_data_when_requested(self) -> None:
-        from odds_mcp.server import _snapshot_to_dict
+        result = _odds_to_dict(make_book_price(price_decimal=american_to_decimal(-110)))
 
-        snap = self._make_snapshot()
-        result = _snapshot_to_dict(snap, include_raw_data=True)
-        assert "raw_data" in result
-        assert result["raw_data"]["bookmakers"][0]["key"] == "bet365"
+        assert result["bookmaker_key"] == "bet365"
+        assert result["market_key"] == "h2h"
+        assert result["outcome_name"] == "Arsenal"
+        assert result["price"] == -110
+        assert result["price_decimal"] == pytest.approx(1.90909, abs=1e-5)
+        assert result["point"] is None
 
-    def test_includes_extracted_odds(self) -> None:
-        from odds_mcp.server import _snapshot_to_dict
+    def test_last_update_is_the_books_change_time(self) -> None:
+        from odds_mcp.server import _odds_to_dict
 
-        odds_obj = Odds(
-            event_id="e1",
-            bookmaker_key="bet365",
-            bookmaker_title="Bet365",
-            market_key="h2h",
-            outcome_name="Arsenal",
-            price_decimal=american_to_decimal(-110),
-            odds_timestamp=datetime(2026, 4, 12, 10, 0, tzinfo=UTC),
-            last_update=datetime(2026, 4, 12, 10, 0, tzinfo=UTC),
+        changed = datetime(2026, 4, 12, 9, 30, tzinfo=UTC)
+
+        assert _odds_to_dict(make_book_price(changed_at=changed))["last_update"] == (
+            changed.isoformat()
         )
 
-        snap = self._make_snapshot()
-        result = _snapshot_to_dict(snap, extracted_odds=[odds_obj])
-        assert len(result["odds"]) == 1
-        assert result["odds"][0]["bookmaker_key"] == "bet365"
-        assert result["odds"][0]["price"] == -110
-        assert result["odds"][0]["price_decimal"] == pytest.approx(1.90909, abs=1e-5)
+    def test_last_update_falls_back_to_snapshot_time(self) -> None:
+        from odds_mcp.server import _odds_to_dict
+
+        result = _odds_to_dict(make_book_price(changed_at=None))
+
+        assert result["last_update"] == datetime(2026, 4, 12, 10, 0, tzinfo=UTC).isoformat()
 
 
 class TestTradeToDict:
@@ -689,18 +686,13 @@ class TestFindRetailEdges:
         *,
         market: str = "h2h",
         point: float | None = None,
-    ) -> Odds:
-        moment = datetime(2026, 4, 12, 10, 0, tzinfo=UTC)
-        return Odds(
-            event_id="e1",
-            bookmaker_key=bookmaker,
-            bookmaker_title=bookmaker,
-            market_key=market,
-            outcome_name=outcome,
-            price_decimal=american_to_decimal(price),
-            point=point,
-            odds_timestamp=moment,
-            last_update=moment,
+    ) -> BookPrice:
+        return make_book_price(
+            bookmaker,
+            outcome,
+            american_to_decimal(price),
+            market=Market(market),
+            line=point,
         )
 
     def _make_snapshot(self) -> MagicMock:
@@ -733,57 +725,30 @@ class TestFindRetailEdges:
         }
         return result
 
-    def _make_book_result(
-        self,
-        odds: list[MagicMock],
-        snapshot_time: datetime | None = None,
-    ) -> MagicMock:
-        """Build a BookPriceResult-like mock from a flat list of Odds mocks."""
-        from odds_lambda.storage.readers import BookPriceEntry, BookPriceMeta, BookPriceResult
-
-        snap_time = snapshot_time or datetime(2026, 4, 12, 10, 0, tzinfo=UTC)
-        entries: dict[tuple[str, str, float | None], BookPriceEntry] = {}
-        for o in odds:
-            key = (o.bookmaker_key, o.outcome_name, o.point)
-            # First-wins: matches OddsReader.get_latest_book_prices, which walks
-            # snapshots newest-first and skips a key once already present
-            # (readers.py: ``if key in book_result.entries: continue``).
-            if key in entries:
-                continue
-            entries[key] = BookPriceEntry(
-                odds=o,
-                meta=BookPriceMeta(
-                    snapshot_id=1,
-                    snapshot_time=snap_time,
-                    age_seconds=0.0,
-                ),
-            )
-        return BookPriceResult(entries=entries)
-
-    def _mock_reader(
-        self,
-        sharp_result: MagicMock | None = None,
-        book_result: object | None = None,
-    ) -> AsyncMock:
+    def _mock_reader(self, sharp_result: MagicMock | None = None) -> AsyncMock:
         reader = AsyncMock()
         reader.get_event_by_id = AsyncMock(return_value=self._make_event())
-        reader.get_latest_snapshot = AsyncMock(return_value=self._make_snapshot())
-        reader.get_sharp_prices = AsyncMock(return_value=sharp_result or self._make_sharp_result())
-        if book_result is not None:
-            reader.get_latest_book_prices = AsyncMock(return_value=book_result)
+        reader.sharp_result = sharp_result or self._make_sharp_result()
         return reader
 
-    async def _call(self, odds: list, reader: AsyncMock, market: str = "h2h") -> dict:
+    async def _call(self, odds: list[BookPrice], reader: AsyncMock, market: str = "h2h") -> dict:
         from odds_mcp.server import find_retail_edges
 
-        # Build a BookPriceResult from the supplied odds list to feed the
-        # reader's get_latest_book_prices mock — replaces the old
-        # extract_odds_from_snapshot patch.
-        reader.get_latest_book_prices = AsyncMock(return_value=self._make_book_result(odds))
+        # First-wins per (book, outcome, line), as latest_book_prices resolves them.
+        book_prices = {(o.bookmaker, o.outcome_name, o.line): o for o in reversed(odds)}
 
         with (
             patch("odds_mcp.server.async_session_maker") as mock_session_maker,
             patch("odds_mcp.server.OddsReader", return_value=reader),
+            patch(
+                "odds_mcp.server.latest_priced_snapshot",
+                AsyncMock(return_value=self._make_snapshot()),
+            ),
+            patch("odds_mcp.server.latest_book_prices", AsyncMock(return_value=book_prices)),
+            patch(
+                "odds_mcp.server.resolve_sharp_prices",
+                AsyncMock(return_value=reader.sharp_result),
+            ),
         ):
             mock_session_maker.return_value.__aenter__ = AsyncMock()
             mock_session_maker.return_value.__aexit__ = AsyncMock()

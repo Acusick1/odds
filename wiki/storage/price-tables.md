@@ -17,7 +17,7 @@ status: stable
 
 # Prices and snapshot payloads tables
 
-`prices` holds one row per price in a snapshot, and `snapshot_payloads` holds what a source returned. They sit beside the `odds` table and `odds_snapshots.raw_data` ([Odds snapshot and odds tables](odds-tables.md)). The candidate rules, the Betfair close and the candidate report read prices from them ([Reading quotes](#reading-quotes)); every other reader reads the `odds` table or `raw_data`. Every snapshot writer fills them alongside those ([Writing price rows](#writing-price-rows)), and `odds data backfill-shape` fills them for the snapshots stored before the writers did ([Shape backfill and verify](shape-backfill.md)). The snapshot columns they rely on (`source`, `market`, `time_basis` and the market metadata) are on [odds_snapshots](odds-tables.md#odds_snapshots).
+`prices` holds one row per price in a snapshot, and `snapshot_payloads` holds what a source returned. They sit beside the `odds` table and `odds_snapshots.raw_data` ([Odds snapshot and odds tables](odds-tables.md)). The candidate rules, the Betfair close, the candidate report and the MCP market tools read prices from them ([Reading quotes](#reading-quotes)); every other reader reads the `odds` table or `raw_data`. Every snapshot writer fills them alongside those ([Writing price rows](#writing-price-rows)), and `odds data backfill-shape` fills them for the snapshots stored before the writers did ([Shape backfill and verify](shape-backfill.md)). The snapshot columns they rely on (`source`, `market`, `time_basis` and the market metadata) are on [odds_snapshots](odds-tables.md#odds_snapshots).
 
 ## prices
 
@@ -93,7 +93,7 @@ A single-market envelope (OddsPortal, Betfair, FDUK, Polymarket) is one snapshot
 
 `odds_core.quotes.quotes(session, event_ids, market, *, sources, time_bases, bookmakers, sides, since, until, known_at, snapshot_ids, before_kickoff)` returns the price rows of the events' snapshots of one market as `odds_core.quotes.Quote`, a frozen dataclass of the row's fields (bookmaker, outcome, line, side, price, size, matched, changed_at) with its snapshot's id, time, `created_at`, source, market, time basis and market metadata. Numeric columns come back as floats. Each keyword narrows the result when given, in SQL: snapshot source and time basis, book and side, snapshot time from `since` to `until` inclusive, stored by `known_at`, among `snapshot_ids`, or within `before_kickoff` before its own event's current kick-off (a join on `events`), so one query serves many events' windows. Quotes come in snapshot time, snapshot id and price id order.
 
-`odds_core.betfair_close.close_quotes` and the [Betfair close check](../operations/health-monitor.md#betfair-close-check) read through it. The candidate rules read through their own query, `odds_lambda.candidate_rules.inputs.rule_quotes`, which returns the same `odds_core.quotes.Quote`, so the rule hash does not cover this function ([rule pinning](../evaluation/candidate-rules.md#rule-pinning)).
+`odds_core.betfair_close.close_quotes`, the [Betfair close check](../operations/health-monitor.md#betfair-close-check) and the [MCP market tools](../agent/mcp-market-tools.md) (`odds_mcp.prices`) read through it. The candidate rules read through their own query, `odds_lambda.candidate_rules.inputs.rule_quotes`, which returns the same `odds_core.quotes.Quote`, so the rule hash does not cover this function ([rule pinning](../evaluation/candidate-rules.md#rule-pinning)).
 
 ## Storing a snapshot under its key
 

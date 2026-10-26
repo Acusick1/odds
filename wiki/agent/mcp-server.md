@@ -28,7 +28,7 @@ status: stable
 
 # odds-mcp server
 
-`odds_mcp.server` defines `mcp = FastMCP("odds-mcp", ...)`, the tool interface the [betting agent](betting-agent.md) uses. Tools are thin wrappers around `odds_lambda.storage.readers.OddsReader` queries, job code and the paper-trading service (the agent's bets carry a bankroll; flat-stake candidate trades come from the [run-candidates job](../evaluation/run-candidates-job.md)); they return JSON-safe dicts, open their own sessions with `odds_core.database.async_session_maker()` and report many failures as `{"error": ...}` dicts. All times are UTC. The `@mcp.tool()` definitions are the source of truth for the toolset (`odds_mcp.server.mcp`).
+`odds_mcp.server` defines `mcp = FastMCP("odds-mcp", ...)`, the tool interface the [betting agent](betting-agent.md) uses. Tools are thin wrappers around `odds_lambda.storage.readers.OddsReader` event queries, price reads through `odds_core.quotes.quotes` ([market tools](mcp-market-tools.md)), job code and the paper-trading service (the agent's bets carry a bankroll; flat-stake candidate trades come from the [run-candidates job](../evaluation/run-candidates-job.md)); they return JSON-safe dicts, open their own sessions with `odds_core.database.async_session_maker()` and report many failures as `{"error": ...}` dicts. All times are UTC. The `@mcp.tool()` definitions are the source of truth for the toolset (`odds_mcp.server.mcp`).
 
 ## Launch
 
@@ -40,7 +40,7 @@ status: stable
 
 | Tool | Owning page |
 |---|---|
-| `odds_mcp.server.get_upcoming_fixtures`, `odds_mcp.server.get_current_odds`, `odds_mcp.server.get_odds_history` | [market tools](mcp-market-tools.md) (`odds_mcp.server.get_odds_history` returns only snapshots containing the requested market) |
+| `odds_mcp.server.get_upcoming_fixtures`, `odds_mcp.server.get_current_odds`, `odds_mcp.server.get_odds_history` | [market tools](mcp-market-tools.md) (`odds_mcp.server.get_odds_history` returns only snapshots of the requested market) |
 | `odds_mcp.server.find_retail_edges` | [market tools](mcp-market-tools.md#retail-edges) |
 | `odds_mcp.server.save_match_brief`, `odds_mcp.server.get_match_brief`, `odds_mcp.server.get_slate_briefs` | [briefs](match-briefs.md) |
 | `odds_mcp.server.paper_bet` (decimal price, optional candidate), `odds_mcp.server.get_portfolio` (bankroll-sized portfolio and open trades, with candidate summaries, each with its family size k and promote interval, or the registry's error), `odds_mcp.server.settle_bets` | [paper trading](paper-trading.md) |

@@ -10,9 +10,17 @@ from unittest.mock import patch
 import pytest
 from odds_core.match_brief_models import BriefDecision, MatchBrief, SharpPriceResult
 from odds_core.models import Event, EventStatus, OddsSnapshot
-from odds_lambda.storage.readers import OddsReader
+from odds_core.vocabulary import Market
+from odds_mcp.prices import resolve_sharp_prices
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
+
+from tests.test_helpers import (
+    make_epl_event,
+    make_tagged_snapshot,
+    store_tagged,
+    three_way_bookmaker,
+)
 
 
 @pytest.fixture
@@ -97,7 +105,7 @@ async def epl_event_with_odds(pglite_async_session):
         fetch_tier="pregame",
         hours_until_commence=6.0,
     )
-    pglite_async_session.add(snapshot)
+    await store_tagged(pglite_async_session, snapshot)
     await pglite_async_session.commit()
     await pglite_async_session.refresh(event)
     await pglite_async_session.refresh(snapshot)
@@ -193,7 +201,7 @@ async def partial_sharp_event(pglite_async_session):
         fetch_tier="pregame",
         hours_until_commence=4.0,
     )
-    pglite_async_session.add(snapshot)
+    await store_tagged(pglite_async_session, snapshot)
     await pglite_async_session.commit()
     await pglite_async_session.refresh(event)
     await pglite_async_session.refresh(snapshot)
@@ -732,7 +740,7 @@ class TestFindRetailEdges:
             fetch_tier="pregame",
             hours_until_commence=3.0,
         )
-        pglite_async_session.add(snapshot)
+        await store_tagged(pglite_async_session, snapshot)
         await pglite_async_session.commit()
         await pglite_async_session.refresh(event)
 
@@ -869,7 +877,7 @@ class TestFindRetailEdges:
             fetch_tier="pregame",
             hours_until_commence=6.0,
         )
-        pglite_async_session.add(snapshot)
+        await store_tagged(pglite_async_session, snapshot)
         await pglite_async_session.commit()
         await pglite_async_session.refresh(event)
 
@@ -964,7 +972,7 @@ async def sharp_lookback_event(pglite_async_session):
         fetch_tier="pregame",
         hours_until_commence=3.0,
     )
-    pglite_async_session.add(snap_old)
+    await store_tagged(pglite_async_session, snap_old)
 
     # Newer snapshot WITHOUT sharp bookmaker
     new_time = commence_time - timedelta(hours=2)
@@ -989,7 +997,7 @@ async def sharp_lookback_event(pglite_async_session):
         fetch_tier="pregame",
         hours_until_commence=2.0,
     )
-    pglite_async_session.add(snap_new)
+    await store_tagged(pglite_async_session, snap_new)
 
     await pglite_async_session.commit()
     await pglite_async_session.refresh(event)
@@ -999,21 +1007,21 @@ async def sharp_lookback_event(pglite_async_session):
 
 
 class TestGetSharpPrices:
-    """Tests for OddsReader.get_sharp_prices lookback method."""
+    """Tests for resolve_sharp_prices lookback."""
 
     @pytest.mark.asyncio
     async def test_sharp_found_in_older_snapshot(self, pglite_async_session, sharp_lookback_event):
         """Sharp price is resolved from an older snapshot when newest lacks it."""
         event, snap_old, snap_new = sharp_lookback_event
-        reader = OddsReader(pglite_async_session)
 
         # Use now=snap_new.snapshot_time so both snapshots are in the 2h window
-        result = await reader.get_sharp_prices(
-            event.id,
-            market="1x2",
-            sharp_bookmakers=["pinnacle", "betfair_exchange"],
-            lookback_hours=2.0,
-            now=snap_new.snapshot_time,
+        result = await resolve_sharp_prices(
+            pglite_async_session,
+            event,
+            Market.ONE_X_TWO,
+            ["pinnacle", "betfair_exchange"],
+            2.0,
+            snap_new.snapshot_time,
         )
 
         assert isinstance(result, SharpPriceResult)
@@ -1031,15 +1039,10 @@ class TestGetSharpPrices:
     async def test_no_sharp_in_window(self, pglite_async_session, sharp_lookback_event):
         """When no snapshot in the window has a sharp bookmaker, result is empty."""
         event, snap_old, snap_new = sharp_lookback_event
-        reader = OddsReader(pglite_async_session)
 
         # Set window so only the newest (retail-only) snapshot is included
-        result = await reader.get_sharp_prices(
-            event.id,
-            market="1x2",
-            sharp_bookmakers=["pinnacle"],
-            lookback_hours=0.5,
-            now=snap_new.snapshot_time,
+        result = await resolve_sharp_prices(
+            pglite_async_session, event, Market.ONE_X_TWO, ["pinnacle"], 0.5, snap_new.snapshot_time
         )
 
         assert result.prices == {}
@@ -1049,15 +1052,10 @@ class TestGetSharpPrices:
     async def test_expired_window(self, pglite_async_session, sharp_lookback_event):
         """When now is far in the future, no snapshots are in the lookback window."""
         event, _snap_old, _snap_new = sharp_lookback_event
-        reader = OddsReader(pglite_async_session)
 
         far_future = datetime(2026, 5, 1, 0, 0, tzinfo=UTC)
-        result = await reader.get_sharp_prices(
-            event.id,
-            market="1x2",
-            sharp_bookmakers=["pinnacle"],
-            lookback_hours=2.0,
-            now=far_future,
+        result = await resolve_sharp_prices(
+            pglite_async_session, event, Market.ONE_X_TWO, ["pinnacle"], 2.0, far_future
         )
 
         assert result.prices == {}
@@ -1070,16 +1068,16 @@ class TestGetSharpPrices:
         """Recency wins: once an outcome is resolved from a newer snapshot,
         older snapshots are skipped even if they contain a higher-priority bookmaker."""
         event, snap_old, snap_new = sharp_lookback_event
-        reader = OddsReader(pglite_async_session)
 
         # pinnacle is higher priority but only in the older snapshot;
         # bet365 in the newer snapshot resolves first.
-        result = await reader.get_sharp_prices(
-            event.id,
-            market="1x2",
-            sharp_bookmakers=["pinnacle", "bet365"],
-            lookback_hours=2.0,
-            now=snap_new.snapshot_time,
+        result = await resolve_sharp_prices(
+            pglite_async_session,
+            event,
+            Market.ONE_X_TWO,
+            ["pinnacle", "bet365"],
+            2.0,
+            snap_new.snapshot_time,
         )
 
         assert result.prices["Brighton"]["bookmaker"] == "bet365"
@@ -1218,12 +1216,12 @@ async def bfe_newest_with_older_retail_event(pglite_async_session):
     snap_op = OddsSnapshot(
         event_id=event.id,
         snapshot_time=op_time,
-        raw_data={"bookmakers": op_bookmakers},
+        raw_data={"bookmakers": op_bookmakers, "source": "oddsportal_live"},
         bookmaker_count=len(op_bookmakers),
         fetch_tier="pregame",
         hours_until_commence=1.5,
     )
-    pglite_async_session.add(snap_op)
+    await store_tagged(pglite_async_session, snap_op)
 
     # Newer BFE-only snapshot at T-30min — wins latest-snapshot race
     bfe_time = commence_time - timedelta(minutes=30)
@@ -1253,7 +1251,7 @@ async def bfe_newest_with_older_retail_event(pglite_async_session):
         fetch_tier="pregame",
         hours_until_commence=0.5,
     )
-    pglite_async_session.add(snap_bfe)
+    await store_tagged(pglite_async_session, snap_bfe)
 
     await pglite_async_session.commit()
     await pglite_async_session.refresh(event)
@@ -1396,8 +1394,9 @@ class TestGetCurrentOddsPerBookmakerLookback:
 
         assert snapshot["anchor_snapshot_id"] == snap_bfe.id
         assert snapshot["anchor_created_at"] == snap_bfe.created_at.isoformat()
-        assert snapshot["anchor_fetch_tier"] == snap_bfe.fetch_tier
-        assert snapshot["anchor_hours_until_commence"] == snap_bfe.hours_until_commence
+        assert snapshot["anchor_source"] == "odds_api"
+        assert snapshot["anchor_time_basis"] == "observed"
+        assert snapshot["anchor_hours_until_commence"] == pytest.approx(0.5)
 
     @pytest.mark.asyncio
     async def test_lookback_hours_override_excludes_older_snapshot(
@@ -1428,7 +1427,7 @@ class TestGetCurrentOddsPerBookmakerLookback:
     async def test_per_book_last_update_surfaced(
         self, patch_session_maker, bfe_newest_with_older_retail_event
     ):
-        """Each surfaced row carries ``last_update`` from ``raw_data``."""
+        """Each surfaced row carries ``last_update``."""
         from odds_mcp.server import get_current_odds
 
         event, _snap_op, _snap_bfe, _retail_books = bfe_newest_with_older_retail_event
@@ -1490,7 +1489,7 @@ class TestGetCurrentOddsPerBookmakerLookback:
             fetch_tier="pregame",
             hours_until_commence=3.0,
         )
-        pglite_async_session.add(snapshot)
+        await store_tagged(pglite_async_session, snapshot)
         await pglite_async_session.commit()
         await pglite_async_session.refresh(event)
 
@@ -1506,20 +1505,107 @@ class TestGetCurrentOddsPerBookmakerLookback:
         assert {row["point"] for row in bet365_over} == {2.5, 3.0}
         assert {row["point"] for row in bet365_under} == {2.5, 3.0}
 
-    @pytest.mark.asyncio
-    async def test_include_raw_data_returns_anchor_raw_data(
-        self, patch_session_maker, bfe_newest_with_older_retail_event
-    ):
-        """``include_raw_data=True`` returns the anchor (BFE) snapshot's raw_data."""
+
+@pytest.fixture
+async def mixed_source_event(pglite_async_session):
+    """An event with an Odds API snapshot and a later Polymarket snapshot carrying mid, ask and bid."""
+    session = pglite_async_session
+    kickoff = datetime(2026, 4, 18, 15, 0, tzinfo=UTC)
+    event = make_epl_event("epl_test_mixed", kickoff)
+    session.add(event)
+    api_time = kickoff - timedelta(hours=3)
+    await store_tagged(
+        session,
+        make_tagged_snapshot(
+            event.id,
+            api_time,
+            [
+                three_way_bookmaker("bet365", (2.0, 3.5, 4.0)),
+                three_way_bookmaker("pinnacle", (2.1, 3.4, 3.9)),
+            ],
+            None,
+        ),
+    )
+    pm_time = kickoff - timedelta(hours=2)
+    probabilities = {
+        "yes_probabilities": {"home": 0.5, "draw": 0.25, "away": 0.25},
+        "best_ask": {"home": 0.52, "draw": 0.26, "away": 0.26},
+        "best_bid": {"home": 0.48, "draw": 0.24, "away": 0.24},
+    }
+    await store_tagged(
+        session,
+        make_tagged_snapshot(
+            event.id,
+            pm_time,
+            [three_way_bookmaker("polymarket", (2.0, 4.0, 4.0), polymarket_meta=probabilities)],
+            "polymarket",
+        ),
+    )
+    await session.commit()
+    return event
+
+
+@pytest.mark.asyncio
+class TestGetCurrentOddsSources:
+    async def test_polymarket_price_is_its_mid(self, patch_session_maker, mixed_source_event):
         from odds_mcp.server import get_current_odds
 
-        event, _snap_op, snap_bfe, _retail_books = bfe_newest_with_older_retail_event
+        result = await get_current_odds(event_id=mixed_source_event.id, market="1x2")
 
-        result = await get_current_odds(event_id=event.id, market="1x2", include_raw_data=True)
+        polymarket = {
+            o["outcome_name"]: o["price_decimal"]
+            for o in result["snapshot"]["odds"]
+            if o["bookmaker_key"] == "polymarket"
+        }
+        assert polymarket == pytest.approx({"Arsenal": 2.0, "Draw": 4.0, "Chelsea": 4.0})
+
+    async def test_anchor_names_its_source_and_time_basis(
+        self, patch_session_maker, mixed_source_event
+    ):
+        from odds_mcp.server import get_current_odds
+
+        result = await get_current_odds(event_id=mixed_source_event.id, market="1x2")
+
         snapshot = result["snapshot"]
-        assert snapshot is not None
+        assert snapshot["anchor_source"] == "polymarket"
+        assert snapshot["anchor_time_basis"] == "observed"
+        assert snapshot["anchor_hours_until_commence"] == pytest.approx(2.0)
+        assert {o["bookmaker_key"] for o in snapshot["odds"]} == {
+            "bet365",
+            "pinnacle",
+            "polymarket",
+        }
 
-        assert "raw_data" in snapshot
-        assert snapshot["raw_data"] == snap_bfe.raw_data
-        # The anchor snapshot is BFE-only — raw_data has just one bookmaker
-        assert {bm["key"] for bm in snapshot["raw_data"]["bookmakers"]} == {"betfair_exchange"}
+
+@pytest.mark.asyncio
+class TestGetOddsHistory:
+    async def test_snapshots_carry_source_and_time_basis(
+        self, patch_session_maker, mixed_source_event
+    ):
+        from odds_mcp.server import get_odds_history
+
+        result = await get_odds_history(event_id=mixed_source_event.id, market="1x2")
+
+        assert result["snapshot_count"] == 2
+        assert [(s["source"], s["time_basis"]) for s in result["snapshots"]] == [
+            ("odds_api", "observed"),
+            ("polymarket", "observed"),
+        ]
+        assert [s["hours_until_commence"] for s in result["snapshots"]] == pytest.approx([3.0, 2.0])
+        assert [s["bookmaker_count"] for s in result["snapshots"]] == [2, 1]
+        assert "fetch_tier" not in result["snapshots"][0]
+
+    async def test_other_market_has_no_snapshots(self, patch_session_maker, mixed_source_event):
+        from odds_mcp.server import get_odds_history
+
+        result = await get_odds_history(event_id=mixed_source_event.id, market="totals")
+
+        assert result["snapshot_count"] == 0
+        assert result["snapshots"] == []
+
+    async def test_event_not_found(self, patch_session_maker):
+        from odds_mcp.server import get_odds_history
+
+        result = await get_odds_history(event_id="missing", market="1x2")
+
+        assert "error" in result

@@ -8,7 +8,7 @@ Sport-specific extension to `common.md`. Covers EPL market type, data sources, e
 
 ## Data Sources
 
-**OddsPortal** is the active odds source. Scrapes can create duplicate event IDs for the same match (one from the upcoming page, one from the live/results page). When you see duplicates, always prefer the `op_live_*` event ID — these have UK bookmakers (bet365, betway, betfred) and sharp references (Betfair Exchange). Non-OP events will have missing sharp data.
+**OddsPortal** is the active odds source, with UK bookmakers (bet365, betway, betfred) and sharp references (Betfair Exchange). A match is one event: use the event ID from `get_upcoming_fixtures`, and treat the ID as opaque. Prices from every source are on that event.
 
 **FPL API** (Fantasy Premier League): when available, ownership percentages and weekly transfer volumes are a public-sentiment signal — high ownership or transfer surges indicate casual-money conviction. May not be active.
 

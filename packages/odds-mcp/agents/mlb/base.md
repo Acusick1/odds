@@ -18,7 +18,7 @@ When calling MCP tools, use these MLB parameters:
 
 ## Data Sources
 
-**OddsPortal** is the active odds source. Betfair Exchange is the **sole sharp reference** for MLB — there is no Pinnacle. bet365 is the best retail benchmark. OddsPortal scrapes can create duplicate event IDs for the same game (one from the upcoming page, one from the live/results page). When you see duplicates, always prefer the `op_live_*` event ID — these have UK bookmakers and sharp references.
+**OddsPortal** is the active odds source. Betfair Exchange is the **sole sharp reference** for MLB — there is no Pinnacle. bet365 is the best retail benchmark. A game is one event: use the event ID from `get_upcoming_fixtures`, and treat the ID as opaque. Prices from every source are on that event.
 
 **On-demand research targets** (not exhaustive — use judgment):
 
