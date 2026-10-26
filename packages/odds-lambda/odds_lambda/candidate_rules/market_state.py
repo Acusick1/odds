@@ -2,25 +2,26 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 
-from odds_core.as_of import RETAIL_KINDS, UPPER_BOUND_TIME_KINDS
-from odds_core.betfair_close import (
+from odds_core.as_of import latest_snapshot
+from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS
+from odds_core.exchange_price import (
     EXCHANGE_BOOKMAKER,
     MAX_EXCHANGE_OVERROUND,
     ExchangePrice,
     exchange_price,
 )
-from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS
-from odds_core.market_prices import Outcome, book_prices, market_outcomes, outcome_names
-from odds_core.models import Event, OddsSnapshot
-from odds_core.snapshot_sources import snapshot_kind
-from sqlalchemy import select
+from odds_core.market_prices import Outcome
+from odds_core.models import Event
+from odds_core.quotes import Quote
+from odds_core.vocabulary import Side
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.betfair.constants import SPORT_CONFIG
+from odds_lambda.candidate_rules.inputs import RETAIL_SOURCES, rule_quotes
 
 
 @dataclass(frozen=True)
@@ -52,25 +53,35 @@ def sport_market(sport_key: str) -> str:
     raise ValueError(f"No candidate market defined for sport {sport_key!r}")
 
 
+def _retail(snapshot: Sequence[Quote]) -> dict[str, dict[Outcome, float]]:
+    retail: dict[str, dict[Outcome, float]] = {}
+    for q in snapshot:
+        if q.bookmaker in UK_RETAIL_BOOKMAKERS:
+            retail.setdefault(q.bookmaker, {})[Outcome(q.outcome.value)] = q.price
+    return retail
+
+
+def _co_timed(snapshot: Sequence[Quote]) -> bool:
+    books = {q.bookmaker for q in snapshot}
+    return EXCHANGE_BOOKMAKER in books and bool(books & UK_RETAIL_BOOKMAKERS)
+
+
 def build_market_state(
     event: Event,
-    snapshots: Sequence[OddsSnapshot],
+    quoted: Sequence[Quote],
     decision_time: datetime,
     max_input_age: timedelta,
 ) -> MarketState:
-    """The event's state at ``decision_time`` from one snapshot; later snapshots are ignored.
+    """The event's state at ``decision_time`` from one snapshot's quotes; later ones are ignored.
 
-    The input is the latest retail-kind snapshot at or before t that quotes the market by a
-    UK retail book and by the Betfair Exchange, so both prices were taken together, when it
-    is at most ``max_input_age`` old; otherwise the state has no inputs. Retail is its UK
-    retail books. The exchange price is its devigged Betfair Exchange row, when that prices
-    every outcome with a back overround of at most ``MAX_EXCHANGE_OVERROUND``.
-
-    FDUK opening snapshots (``UPPER_BOUND_TIME_KINDS``) are excluded: their stamp is an
-    upper bound on the prices' time, which a live run at t never sees.
+    The input is the latest snapshot of the state's market from a ``RETAIL_SOURCES`` source,
+    stamped at or before t, whose back prices quote a UK retail book and the Betfair Exchange, so both
+    prices were taken together, when it is at most ``max_input_age`` old; otherwise the state
+    has no inputs. Retail is its UK retail books' back prices. The exchange price is its
+    devigged Betfair Exchange backs, when they price every outcome with an overround of at most
+    ``MAX_EXCHANGE_OVERROUND``.
     """
     market = sport_market(event.sport_key)
-    names = outcome_names(event, market)
     state = MarketState(
         event_id=event.id,
         sport_key=event.sport_key,
@@ -78,33 +89,27 @@ def build_market_state(
         kickoff=event.commence_time,
         decision_time=decision_time,
     )
-    inputs: list[tuple[OddsSnapshot, dict[str, dict[Outcome, float]]]] = []
-    for s in snapshots:
-        kind = snapshot_kind(s.raw_data)
-        if (
-            s.snapshot_time > decision_time
-            or kind not in RETAIL_KINDS
-            or kind in UPPER_BOUND_TIME_KINDS
-        ):
-            continue
-        books = book_prices(s.raw_data, kind, market, names)
-        retail = {book: prices for book, prices in books.items() if book in UK_RETAIL_BOOKMAKERS}
-        if retail and EXCHANGE_BOOKMAKER in books:
-            inputs.append((s, retail))
-    if not inputs:
+    snapshot = latest_snapshot(
+        (
+            q
+            for q in quoted
+            if q.market == market and q.source in RETAIL_SOURCES and q.side is Side.BACK
+        ),
+        decision_time,
+        _co_timed,
+    )
+    if snapshot is None:
         return state
-    snapshot, retail = max(inputs, key=lambda sr: (sr[0].snapshot_time, sr[0].id or 0))
-    if decision_time - snapshot.snapshot_time > max_input_age:
+    snapshot_time = snapshot[0].snapshot_time
+    if decision_time - snapshot_time > max_input_age:
         return state
 
-    exchange = exchange_price(
-        snapshot, snapshot_kind(snapshot.raw_data), market, names, market_outcomes(market)
-    )
+    exchange = exchange_price([q for q in snapshot if q.bookmaker == EXCHANGE_BOOKMAKER], market)
     return replace(
         state,
-        snapshot_id=snapshot.id,
-        snapshot_time=snapshot.snapshot_time,
-        retail=retail,
+        snapshot_id=snapshot[0].snapshot_id,
+        snapshot_time=snapshot_time,
+        retail=_retail(snapshot),
         exchange=(
             exchange
             if exchange is not None and exchange.overround <= MAX_EXCHANGE_OVERROUND
@@ -119,20 +124,24 @@ async def load_market_state(
     decision_time: datetime,
     max_input_age: timedelta,
     known_at: datetime | None = None,
+    snapshot_ids: Collection[int] | None = None,
 ) -> MarketState:
-    """Build the state from one query for the snapshots within ``max_input_age`` before t.
+    """Build the state from the quotes ``rule_quotes`` loads within ``max_input_age`` before t.
 
     With ``known_at``, only snapshots stored (``created_at``) by then count: the data the
     system had when it acted. The live runner passes its run time and the parity check
     passes the decision's recorded ``known_at``. A historical backtest passes ``None``, because
-    backfilled rows were created long after their snapshot time.
+    backfilled rows were created long after their snapshot time. With ``snapshot_ids``, only
+    those snapshots count, whatever event they now belong to: the parity check passes a
+    decision's recorded inputs.
     """
-    conditions = [
-        OddsSnapshot.event_id == event.id,
-        OddsSnapshot.snapshot_time <= decision_time,
-        OddsSnapshot.snapshot_time >= decision_time - max_input_age,
-    ]
-    if known_at is not None:
-        conditions.append(OddsSnapshot.created_at <= known_at)
-    result = await session.execute(select(OddsSnapshot).where(*conditions))
-    return build_market_state(event, list(result.scalars().all()), decision_time, max_input_age)
+    quoted = await rule_quotes(
+        session,
+        event.id,
+        sport_market(event.sport_key),
+        since=decision_time - max_input_age,
+        until=decision_time,
+        known_at=known_at,
+        snapshot_ids=snapshot_ids,
+    )
+    return build_market_state(event, quoted, decision_time, max_input_age)

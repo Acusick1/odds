@@ -2,12 +2,12 @@ name: exchange-gap-epl
 description: Back the longest UK retail price when the Betfair Exchange fair probability times the price minus 1 exceeds 1%, 60 and 30 minutes before kick-off, at most once per outcome
 kind: mechanical
 sport: soccer_epl
-version: 1
+version: 2
 issue: 626
-start_date: 2026-10-27
+start_date: 2026-10-28
 status: active
 rule: exchange_gap
-rule_sha256: ed5e9f5047ba14673c3d0ecb0292173909b290d7f28111d6b2f4fba0e4398f86
+rule_sha256: 943329234588223d669224e97bcc35a31e53c5d62bbe0d64830e88bfaad305e8
 params:
   threshold: 0.01
   minutes_before_kickoff: [60, 30]

@@ -11,7 +11,6 @@ from odds_analytics.candidate_report import (
     Verdict,
     candidate_report,
     checkpoint_at,
-    close_candidate_snapshots,
     family_size_at,
     family_starts,
     judge,
@@ -19,15 +18,21 @@ from odds_analytics.candidate_report import (
     summarize_candidates,
 )
 from odds_cli.main import app
-from odds_core.betfair_close import event_close
+from odds_core.betfair_close import close_quotes, event_close
 from odds_core.candidates import AgentCandidate, CandidateStatus
-from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.models import Event, EventStatus
 from odds_core.paper_trade_models import PaperTrade, TradeResult
-from sqlalchemy import select
+from odds_core.quotes import quotes
 from sqlalchemy.ext.asyncio import AsyncSession
 from typer.testing import CliRunner
 
-from tests.test_helpers import make_epl_event, make_tagged_snapshot, three_way_bookmaker
+from tests.test_helpers import (
+    betfair_exchange_bookmaker,
+    make_epl_event,
+    make_tagged_snapshot,
+    store_tagged,
+    three_way_bookmaker,
+)
 
 N_BOOT = 400
 NOW = datetime(2026, 6, 1, tzinfo=UTC)
@@ -398,18 +403,15 @@ KICKOFF = datetime(2026, 4, 15, 15, 0, tzinfo=UTC)
 CLOSE_PRICES = (2.0, 4.0, 4.0)
 
 
-def _close_snapshot(event_id: str):
-    return make_tagged_snapshot(
-        event_id,
-        KICKOFF - timedelta(minutes=10),
-        [
-            three_way_bookmaker(
-                "betfair_exchange",
-                CLOSE_PRICES,
-                betfair_meta={"inplay": False, "market_status": "OPEN"},
-            )
-        ],
-        "betfair_api",
+async def _store_close(session: AsyncSession, event: Event) -> None:
+    await store_tagged(
+        session,
+        make_tagged_snapshot(
+            event.id,
+            KICKOFF - timedelta(minutes=10),
+            [betfair_exchange_bookmaker(CLOSE_PRICES)],
+            "betfair_api",
+        ),
     )
 
 
@@ -436,7 +438,8 @@ class TestLoadScoredBets:
     @pytest.mark.asyncio
     async def test_report_from_database(self, test_session: AsyncSession) -> None:
         session = test_session
-        session.add(make_epl_event("e1", KICKOFF, status=EventStatus.FINAL))
+        e1 = make_epl_event("e1", KICKOFF, status=EventStatus.FINAL)
+        session.add(e1)
         session.add(make_epl_event("e2", KICKOFF, status=EventStatus.FINAL))
         session.add(
             Event(
@@ -450,7 +453,7 @@ class TestLoadScoredBets:
             )
         )
         await session.flush()
-        session.add(_close_snapshot("e1"))
+        await _store_close(session, e1)
         session.add_all(
             [
                 _paper_trade("e1", 2),
@@ -483,9 +486,10 @@ class TestLoadScoredBets:
         from odds_analytics.candidate_report import load_scored_trades
 
         session = test_session
-        session.add(make_epl_event("e1", KICKOFF, status=EventStatus.FINAL))
+        e1 = make_epl_event("e1", KICKOFF, status=EventStatus.FINAL)
+        session.add(e1)
         await session.flush()
-        session.add(_close_snapshot("e1"))
+        await _store_close(session, e1)
         session.add(_paper_trade("e1", 1))
         session.add(_paper_trade("e1", 2, selection="draw", price_decimal=4.5))
         await session.flush()
@@ -499,57 +503,56 @@ class TestLoadScoredBets:
         assert draw.ev == pytest.approx(0.25 * 4.5 - 1)
 
     @pytest.mark.asyncio
-    async def test_restricted_snapshot_load_gives_the_same_close(
+    async def test_close_quotes_give_the_close_of_all_quotes(
         self, test_session: AsyncSession
     ) -> None:
         session = test_session
-        session.add(make_epl_event("e1", KICKOFF, status=EventStatus.FINAL))
-        session.add(make_epl_event("e2", KICKOFF, status=EventStatus.FINAL))
+        events = [make_epl_event(i, KICKOFF, status=EventStatus.FINAL) for i in ("e1", "e2")]
+        session.add_all(events)
         await session.flush()
+        e1, e2 = events
 
-        def betfair(event_id: str, minutes_before: int, prices: tuple[float, float, float]):
-            return make_tagged_snapshot(
-                event_id,
-                KICKOFF - timedelta(minutes=minutes_before),
-                [three_way_bookmaker("betfair_exchange", prices)],
-                "betfair_api",
+        async def betfair(event: Event, minutes_before: int, prices: tuple[float, float, float]):
+            await store_tagged(
+                session,
+                make_tagged_snapshot(
+                    event.id,
+                    KICKOFF - timedelta(minutes=minutes_before),
+                    [betfair_exchange_bookmaker(prices)],
+                    "betfair_api",
+                ),
             )
 
-        def fduk(event_id: str, basis: str, prices: tuple[float, float, float]):
-            return make_tagged_snapshot(
-                event_id,
-                KICKOFF,
-                [three_way_bookmaker("betfair_exchange", prices)],
-                "football_data_uk",
-                basis,
+        async def fduk(event: Event, basis: str, prices: tuple[float, float, float]):
+            await store_tagged(
+                session,
+                make_tagged_snapshot(
+                    event.id,
+                    KICKOFF - timedelta(hours=3 if basis == "fduk_collection_deadline" else 0),
+                    [three_way_bookmaker("betfair_exchange", prices)],
+                    "football_data_uk",
+                    basis,
+                ),
             )
 
-        session.add_all(
-            [
-                betfair("e1", 300, (3.0, 3.0, 3.0)),
-                betfair("e1", 20, (2.0, 4.0, 4.0)),
-                betfair("e1", 5, (2.1, 3.9, 4.0)),
-                fduk("e1", "fduk_collection_deadline", (2.5, 3.5, 3.5)),
-                fduk("e1", "kickoff", (1.9, 4.0, 4.5)),
-                betfair("e2", 300, (3.0, 3.0, 3.0)),
-                fduk("e2", "fduk_collection_deadline", (2.5, 3.5, 3.5)),
-                fduk("e2", "kickoff", (1.9, 4.0, 4.5)),
-            ]
-        )
+        await betfair(e1, 300, (3.0, 3.0, 3.0))
+        await betfair(e1, 20, (2.0, 4.0, 4.0))
+        await betfair(e1, 5, (2.1, 3.9, 4.0))
+        await fduk(e1, "fduk_collection_deadline", (2.5, 3.5, 3.5))
+        await fduk(e1, "kickoff", (1.9, 4.0, 4.5))
+        await betfair(e2, 300, (3.0, 3.0, 3.0))
+        await fduk(e2, "fduk_collection_deadline", (2.5, 3.5, 3.5))
+        await fduk(e2, "kickoff", (1.9, 4.0, 4.5))
         await session.flush()
 
-        full = (await session.execute(select(OddsSnapshot))).scalars().all()
-        restricted = (await session.execute(close_candidate_snapshots({"e1", "e2"}))).scalars()
-        kept = list(restricted)
-
-        assert len(kept) < len(full)
-        for event_id in ("e1", "e2"):
-            event = await session.get(Event, event_id)
-            assert event is not None
-            expected = event_close(event, [s for s in full if s.event_id == event_id], "1x2")
-            actual = event_close(event, [s for s in kept if s.event_id == event_id], "1x2")
+        restricted = await close_quotes(session, events, "1x2")
+        for event in events:
+            full = await quotes(session, [event.id], "1x2")
+            kept = restricted[event.id]
+            assert len(kept) < len(full)
+            expected = event_close(full, KICKOFF, "1x2")
             assert expected is not None
-            assert actual == expected
+            assert event_close(kept, KICKOFF, "1x2") == expected
 
 
 class TestReportCommand:

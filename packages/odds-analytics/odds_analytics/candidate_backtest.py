@@ -9,15 +9,15 @@ never promote one.
 
 from __future__ import annotations
 
-from collections import defaultdict
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
 
+from odds_core.betfair_close import close_quotes
 from odds_core.candidates import MechanicalCandidate
 from odds_core.market_prices import THREE_WAY_MARKET, Outcome
-from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.models import Event, EventStatus
 from odds_core.odds_math import calculate_profit_from_decimal, determine_h2h_winner
 from odds_lambda.candidate_rules import (
     RULES,
@@ -42,7 +42,6 @@ from odds_analytics.candidate_report import (
     Checkpoint,
     ScoredBet,
     checkpoint_at,
-    close_candidate_snapshots,
     scoreable_prefix,
     selection_close_probability,
     summarize_candidate,
@@ -131,15 +130,6 @@ async def final_events(session: AsyncSession, sport: str, start: date, end: date
     return await canonical_events(session, result.scalars().all())
 
 
-async def _close_snapshots(
-    session: AsyncSession, event_ids: set[str]
-) -> dict[str, list[OddsSnapshot]]:
-    snapshots: dict[str, list[OddsSnapshot]] = defaultdict(list)
-    for snapshot in (await session.execute(close_candidate_snapshots(event_ids))).scalars():
-        snapshots[snapshot.event_id].append(snapshot)
-    return snapshots
-
-
 @dataclass
 class _Counts:
     decisions: int = 0
@@ -177,9 +167,9 @@ async def _decide(
                 decided.append((event, t, state.market, intents))
 
         has_close = {
-            e.id for e, _, market, intents in decided if intents and market == THREE_WAY_MARKET
+            e.id: e for e, _, market, intents in decided if intents and market == THREE_WAY_MARKET
         }
-        snapshots = await _close_snapshots(session, has_close) if has_close else {}
+        closes = await close_quotes(session, list(has_close.values()), THREE_WAY_MARKET)
         for event, t, market, intents in decided:
             assert event.home_score is not None and event.away_score is not None  # noqa: S101
             winner = determine_h2h_winner(event.home_score, event.away_score)
@@ -197,13 +187,11 @@ async def _decide(
                         ),
                         price_decimal=intent.price_decimal,
                         p_close=selection_close_probability(
-                            market, selection, event, snapshots.get(event.id, [])
+                            market, selection, event, closes.get(event.id, [])
                         ),
                         placed_at=t,
                     )
                 )
-        # Read-only session: drop the loaded snapshots rather than hold the whole range.
-        session.expunge_all()
     return bets
 
 

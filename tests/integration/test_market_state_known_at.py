@@ -7,7 +7,13 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from odds_lambda.candidate_rules import load_market_state
 
-from tests.test_helpers import make_epl_event, make_tagged_snapshot, three_way_bookmaker
+from tests.test_helpers import (
+    betfair_exchange_bookmaker,
+    make_epl_event,
+    make_tagged_snapshot,
+    store_tagged,
+    three_way_bookmaker,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -16,7 +22,7 @@ T = KICKOFF - timedelta(hours=1)
 MAX_AGE = timedelta(minutes=15)
 BOOKS = [
     three_way_bookmaker("bet365", (2.0, 3.0, 4.0)),
-    three_way_bookmaker("betfair_exchange", (2.0, 4.0, 4.0)),
+    betfair_exchange_bookmaker((2.0, 4.0, 4.0)),
 ]
 
 
@@ -26,13 +32,14 @@ class TestLookback:
     ) -> None:
         event = make_epl_event("evt", KICKOFF)
         pglite_async_session.add(event)
-        pglite_async_session.add(
+        await store_tagged(
+            pglite_async_session,
             make_tagged_snapshot(
                 event.id,
                 T - MAX_AGE - timedelta(seconds=1),
                 BOOKS,
                 "oddsportal_live",
-            )
+            ),
         )
         await pglite_async_session.commit()
 
@@ -53,7 +60,7 @@ class TestKnownAt:
             "oddsportal_live",
         )
         late.created_at = T + timedelta(minutes=5)
-        session.add(late)
+        await store_tagged(session, late)
         await session.commit()
         return event
 

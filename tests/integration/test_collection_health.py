@@ -34,6 +34,8 @@ from odds_lambda.jobs import (
 from odds_lambda.scheduling.decision import ScheduleDecision
 from odds_lambda.scheduling.jobs import JobContext
 
+from tests.test_helpers import store_tagged
+
 NOW = datetime(2026, 10, 19, 12, 0, tzinfo=UTC)
 OP = SnapshotSource.ODDSPORTAL_LIVE
 BETFAIR = SnapshotSource.BETFAIR_API
@@ -582,20 +584,21 @@ class TestCheckMissingBetfairCloses:
         return HealthMonitor(session, cls._settings())
 
     @staticmethod
-    def _betfair(inplay: bool = False, outcomes: int = 3) -> dict[str, Any]:
-        names = ("Home FC", "Draw", "Away FC")[:outcomes]
+    def _betfair(
+        inplay: bool = False, outcomes: int = 3, prices: tuple[float, ...] = (2.0, 4.0, 4.0)
+    ) -> dict[str, Any]:
+        names = ("Home FC", "The Draw", "Away FC")[:outcomes]
+        runners = [
+            {"runner_name": name, "best_back": price}
+            for name, price in zip(names, prices, strict=False)
+        ]
         return {
             "source": BETFAIR.value,
             "bookmakers": [
                 {
                     "key": "betfair_exchange",
-                    "betfair_meta": {"inplay": inplay},
-                    "markets": [
-                        {
-                            "key": "1x2",
-                            "outcomes": [{"name": name, "price_decimal": 2.5} for name in names],
-                        }
-                    ],
+                    "betfair_meta": {"inplay": inplay, "runners": runners},
+                    "markets": [{"key": "1x2", "outcomes": []}],
                 }
             ],
         }
@@ -625,13 +628,14 @@ class TestCheckMissingBetfairCloses:
             )
             await pglite_async_session.flush()
             for taken, raw_data in snapshots:
-                pglite_async_session.add(
+                await store_tagged(
+                    pglite_async_session,
                     OddsSnapshot(
                         event_id=event_id,
                         snapshot_time=taken,
                         raw_data=raw_data,
                         bookmaker_count=1,
-                    )
+                    ),
                 )
             await pglite_async_session.commit()
             return event_id
@@ -726,6 +730,21 @@ class TestCheckMissingBetfairCloses:
         )
 
         assert await self._monitor(pglite_async_session).check_missing_betfair_closes(NOW) == []
+
+    async def test_snapshot_wider_than_the_overround_cap_is_not_a_close(
+        self, pglite_async_session: Any, seed_event: Callable[..., Any]
+    ) -> None:
+        await seed_event(
+            self.KICKOFF,
+            (
+                self._earlier_betfair(self.KICKOFF),
+                (self.KICKOFF - timedelta(minutes=10), self._betfair(prices=(2.5, 2.5, 2.5))),
+            ),
+        )
+
+        missing = await self._monitor(pglite_async_session).check_missing_betfair_closes(NOW)
+
+        assert len(missing) == 1
 
     async def test_snapshot_without_every_outcome_is_not_a_close(
         self, pglite_async_session: Any, seed_event: Callable[..., Any]

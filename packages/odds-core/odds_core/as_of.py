@@ -1,32 +1,30 @@
-"""Which stored prices count as known at a decision time t."""
+"""Which stored quotes count as known at a decision time t."""
 
 from __future__ import annotations
 
-import bisect
-from datetime import datetime, timedelta
+from collections.abc import Callable, Iterable, Sequence
+from datetime import datetime
 
-from odds_core.snapshot_sources import SnapshotKind
-
-MAX_EXCHANGE_AGE = timedelta(hours=2)
-
-RETAIL_KINDS: frozenset[SnapshotKind] = frozenset(
-    {
-        SnapshotKind.ODDS_API,
-        SnapshotKind.ODDSPORTAL,
-        SnapshotKind.ODDSPORTAL_LIVE,
-        SnapshotKind.FDUK_OPENING,
-    }
-)
-# Stamped at FDUK's latest documented collection time, an upper bound on when the price was taken.
-UPPER_BOUND_TIME_KINDS: frozenset[SnapshotKind] = frozenset({SnapshotKind.FDUK_OPENING})
-EXCHANGE_AT_T_KINDS: frozenset[SnapshotKind] = frozenset(
-    {SnapshotKind.BETFAIR_LIVE, SnapshotKind.FDUK_OPENING}
-)
+from odds_core.quotes import Quote
 
 
-def latest_at_or_before(times: list[datetime], at: datetime, max_age: timedelta) -> int | None:
-    """Index of the last of the sorted ``times`` that is <= ``at`` and at most ``max_age`` older."""
-    idx = bisect.bisect_right(times, at) - 1
-    if idx < 0 or at - times[idx] > max_age:
-        return None
-    return idx
+def by_snapshot(quoted: Iterable[Quote]) -> list[list[Quote]]:
+    """Quotes grouped by snapshot, in snapshot time then id order."""
+    groups: dict[int, list[Quote]] = {}
+    for quote in quoted:
+        groups.setdefault(quote.snapshot_id, []).append(quote)
+    return sorted(groups.values(), key=lambda g: (g[0].snapshot_time, g[0].snapshot_id))
+
+
+def latest_snapshot(
+    quoted: Iterable[Quote],
+    at: datetime,
+    accept: Callable[[Sequence[Quote]], bool] = lambda _: True,
+) -> list[Quote] | None:
+    """The quotes of the latest snapshot stamped at or before ``at`` whose quotes ``accept``
+    takes, as a whole; a tie in time goes to the higher snapshot id. None when there is none."""
+    chosen: list[Quote] | None = None
+    for group in by_snapshot(q for q in quoted if q.snapshot_time <= at):
+        if accept(group):
+            chosen = group
+    return chosen

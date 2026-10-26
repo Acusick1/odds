@@ -33,7 +33,12 @@ from odds_lambda.scheduling.jobs import JobContext
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from tests.test_helpers import make_epl_event, make_tagged_snapshot, three_way_bookmaker
+from tests.test_helpers import (
+    make_epl_event,
+    make_tagged_snapshot,
+    store_tagged,
+    three_way_bookmaker,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -112,7 +117,7 @@ async def add_event(
         "oddsportal_live",
     )
     snapshot.created_at = NOW - timedelta(hours=1)
-    session.add(snapshot)
+    await store_tagged(session, snapshot)
     await session.commit()
 
 
@@ -274,13 +279,14 @@ class TestDecisions:
         await add_event(pglite_async_session, "op_live_e1", DUE)
         await add_event(pglite_async_session, "api1", DUE - timedelta(minutes=5))
         for event_id in ("op_live_e1", "api1"):
-            pglite_async_session.add(
+            await store_tagged(
+                pglite_async_session,
                 make_tagged_snapshot(
                     event_id,
                     NOW - timedelta(minutes=30),
                     [three_way_bookmaker("bet365", (2.0, 3.4, 4.0)), EXCHANGE_ROW],
                     "oddsportal_live",
-                )
+                ),
             )
         await pglite_async_session.commit()
 
@@ -389,7 +395,7 @@ class TestSeveralDecisionTimes:
             "oddsportal_live",
         )
         later.created_at = NOW - timedelta(minutes=5)
-        pglite_async_session.add(later)
+        await store_tagged(pglite_async_session, later)
         await pglite_async_session.commit()
 
         await run(pglite_async_session, self.EARLY_RUN)

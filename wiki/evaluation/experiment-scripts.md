@@ -42,7 +42,7 @@ A results directory holds CSV tables, a `summary.json` and, for the retail-EV ev
 
 | Script | Subject | Page |
 |---|---|---|
-| `retail_ev_target_report` | Row counts (events selected by close) by season, source, horizon bucket and book for the retail-EV target (the season and horizon bucket are properties of each row's `odds_analytics.retail_ev.RetailEvInput`), with the baseline's weighted MSE; trains no model | [CLV and the training target](../modelling/clv-target.md#the-retail-ev-target) |
+| `retail_ev_target_report` | Row counts (events selected by close) by season, retail source, close source (the source the close is stored under), horizon bucket and book for the retail-EV target (the season and horizon bucket are properties of each row's `odds_analytics.retail_ev.RetailEvInput`), with the baseline's weighted MSE; trains no model | [CLV and the training target](../modelling/clv-target.md#the-retail-ev-target) |
 | `retail_ev_exchange_overround` | Gap between the exchange price at t and the close by back overround, and three policies for wide exchange books | none |
 | `retail_ev_price_only` | Price-only XGBoost on the retail-EV target, direct and residual arms over two seeds, against the martingale baseline and a constant shrinkage | [Price-only models on the retail-EV target](exp-epl-retail-ev-price-only.md) |
 | `retail_ev_weight_scale` | Mean loss weight per event and the events a frozen `min_child_weight` stands for, under the fixed scale and under mean-one rescaling, and the frozen residual trial refitted under each weighting | [Price-only rerun](exp-epl-retail-ev-price-only.md#rerun-with-the-pipeline-residual-arm-and-a-fixed-weight-scale) |

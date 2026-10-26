@@ -19,8 +19,10 @@ from tests.test_helpers import (
     API_EVENT_ID,
     TWIN_EVENT_ID,
     TWIN_KICKOFF,
+    betfair_exchange_bookmaker,
     make_epl_event,
     make_tagged_snapshot,
+    store_tagged,
     three_way_bookmaker,
 )
 
@@ -55,12 +57,7 @@ def candidate(**overrides: Any) -> MechanicalCandidate:
 
 
 def betfair(prices: tuple[float, float, float], **teams: str) -> dict[str, Any]:
-    return three_way_bookmaker(
-        "betfair_exchange",
-        prices,
-        betfair_meta={"inplay": False, "market_status": "OPEN"},
-        **teams,
-    )
+    return betfair_exchange_bookmaker(prices, **teams)
 
 
 async def add_event(
@@ -93,16 +90,18 @@ async def add_event(
         *([betfair(exchange, **teams)] if exchange is not None else []),
     ]
     if books:
-        session.add(
+        await store_tagged(
+            session,
             make_tagged_snapshot(
                 event_id, t - timedelta(minutes=5) + snapshot_offset, books, "oddsportal_live"
-            )
+            ),
         )
     if close is not None:
-        session.add(
+        await store_tagged(
+            session,
             make_tagged_snapshot(
                 event_id, kickoff - timedelta(minutes=2), [betfair(close, **teams)], "betfair_api"
-            )
+            ),
         )
     await session.commit()
 
@@ -158,13 +157,14 @@ class TestReplay:
     ) -> None:
         await add_event(pglite_async_session, "e1")
         # Inputs at both decision times, each with the home edge.
-        pglite_async_session.add(
+        await store_tagged(
+            pglite_async_session,
             make_tagged_snapshot(
                 "e1",
                 KICKOFF - timedelta(minutes=95),
                 [three_way_bookmaker("bet365", RETAIL), betfair(EXCHANGE)],
                 "oddsportal_live",
-            )
+            ),
         )
         await pglite_async_session.commit()
         two_times = candidate(
@@ -488,14 +488,15 @@ class TestModelReplay:
         for i in range(5):
             kickoff = KICKOFF + i * WEEK
             await add_event(pglite_async_session, f"m{i}", kickoff, away_team=f"T{i}", close=None)
-            pglite_async_session.add(
+            await store_tagged(
+                pglite_async_session,
                 make_tagged_snapshot(
                     f"m{i}",
                     kickoff,
                     [betfair(EXCHANGE, home_team="Arsenal", away_team=f"T{i}")],
                     "football_data_uk",
                     FdukTimeBasis.KICKOFF,
-                )
+                ),
             )
         await pglite_async_session.commit()
 

@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import inspect
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
-from odds_core.betfair_close import ExchangePrice
 from odds_core.candidates import MechanicalCandidate, candidates_dir, load_candidates
+from odds_core.exchange_price import ExchangePrice
 from odds_core.market_prices import Outcome
-from odds_core.models import OddsSnapshot
-from odds_core.snapshot_sources import FdukTimeBasis, SnapshotKind
+from odds_core.quotes import Quote
+from odds_core.snapshot_sources import FdukTimeBasis
+from odds_core.vocabulary import Side, Source, TimeBasis
 from odds_lambda.candidate_rules import (
     RULES,
     BetIntent,
@@ -33,7 +35,12 @@ from odds_lambda.candidate_rules import (
 )
 from pydantic import ValidationError
 
-from tests.test_helpers import make_epl_event, make_tagged_snapshot, three_way_bookmaker
+from tests.test_helpers import (
+    betfair_exchange_bookmaker,
+    make_epl_event,
+    make_quotes,
+    three_way_bookmaker,
+)
 
 KICKOFF = datetime(2026, 11, 7, 15, 0, tzinfo=UTC)
 T = KICKOFF - timedelta(hours=1)
@@ -43,21 +50,33 @@ MAX_AGE = timedelta(minutes=10)
 
 
 def _betfair(prices: tuple[float, float, float], inplay: bool = False) -> dict[str, Any]:
-    return three_way_bookmaker(
-        "betfair_exchange", prices, betfair_meta={"inplay": inplay, "market_status": "OPEN"}
-    )
+    return betfair_exchange_bookmaker(prices, inplay=inplay)
+
+
+_ids = iter(range(1, 10_000))
 
 
 def _snap(
-    minutes_before_t: float, *books: dict[str, Any], source: str | None = "oddsportal_live"
-) -> OddsSnapshot:
-    return make_tagged_snapshot(
-        EVENT.id, T - timedelta(minutes=minutes_before_t), list(books), source
+    minutes_before_t: float,
+    *books: dict[str, Any],
+    source: str | None = "oddsportal_live",
+    snapshot_id: int | None = None,
+) -> list[Quote]:
+    return make_quotes(
+        EVENT,
+        snapshot_id or next(_ids),
+        T - timedelta(minutes=minutes_before_t),
+        list(books),
+        source,
     )
 
 
-def _state(snapshots: list[OddsSnapshot]) -> MarketState:
-    return build_market_state(EVENT, snapshots, T, MAX_AGE)
+def _time(snapshot: list[Quote]) -> datetime:
+    return snapshot[0].snapshot_time
+
+
+def _state(snapshots: list[list[Quote]]) -> MarketState:
+    return build_market_state(EVENT, [q for s in snapshots for q in s], T, MAX_AGE)
 
 
 BET365 = three_way_bookmaker("bet365", (2.0, 3.0, 4.0))
@@ -77,15 +96,14 @@ class TestBuildMarketState:
         assert build_market_state(event, [], T, MAX_AGE).market == "h2h"
 
     def test_retail_and_exchange_come_from_one_snapshot(self) -> None:
-        snapshot = _snap(3, BET365, _betfair((2.0, 4.0, 4.0)))
-        snapshot.id = 7
+        snapshot = _snap(3, BET365, _betfair((2.0, 4.0, 4.0)), snapshot_id=7)
         state = _state([snapshot])
         assert state.has_input
-        assert (state.snapshot_id, state.snapshot_time) == (7, snapshot.snapshot_time)
+        assert (state.snapshot_id, state.snapshot_time) == (7, _time(snapshot))
         assert state.retail == {"bet365": {HOME: 2.0, DRAW: 3.0, AWAY: 4.0}}
         assert state.exchange is not None
-        assert state.exchange.kind is SnapshotKind.ODDSPORTAL_LIVE
-        assert state.exchange.time == snapshot.snapshot_time
+        assert state.exchange.source is Source.ODDSPORTAL
+        assert state.exchange.time == _time(snapshot)
         assert sum(state.exchange.fair.values()) == pytest.approx(1.0)
         assert state.exchange.fair[HOME] == pytest.approx(0.5)
 
@@ -100,8 +118,27 @@ class TestBuildMarketState:
         old = _snap(8, BET365, _betfair((2.0, 4.0, 4.0)))
         new = _snap(2, three_way_bookmaker("betway", (2.2, 3.2, 4.2)), _betfair((2.1, 4.0, 3.8)))
         state = _state([new, old])
-        assert state.snapshot_time == new.snapshot_time
+        assert state.snapshot_time == _time(new)
         assert set(state.retail) == {"betway"}
+
+    def test_a_tie_in_time_goes_to_the_higher_snapshot_id(self) -> None:
+        low = _snap(2, BET365, _betfair((2.0, 4.0, 4.0)), snapshot_id=5000)
+        high = _snap(
+            2,
+            three_way_bookmaker("betway", (2.2, 3.2, 4.2)),
+            _betfair((2.0, 4.0, 4.0)),
+            source=None,
+            snapshot_id=5001,
+        )
+        state = _state([high, low])
+        assert state.snapshot_id == 5001 and set(state.retail) == {"betway"}
+
+    def test_lay_prices_are_not_read(self) -> None:
+        [snapshot] = [_snap(2, BET365, _betfair((2.0, 4.0, 4.0)))]
+        lays = [replace(q, side=Side.LAY, price=q.price + 1) for q in snapshot]
+        state = _state([snapshot, lays])
+        assert state.retail == {"bet365": {HOME: 2.0, DRAW: 3.0, AWAY: 4.0}}
+        assert state.exchange is not None and state.exchange.fair[HOME] == pytest.approx(0.5)
 
     def test_a_later_snapshot_of_another_market_is_skipped(self) -> None:
         one_x_two = _snap(5, BET365, _betfair((2.0, 4.0, 4.0)))
@@ -120,7 +157,7 @@ class TestBuildMarketState:
                 ],
             },
         )
-        assert _state([one_x_two, totals]).snapshot_time == one_x_two.snapshot_time
+        assert _state([one_x_two, totals]).snapshot_time == _time(one_x_two)
 
     def test_snapshot_at_the_max_age_counts(self) -> None:
         assert _state([_snap(10, BET365, _betfair((2.0, 4.0, 4.0)))]).has_input
@@ -131,18 +168,19 @@ class TestBuildMarketState:
         assert state.retail == {} and state.exchange is None
 
     @pytest.mark.parametrize(
-        ("source", "kind"),
+        ("source", "shape"),
         [
-            (None, SnapshotKind.ODDS_API),
-            ("oddsportal", SnapshotKind.ODDSPORTAL),
-            ("oddsportal_live", SnapshotKind.ODDSPORTAL_LIVE),
+            (None, (Source.ODDS_API, TimeBasis.OBSERVED)),
+            ("oddsportal", (Source.ODDSPORTAL, TimeBasis.SOURCE_STAMPED)),
+            ("oddsportal_live", (Source.ODDSPORTAL, TimeBasis.OBSERVED)),
         ],
     )
-    def test_any_retail_kind_with_both_prices_is_an_input(
-        self, source: str | None, kind: SnapshotKind
+    def test_any_retail_source_with_both_prices_is_an_input(
+        self, source: str | None, shape: tuple[Source, TimeBasis]
     ) -> None:
         state = _state([_snap(2, BET365, _betfair((2.0, 4.0, 4.0)), source=source)])
-        assert state.has_input and state.exchange is not None and state.exchange.kind is kind
+        assert state.has_input and state.exchange is not None
+        assert (state.exchange.source, state.exchange.time_basis) == shape
 
     def test_odds_api_exchange_alias_is_the_exchange(self) -> None:
         exchange = three_way_bookmaker("betfair_ex_uk", (2.0, 4.0, 4.0))
@@ -155,8 +193,9 @@ class TestBuildMarketState:
         ).has_input
 
     def test_fduk_opening_is_not_an_input(self) -> None:
-        snapshot = make_tagged_snapshot(
-            EVENT.id,
+        snapshot = make_quotes(
+            EVENT,
+            next(_ids),
             T - timedelta(minutes=2),
             [_betfair((2.0, 4.0, 4.0)), BET365],
             "football_data_uk",
@@ -168,7 +207,7 @@ class TestBuildMarketState:
         both = _snap(6, BET365, _betfair((2.0, 4.0, 4.0)))
         retail_only = _snap(2, three_way_bookmaker("betway", (2.2, 3.2, 4.2)), source=None)
         state = _state([both, retail_only])
-        assert state.snapshot_time == both.snapshot_time and set(state.retail) == {"bet365"}
+        assert state.snapshot_time == _time(both) and set(state.retail) == {"bet365"}
 
     def test_snapshot_without_retail_is_skipped(self) -> None:
         assert not _state([_snap(2, _betfair((2.0, 4.0, 4.0)))]).has_input
@@ -190,13 +229,15 @@ class TestBuildMarketState:
         tight = _snap(6, BET365, _betfair((2.0, 4.0, 4.0)))
         wide = _snap(2, BET365, _betfair((1.8, 3.5, 3.5)))
         state = _state([tight, wide])
-        assert state.snapshot_time == wide.snapshot_time and state.exchange is None
+        assert state.snapshot_time == _time(wide) and state.exchange is None
 
 
 def _exchange(home: float, draw: float, away: float) -> ExchangePrice:
     return ExchangePrice(
         time=T,
-        kind=SnapshotKind.ODDSPORTAL_LIVE,
+        source=Source.ODDSPORTAL,
+        time_basis=TimeBasis.OBSERVED,
+        in_play=False,
         fair={HOME: home, DRAW: draw, AWAY: away},
         overround=0.0,
     )
@@ -509,11 +550,11 @@ class TestRuleSha256:
             "odds_lambda.candidate_rules.rules.exchange_gap",
             "odds_lambda.candidate_rules.rules.ExchangeGapParams",
             "odds_lambda.candidate_rules.rules.RuleParams",
+            "odds_lambda.candidate_rules.rules.apply_rule",
+            "odds_lambda.candidate_rules.inputs",
             "odds_lambda.candidate_rules.market_state",
             "odds_core.as_of",
-            "odds_core.betfair_close.exchange_price",
-            "odds_core.market_prices.book_prices",
-            "odds_core.bookmakers.canonical_bookmaker_key",
+            "odds_core.exchange_price",
         ],
     )
     def test_covers_the_code_that_picks_the_inputs(
@@ -535,19 +576,20 @@ class TestRuleSha256:
         monkeypatch.setattr(inspect, "getsource", fake)
         assert rule_sha256("exchange_gap") != before
 
-    @pytest.mark.parametrize(
-        ("module", "name", "value"),
-        [
-            ("odds_core.bookmakers", "UK_RETAIL_BOOKMAKERS", frozenset({"bet365"})),
-            ("odds_core.bookmakers", "BOOKMAKER_ALIASES", {}),
-            ("odds_core.betfair_close", "MAX_EXCHANGE_OVERROUND", 0.1),
-        ],
-    )
-    def test_covers_the_constants_that_pick_the_inputs(
-        self, monkeypatch: pytest.MonkeyPatch, module: str, name: str, value: object
-    ) -> None:
+    def test_does_not_cover_the_shared_quote_reader(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        real = inspect.getsource
+
+        def fake(obj: Any) -> str:
+            changed = inspect.ismodule(obj) and obj.__name__ == "odds_core.quotes"
+            return real(obj) + ("# changed" if changed else "")
+
         before = rule_sha256("exchange_gap")
-        monkeypatch.setattr(f"{module}.{name}", value)
+        monkeypatch.setattr(inspect, "getsource", fake)
+        assert rule_sha256("exchange_gap") == before
+
+    def test_covers_the_uk_retail_roster(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        before = rule_sha256("exchange_gap")
+        monkeypatch.setattr("odds_core.bookmakers.UK_RETAIL_BOOKMAKERS", frozenset({"bet365"}))
         assert rule_sha256("exchange_gap") != before
 
     @pytest.mark.parametrize(
@@ -560,6 +602,7 @@ class TestRuleSha256:
             "odds_analytics.retail_ev",
             "odds_analytics.xgboost_line_movement",
             "odds_core.betfair_close",
+            "odds_analytics.retail_ev_metrics",
         ],
     )
     def test_model_rule_covers_the_code_that_fits_and_queries_the_model(

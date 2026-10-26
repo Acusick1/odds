@@ -28,7 +28,7 @@ from odds_lambda.candidate_rules import (
     RuleParams,
     RuleSpec,
     apply_rule,
-    build_market_state,
+    load_market_state,
     max_input_age,
     resolve_rule,
     run_rule,
@@ -105,14 +105,16 @@ async def _recorded_inputs(
 ) -> tuple[list[BetIntent], tuple[int, ...]]:
     """The bets from the decision's recorded snapshots, and the recorded ids not found."""
     ids = list(decision.input_snapshot_ids)
-    snapshots: list[OddsSnapshot] = []
+    found: set[int] = set()
     if ids:
         rows = await session.execute(
-            select(OddsSnapshot).where(OddsSnapshot.id.in_(ids))  # type: ignore[union-attr]
+            select(OddsSnapshot.id).where(OddsSnapshot.id.in_(ids))  # type: ignore[union-attr]
         )
-        snapshots = list(rows.scalars().all())
-    missing = tuple(sorted(set(ids) - {s.id for s in snapshots}))
-    state = build_market_state(event, snapshots, decision.decision_time, max_input_age(params))
+        found = set(rows.scalars().all())  # type: ignore[arg-type]
+    missing = tuple(sorted(set(ids) - found))
+    state = await load_market_state(
+        session, event, decision.decision_time, max_input_age(params), snapshot_ids=ids
+    )
     _, intents = apply_rule(spec, params, state, decision.kickoff_at_decision, bet_outcomes)
     return intents, missing
 

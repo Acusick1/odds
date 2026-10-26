@@ -18,7 +18,12 @@ from tests.integration.test_candidate_backtest import (
     candidate,
     model_candidate,
 )
-from tests.test_helpers import make_epl_event, make_tagged_snapshot, three_way_bookmaker
+from tests.test_helpers import (
+    make_epl_event,
+    make_tagged_snapshot,
+    store_tagged,
+    three_way_bookmaker,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -45,7 +50,7 @@ async def add_event(
         "oddsportal_live",
     )
     snapshot.created_at = KNOWN_AT - timedelta(hours=1)
-    session.add(snapshot)
+    await store_tagged(session, snapshot)
     if late_retail is not None:
         late = make_tagged_snapshot(
             "e1",
@@ -54,7 +59,7 @@ async def add_event(
             "oddsportal_live",
         )
         late.created_at = KNOWN_AT + late_stored
-        session.add(late)
+        await store_tagged(session, late)
     await session.commit()
     assert snapshot.id is not None
     return [snapshot.id]
@@ -205,7 +210,7 @@ class TestCheckParity:
             "oddsportal_live",
         )
         early.created_at = early_time - timedelta(minutes=4)
-        pglite_async_session.add(early)
+        await store_tagged(pglite_async_session, early)
         await pglite_async_session.commit()
         assert early.id is not None
         await add_decision(
@@ -265,7 +270,7 @@ class TestCheckParity:
             "oddsportal_live",
         )
         snapshot.created_at = KICKOFF - timedelta(minutes=94)
-        pglite_async_session.add(snapshot)
+        await store_tagged(pglite_async_session, snapshot)
         await pglite_async_session.commit()
         assert snapshot.id is not None
         await add_decision(

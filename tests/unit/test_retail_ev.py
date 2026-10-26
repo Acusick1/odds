@@ -26,6 +26,7 @@ from odds_core.market_prices import Outcome, market_outcomes
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.odds_math import devig_probabilities
 from odds_core.snapshot_sources import FdukTimeBasis, SnapshotKind, snapshot_kind
+from odds_core.vocabulary import Source, TimeBasis
 
 from tests.test_helpers import make_epl_event, make_tagged_snapshot, three_way_bookmaker
 
@@ -235,7 +236,9 @@ class TestBuildEventRows:
         self, event: Event, snapshots: list[OddsSnapshot]
     ) -> None:
         rows, _ = build_event_rows(event, snapshots, "1x2")
-        assert {r.close.kind for r in rows} == {SnapshotKind.BETFAIR_LIVE}
+        assert {(r.close.source, r.close.time_basis) for r in rows} == {
+            (Source.BETFAIR, TimeBasis.OBSERVED)
+        }
         assert rows[0].close.fair == pytest.approx(_fair(LIVE_CLOSE))
 
     def test_fduk_close_without_live_close_in_window(
@@ -244,7 +247,9 @@ class TestBuildEventRows:
         early_close = _live("betfair_api", 40, _betfair(LIVE_CLOSE))
         kept = [s for s in snapshots if s.snapshot_time != KICKOFF - timedelta(minutes=10)]
         rows, _ = build_event_rows(event, [*kept, early_close], "1x2")
-        assert {r.close.kind for r in rows} == {SnapshotKind.FDUK_CLOSING}
+        assert {(r.close.source, r.close.time_basis) for r in rows} == {
+            (Source.FOOTBALL_DATA_UK, TimeBasis.CLOSE)
+        }
         assert rows[0].close.fair == pytest.approx(_fair(FDUK_CLOSE))
         assert rows[0].close.time == KICKOFF
 
@@ -270,7 +275,10 @@ class TestBuildEventRows:
             and r.book == "bet365"
             and r.outcome is Outcome.HOME
         )
-        assert row.exchange.kind is SnapshotKind.BETFAIR_LIVE
+        assert (row.exchange.source, row.exchange.time_basis) == (
+            Source.BETFAIR,
+            TimeBasis.OBSERVED,
+        )
         assert row.exchange_age_hours == pytest.approx(1.0)
         assert row.target == pytest.approx(_fair(LIVE_CLOSE)[Outcome.HOME] * 2.05 - 1)
         assert row.baseline == pytest.approx(_fair(LIVE_BFE)[Outcome.HOME] * 2.05 - 1)
@@ -280,7 +288,9 @@ class TestBuildEventRows:
     ) -> None:
         rows, _ = build_event_rows(event, snapshots, "1x2")
         fduk = [r for r in rows if r.retail_kind is SnapshotKind.FDUK_OPENING]
-        assert {r.exchange.kind for r in fduk} == {SnapshotKind.FDUK_OPENING}
+        assert {(r.exchange.source, r.exchange.time_basis) for r in fduk} == {
+            (Source.FOOTBALL_DATA_UK, TimeBasis.UPPER_BOUND)
+        }
         assert fduk[0].exchange.fair == pytest.approx(_fair(FDUK_OPEN_BFE))
 
     def test_stale_exchange_price_is_dropped(self, event: Event) -> None:
@@ -503,7 +513,10 @@ class TestDynamics:
         ]
         rows, _ = build_event_rows(event, [*rich_snapshots, *live_near_fduk], "1x2")
         row = _row(rows, 42 * 60, "bet365", Outcome.HOME)
-        assert row.exchange.kind is SnapshotKind.BETFAIR_LIVE
+        assert (row.exchange.source, row.exchange.time_basis) == (
+            Source.BETFAIR,
+            TimeBasis.OBSERVED,
+        )
         assert row.dynamics.exchange_moves == (None, None, None), (
             "the FDUK opening price lies within the cap of t - 6h but is another source"
         )

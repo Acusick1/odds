@@ -9,9 +9,10 @@ from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from functools import partial
+from types import ModuleType
 from typing import Any, Literal
 
-from odds_core import as_of, betfair_close, bookmakers, market_prices
+from odds_core import as_of, bookmakers, exchange_price
 from odds_core.candidates import Candidate, CandidateStatus, MechanicalCandidate
 from odds_core.market_prices import Outcome, market_outcomes
 from odds_core.models import Event
@@ -27,7 +28,7 @@ from pydantic import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_lambda.candidate_rules import market_state
+from odds_lambda.candidate_rules import inputs, market_state
 from odds_lambda.candidate_rules.market_state import MarketState, load_market_state, sport_market
 
 
@@ -93,26 +94,14 @@ def exchange_gap(state: MarketState, params: ExchangeGapParams) -> list[BetInten
     return bets
 
 
-# Code outside this package that decides which prices a market state holds.
-RULE_INPUT_FUNCTIONS: tuple[Callable[..., Any], ...] = (
-    betfair_close.exchange_price,
-    betfair_close.complete_exchange_prices,
-    betfair_close.devig,
-    betfair_close.overround,
-    market_prices.book_prices,
-    bookmakers.canonical_bookmaker_key,
-)
+# The modules that load a market state's quotes, pick them as of t and price the exchange.
+RULE_INPUT_MODULES: tuple[ModuleType, ...] = (inputs, market_state, as_of, exchange_price)
 
 
 def rule_input_constants() -> list[tuple[str, str]]:
-    """The values, in a fixed order and a stable text form, that pick a market state's prices."""
-    return [
-        ("UK_RETAIL_BOOKMAKERS", repr(sorted(bookmakers.UK_RETAIL_BOOKMAKERS))),
-        ("BOOKMAKER_ALIASES", repr(sorted(bookmakers.BOOKMAKER_ALIASES.items()))),
-        ("ODDS_API_KEY_ALIASES", repr(sorted(bookmakers.ODDS_API_KEY_ALIASES.items()))),
-        ("EXCHANGE_BOOKMAKER", repr(betfair_close.EXCHANGE_BOOKMAKER)),
-        ("MAX_EXCHANGE_OVERROUND", repr(betfair_close.MAX_EXCHANGE_OVERROUND)),
-    ]
+    """The values outside ``RULE_INPUT_MODULES``, in a fixed order and a stable text form, that
+    pick a market state's prices."""
+    return [("UK_RETAIL_BOOKMAKERS", repr(sorted(bookmakers.UK_RETAIL_BOOKMAKERS)))]
 
 
 @dataclass(frozen=True)
@@ -261,10 +250,9 @@ def rule_sha256(rule_name: str) -> str:
     """Hash of the code and values a rule's bets depend on, in a fixed order.
 
     The source of the rule function, its params model, the params every rule takes,
-    ``apply_rule`` (which drops outcomes already bet), the market state module, the as-of
-    module and the functions that read a snapshot's prices (``RULE_INPUT_FUNCTIONS``), then
-    the values of ``rule_input_constants``. A model rule adds the source of its
-    ``model_modules``.
+    ``apply_rule`` (which drops outcomes already bet) and the ``RULE_INPUT_MODULES``, then the
+    values of ``rule_input_constants``. A model rule adds the source of its ``model_modules``.
+    ``odds_core.quotes``, which other readers share, is not hashed.
     """
     spec = RULES[rule_name]
     digest = hashlib.sha256()
@@ -273,9 +261,7 @@ def rule_sha256(rule_name: str) -> str:
         inspect.getsource(spec.params_model),
         inspect.getsource(RuleParams),
         inspect.getsource(apply_rule),
-        inspect.getsource(market_state),
-        inspect.getsource(as_of),
-        *(inspect.getsource(function) for function in RULE_INPUT_FUNCTIONS),
+        *(inspect.getsource(module) for module in RULE_INPUT_MODULES),
         *(f"{name}={value}" for name, value in rule_input_constants()),
     ]
     if isinstance(spec, ModelRuleSpec):

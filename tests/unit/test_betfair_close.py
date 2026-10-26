@@ -3,18 +3,27 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from itertools import count
 
 import pytest
-from odds_core.betfair_close import MAX_EXCHANGE_OVERROUND, ExchangePrice, event_close
+from odds_core.betfair_close import event_close, pick_close
+from odds_core.exchange_price import MAX_EXCHANGE_OVERROUND, ExchangePrice, exchange_price
 from odds_core.market_prices import market_outcomes
-from odds_core.models import Event, OddsSnapshot
 from odds_core.odds_math import devig_probabilities
-from odds_core.snapshot_sources import FdukTimeBasis, SnapshotKind
+from odds_core.quotes import Quote
+from odds_core.snapshot_sources import FdukTimeBasis
+from odds_core.vocabulary import Source, TimeBasis
 
-from tests.test_helpers import make_epl_event, make_tagged_snapshot, three_way_bookmaker
+from tests.test_helpers import (
+    betfair_exchange_bookmaker,
+    make_epl_event,
+    make_quotes,
+    three_way_bookmaker,
+)
 
 KICKOFF = datetime(2025, 10, 4, 14, 0, tzinfo=UTC)
-EVENT_ID = "fduk_ARS_CHE_2025-10-04"
+EVENT = make_epl_event("fduk_ARS_CHE_2025-10-04", KICKOFF)
+_ids = count(1)
 EARLY = (2.2, 3.5, 3.8)
 LATE = (2.3, 3.4, 3.6)
 FDUK_CLOSE = (2.25, 3.45, 3.7)
@@ -26,21 +35,19 @@ def _betfair(
     prices: tuple[float, float, float],
     inplay: bool = False,
     betfair_start: datetime = KICKOFF,
-):
-    meta = {
-        "inplay": inplay,
-        "market_status": "OPEN",
-        "market_start_time": betfair_start.isoformat(),
-    }
-    book = three_way_bookmaker("betfair_exchange", prices, betfair_meta=meta)
-    return make_tagged_snapshot(
-        EVENT_ID, KICKOFF - timedelta(minutes=minutes_before), [book], "betfair_api"
+) -> list[Quote]:
+    book = betfair_exchange_bookmaker(
+        prices, inplay=inplay, market_start_time=betfair_start.isoformat()
+    )
+    return make_quotes(
+        EVENT, next(_ids), KICKOFF - timedelta(minutes=minutes_before), [book], "betfair_api"
     )
 
 
-def _fduk_close(prices: tuple[float, float, float]) -> OddsSnapshot:
-    return make_tagged_snapshot(
-        EVENT_ID,
+def _fduk_close(prices: tuple[float, float, float]) -> list[Quote]:
+    return make_quotes(
+        EVENT,
+        next(_ids),
         KICKOFF,
         [three_way_bookmaker("betfair_exchange", prices)],
         "football_data_uk",
@@ -48,80 +55,104 @@ def _fduk_close(prices: tuple[float, float, float]) -> OddsSnapshot:
     )
 
 
+def _close(*snapshots: list[Quote], **kwargs: float) -> ExchangePrice | None:
+    return event_close([q for s in snapshots for q in s], KICKOFF, "1x2", **kwargs)
+
+
 def _fair(prices: tuple[float, float, float]) -> dict:
     probs = devig_probabilities(*(1 / p for p in prices))
     return dict(zip(market_outcomes("1x2"), probs, strict=True))
 
 
-@pytest.fixture
-def event() -> Event:
-    return make_epl_event(EVENT_ID, KICKOFF)
-
-
 class TestEventClose:
-    def test_last_live_snapshot_in_window_wins(self, event: Event) -> None:
-        snapshots = [_betfair(20, EARLY), _betfair(10, LATE), _fduk_close(FDUK_CLOSE)]
-        close = event_close(event, snapshots, "1x2")
+    def test_last_live_snapshot_in_window_wins(self) -> None:
+        close = _close(_betfair(20, EARLY), _betfair(10, LATE), _fduk_close(FDUK_CLOSE))
         assert close is not None
-        assert close.kind is SnapshotKind.BETFAIR_LIVE
+        assert (close.source, close.time_basis) == (Source.BETFAIR, TimeBasis.OBSERVED)
         assert close.time == KICKOFF - timedelta(minutes=10)
         assert close.fair == pytest.approx(_fair(LATE))
 
-    def test_order_of_snapshots_does_not_matter(self, event: Event) -> None:
-        close = event_close(event, [_betfair(10, LATE), _betfair(20, EARLY)], "1x2")
+    def test_order_of_snapshots_does_not_matter(self) -> None:
+        close = _close(_betfair(10, LATE), _betfair(20, EARLY))
         assert close is not None and close.fair == pytest.approx(_fair(LATE))
 
-    def test_in_play_snapshot_is_skipped(self, event: Event) -> None:
-        snapshots = [_betfair(10, LATE), _betfair(1, (5.0, 5.0, 1.5), inplay=True)]
-        close = event_close(event, snapshots, "1x2")
+    def test_in_play_snapshot_is_skipped(self) -> None:
+        close = _close(_betfair(10, LATE), _betfair(1, (5.0, 5.0, 1.5), inplay=True))
         assert close is not None and close.fair == pytest.approx(_fair(LATE))
 
-    def test_latest_pre_play_snapshot_wins_whatever_the_betfair_start(self, event: Event) -> None:
+    def test_latest_pre_play_snapshot_wins_whatever_the_betfair_start(self) -> None:
         betfair_start = KICKOFF - timedelta(minutes=25)
-        snapshots = [
+        close = _close(
             _betfair(20, EARLY, betfair_start=betfair_start),
             _betfair(5, LATE, betfair_start=betfair_start),
             _betfair(2, (5.0, 5.0, 1.5), inplay=True, betfair_start=betfair_start),
             _betfair(-5, (2.0, 3.6, 4.4), betfair_start=betfair_start),
-        ]
-        close = event_close(event, snapshots, "1x2")
+        )
         assert close is not None
         assert close.time == KICKOFF - timedelta(minutes=5)
         assert close.fair == pytest.approx(_fair(LATE))
 
-    def test_snapshot_outside_window_falls_back_to_fduk(self, event: Event) -> None:
-        snapshots = [_betfair(45, EARLY), _fduk_close(FDUK_CLOSE)]
-        close = event_close(event, snapshots, "1x2")
+    def test_snapshot_outside_window_falls_back_to_fduk(self) -> None:
+        close = _close(_betfair(45, EARLY), _fduk_close(FDUK_CLOSE))
         assert close is not None
-        assert close.kind is SnapshotKind.FDUK_CLOSING
+        assert (close.source, close.time_basis) == (Source.FOOTBALL_DATA_UK, TimeBasis.CLOSE)
         assert close.fair == pytest.approx(_fair(FDUK_CLOSE))
 
-    def test_wide_overround_snapshot_is_skipped(self, event: Event) -> None:
-        snapshots = [_betfair(20, EARLY), _betfair(10, WIDE)]
-        close = event_close(event, snapshots, "1x2")
+    def test_wide_overround_snapshot_is_skipped(self) -> None:
+        close = _close(_betfair(20, EARLY), _betfair(10, WIDE))
         assert close is not None and close.fair == pytest.approx(_fair(EARLY))
 
-    def test_overround_cap_is_a_parameter(self, event: Event) -> None:
-        close = event_close(event, [_betfair(10, WIDE)], "1x2", max_exchange_overround=1.0)
+    def test_overround_cap_is_a_parameter(self) -> None:
+        close = _close(_betfair(10, WIDE), max_exchange_overround=1.0)
         assert close is not None and close.fair == pytest.approx(_fair(WIDE))
 
-    def test_wide_live_and_no_fduk_has_no_close(self, event: Event) -> None:
-        assert event_close(event, [_betfair(10, WIDE)], "1x2") is None
+    def test_wide_live_and_no_fduk_has_no_close(self) -> None:
+        assert _close(_betfair(10, WIDE)) is None
 
-    def test_no_exchange_snapshots_has_no_close(self, event: Event) -> None:
-        retail = make_tagged_snapshot(
-            EVENT_ID,
+    def test_no_exchange_snapshots_has_no_close(self) -> None:
+        retail = make_quotes(
+            EVENT,
+            next(_ids),
             KICKOFF - timedelta(minutes=10),
             [three_way_bookmaker("bet365", (2.0, 3.4, 4.0))],
             "oddsportal_live",
         )
-        assert event_close(event, [retail], "1x2") is None
-        assert event_close(event, [], "1x2") is None
+        assert _close(retail) is None
+        assert _close() is None
+
+    def test_live_exchange_in_a_retail_snapshot_is_not_a_close(self) -> None:
+        oddsportal = make_quotes(
+            EVENT,
+            next(_ids),
+            KICKOFF - timedelta(minutes=10),
+            [betfair_exchange_bookmaker(LATE)],
+            "oddsportal_live",
+        )
+        assert _close(oddsportal) is None
 
     def test_default_cap_is_the_retail_ev_cap(self) -> None:
         assert MAX_EXCHANGE_OVERROUND == 0.05
 
-    def test_result_is_an_exchange_price(self, event: Event) -> None:
-        close = event_close(event, [_betfair(10, LATE)], "1x2")
+    def test_result_is_an_exchange_price(self) -> None:
+        close = _close(_betfair(10, LATE))
         assert isinstance(close, ExchangePrice)
         assert sum(close.fair.values()) == pytest.approx(1.0)
+
+
+class TestExchangePrice:
+    def test_needs_a_back_price_for_every_outcome(self) -> None:
+        assert exchange_price(_betfair(10, LATE)[:2], "1x2") is None
+        assert exchange_price([], "1x2") is None
+
+    def test_reads_only_exchange_backs(self) -> None:
+        quotes = _betfair(10, LATE)
+        price = exchange_price(quotes, "1x2")
+        assert price is not None and price.fair == pytest.approx(_fair(LATE))
+        assert price.overround == pytest.approx(sum(1 / p for p in LATE) - 1)
+
+
+class TestPickClose:
+    def test_in_play_price_is_not_the_close(self) -> None:
+        price = exchange_price(_betfair(10, LATE, inplay=True), "1x2")
+        assert price is not None and price.in_play
+        assert pick_close([price], KICKOFF) is None

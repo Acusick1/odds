@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import fields
 from datetime import UTC, datetime, timedelta
+from itertools import count
 from typing import Any
 
 import pytest
@@ -20,25 +21,37 @@ from odds_analytics.candidate_model import (
 )
 from odds_analytics.retail_ev import RetailEvInput
 from odds_core.market_prices import Outcome
-from odds_core.models import Event, OddsSnapshot
+from odds_core.models import Event
+from odds_core.quotes import Quote
 from odds_core.snapshot_sources import FdukTimeBasis, SnapshotKind
+from odds_core.vocabulary import Source
 from odds_lambda.candidate_rules import RetailEvModelParams, build_market_state
 
-from tests.test_helpers import make_epl_event, make_tagged_snapshot, three_way_bookmaker
+from tests.test_helpers import (
+    betfair_exchange_bookmaker,
+    make_epl_event,
+    make_quotes,
+    three_way_bookmaker,
+)
 
 KICKOFF = datetime(2026, 11, 7, 15, 0, tzinfo=UTC)
 EVENT = make_epl_event("evt", KICKOFF)
 EXCHANGE = (2.0, 4.0, 4.0)
 
 
+_ids = count(1)
+
+
 def _betfair(prices: tuple[float, float, float] = EXCHANGE) -> dict[str, Any]:
-    return three_way_bookmaker(
-        "betfair_exchange", prices, betfair_meta={"inplay": False, "market_status": "OPEN"}
-    )
+    return betfair_exchange_bookmaker(prices)
 
 
-def _snap(before_kickoff: timedelta, *books: dict[str, Any], source: str) -> OddsSnapshot:
-    return make_tagged_snapshot(EVENT.id, KICKOFF - before_kickoff, list(books), source)
+def _snap(before_kickoff: timedelta, *books: dict[str, Any], source: str) -> list[Quote]:
+    return make_quotes(EVENT, next(_ids), KICKOFF - before_kickoff, list(books), source)
+
+
+def _time(snapshot: list[Quote]) -> datetime:
+    return snapshot[0].snapshot_time
 
 
 CO_TIMED = _snap(
@@ -53,21 +66,21 @@ CLOSE = _snap(timedelta(minutes=2), _betfair((1.9, 4.2, 4.4)), source="betfair_a
 
 class TestTrainingRows:
     def test_one_row_per_book_and_outcome_of_each_co_timed_snapshot(self) -> None:
-        rows = training_rows(EVENT, [CO_TIMED, CLOSE])
+        rows = training_rows(EVENT, CO_TIMED + CLOSE)
         assert {(r.book, r.outcome) for r in rows} == {
             (book, outcome) for book in ("bet365", "betway") for outcome in Outcome
         }
-        assert {r.decision_time for r in rows} == {CO_TIMED.snapshot_time}
+        assert {r.decision_time for r in rows} == {_time(CO_TIMED)}
         assert all(r.retail_kind is SnapshotKind.ODDSPORTAL_LIVE for r in rows)
         assert all(r.exchange.fair[Outcome.HOME] == pytest.approx(0.5) for r in rows)
-        assert all(r.close.kind is SnapshotKind.BETFAIR_LIVE for r in rows)
+        assert all(r.close.source is Source.BETFAIR for r in rows)
 
     def test_the_exchange_price_comes_from_the_rows_own_snapshot(self) -> None:
         live_betfair = _snap(
             timedelta(hours=3, minutes=1), _betfair((1.5, 5.0, 8.0)), source="betfair_api"
         )
-        rows = training_rows(EVENT, [live_betfair, CO_TIMED, CLOSE])
-        assert all(r.exchange.time == CO_TIMED.snapshot_time for r in rows)
+        rows = training_rows(EVENT, live_betfair + CO_TIMED + CLOSE)
+        assert all(r.exchange.time == _time(CO_TIMED) for r in rows)
 
     @pytest.mark.parametrize(
         "snapshot",
@@ -94,31 +107,32 @@ class TestTrainingRows:
         ids=["no_exchange_row", "no_retail", "inside_the_cutoff", "outside_the_window"],
     )
     def test_snapshots_that_are_not_a_co_timed_decision_give_no_rows(
-        self, snapshot: OddsSnapshot
+        self, snapshot: list[Quote]
     ) -> None:
-        assert training_rows(EVENT, [snapshot, CLOSE]) == []
+        assert training_rows(EVENT, snapshot + CLOSE) == []
 
     def test_an_event_without_a_close_gives_no_rows(self) -> None:
-        assert training_rows(EVENT, [CO_TIMED]) == []
+        assert training_rows(EVENT, CO_TIMED) == []
 
     def test_an_fduk_close_is_not_a_label(self) -> None:
         # Published days after kick-off, so a refit at the next matchday would not have it.
-        fduk_close = make_tagged_snapshot(
-            EVENT.id,
+        fduk_close = make_quotes(
+            EVENT,
+            next(_ids),
             KICKOFF,
             [_betfair((1.9, 4.2, 4.4))],
             "football_data_uk",
             FdukTimeBasis.KICKOFF,
         )
-        assert training_rows(EVENT, [CO_TIMED, fduk_close]) == []
-        assert training_rows(EVENT, [CO_TIMED, fduk_close, CLOSE]) != []
+        assert training_rows(EVENT, CO_TIMED + fduk_close) == []
+        assert training_rows(EVENT, CO_TIMED + fduk_close + CLOSE) != []
 
 
 class TestStateInputs:
     def test_a_decision_sees_the_inputs_its_snapshot_trains_on(self) -> None:
-        t = CO_TIMED.snapshot_time + timedelta(minutes=8)
-        state = build_market_state(EVENT, [CO_TIMED, CLOSE], t, timedelta(minutes=10))
-        rows = training_rows(EVENT, [CO_TIMED, CLOSE])
+        t = _time(CO_TIMED) + timedelta(minutes=8)
+        state = build_market_state(EVENT, CO_TIMED + CLOSE, t, timedelta(minutes=10))
+        rows = training_rows(EVENT, CO_TIMED + CLOSE)
         assert state_inputs(state) == [
             RetailEvInput(**{f.name: getattr(r, f.name) for f in fields(RetailEvInput)})
             for r in rows
@@ -131,7 +145,7 @@ class TestStateInputs:
             _betfair((1.5, 2.5, 3.0)),
             source="oddsportal_live",
         )
-        state = build_market_state(EVENT, [wide], wide.snapshot_time, timedelta(minutes=10))
+        state = build_market_state(EVENT, wide, _time(wide), timedelta(minutes=10))
         assert state.has_input and state.exchange is None
         assert state_inputs(state) == []
 
@@ -197,19 +211,21 @@ class TestTune:
         rows = []
         for i, home in enumerate((2.2, 2.0, 1.9)):
             event = make_epl_event(f"t{i}", KICKOFF + timedelta(days=8 * i))
-            snap = make_tagged_snapshot(
-                event.id,
+            snap = make_quotes(
+                event,
+                next(_ids),
                 event.commence_time - timedelta(hours=3),
                 [three_way_bookmaker("bet365", (home, 3.4, 3.8)), _betfair()],
                 "oddsportal_live",
             )
-            close = make_tagged_snapshot(
-                event.id,
+            close = make_quotes(
+                event,
+                next(_ids),
                 event.commence_time - timedelta(minutes=2),
                 [_betfair((1.9, 4.2, 4.4))],
                 "betfair_api",
             )
-            rows.append(training_rows(event, [snap, close]))
+            rows.append(training_rows(event, snap + close))
         return [(rows[0], rows[1]), ([], rows[2]), (rows[0] + rows[1], rows[2])]
 
     def test_chooses_from_the_search_space_reproducibly(self) -> None:
@@ -264,5 +280,5 @@ class TestAtDecisionTimes:
             _betfair(),
             source="oddsportal_live",
         )
-        [row, *_] = training_rows(EVENT, [snapshot, CLOSE])
+        [row, *_] = training_rows(EVENT, snapshot + CLOSE)
         assert at_decision_times(row, _params()) is usable

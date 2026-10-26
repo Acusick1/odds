@@ -7,6 +7,7 @@ sources:
   - odds_cli.commands.candidates
   - odds_analytics.candidate_report
   - odds_core.betfair_close.event_close
+  - odds_core.betfair_close.close_quotes
   - odds_core.paper_trade_models.PaperTrade
   - odds_mcp.server.get_portfolio
   - scripts/check_candidate_versions.py
@@ -38,7 +39,7 @@ A change of status goes through a pull request. The version is a strict positive
 
 ## `odds candidates rule-hash`
 
-`odds_cli.commands.candidates.rule_hash` prints `odds_lambda.candidate_rules.rules.rule_sha256` for a rule name (the hash of the rule's code, of its once-per-outcome filter, of the code and values that pick its inputs and, for a model rule, of the modules that fit and query its model, [rule pinning](candidate-rules.md#rule-pinning)), the value a mechanical candidate records as `odds_core.candidates.MechanicalCandidate.rule_sha256`. An unknown rule name prints the known names and exits 1.
+`odds_cli.commands.candidates.rule_hash` prints `odds_lambda.candidate_rules.rules.rule_sha256` for a rule name (the hash of the rule's code, of its once-per-outcome filter, of the modules and values that load and pick its inputs and, for a model rule, of the modules that fit and query its model, [rule pinning](candidate-rules.md#rule-pinning)), the value a mechanical candidate records as `odds_core.candidates.MechanicalCandidate.rule_sha256`. An unknown rule name prints the known names and exits 1.
 
 ## `odds candidates report`
 
@@ -49,7 +50,7 @@ A change of status goes through a pull request. The version is a strict positive
 What is scored, in `odds_analytics.candidate_report`:
 
 - **Bets.** `odds_analytics.candidate_report.ScoredBet` is what is scored, built from an `odds_core.paper_trade_models.PaperTrade` or from a [replayed](candidate-backtest.md) bet. `odds_analytics.candidate_report.load_scored_trades` takes every paper trade that carries a candidate, settled or not, in placement order (`placed_at`, then id), and drops void ones ([paper trading](../agent/paper-trading.md#candidate-fields)). Pushes count as settled bets.
-- **Close.** `p_close` is the devigged probability of the trade's selection in `odds_core.betfair_close.event_close`, computed from the event's stored snapshots when the report runs, so nothing is recorded at settlement and the close can be re-derived. `odds_analytics.candidate_report.close_candidate_snapshots` loads only the snapshots that can be the close: those within `odds_core.betfair_close.LIVE_CLOSE_WINDOW` before kick-off, and FDUK closing snapshots. Only the `1x2` market has a close (`odds_analytics.candidate_report.selection_close_probability`): an `h2h` trade, which is every MLB trade, has none, and so does a `1x2` trade whose event has no close.
+- **Close.** `p_close` is the devigged probability of the trade's selection in `odds_core.betfair_close.event_close`, computed from the event's stored prices when the report runs, so nothing is recorded at settlement and the close can be re-derived. `odds_core.betfair_close.close_quotes` loads only the quotes that can be the close: the Betfair Exchange backs of live Betfair snapshots within `odds_core.betfair_close.LIVE_CLOSE_WINDOW` before kick-off, and of FDUK closing snapshots. The [health monitor's missing-close check](../operations/health-monitor.md) uses the same close. Only the `1x2` market has a close (`odds_analytics.candidate_report.selection_close_probability`): an `h2h` trade, which is every MLB trade, has none, and so does a `1x2` trade whose event has no close.
 - **EV.** `odds_analytics.candidate_report.ScoredBet.ev` is `p_close × price_decimal − 1`.
 - **Scoreable prefix.** `odds_analytics.candidate_report.scoreable_prefix` walks a version's trades in placement order and stops at the first trade that is unsettled, or has no close and kicked off less than `odds_analytics.candidate_report.CLOSE_GRACE` (7 days) before the report's `now`, since the FDUK closing price may still arrive. A trade with no close after that is final: it counts in P&L and in the no-close count, and is left out of the EV. Trades beyond the prefix are the pending count. The prefix only grows, and the bets with a close in it keep their order, so a checkpoint's bets never change once reached.
 - **Checkpoint.** `odds_analytics.candidate_report.checkpoint_at` scores the first n bets with a close, the earliest, for n a multiple of `odds_analytics.candidate_report.CHECKPOINT_SIZE` (100). The score is the stake-weighted mean EV per unit staked, `Σ stake·EV / Σ stake`, with `odds_analytics.retail_ev_metrics.event_clustered_ratio` giving percentile CIs at the 95% kill level and the promote level (below) from `odds_analytics.candidate_report.DEFAULT_BOOTSTRAP_SAMPLES` resamples of whole events under a fixed seed, so the same trades always give the same verdict.

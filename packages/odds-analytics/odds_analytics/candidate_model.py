@@ -21,10 +21,13 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from odds_core.betfair_close import event_close
+from odds_core.as_of import by_snapshot
+from odds_core.betfair_close import close_quotes, event_close
 from odds_core.market_prices import Outcome, market_outcomes
-from odds_core.models import Event, OddsSnapshot
+from odds_core.models import Event
+from odds_core.quotes import Quote
 from odds_core.snapshot_sources import SnapshotKind
+from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.candidate_rules import (
     MarketState,
     ModelRuleSpec,
@@ -33,8 +36,8 @@ from odds_lambda.candidate_rules import (
     build_market_state,
     decision_times,
 )
+from odds_lambda.candidate_rules.inputs import RETAIL_SOURCES, rule_quotes
 from odds_lambda.candidate_rules.market_state import sport_market
-from odds_lambda.storage.readers import OddsReader
 
 from odds_analytics.retail_ev import (
     DECISION_CUTOFF,
@@ -76,6 +79,15 @@ FIXED_XGBOOST_PARAMS: dict[str, Any] = {
 }
 
 
+# The retail kind ``odds_analytics.retail_ev`` labels a market state's snapshot with.
+RETAIL_KINDS: dict[tuple[Source, TimeBasis], SnapshotKind] = {
+    (Source.ODDS_API, TimeBasis.OBSERVED): SnapshotKind.ODDS_API,
+    (Source.ODDS_API, TimeBasis.UPPER_BOUND): SnapshotKind.ODDS_API,
+    (Source.ODDSPORTAL, TimeBasis.OBSERVED): SnapshotKind.ODDSPORTAL_LIVE,
+    (Source.ODDSPORTAL, TimeBasis.SOURCE_STAMPED): SnapshotKind.ODDSPORTAL,
+}
+
+
 def state_inputs(state: MarketState) -> list[RetailEvInput]:
     """The state's quotes as model inputs at its snapshot's time; none without an exchange price."""
     if state.exchange is None or state.snapshot_time is None:
@@ -83,7 +95,7 @@ def state_inputs(state: MarketState) -> list[RetailEvInput]:
     return quote_inputs(
         state.event_id,
         state.kickoff,
-        state.exchange.kind,
+        RETAIL_KINDS[(state.exchange.source, state.exchange.time_basis)],
         state.snapshot_time,
         state.retail,
         market_outcomes(state.market),
@@ -93,22 +105,23 @@ def state_inputs(state: MarketState) -> list[RetailEvInput]:
     )
 
 
-def training_rows(event: Event, snapshots: Sequence[OddsSnapshot]) -> list[RetailEvRow]:
+def training_rows(event: Event, quoted: Sequence[Quote]) -> list[RetailEvRow]:
     """Rows of every co-timed snapshot in the decision window, against the live Betfair close.
 
-    An event without a live Betfair close has none.
+    ``quoted`` holds the event's retail quotes and its close quotes. An event without a live
+    Betfair close has none.
     """
-    ordered = sorted(snapshots, key=lambda s: s.snapshot_time)
-    close = event_close(event, ordered, sport_market(event.sport_key))
-    if close is None or close.kind is not SnapshotKind.BETFAIR_LIVE:
+    close = event_close(quoted, event.commence_time, sport_market(event.sport_key))
+    if close is None or close.source is not Source.BETFAIR:
         return []
     first = event.commence_time - DECISION_WINDOW
     last = event.commence_time - DECISION_CUTOFF
     rows: list[RetailEvRow] = []
-    for snapshot in ordered:
-        if not first <= snapshot.snapshot_time <= last:
+    for snapshot in by_snapshot(q for q in quoted if q.source in RETAIL_SOURCES):
+        time = snapshot[0].snapshot_time
+        if not first <= time <= last:
             continue
-        state = build_market_state(event, [snapshot], snapshot.snapshot_time, timedelta(0))
+        state = build_market_state(event, snapshot, time, timedelta(0))
         rows.extend(RetailEvRow.with_close(inputs, close) for inputs in state_inputs(state))
     return rows
 
@@ -303,7 +316,8 @@ class Refit:
 class ModelReplay:
     """Tunes and refits the model over one replay's range, ``events`` in kick-off order.
 
-    A match's training rows are built once, from all of its snapshots.
+    A match's training rows are built once, from its quotes in the decision window and its
+    close quotes.
     """
 
     def __init__(
@@ -314,19 +328,24 @@ class ModelReplay:
         events: Sequence[Event],
     ) -> None:
         self._session = session
-        self._reader = OddsReader(session)
         self._spec = spec
         self._params = params
         self._events = events
         self._rows: dict[str, list[RetailEvRow]] = {}
 
     async def _training_rows(self, events: Sequence[Event]) -> list[RetailEvRow]:
+        market = self._market()
         for event in events:
             if event.id not in self._rows:
-                snapshots = await self._reader.get_snapshots_for_event(event.id)
-                self._rows[event.id] = training_rows(event, snapshots)
-                for snapshot in snapshots:
-                    self._session.expunge(snapshot)
+                retail = await rule_quotes(
+                    self._session,
+                    event.id,
+                    market,
+                    since=event.commence_time - DECISION_WINDOW,
+                    until=event.commence_time - DECISION_CUTOFF,
+                )
+                close = (await close_quotes(self._session, [event], market))[event.id]
+                self._rows[event.id] = training_rows(event, retail + close)
         return [row for event in events for row in self._rows[event.id]]
 
     def _market(self) -> str:

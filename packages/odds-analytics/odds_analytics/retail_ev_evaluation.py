@@ -232,7 +232,7 @@ def _row_frame(dataset: RetailEvDataset) -> pd.DataFrame:
             "decision_time": pd.to_datetime([_naive_utc(r.decision_time) for r in dataset.rows]),
             "horizon": [r.horizon_bucket for r in dataset.rows],
             "retail_source": [r.retail_kind.value for r in dataset.rows],
-            "close_source": [r.close.kind.value for r in dataset.rows],
+            "close_source": [r.close.source.value for r in dataset.rows],
             "outcome": [r.outcome.value for r in dataset.rows],
             "book": [r.book for r in dataset.rows],
             "retail_decimal": [r.retail_decimal for r in dataset.rows],

@@ -16,23 +16,15 @@ from typing import TYPE_CHECKING, Any, cast, get_args
 
 import numpy as np
 import structlog
-from odds_core.as_of import (
-    EXCHANGE_AT_T_KINDS,
-    MAX_EXCHANGE_AGE,
-    RETAIL_KINDS,
-    UPPER_BOUND_TIME_KINDS,
-    latest_at_or_before,
-)
-from odds_core.betfair_close import (
+from odds_core.betfair_close import pick_close
+from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS, canonical_bookmaker_key
+from odds_core.exchange_price import (
+    EXCHANGE_BOOKMAKER,
     MAX_EXCHANGE_OVERROUND,
     ExchangePrice,
     devig,
-    event_close,
-    exchange_price,
-    is_in_play,
     overround,
 )
-from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS
 from odds_core.market_prices import (
     Outcome,
     book_prices,
@@ -41,6 +33,7 @@ from odds_core.market_prices import (
 )
 from odds_core.models import Event, OddsSnapshot
 from odds_core.snapshot_sources import SnapshotKind, snapshot_kind
+from odds_core.vocabulary import Source, TimeBasis
 
 from odds_analytics.epl_schedule_features import EplScheduleFeatures
 from odds_analytics.standings_features import StandingsFeatures
@@ -73,6 +66,24 @@ BASELINE_FEATURE = "baseline_ev"
 HORIZON_BUCKET_EDGES_HOURS: tuple[float, ...] = (0.0, 1.0, 6.0, 24.0, 72.0)
 HORIZON_BUCKET_LABELS: tuple[str, ...] = ("0-1h", "1-6h", "6-24h", "1-3d", "3-7d")
 SEASON_START_MONTH = 7
+MAX_EXCHANGE_AGE = timedelta(hours=2)
+
+RETAIL_KINDS: frozenset[SnapshotKind] = frozenset(
+    {
+        SnapshotKind.ODDS_API,
+        SnapshotKind.ODDSPORTAL,
+        SnapshotKind.ODDSPORTAL_LIVE,
+        SnapshotKind.FDUK_OPENING,
+    }
+)
+# Stamped at FDUK's latest documented collection time, an upper bound on when the price was taken.
+UPPER_BOUND_TIME_KINDS: frozenset[SnapshotKind] = frozenset({SnapshotKind.FDUK_OPENING})
+# The kinds whose exchange prices are read, with the source and time basis they are stored under.
+EXCHANGE_KINDS: dict[SnapshotKind, tuple[Source, TimeBasis]] = {
+    SnapshotKind.BETFAIR_LIVE: (Source.BETFAIR, TimeBasis.OBSERVED),
+    SnapshotKind.FDUK_OPENING: (Source.FOOTBALL_DATA_UK, TimeBasis.UPPER_BOUND),
+    SnapshotKind.FDUK_CLOSING: (Source.FOOTBALL_DATA_UK, TimeBasis.CLOSE),
+}
 
 
 @dataclass(frozen=True)
@@ -226,6 +237,45 @@ def event_weights(event_ids: np.ndarray) -> np.ndarray:
     return 1.0 / counts[inverse]
 
 
+def latest_at_or_before(times: list[datetime], at: datetime, max_age: timedelta) -> int | None:
+    """Index of the last of the sorted ``times`` that is <= ``at`` and at most ``max_age`` older."""
+    idx = bisect.bisect_right(times, at) - 1
+    if idx < 0 or at - times[idx] > max_age:
+        return None
+    return idx
+
+
+def _is_in_play(raw_data: dict[str, Any]) -> bool:
+    return any(
+        bool((bm.get("betfair_meta") or {}).get("inplay"))
+        for bm in raw_data.get("bookmakers", [])
+        if canonical_bookmaker_key(bm.get("key", ""), SnapshotKind.BETFAIR_LIVE)
+        == EXCHANGE_BOOKMAKER
+    )
+
+
+def _exchange_price(
+    snapshot: OddsSnapshot,
+    kind: SnapshotKind,
+    market: str,
+    names: dict[str, Outcome],
+    outcomes: tuple[Outcome, ...],
+) -> ExchangePrice | None:
+    """The exchange price of a snapshot of one of ``EXCHANGE_KINDS``, read from its ``raw_data``."""
+    prices = book_prices(snapshot.raw_data, kind, market, names).get(EXCHANGE_BOOKMAKER)
+    if prices is None or set(prices) != set(outcomes):
+        return None
+    source, time_basis = EXCHANGE_KINDS[kind]
+    return ExchangePrice(
+        time=snapshot.snapshot_time,
+        source=source,
+        time_basis=time_basis,
+        in_play=kind is SnapshotKind.BETFAIR_LIVE and _is_in_play(snapshot.raw_data),
+        fair=devig(prices, outcomes),
+        overround=overround(prices, outcomes),
+    )
+
+
 def _polymarket_price(
     snapshot: OddsSnapshot, market: str, names: dict[str, Outcome], outcomes: tuple[Outcome, ...]
 ) -> PolymarketPrice | None:
@@ -344,7 +394,8 @@ def build_event_rows(
 ) -> tuple[list[RetailEvRow], DropCounts]:
     """Build every decision row for one event from its snapshots, in time order.
 
-    The close is ``odds_core.betfair_close.event_close``. The exchange price at t comes
+    The close is ``odds_core.betfair_close.pick_close`` over the event's exchange prices. The
+    exchange price at t comes
     only from live Betfair or FDUK opening snapshots at or before t, so nothing after t
     enters a row's inputs. Exchange prices whose back overround exceeds
     ``max_exchange_overround`` are not prices.
@@ -357,6 +408,7 @@ def build_event_rows(
     ordered = sorted(snapshots, key=lambda s: s.snapshot_time)
     kinds = [snapshot_kind(s.raw_data) for s in ordered]
 
+    exchange_prices: list[ExchangePrice] = []
     exchange_at_t: list[ExchangePrice] = []
     polymarket: list[PolymarketPrice] = []
     for snapshot, kind in zip(ordered, kinds, strict=True):
@@ -365,12 +417,13 @@ def build_event_rows(
             if pm_price is not None and pm_price.time < kickoff:
                 polymarket.append(pm_price)
             continue
-        if kind not in EXCHANGE_AT_T_KINDS and kind is not SnapshotKind.FDUK_CLOSING:
+        if kind not in EXCHANGE_KINDS:
             continue
-        if kind is SnapshotKind.BETFAIR_LIVE and is_in_play(snapshot.raw_data):
-            continue
-        price = exchange_price(snapshot, kind, market, names, outcomes)
+        price = _exchange_price(snapshot, kind, market, names, outcomes)
         if price is None:
+            continue
+        exchange_prices.append(price)
+        if price.in_play:
             continue
         if price.overround > max_exchange_overround:
             drops.wide_exchange_snapshots += 1
@@ -378,15 +431,15 @@ def build_event_rows(
         if kind is not SnapshotKind.FDUK_CLOSING and price.time < kickoff:
             exchange_at_t.append(price)
 
-    close = event_close(event, ordered, market, max_exchange_overround)
+    close = pick_close(exchange_prices, kickoff, max_exchange_overround)
     if close is None:
         drops.events_without_close = 1
         return [], drops
 
     exchange_times = [p.time for p in exchange_at_t]
-    exchange_by_kind: dict[SnapshotKind, list[ExchangePrice]] = {}
+    exchange_by_kind: dict[tuple[Source, TimeBasis], list[ExchangePrice]] = {}
     for price in exchange_at_t:
-        exchange_by_kind.setdefault(price.kind, []).append(price)
+        exchange_by_kind.setdefault((price.source, price.time_basis), []).append(price)
     exchange_times_by_kind = {
         kind: [p.time for p in prices] for kind, prices in exchange_by_kind.items()
     }
@@ -434,7 +487,8 @@ def build_event_rows(
                 continue
         else:
             # t only bounds when the price was taken, so no other snapshot is known to precede it.
-            own = [p for p in exchange_by_kind.get(quote.kind, []) if p.time == t]
+            own_kind = EXCHANGE_KINDS.get(quote.kind)
+            own = [p for p in exchange_by_kind.get(own_kind, []) if p.time == t] if own_kind else []
             if not own:
                 drops.rows_without_own_exchange += n_candidates
                 continue
@@ -446,8 +500,8 @@ def build_event_rows(
                 outcome,
                 t,
                 exchange,
-                exchange_by_kind[exchange.kind] if exact else [],
-                exchange_times_by_kind[exchange.kind] if exact else [],
+                exchange_by_kind[(exchange.source, exchange.time_basis)] if exact else [],
+                exchange_times_by_kind[(exchange.source, exchange.time_basis)] if exact else [],
                 quote,
                 quotes_by_kind[quote.kind],
                 quote_times[quote.kind],
