@@ -20,7 +20,7 @@ from odds_analytics.candidate_model import (
     tuning_folds,
 )
 from odds_analytics.retail_ev import RetailEvInput
-from odds_core.market_prices import Outcome
+from odds_core.market_prices import Outcome, market_outcomes
 from odds_core.models import Event
 from odds_core.quotes import Quote
 from odds_core.snapshot_sources import FdukTimeBasis, SnapshotKind
@@ -66,9 +66,9 @@ CLOSE = _snap(timedelta(minutes=2), _betfair((1.9, 4.2, 4.4)), source="betfair_a
 
 class TestTrainingRows:
     def test_one_row_per_book_and_outcome_of_each_co_timed_snapshot(self) -> None:
-        rows = training_rows(EVENT, CO_TIMED + CLOSE)
+        rows = training_rows(EVENT, "1x2", CO_TIMED + CLOSE)
         assert {(r.book, r.outcome) for r in rows} == {
-            (book, outcome) for book in ("bet365", "betway") for outcome in Outcome
+            (book, outcome) for book in ("bet365", "betway") for outcome in market_outcomes("1x2")
         }
         assert {r.decision_time for r in rows} == {_time(CO_TIMED)}
         assert all(r.retail_kind is SnapshotKind.ODDSPORTAL_LIVE for r in rows)
@@ -79,7 +79,7 @@ class TestTrainingRows:
         live_betfair = _snap(
             timedelta(hours=3, minutes=1), _betfair((1.5, 5.0, 8.0)), source="betfair_api"
         )
-        rows = training_rows(EVENT, live_betfair + CO_TIMED + CLOSE)
+        rows = training_rows(EVENT, "1x2", live_betfair + CO_TIMED + CLOSE)
         assert all(r.exchange.time == _time(CO_TIMED) for r in rows)
 
     @pytest.mark.parametrize(
@@ -109,10 +109,10 @@ class TestTrainingRows:
     def test_snapshots_that_are_not_a_co_timed_decision_give_no_rows(
         self, snapshot: list[Quote]
     ) -> None:
-        assert training_rows(EVENT, snapshot + CLOSE) == []
+        assert training_rows(EVENT, "1x2", snapshot + CLOSE) == []
 
     def test_an_event_without_a_close_gives_no_rows(self) -> None:
-        assert training_rows(EVENT, CO_TIMED) == []
+        assert training_rows(EVENT, "1x2", CO_TIMED) == []
 
     def test_an_fduk_close_is_not_a_label(self) -> None:
         # Published days after kick-off, so a refit at the next matchday would not have it.
@@ -124,15 +124,15 @@ class TestTrainingRows:
             "football_data_uk",
             FdukTimeBasis.KICKOFF,
         )
-        assert training_rows(EVENT, CO_TIMED + fduk_close) == []
-        assert training_rows(EVENT, CO_TIMED + fduk_close + CLOSE) != []
+        assert training_rows(EVENT, "1x2", CO_TIMED + fduk_close) == []
+        assert training_rows(EVENT, "1x2", CO_TIMED + fduk_close + CLOSE) != []
 
 
 class TestStateInputs:
     def test_a_decision_sees_the_inputs_its_snapshot_trains_on(self) -> None:
         t = _time(CO_TIMED) + timedelta(minutes=8)
-        state = build_market_state(EVENT, CO_TIMED + CLOSE, t, timedelta(minutes=10))
-        rows = training_rows(EVENT, CO_TIMED + CLOSE)
+        state = build_market_state(EVENT, "1x2", CO_TIMED + CLOSE, t, timedelta(minutes=10))
+        rows = training_rows(EVENT, "1x2", CO_TIMED + CLOSE)
         assert state_inputs(state) == [
             RetailEvInput(**{f.name: getattr(r, f.name) for f in fields(RetailEvInput)})
             for r in rows
@@ -145,8 +145,8 @@ class TestStateInputs:
             _betfair((1.5, 2.5, 3.0)),
             source="oddsportal_live",
         )
-        state = build_market_state(EVENT, wide, _time(wide), timedelta(minutes=10))
-        assert state.has_input and state.exchange is None
+        state = build_market_state(EVENT, "1x2", wide, _time(wide), timedelta(minutes=10))
+        assert state.has_input and state.exchange == {}
         assert state_inputs(state) == []
 
 
@@ -225,7 +225,7 @@ class TestTune:
                 [_betfair((1.9, 4.2, 4.4))],
                 "betfair_api",
             )
-            rows.append(training_rows(event, snap + close))
+            rows.append(training_rows(event, "1x2", snap + close))
         return [(rows[0], rows[1]), ([], rows[2]), (rows[0] + rows[1], rows[2])]
 
     def test_chooses_from_the_search_space_reproducibly(self) -> None:
@@ -280,5 +280,5 @@ class TestAtDecisionTimes:
             _betfair(),
             source="oddsportal_live",
         )
-        [row, *_] = training_rows(EVENT, snapshot + CLOSE)
+        [row, *_] = training_rows(EVENT, "1x2", snapshot + CLOSE)
         assert at_decision_times(row, _params()) is usable

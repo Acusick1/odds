@@ -2,23 +2,20 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
 from typing import Any
 
 from odds_core.bookmakers import canonical_bookmaker_key
 from odds_core.models import Event
 from odds_core.odds_math import outcome_price_decimal
 from odds_core.snapshot_sources import SnapshotKind
+from odds_core.vocabulary import PriceOutcome
 
 DRAW_OUTCOME_NAME = "Draw"
 THREE_WAY_MARKET = "1x2"
 TWO_WAY_MARKET = "h2h"
+TOTALS_MARKET = "totals"
 
-
-class Outcome(StrEnum):
-    HOME = "home"
-    DRAW = "draw"
-    AWAY = "away"
+Outcome = PriceOutcome
 
 
 def market_outcomes(market: str) -> tuple[Outcome, ...]:
@@ -26,6 +23,8 @@ def market_outcomes(market: str) -> tuple[Outcome, ...]:
         return (Outcome.HOME, Outcome.DRAW, Outcome.AWAY)
     if market == TWO_WAY_MARKET:
         return (Outcome.HOME, Outcome.AWAY)
+    if market == TOTALS_MARKET:
+        return (Outcome.OVER, Outcome.UNDER)
     raise ValueError(f"No outcomes defined for market {market!r}")
 
 

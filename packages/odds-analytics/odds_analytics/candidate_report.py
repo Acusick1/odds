@@ -22,6 +22,7 @@ from odds_core.market_prices import THREE_WAY_MARKET, Outcome
 from odds_core.models import Event
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade, TradeResult
 from odds_core.quotes import Quote
+from odds_core.vocabulary import Market
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -38,6 +39,8 @@ DEFAULT_BOOTSTRAP_SAMPLES = 10_000
 BOOTSTRAP_SEED = 0
 # The FDUK closing price can arrive days after the match, so a missing close is final only later.
 CLOSE_GRACE = timedelta(days=7)
+# Markets with a Betfair Exchange close; MLB's two-way market has none.
+CLOSE_MARKETS: frozenset[Market] = frozenset({Market.ONE_X_TWO, Market.TOTALS})
 
 
 class Verdict(StrEnum):
@@ -107,16 +110,15 @@ class CandidateSummary:
 
 
 def selection_close_probability(
-    market: str, selection: str, event: Event, quoted: Sequence[Quote]
+    market: Market, selection: str, line: float | None, event: Event, quoted: Sequence[Quote]
 ) -> float | None:
-    """Close probability of the selection from the event's close quotes
-    (``odds_core.betfair_close.close_quotes``); None where no close is defined or exists.
-
-    Only the 1x2 market has a close (MLB's two-way market has none).
+    """Close probability of the selection on ``line`` from the event's close quotes
+    (``odds_core.betfair_close.close_quotes``), the close on that line; None where no close is
+    defined (a market outside ``CLOSE_MARKETS``) or exists.
     """
-    if market != THREE_WAY_MARKET:
+    if market not in CLOSE_MARKETS:
         return None
-    close = event_close(quoted, event.commence_time, market)
+    close = event_close(quoted, event.commence_time, market, line=line)
     if close is None:
         return None
     return close.fair[Outcome(selection)]
@@ -127,26 +129,29 @@ def promote_level(family_versions: int) -> float:
     return 1 - PROMOTE_ERROR / family_versions
 
 
+# A family of candidate versions: their rule, sport and market.
+Family = tuple[str, str, Market]
+
+
+def family(candidate: MechanicalCandidate) -> Family:
+    return (candidate.rule, candidate.sport, candidate.market)
+
+
 def family_starts(
-    rule: str,
-    sport: str,
+    key: Family,
     registry: Sequence[Candidate],
     decision_starts: Mapping[tuple[str, int], datetime],
     draft: tuple[str, int] | None = None,
     draft_start: datetime | None = None,
 ) -> list[datetime]:
-    """When each version in the (rule, sport) family took its first look, sorted.
+    """When each version in the family ``key`` took its first look, sorted.
 
     A version counts from its first recorded decision in ``decision_starts``, for names whose
     registry entry is in the family: a version with no decision has taken no look, and a
     ``start_date`` can be back-dated where a decision cannot. An unregistered ``draft`` counts
     from ``draft_start``, unless it already has a decision.
     """
-    members = {
-        c.name
-        for c in registry
-        if isinstance(c, MechanicalCandidate) and c.rule == rule and c.sport == sport
-    }
+    members = {c.name for c in registry if isinstance(c, MechanicalCandidate) and family(c) == key}
     starts = {key: first for key, first in decision_starts.items() if key[0] in members}
     if draft is not None and draft_start is not None:
         starts.setdefault(draft, draft_start)
@@ -287,7 +292,7 @@ def summarize_candidates(
         entry = current.get(name)
         if not isinstance(entry, MechanicalCandidate):
             return lambda _: 1
-        starts = family_starts(entry.rule, entry.sport, registry, decision_starts or {})
+        starts = family_starts(family(entry), registry, decision_starts or {})
         return lambda when: family_size_at(starts, when)
 
     return [
@@ -330,8 +335,9 @@ async def load_scored_trades(session: AsyncSession) -> list[ScoredBet]:
                 stake=trade.stake,
                 pnl=trade.pnl,
                 price_decimal=trade.price_decimal,
+                # A paper trade records no line: the live runner bets only markets without lines.
                 p_close=selection_close_probability(
-                    trade.market, trade.selection, event, closes.get(event.id, [])
+                    Market(trade.market), trade.selection, None, event, closes.get(event.id, [])
                 ),
                 placed_at=trade.placed_at,
             )

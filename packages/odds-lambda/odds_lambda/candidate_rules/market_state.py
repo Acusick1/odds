@@ -17,48 +17,70 @@ from odds_core.exchange_price import (
 from odds_core.market_prices import Outcome
 from odds_core.models import Event
 from odds_core.quotes import Quote
-from odds_core.vocabulary import Side
+from odds_core.vocabulary import Market, Side
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_lambda.betfair.constants import SPORT_CONFIG
 from odds_lambda.candidate_rules.inputs import RETAIL_SOURCES, rule_quotes
+
+# A market's line, None in a market without lines.
+Line = float | None
+# Markets whose prices are on a line.
+LINE_MARKETS: frozenset[Market] = frozenset({Market.SPREADS, Market.TOTALS})
 
 
 @dataclass(frozen=True)
 class MarketState:
-    """One event at ``decision_time``, from the snapshot ``snapshot_id`` stamped at or before it.
+    """One event's ``market`` at ``decision_time``, from the snapshot ``snapshot_id`` stamped at
+    or before it.
 
-    A state without a snapshot has no inputs: no retail prices and no exchange price.
+    ``retail`` holds each line's UK retail back prices per book, and ``exchange`` each line's
+    devigged exchange price; a market without lines has the one line None. A state without a
+    snapshot has no inputs: no retail prices and no exchange price.
     """
 
     event_id: str
     sport_key: str
-    market: str
+    market: Market
     kickoff: datetime
     decision_time: datetime
     snapshot_id: int | None = None
     snapshot_time: datetime | None = None
-    retail: dict[str, dict[Outcome, float]] = field(default_factory=dict)
-    exchange: ExchangePrice | None = None
+    retail: dict[Line, dict[str, dict[Outcome, float]]] = field(default_factory=dict)
+    exchange: dict[Line, ExchangePrice] = field(default_factory=dict)
 
     @property
     def has_input(self) -> bool:
         return self.snapshot_time is not None
 
 
-def sport_market(sport_key: str) -> str:
-    for key, config in SPORT_CONFIG.items():
-        if key == sport_key:
-            return config.market_key
-    raise ValueError(f"No candidate market defined for sport {sport_key!r}")
+def is_bettable_line(market: Market, line: Line) -> bool:
+    """A line of ``market`` no result can push on: None in a market without lines, else a half
+    line."""
+    if market not in LINE_MARKETS:
+        return line is None
+    return line is not None and line % 1 == 0.5
 
 
-def _retail(snapshot: Sequence[Quote]) -> dict[str, dict[Outcome, float]]:
-    retail: dict[str, dict[Outcome, float]] = {}
+def _retail(
+    snapshot: Sequence[Quote], market: Market
+) -> dict[Line, dict[str, dict[Outcome, float]]]:
+    retail: dict[Line, dict[str, dict[Outcome, float]]] = {}
     for q in snapshot:
-        if q.bookmaker in UK_RETAIL_BOOKMAKERS:
-            retail.setdefault(q.bookmaker, {})[Outcome(q.outcome.value)] = q.price
+        if q.bookmaker in UK_RETAIL_BOOKMAKERS and is_bettable_line(market, q.line):
+            retail.setdefault(q.line, {}).setdefault(q.bookmaker, {})[q.outcome] = q.price
     return retail
+
+
+def _exchange(snapshot: Sequence[Quote], market: Market) -> dict[Line, ExchangePrice]:
+    exchange_quotes = [q for q in snapshot if q.bookmaker == EXCHANGE_BOOKMAKER]
+    lines = {q.line for q in exchange_quotes if is_bettable_line(market, q.line)}
+    prices: dict[Line, ExchangePrice] = {}
+    # A market's bettable lines are all None or all numbers, so they sort.
+    for line in sorted(lines):  # type: ignore[type-var]
+        price = exchange_price(exchange_quotes, market, line)
+        if price is not None and price.overround <= MAX_EXCHANGE_OVERROUND:
+            prices[line] = price
+    return prices
 
 
 def _co_timed(snapshot: Sequence[Quote]) -> bool:
@@ -68,20 +90,22 @@ def _co_timed(snapshot: Sequence[Quote]) -> bool:
 
 def build_market_state(
     event: Event,
+    market: Market,
     quoted: Sequence[Quote],
     decision_time: datetime,
     max_input_age: timedelta,
 ) -> MarketState:
-    """The event's state at ``decision_time`` from one snapshot's quotes; later ones are ignored.
+    """The event's state in ``market`` at ``decision_time`` from one snapshot's quotes; later
+    ones are ignored.
 
-    The input is the latest snapshot of the state's market from a ``RETAIL_SOURCES`` source,
-    stamped at or before t, whose back prices quote a UK retail book and the Betfair Exchange, so both
+    The input is the latest snapshot of the market from a ``RETAIL_SOURCES`` source, stamped at
+    or before t, whose back prices quote a UK retail book and the Betfair Exchange, so both
     prices were taken together, when it is at most ``max_input_age`` old; otherwise the state
-    has no inputs. Retail is its UK retail books' back prices. The exchange price is its
-    devigged Betfair Exchange backs, when they price every outcome with an overround of at most
+    has no inputs. Only bettable lines (``is_bettable_line``) count. Retail is its UK retail
+    books' back prices per line. A line's exchange price is its devigged Betfair Exchange backs
+    on that line, when they price every outcome with an overround of at most
     ``MAX_EXCHANGE_OVERROUND``.
     """
-    market = sport_market(event.sport_key)
     state = MarketState(
         event_id=event.id,
         sport_key=event.sport_key,
@@ -103,24 +127,19 @@ def build_market_state(
     snapshot_time = snapshot[0].snapshot_time
     if decision_time - snapshot_time > max_input_age:
         return state
-
-    exchange = exchange_price([q for q in snapshot if q.bookmaker == EXCHANGE_BOOKMAKER], market)
     return replace(
         state,
         snapshot_id=snapshot[0].snapshot_id,
         snapshot_time=snapshot_time,
-        retail=_retail(snapshot),
-        exchange=(
-            exchange
-            if exchange is not None and exchange.overround <= MAX_EXCHANGE_OVERROUND
-            else None
-        ),
+        retail=_retail(snapshot, market),
+        exchange=_exchange(snapshot, market),
     )
 
 
 async def load_market_state(
     session: AsyncSession,
     event: Event,
+    market: Market,
     decision_time: datetime,
     max_input_age: timedelta,
     known_at: datetime | None = None,
@@ -138,10 +157,10 @@ async def load_market_state(
     quoted = await rule_quotes(
         session,
         event.id,
-        sport_market(event.sport_key),
+        market,
         since=decision_time - max_input_age,
         until=decision_time,
         known_at=known_at,
         snapshot_ids=snapshot_ids,
     )
-    return build_market_state(event, quoted, decision_time, max_input_age)
+    return build_market_state(event, market, quoted, decision_time, max_input_age)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from itertools import count
 
@@ -12,7 +13,7 @@ from odds_core.market_prices import market_outcomes
 from odds_core.odds_math import devig_probabilities
 from odds_core.quotes import Quote
 from odds_core.snapshot_sources import FdukTimeBasis
-from odds_core.vocabulary import Source, TimeBasis
+from odds_core.vocabulary import Market, PriceOutcome, Source, TimeBasis
 
 from tests.test_helpers import (
     betfair_exchange_bookmaker,
@@ -149,6 +150,37 @@ class TestExchangePrice:
         price = exchange_price(quotes, "1x2")
         assert price is not None and price.fair == pytest.approx(_fair(LATE))
         assert price.overround == pytest.approx(sum(1 / p for p in LATE) - 1)
+
+
+def _totals(minutes_before: float, lines: dict[float, tuple[float, float]]) -> list[Quote]:
+    """A live Betfair snapshot's totals backs, (over, under) per line."""
+    [template, *_] = _betfair(minutes_before, LATE)
+    return [
+        replace(template, market=Market.TOTALS, outcome=outcome, line=line, price=price)
+        for line, (over, under) in lines.items()
+        for outcome, price in ((PriceOutcome.OVER, over), (PriceOutcome.UNDER, under))
+    ]
+
+
+class TestLineClose:
+    def test_each_line_has_its_own_close(self) -> None:
+        quoted = _totals(10, {2.5: (2.0, 2.0), 3.5: (4.0, 4.0 / 3)})
+        on_2_5 = event_close(quoted, KICKOFF, "totals", line=2.5)
+        on_3_5 = event_close(quoted, KICKOFF, "totals", line=3.5)
+        assert on_2_5 is not None and on_2_5.fair[PriceOutcome.OVER] == pytest.approx(0.5)
+        assert on_3_5 is not None and on_3_5.fair[PriceOutcome.OVER] == pytest.approx(0.25)
+
+    def test_the_last_snapshot_pricing_the_line_wins(self) -> None:
+        quoted = _totals(20, {2.5: (2.0, 2.0)}) + _totals(10, {3.5: (4.0, 4.0 / 3)})
+        close = event_close(quoted, KICKOFF, "totals", line=2.5)
+        assert close is not None and close.fair[PriceOutcome.OVER] == pytest.approx(0.5)
+
+    def test_a_line_without_prices_has_no_close(self) -> None:
+        assert event_close(_totals(10, {2.5: (2.0, 2.0)}), KICKOFF, "totals", line=1.5) is None
+
+    def test_a_one_sided_line_has_no_price(self) -> None:
+        quoted = [q for q in _totals(10, {2.5: (2.0, 2.0)}) if q.outcome is PriceOutcome.OVER]
+        assert exchange_price(quoted, "totals", 2.5) is None
 
 
 class TestPickClose:

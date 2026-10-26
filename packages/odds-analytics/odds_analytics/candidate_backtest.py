@@ -1,7 +1,7 @@
 """Replay a mechanical candidate over completed events and score it like the forward test.
 
 Each event is decided at each of its rule's decision times, from the snapshots stamped at or
-before it, betting each outcome at most once per event, and the bets are scored by
+before it, betting each selection at most once per event, and the bets are scored by
 ``odds_analytics.candidate_report``: the same close lookup, EV, checkpoint and verdict code
 as the paper trades. Development data can kill an idea but
 never promote one.
@@ -16,15 +16,17 @@ from enum import StrEnum
 
 from odds_core.betfair_close import close_quotes
 from odds_core.candidates import MechanicalCandidate
-from odds_core.market_prices import THREE_WAY_MARKET, Outcome
+from odds_core.market_prices import Outcome
 from odds_core.models import Event, EventStatus
 from odds_core.odds_math import calculate_profit_from_decimal, determine_h2h_winner
 from odds_lambda.candidate_rules import (
     RULES,
+    BetIntent,
     ModelRuleSpec,
     RetailEvModelParams,
     RuleParams,
     RuleSpec,
+    Selection,
     decision_times,
     resolve_rule,
     rule_sha256,
@@ -37,6 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from odds_analytics.candidate_model import ModelReplay, Refit, Tuning, library_versions
 from odds_analytics.candidate_report import (
     BOOTSTRAP_SEED,
+    CLOSE_MARKETS,
     DEFAULT_BOOTSTRAP_SAMPLES,
     CandidateSummary,
     Checkpoint,
@@ -130,6 +133,18 @@ async def final_events(session: AsyncSession, sport: str, start: date, end: date
     return await canonical_events(session, result.scalars().all())
 
 
+def won(intent: BetIntent, home_score: int, away_score: int) -> bool:
+    """Whether the bet won: its outcome is the result, or the goals are over or under its line."""
+    goals = home_score + away_score
+    if intent.outcome is Outcome.OVER:
+        assert intent.line is not None  # noqa: S101
+        return goals > intent.line
+    if intent.outcome is Outcome.UNDER:
+        assert intent.line is not None  # noqa: S101
+        return goals < intent.line
+    return intent.outcome.value == determine_h2h_winner(home_score, away_score)
+
+
 @dataclass
 class _Counts:
     decisions: int = 0
@@ -148,33 +163,30 @@ async def _decide(
     counts: _Counts,
 ) -> list[ScoredBet]:
     """Decide ``events`` at each of their decision times and settle the bets."""
+    market = candidate.market
     bets: list[ScoredBet] = []
     for offset in range(0, len(events), EVENT_BATCH_SIZE):
         batch = events[offset : offset + EVENT_BATCH_SIZE]
         decided = []
         for event in batch:
-            bet_outcomes: set[Outcome] = set()
+            bet_selections: set[Selection] = set()
             for _, t in decision_times(event.commence_time, params):
                 state, intents = await run_rule(
-                    session, spec, params, event, t, None, bet_outcomes=bet_outcomes
+                    session, spec, params, event, market, t, None, bet_selections=bet_selections
                 )
-                bet_outcomes.update(intent.outcome for intent in intents)
+                bet_selections.update(intent.selection for intent in intents)
                 counts.decisions += 1
                 counts.with_input += state.has_input
-                counts.with_exchange += state.exchange is not None
+                counts.with_exchange += bool(state.exchange)
                 counts.with_retail += bool(state.retail)
                 counts.with_bet += bool(intents)
-                decided.append((event, t, state.market, intents))
+                decided.append((event, t, intents))
 
-        has_close = {
-            e.id: e for e, _, market, intents in decided if intents and market == THREE_WAY_MARKET
-        }
-        closes = await close_quotes(session, list(has_close.values()), THREE_WAY_MARKET)
-        for event, t, market, intents in decided:
+        has_close = {e.id: e for e, _, intents in decided if intents and market in CLOSE_MARKETS}
+        closes = await close_quotes(session, list(has_close.values()), market)
+        for event, t, intents in decided:
             assert event.home_score is not None and event.away_score is not None  # noqa: S101
-            winner = determine_h2h_winner(event.home_score, event.away_score)
             for intent in intents:
-                selection = intent.outcome.value
                 bets.append(
                     ScoredBet(
                         candidate_name=candidate.name,
@@ -183,11 +195,17 @@ async def _decide(
                         commence_time=event.commence_time,
                         stake=intent.stake,
                         pnl=calculate_profit_from_decimal(
-                            intent.stake, intent.price_decimal, won=selection == winner
+                            intent.stake,
+                            intent.price_decimal,
+                            won=won(intent, event.home_score, event.away_score),
                         ),
                         price_decimal=intent.price_decimal,
                         p_close=selection_close_probability(
-                            market, selection, event, closes.get(event.id, [])
+                            market,
+                            intent.outcome.value,
+                            intent.line,
+                            event,
+                            closes.get(event.id, []),
                         ),
                         placed_at=t,
                     )
@@ -234,7 +252,7 @@ async def replay(
             )
         assert isinstance(params, RetailEvModelParams)  # noqa: S101
         bets: list[ScoredBet] = []
-        model = ModelReplay(session, spec, params, events)
+        model = ModelReplay(session, spec, params, candidate.market, events)
         tuning = await model.tuned_hyperparameters()
         if tuning is not None:
             async for refit, bound, block in model.blocks(tuning):

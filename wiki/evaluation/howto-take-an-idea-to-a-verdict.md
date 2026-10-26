@@ -16,13 +16,14 @@ What a candidate is and when it is promoted or killed is on [Goal and strategy](
    - State the rule, the reason it might earn EV and the pre-registered grid: the parameter values, the data range and how a cell is selected. Fix these before any backtest runs, as [#626](https://github.com/Acusick1/odds/issues/626) does.
    - A rule that is not in `odds_lambda.candidate_rules.rules.RULES` needs a rule function first ([candidate rules](candidate-rules.md#rule-interface)); a rule reads only the [market state](candidate-rules.md#market-state). A [model rule](candidate-rules.md#model-rules) can only be backtested, because the live runner does not run one; its draft's params also fix the tuning trials, seed and folds, its result records the library versions, and `--compare` takes a rule without a model.
 2. **Backtest a draft on development data.**
-   - Write a draft file outside `candidates/` with every required field of `odds_core.candidates.MechanicalCandidate` except its hash: name, description, kind (`mechanical`), sport, version, issue, start date, status, rule and the rule's params, which include `minutes_before_kickoff`, the list of decision times, and `max_input_age_minutes` (10 for a version to register; a draft may widen it to reach older snapshots, [rule interface](candidate-rules.md#rule-interface)). A candidate with several decision times bets each outcome of a match at most once, at the first time it qualifies, and its verdict covers the set of times ([once per outcome](candidate-rules.md#once-per-outcome)).
+   - Write a draft file outside `candidates/` with every required field of `odds_core.candidates.MechanicalCandidate` except its hash: name, description, kind (`mechanical`), sport, market (such as `1x2` or `totals`), version, issue, start date, status, rule and the rule's params, which include `minutes_before_kickoff`, the list of decision times, and `max_input_age_minutes` (10 for a version to register; a draft may widen it to reach older snapshots, [rule interface](candidate-rules.md#rule-interface)). A candidate with several decision times bets each selection of a match (an outcome on a line) at most once, at the first time it qualifies, and its verdict covers the set of times ([once per selection](candidate-rules.md#once-per-selection)).
    - For example:
 
      ```yaml
      name: back-longest
      description: Back the longest retail price when it beats the exchange fair price by 2%.
      kind: mechanical
+     market: 1x2
      sport: soccer_epl
      version: 1
      issue: 626

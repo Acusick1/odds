@@ -3,6 +3,7 @@
 name: retail-ev-model-epl
 description: Back the longest UK retail price when the price-only retail-EV model predicts EV above 1%, 60 and 30 minutes before kick-off (each outcome once); hyperparameters tuned on 50 training-only matches, then refitted every 10 matches
 kind: mechanical
+market: 1x2
 sport: soccer_epl
 version: 1
 issue: 680
