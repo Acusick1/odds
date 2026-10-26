@@ -16,13 +16,13 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
 import numpy as np
-from odds_core.betfair_close import LIVE_CLOSE_WINDOW, event_close
+from odds_core.betfair_close import close_quotes, event_close
 from odds_core.candidates import Candidate, CandidateStatus, MechanicalCandidate
 from odds_core.market_prices import THREE_WAY_MARKET, Outcome
-from odds_core.models import Event, OddsSnapshot
+from odds_core.models import Event
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade, TradeResult
-from odds_core.snapshot_sources import FdukTimeBasis, SnapshotSource
-from sqlalchemy import Select, and_, func, or_, select
+from odds_core.quotes import Quote
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -107,15 +107,16 @@ class CandidateSummary:
 
 
 def selection_close_probability(
-    market: str, selection: str, event: Event, snapshots: Sequence[OddsSnapshot]
+    market: str, selection: str, event: Event, quoted: Sequence[Quote]
 ) -> float | None:
-    """Close probability of the selection; None where no close is defined or exists.
+    """Close probability of the selection from the event's close quotes
+    (``odds_core.betfair_close.close_quotes``); None where no close is defined or exists.
 
     Only the 1x2 market has a close (MLB's two-way market has none).
     """
     if market != THREE_WAY_MARKET:
         return None
-    close = event_close(event, snapshots, market)
+    close = event_close(quoted, event.commence_time, market)
     if close is None:
         return None
     return close.fair[Outcome(selection)]
@@ -304,27 +305,6 @@ def summarize_candidates(
     ]
 
 
-def close_candidate_snapshots(event_ids: set[str]) -> Select[tuple[OddsSnapshot]]:
-    """The snapshots of ``event_ids`` that ``event_close`` can pick.
-
-    Those are live Betfair prices in the window before kick-off and FDUK closing prices.
-    """
-    in_window = and_(
-        OddsSnapshot.snapshot_time >= Event.commence_time - LIVE_CLOSE_WINDOW,  # type: ignore[operator]
-        OddsSnapshot.snapshot_time <= Event.commence_time,  # type: ignore[operator]
-    )
-    fduk_closing = and_(
-        OddsSnapshot.raw_data["source"].as_string() == SnapshotSource.FOOTBALL_DATA_UK.value,  # type: ignore[index]
-        OddsSnapshot.raw_data["timing"]["basis"].as_string() == FdukTimeBasis.KICKOFF.value,  # type: ignore[index]
-    )
-    return (
-        select(OddsSnapshot)
-        .join(Event, OddsSnapshot.event_id == Event.id)  # type: ignore[arg-type]
-        .where(OddsSnapshot.event_id.in_(event_ids))  # type: ignore[attr-defined]
-        .where(or_(in_window, fduk_closing))
-    )
-
-
 async def load_scored_trades(session: AsyncSession) -> list[ScoredBet]:
     """Non-void candidate trades in placement order, each with its close probability."""
     stmt = (
@@ -335,12 +315,8 @@ async def load_scored_trades(session: AsyncSession) -> list[ScoredBet]:
         .order_by(PaperTrade.placed_at, PaperTrade.id)  # type: ignore[arg-type]
     )
     rows = (await session.execute(stmt)).all()
-    event_ids = {event.id for trade, event in rows if trade.market == THREE_WAY_MARKET}
-    snapshots: dict[str, list[OddsSnapshot]] = defaultdict(list)
-    if event_ids:
-        snapshot_rows = await session.execute(close_candidate_snapshots(event_ids))
-        for snapshot in snapshot_rows.scalars():
-            snapshots[snapshot.event_id].append(snapshot)
+    events = {event.id: event for trade, event in rows if trade.market == THREE_WAY_MARKET}
+    closes = await close_quotes(session, list(events.values()), THREE_WAY_MARKET)
 
     scored: list[ScoredBet] = []
     for trade, event in rows:
@@ -355,7 +331,7 @@ async def load_scored_trades(session: AsyncSession) -> list[ScoredBet]:
                 pnl=trade.pnl,
                 price_decimal=trade.price_decimal,
                 p_close=selection_close_probability(
-                    trade.market, trade.selection, event, snapshots[event.id]
+                    trade.market, trade.selection, event, closes.get(event.id, [])
                 ),
                 placed_at=trade.placed_at,
             )

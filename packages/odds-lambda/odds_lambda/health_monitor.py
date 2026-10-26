@@ -20,12 +20,12 @@ from typing import Protocol
 
 import structlog
 from odds_core.alerts import job_outage_alerted_at, send_recorded_alert
-from odds_core.betfair_close import LIVE_CLOSE_WINDOW, complete_exchange_prices, is_in_play
+from odds_core.betfair_close import LIVE_CLOSE_WINDOW, event_close, live_close_quotes
 from odds_core.config import Settings, get_settings
 from odds_core.database import async_session_maker
-from odds_core.market_prices import THREE_WAY_MARKET, outcome_names
+from odds_core.market_prices import THREE_WAY_MARKET
 from odds_core.models import AlertHistory, Event, EventStatus, OddsSnapshot
-from odds_core.snapshot_sources import SnapshotKind, SnapshotSource
+from odds_core.vocabulary import Source
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -309,10 +309,10 @@ class HealthMonitor:
         before. It is skipped when its status is postponed or cancelled, or when it
         has no live Betfair snapshot in the ``BETFAIR_HISTORY_WINDOW`` before
         kick-off (a ghost, a twin that carries the prices, or an unannounced
-        postponement). It is missing when no non-in-play live Betfair snapshot with
-        a price for every outcome lies within ``LIVE_CLOSE_WINDOW`` before kick-off,
-        the same definition the retail-EV builder uses for its close. Events already
-        named in an alert inside the lookback are not reported again.
+        postponement). It is missing when it has no live close
+        (``odds_core.betfair_close.event_close`` over its ``live_close_quotes``), the close
+        the candidate report scores against. Events already named in an alert inside the
+        lookback are not reported again.
         """
         moment = now or datetime.now(UTC)
         if (
@@ -324,12 +324,17 @@ class HealthMonitor:
             BETFAIR_CLOSE_JOB, self.settings.data_collection.sports
         ):
             return []
-        if (
-            await latest_snapshot_time(
-                self.session, BETFAIR_CLOSE_SPORT, SnapshotSource.BETFAIR_API
+        betfair_history = (
+            await self.session.execute(
+                select(OddsSnapshot.id)
+                .join(Event, Event.id == OddsSnapshot.event_id)  # type: ignore[arg-type]
+                .where(
+                    Event.sport_key == BETFAIR_CLOSE_SPORT, OddsSnapshot.source == Source.BETFAIR
+                )
+                .limit(1)
             )
-            is None
-        ):
+        ).first()
+        if betfair_history is None:
             logger.info("betfair_close_no_history", sport=BETFAIR_CLOSE_SPORT)
             return []
         lookback = timedelta(hours=self.settings.alerts.betfair_close_lookback_hours)
@@ -350,7 +355,6 @@ class HealthMonitor:
             .all()
         )
         already_alerted = await self._event_ids_alerted(BETFAIR_CLOSE_ALERT_TYPE, moment - lookback)
-        tag = OddsSnapshot.raw_data["source"].as_string()  # type: ignore[index]
         missing: list[MissingBetfairClose] = []
         for event in events:
             if event.id in already_alerted:
@@ -361,7 +365,7 @@ class HealthMonitor:
                     select(OddsSnapshot.id)
                     .where(
                         OddsSnapshot.event_id == event.id,
-                        tag == SnapshotSource.BETFAIR_API.value,
+                        OddsSnapshot.source == Source.BETFAIR,
                         OddsSnapshot.snapshot_time >= kickoff - BETFAIR_HISTORY_WINDOW,
                         OddsSnapshot.snapshot_time <= kickoff,
                     )
@@ -370,25 +374,8 @@ class HealthMonitor:
             ).first()
             if betfair_before is None:
                 continue
-            closes = (
-                await self.session.execute(
-                    select(OddsSnapshot.raw_data).where(
-                        OddsSnapshot.event_id == event.id,
-                        tag == SnapshotSource.BETFAIR_API.value,
-                        OddsSnapshot.snapshot_time >= kickoff - LIVE_CLOSE_WINDOW,
-                        OddsSnapshot.snapshot_time <= kickoff,
-                    )
-                )
-            ).scalars()
-            names = outcome_names(event, THREE_WAY_MARKET)
-            if any(
-                not is_in_play(raw_data)
-                and complete_exchange_prices(
-                    raw_data, SnapshotKind.BETFAIR_LIVE, THREE_WAY_MARKET, names
-                )
-                is not None
-                for raw_data in closes
-            ):
+            closes = await live_close_quotes(self.session, [event.id], THREE_WAY_MARKET)
+            if event_close(closes, kickoff, THREE_WAY_MARKET) is not None:
                 continue
             missing.append(
                 MissingBetfairClose(

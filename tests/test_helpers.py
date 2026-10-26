@@ -7,6 +7,10 @@ from typing import Any
 
 from odds_core.api_models import EventsResponse, HistoricalOddsResponse, OddsResponse
 from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.quotes import Quote
+from odds_core.vocabulary import Source, TimeBasis
+from odds_lambda.price_rows import expand_envelope
+from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_shaped_snapshot
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -198,6 +202,97 @@ def make_tagged_snapshot(
         raw_data=raw_data,
         bookmaker_count=len(bookmakers),
     )
+
+
+def betfair_exchange_bookmaker(
+    prices: tuple[float, float, float],
+    inplay: bool = False,
+    home_team: str = "Arsenal",
+    away_team: str = "Chelsea",
+    **meta: Any,
+) -> dict[str, Any]:
+    """A Betfair Exchange entry with 1x2 back prices, both as outcomes (what OddsPortal and the
+    Odds API carry) and as Betfair runners (what the Betfair job carries)."""
+    names = (home_team, "The Draw", away_team)
+    runners = [
+        {"runner_name": name, "best_back": price} for name, price in zip(names, prices, strict=True)
+    ]
+    return three_way_bookmaker(
+        "betfair_exchange",
+        prices,
+        home_team,
+        away_team,
+        betfair_meta={"inplay": inplay, "market_status": "OPEN", "runners": runners, **meta},
+    )
+
+
+def snapshot_shape(source: str | None, fduk_basis: str | None = None) -> tuple[Source, TimeBasis]:
+    """The source and time basis the writers store a ``make_tagged_snapshot`` tag under."""
+    if source == "football_data_uk":
+        return Source.FOOTBALL_DATA_UK, (
+            TimeBasis.CLOSE if fduk_basis == "kickoff" else TimeBasis.UPPER_BOUND
+        )
+    return {
+        None: (Source.ODDS_API, TimeBasis.OBSERVED),
+        "oddsportal": (Source.ODDSPORTAL, TimeBasis.SOURCE_STAMPED),
+        "oddsportal_live": (Source.ODDSPORTAL, TimeBasis.OBSERVED),
+        "betfair_api": (Source.BETFAIR, TimeBasis.OBSERVED),
+        "polymarket": (Source.POLYMARKET, TimeBasis.OBSERVED),
+    }[source]
+
+
+def make_quotes(
+    event: Event,
+    snapshot_id: int,
+    snapshot_time: datetime,
+    bookmakers: list[dict[str, Any]],
+    source: str | None,
+    fduk_basis: str | None = None,
+    created_at: datetime | None = None,
+) -> list[Quote]:
+    """The quotes the writers would store for a ``make_tagged_snapshot`` of ``event``, as one
+    snapshot per market numbered from ``snapshot_id``."""
+    shape_source, time_basis = snapshot_shape(source, fduk_basis)
+    expanded = expand_envelope(
+        {"bookmakers": bookmakers}, shape_source, event.home_team, event.away_team
+    )
+    return [
+        Quote(
+            snapshot_id=snapshot_id + i,
+            event_id=event.id,
+            snapshot_time=snapshot_time,
+            created_at=created_at or snapshot_time,
+            source=shape_source,
+            market=market.market,
+            time_basis=time_basis,
+            in_play=market.meta.in_play,
+            market_status=market.meta.market_status,
+            total_matched=None,
+            market_start_time=market.meta.market_start_time,
+            bookmaker=spec.bookmaker,
+            outcome=spec.outcome,
+            line=None if spec.line is None else float(spec.line),
+            side=spec.side,
+            price=float(spec.price),
+            size=None if spec.size is None else float(spec.size),
+            matched=None if spec.matched is None else float(spec.matched),
+            changed_at=spec.changed_at,
+        )
+        for i, market in enumerate(expanded.markets)
+        for spec in market.prices
+    ]
+
+
+async def store_tagged(session: AsyncSession, snapshot: OddsSnapshot) -> OddsSnapshot:
+    """Store a ``make_tagged_snapshot`` with its price rows, as the writers do; its event must
+    be in the session."""
+    await session.flush()
+    event = await session.get(Event, snapshot.event_id)
+    assert event is not None
+    timing = snapshot.raw_data.get("timing") or {}
+    source, time_basis = snapshot_shape(snapshot.raw_data.get("source"), timing.get("basis"))
+    await store_shaped_snapshot(session, snapshot, event, SnapshotShape(source, time_basis, None))
+    return snapshot
 
 
 class FakeBetfairClient:

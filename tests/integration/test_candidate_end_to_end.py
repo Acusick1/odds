@@ -23,7 +23,12 @@ from tests.integration.test_candidate_backtest import (
     betfair,
     candidate,
 )
-from tests.test_helpers import make_epl_event, make_tagged_snapshot, three_way_bookmaker
+from tests.test_helpers import (
+    make_epl_event,
+    make_tagged_snapshot,
+    store_tagged,
+    three_way_bookmaker,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -54,7 +59,8 @@ async def seed(
     ]
     for snapshot in snapshots:
         snapshot.created_at = NOW - timedelta(hours=1)
-    session.add_all(snapshots)
+    for snapshot in snapshots:
+        await store_tagged(session, snapshot)
     await session.commit()
 
 
@@ -108,7 +114,7 @@ class TestRunnerThenParity:
             "oddsportal_live",
         )
         merged.created_at = NOW - timedelta(hours=2)
-        pglite_async_session.add(merged)
+        await store_tagged(pglite_async_session, merged)
         await pglite_async_session.commit()
 
         report = await check_parity(pglite_async_session, candidate())

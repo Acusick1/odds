@@ -43,7 +43,7 @@ def frame(dataset: RetailEvDataset) -> pd.DataFrame:
             "event_id": dataset.event_ids,
             "season": [r.season for r in dataset.rows],
             "retail_source": [r.retail_kind.value for r in dataset.rows],
-            "close_source": [r.close.kind.value for r in dataset.rows],
+            "close_source": [r.close.source.value for r in dataset.rows],
             "horizon": [r.horizon_bucket for r in dataset.rows],
             "book": [r.book for r in dataset.rows],
             "target": dataset.targets,

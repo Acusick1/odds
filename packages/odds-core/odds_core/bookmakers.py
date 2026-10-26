@@ -69,7 +69,7 @@ def canonical_bookmaker_key(key: str, kind: SnapshotKind) -> str:
 
 
 # Odds API keys that differ from the pipeline's bookmaker keys, rewritten in its responses as
-# they are fetched. Kept apart from the read-time maps above, which candidate rules hash.
+# they are fetched. Kept apart from the read-time maps above.
 ODDS_API_BOOKMAKER_KEY_MAP: dict[str, str] = {
     "betfair_ex_uk": "betfair_exchange",
     "betfair_ex_eu": "betfair_exchange",

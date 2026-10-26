@@ -66,7 +66,7 @@ Both CIs are event-clustered percentile bootstraps drawn from the spec's resampl
 - the scored events and rows, and the events and rows before the window;
 - each unscored window event with its status and those three source flags, and the window's drop counts;
 - runs of at least `odds_analytics.retail_ev_evaluation.OUTAGE_MIN_EVENTS` consecutive window events with no live OddsPortal snapshot, and with no live Betfair snapshot near kick-off;
-- scored rows and events by horizon, retail source, close source, event type and outcome.
+- scored rows and events by horizon, retail source (the retail snapshot's kind), close source (the source the close is stored under, `betfair` or `football_data_uk`), event type and outcome.
 
 `odds_analytics.retail_ev_evaluation.slice_table` repeats both statistics, with CIs, picks and pick totals, by each of `odds_analytics.retail_ev_evaluation.SLICE_KEYS`. The slices are descriptive and do not enter the verdict.
 
