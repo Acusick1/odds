@@ -39,7 +39,7 @@ status: stable
 - the window ends after the time the run starts;
 - any event or row it reads kicks off after `window.end` (`odds_analytics.retail_ev_evaluation.check_window_end`).
 
-It raises `odds_analytics.retail_ev_evaluation.IncompleteWindowError` when a window event is not FINAL or has no FDUK closing snapshot (`odds_analytics.retail_ev_evaluation.incomplete_events`), unless `allow_incomplete` names that event. The run time is passed to `odds_analytics.retail_ev.load_retail_ev_dataset` as `now`.
+It raises `odds_analytics.retail_ev_evaluation.IncompleteWindowError` when a window event is not FINAL or has no FDUK closing snapshot (`odds_analytics.retail_ev_evaluation.incomplete_events`), unless `allow_incomplete` names that event. Which sources an event's snapshots hold comes from their `source`, `time_basis` and time (`odds_analytics.retail_ev_evaluation.snapshot_stamps`, every market): an FDUK closing snapshot is FDUK with time basis `close`, and a live OddsPortal snapshot is OddsPortal `observed`. The run time is passed to `odds_analytics.retail_ev.load_retail_ev_dataset` as `now`.
 
 It reads the sport's events whose kick-off falls between `training_start` and `window.end`, in kick-off order, and builds their rows with `odds_analytics.retail_ev.load_retail_ev_dataset`. Team history for the schedule and standings groups is read only up to `window.end` (`odds_analytics.as_of_team_features.load_team_history`).
 
@@ -66,7 +66,7 @@ Both CIs are event-clustered percentile bootstraps drawn from the spec's resampl
 - the scored events and rows, and the events and rows before the window;
 - each unscored window event with its status and those three source flags, and the window's drop counts;
 - runs of at least `odds_analytics.retail_ev_evaluation.OUTAGE_MIN_EVENTS` consecutive window events with no live OddsPortal snapshot, and with no live Betfair snapshot near kick-off;
-- scored rows and events by horizon, retail source (the retail snapshot's kind), close source (the source the close is stored under, `betfair` or `football_data_uk`), event type and outcome.
+- scored rows and events by horizon, retail source and retail time basis (the retail snapshot's, such as `oddsportal` and `observed`), close source (the source the close is stored under, `betfair` or `football_data_uk`), event type (`fduk_only` when every row of the event comes from FDUK, else `live_collected`) and outcome.
 
 `odds_analytics.retail_ev_evaluation.slice_table` repeats both statistics, with CIs, picks and pick totals, by each of `odds_analytics.retail_ev_evaluation.SLICE_KEYS`. The slices are descriptive and do not enter the verdict.
 

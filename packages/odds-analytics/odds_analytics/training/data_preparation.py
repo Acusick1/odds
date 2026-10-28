@@ -33,15 +33,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 import numpy as np
 import structlog
-from odds_core.event_ids import is_odds_api_event_id
-from odds_core.models import Event, EventStatus
+from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.vocabulary import Source
 from scipy import stats
 from sklearn.model_selection import train_test_split
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from odds_analytics.training.config import MLTrainingConfig
 
@@ -318,7 +320,7 @@ async def filter_events_by_date_range(
     start_date: datetime,
     end_date: datetime,
     status: EventStatus | None = EventStatus.FINAL,
-    data_source: Literal["oddsportal", "oddsapi", "football_data_uk"] | None = None,
+    data_source: Source | None = None,
     min_snapshots: int | None = None,
     sport_key: str | None = None,
 ) -> list[Event]:
@@ -330,7 +332,7 @@ async def filter_events_by_date_range(
         start_date: Start date (inclusive)
         end_date: End date (inclusive)
         status: Event status to filter by (default: FINAL; None keeps every status)
-        data_source: Filter by data source ('oddsportal', 'oddsapi', or None)
+        data_source: Keep only events with a snapshot from this source (None keeps all)
         min_snapshots: Minimum number of snapshots required per event
         sport_key: Filter by sport key (e.g. 'basketball_nba', 'soccer_epl')
 
@@ -341,22 +343,30 @@ async def filter_events_by_date_range(
 
     reader = OddsReader(session)
 
-    # oddsportal/fduk events use ID prefixes; push to SQL for efficiency
-    prefix_map = {"oddsportal": "op_%", "football_data_uk": "fduk_%"}
-    event_id_pattern = prefix_map.get(data_source) if data_source else None
-
     events = await reader.get_events_by_date_range(
         start_date=start_date,
         end_date=end_date,
         sport_key=sport_key,
         status=status,
-        event_id_pattern=event_id_pattern,
         min_snapshots=min_snapshots,
     )
 
-    # oddsapi = everything that isn't from a known scraped source; filter in-memory
-    if data_source == "oddsapi":
-        events = [e for e in events if is_odds_api_event_id(e.id)]
+    if data_source is not None and events:
+        with_source = set(
+            (
+                await session.execute(
+                    select(col(OddsSnapshot.event_id))
+                    .where(
+                        col(OddsSnapshot.source) == data_source,
+                        col(OddsSnapshot.event_id).in_([e.id for e in events]),
+                    )
+                    .distinct()
+                )
+            )
+            .scalars()
+            .all()
+        )
+        events = [e for e in events if e.id in with_source]
 
     logger.info(
         "filtered_events_by_date_range",
@@ -364,7 +374,7 @@ async def filter_events_by_date_range(
         end_date=end_date.isoformat(),
         num_events=len(events),
         status=status.value if status else None,
-        data_source=data_source,
+        data_source=data_source.value if data_source else None,
         min_snapshots=min_snapshots,
         sport_key=sport_key,
     )
@@ -435,18 +445,13 @@ async def prepare_training_data_from_config(
         tzinfo=UTC,
     )
 
-    # Normalize data_source: treat "all" as None (no filter)
-    data_source = data_config.data_source
-    if data_source == "all":
-        data_source = None
-
     # Filter events by date range
     events = await filter_events_by_date_range(
         session=session,
         start_date=start_datetime,
         end_date=end_datetime,
         status=None if features_config.target_type == "retail_ev" else EventStatus.FINAL,
-        data_source=data_source,
+        data_source=data_config.data_source,
         min_snapshots=data_config.min_snapshots,
         sport_key=data_config.sport_key,
     )

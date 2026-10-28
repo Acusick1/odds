@@ -12,25 +12,33 @@ import pandas as pd
 import pytest
 from odds_analytics.retail_ev import BASELINE_FEATURE, RetailEvFeatures, event_weights
 from odds_analytics.retail_ev_evaluation import (
+    SLICE_KEYS,
     BootstrapSpec,
     EvaluationData,
     EvaluationSpec,
     KeepBar,
     OutputExistsError,
     RepeatedLookError,
+    SnapshotStamp,
     Verdict,
     WindowEndError,
+    _window_event_frame,
     check_one_look,
     check_output_dir,
     check_window_end,
     evaluate,
     evaluation_blocks,
     incomplete_events,
+    slice_table,
     xgboost_fitter,
 )
 from odds_analytics.retail_ev_metrics import BootstrapEstimate
 from odds_analytics.training.config import RetailEvArm, XGBoostConfig
 from odds_core.market_prices import market_outcomes
+from odds_core.models import EventStatus
+from odds_core.vocabulary import Source, TimeBasis
+
+from tests.test_helpers import make_epl_event
 
 TRAINING_START = datetime(2024, 8, 1, tzinfo=UTC)
 WINDOW_START = datetime(2025, 8, 1, tzinfo=UTC)
@@ -58,7 +66,8 @@ def _rows(kickoffs: list[datetime], rows_per_event: int = 2) -> pd.DataFrame:
             "event_id": event_ids,
             "commence_time": pd.to_datetime(times),
             "horizon": "1-3d",
-            "retail_source": "fduk_opening",
+            "retail_source": "football_data_uk",
+            "retail_time_basis": "upper_bound",
             "close_source": "football_data_uk",
             "event_type": "fduk_only",
             "outcome": np.resize(["home", "draw", "away"], n),
@@ -311,6 +320,75 @@ class TestReadiness:
         )
 
         assert incomplete_events(window) == ["scheduled", "no_close"]
+
+
+KICKOFF = datetime(2025, 10, 4, 14, 0, tzinfo=UTC)
+
+
+def _stamp(
+    source: Source, time_basis: TimeBasis, before_kickoff: timedelta = timedelta(hours=40)
+) -> SnapshotStamp:
+    return SnapshotStamp(source, time_basis, KICKOFF - before_kickoff)
+
+
+def _flags(stamps: list[SnapshotStamp]) -> dict[str, Any]:
+    event = make_epl_event("evt", KICKOFF, status=EventStatus.FINAL)
+    frame = _window_event_frame([event], {"evt": stamps})
+    return frame.iloc[0].to_dict()
+
+
+class TestWindowEventFrame:
+    def test_flags_follow_the_source_and_time_basis_of_the_stamps(self) -> None:
+        flags = _flags(
+            [
+                _stamp(Source.FOOTBALL_DATA_UK, TimeBasis.CLOSE, timedelta(0)),
+                _stamp(Source.ODDSPORTAL, TimeBasis.OBSERVED),
+                _stamp(Source.BETFAIR, TimeBasis.OBSERVED, timedelta(minutes=10)),
+            ]
+        )
+
+        assert flags["has_fduk_closing"]
+        assert flags["has_oddsportal_live"]
+        assert flags["has_live_betfair_near_kickoff"]
+
+    def test_other_stamps_of_the_same_source_set_no_flag(self) -> None:
+        flags = _flags(
+            [
+                _stamp(Source.FOOTBALL_DATA_UK, TimeBasis.UPPER_BOUND),
+                _stamp(Source.ODDSPORTAL, TimeBasis.SOURCE_STAMPED),
+                _stamp(Source.ODDS_API, TimeBasis.OBSERVED, timedelta(minutes=10)),
+            ]
+        )
+
+        assert not flags["has_fduk_closing"]
+        assert not flags["has_oddsportal_live"]
+        assert not flags["has_live_betfair_near_kickoff"]
+
+    def test_a_betfair_snapshot_counts_only_within_the_close_window(self) -> None:
+        early = _flags([_stamp(Source.BETFAIR, TimeBasis.OBSERVED, timedelta(hours=40))])
+        after = _flags([_stamp(Source.BETFAIR, TimeBasis.OBSERVED, timedelta(minutes=-5))])
+
+        assert not early["has_live_betfair_near_kickoff"]
+        assert not after["has_live_betfair_near_kickoff"]
+
+
+class TestSlices:
+    def test_retail_time_basis_is_a_slice_key(self) -> None:
+        assert "retail_time_basis" in SLICE_KEYS
+
+    def test_slices_split_rows_by_time_basis(self) -> None:
+        rows = _rows(_weekly(WINDOW_START, 10))
+        rng = np.random.default_rng(0)
+        rows["y"] = rng.normal(0.0, 0.05, len(rows))
+        rows["baseline"] = rng.normal(0.0, 0.05, len(rows))
+        rows["model"] = rows["y"] + rng.normal(0.0, 0.02, len(rows))
+        rows["retail_time_basis"] = np.where(rows["event_id"] < "e005", "upper_bound", "observed")
+        rows["block"] = 0
+
+        table = slice_table(rows, BootstrapSpec(resamples=50, seed=0))
+
+        by_basis = table[table["slice"] == "retail_time_basis"]
+        assert set(by_basis["value"]) == {"upper_bound", "observed"}
 
 
 class TestOneLook:

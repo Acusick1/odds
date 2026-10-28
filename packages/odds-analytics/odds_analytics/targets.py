@@ -7,9 +7,11 @@ Key Functions:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import numpy as np
 import structlog
-from odds_core.models import Odds
+from odds_core.quotes import Quote
 
 logger = structlog.get_logger()
 
@@ -19,8 +21,8 @@ __all__ = [
 
 
 def calculate_regression_target(
-    opening_odds: list[Odds] | None,
-    closing_odds: list[Odds] | None,
+    opening_quotes: Sequence[Quote] | None,
+    closing_quotes: Sequence[Quote] | None,
     market: str,
 ) -> float | None:
     """
@@ -30,8 +32,8 @@ def calculate_regression_target(
     For spreads/totals: Uses point delta (closing point - opening point)
 
     Args:
-        opening_odds: Opening odds for target outcome
-        closing_odds: Closing odds for target outcome
+        opening_quotes: Opening quotes for target outcome
+        closing_quotes: Closing quotes for target outcome
         market: Market type (h2h, spreads, totals)
 
     Returns:
@@ -39,14 +41,14 @@ def calculate_regression_target(
         For h2h: Probability change (positive = line moved in favor)
         For spreads/totals: Point change (closing point - opening point)
     """
-    if not opening_odds or not closing_odds:
+    if not opening_quotes or not closing_quotes:
         return None
 
     if market == "h2h":
         # For h2h, use implied probability delta
         # Average across bookmakers if multiple
-        opening_probs = [o.implied_probability for o in opening_odds]
-        closing_probs = [o.implied_probability for o in closing_odds]
+        opening_probs = [1 / q.price for q in opening_quotes]
+        closing_probs = [1 / q.price for q in closing_quotes]
 
         if not opening_probs or not closing_probs:
             return None
@@ -59,8 +61,8 @@ def calculate_regression_target(
     elif market in ("spreads", "totals"):
         # For spreads/totals, use point delta
         # Filter for odds that have point values
-        opening_points = [o.point for o in opening_odds if o.point is not None]
-        closing_points = [o.point for o in closing_odds if o.point is not None]
+        opening_points = [q.line for q in opening_quotes if q.line is not None]
+        closing_points = [q.line for q in closing_quotes if q.line is not None]
 
         if not opening_points or not closing_points:
             return None

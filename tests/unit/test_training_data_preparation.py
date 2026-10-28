@@ -12,7 +12,7 @@ Tests cover:
 from __future__ import annotations
 
 import tempfile
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -34,7 +34,16 @@ from odds_analytics.training.data_preparation import (
     save_verification_artifacts,
 )
 from odds_core.models import Event, EventStatus
+from odds_core.vocabulary import Source
 from pydantic import ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from tests.test_helpers import (
+    make_epl_event,
+    make_tagged_snapshot,
+    store_tagged,
+    three_way_bookmaker,
+)
 
 # =============================================================================
 # TrainingDataResult Tests
@@ -113,23 +122,19 @@ class TestFeatureConfigExtraction:
         assert config.outcome == "home"
         assert config.markets == ["h2h", "spreads", "totals"]
         assert config.sharp_bookmakers == ["pinnacle"]
-        assert config.retail_bookmakers == ["fanduel", "draftkings", "betmgm"]
+        assert config.retail_bookmakers == ["fanduel", "draftkings", "betmgm_us"]
         assert config.feature_groups == ("tabular",)
-        assert config.closing_tier.value == "closing"
         assert config.adapter == "xgboost"
         assert config.sampling.strategy == "time_range"
 
     def test_feature_config_custom_values(self):
         """Test FeatureConfig with custom values."""
-        from odds_lambda.fetch_tier import FetchTier
-
         config = FeatureConfig(
             target_type="raw",
             outcome="away",
             markets=["spreads"],
             sharp_bookmakers=["pinnacle", "circasports"],
             retail_bookmakers=["fanduel"],
-            closing_tier=FetchTier.CLOSING,
             feature_groups=["tabular", "polymarket"],
         )
 
@@ -425,7 +430,6 @@ class TestConfigLoadingIntegration:
                     "markets": ["h2h"],
                     "sharp_bookmakers": ["pinnacle"],
                     "retail_bookmakers": ["fanduel", "draftkings"],
-                    "closing_tier": "closing",
                     "feature_groups": ["tabular"],
                 },
             },
@@ -522,7 +526,6 @@ class TestDateRangeFiltering:
                 end_date=end_date,
                 sport_key=None,
                 status=EventStatus.FINAL,
-                event_id_pattern=None,
                 min_snapshots=None,
             )
 
@@ -550,61 +553,6 @@ class TestDateRangeFiltering:
             assert events == expected_events
 
     @pytest.mark.asyncio
-    async def test_filter_oddsportal_passes_pattern(self):
-        """data_source='oddsportal' passes event_id_pattern='op_%' to reader."""
-        session = AsyncMock()
-        start_date = datetime(2024, 10, 1, tzinfo=UTC)
-        end_date = datetime(2024, 10, 31, tzinfo=UTC)
-
-        with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_cls:
-            mock_reader = MagicMock()
-            mock_reader.get_events_by_date_range = AsyncMock(return_value=[])
-            mock_reader_cls.return_value = mock_reader
-
-            await filter_events_by_date_range(
-                session=session,
-                start_date=start_date,
-                end_date=end_date,
-                data_source="oddsportal",
-            )
-
-            mock_reader.get_events_by_date_range.assert_called_once_with(
-                start_date=start_date,
-                end_date=end_date,
-                sport_key=None,
-                status=EventStatus.FINAL,
-                event_id_pattern="op_%",
-                min_snapshots=None,
-            )
-
-    @pytest.mark.asyncio
-    async def test_filter_oddsapi_excludes_op_prefix(self):
-        """data_source='oddsapi' filters out events with op_ prefix."""
-        session = AsyncMock()
-        start_date = datetime(2024, 10, 1, tzinfo=UTC)
-        end_date = datetime(2024, 10, 31, tzinfo=UTC)
-
-        op_event = MagicMock(spec=Event)
-        op_event.id = "op_2024-2025_LAL_BOS_20241015"
-        api_event = MagicMock(spec=Event)
-        api_event.id = "abc123-def456"
-
-        with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_cls:
-            mock_reader = MagicMock()
-            mock_reader.get_events_by_date_range = AsyncMock(return_value=[op_event, api_event])
-            mock_reader_cls.return_value = mock_reader
-
-            events = await filter_events_by_date_range(
-                session=session,
-                start_date=start_date,
-                end_date=end_date,
-                data_source="oddsapi",
-            )
-
-            assert len(events) == 1
-            assert events[0].id == "abc123-def456"
-
-    @pytest.mark.asyncio
     async def test_filter_min_snapshots_passed_to_reader(self):
         """min_snapshots is forwarded to the reader."""
         session = AsyncMock()
@@ -628,37 +576,7 @@ class TestDateRangeFiltering:
                 end_date=end_date,
                 sport_key=None,
                 status=EventStatus.FINAL,
-                event_id_pattern=None,
                 min_snapshots=5,
-            )
-
-    @pytest.mark.asyncio
-    async def test_filter_data_source_all_treated_as_none(self):
-        """data_source='all' should not filter (same as None)."""
-        session = AsyncMock()
-        start_date = datetime(2024, 10, 1, tzinfo=UTC)
-        end_date = datetime(2024, 10, 31, tzinfo=UTC)
-
-        with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_cls:
-            mock_reader = MagicMock()
-            mock_reader.get_events_by_date_range = AsyncMock(return_value=[])
-            mock_reader_cls.return_value = mock_reader
-
-            await filter_events_by_date_range(
-                session=session,
-                start_date=start_date,
-                end_date=end_date,
-                data_source="all",
-            )
-
-            # Should not pass event_id_pattern
-            mock_reader.get_events_by_date_range.assert_called_once_with(
-                start_date=start_date,
-                end_date=end_date,
-                sport_key=None,
-                status=EventStatus.FINAL,
-                event_id_pattern=None,
-                min_snapshots=None,
             )
 
     @pytest.mark.asyncio
@@ -685,7 +603,6 @@ class TestDateRangeFiltering:
                 end_date=end_date,
                 sport_key="soccer_epl",
                 status=EventStatus.FINAL,
-                event_id_pattern=None,
                 min_snapshots=None,
             )
 
@@ -727,7 +644,7 @@ class TestDateRangeFiltering:
                 start_date=start_date,
                 end_date=end_date,
                 sport_key="basketball_nba",
-                data_source="oddsportal",
+                data_source=Source.ODDSPORTAL,
             )
 
             mock_reader.get_events_by_date_range.assert_called_once_with(
@@ -735,9 +652,77 @@ class TestDateRangeFiltering:
                 end_date=end_date,
                 sport_key="basketball_nba",
                 status=EventStatus.FINAL,
-                event_id_pattern="op_%",
                 min_snapshots=None,
             )
+
+
+# =============================================================================
+# Data Source Filtering Tests
+# =============================================================================
+
+
+class TestDataSourceFiltering:
+    """filter_events_by_date_range keeps events that have a snapshot of the data source."""
+
+    START = datetime(2026, 4, 1, tzinfo=UTC)
+    END = datetime(2026, 4, 30, tzinfo=UTC)
+
+    @pytest.fixture
+    async def stored_events(self, test_session: AsyncSession) -> None:
+        """An op_-prefixed event with only FDUK snapshots, an Odds API event with an Odds
+        API and an OddsPortal snapshot, and an event with no snapshots."""
+        kickoff = datetime(2026, 4, 15, 15, 0, tzinfo=UTC)
+        books = [three_way_bookmaker("bet365", (2.0, 3.4, 3.8))]
+        test_session.add(
+            make_epl_event("op_fduk_only", status=EventStatus.FINAL, commence_time=kickoff)
+        )
+        test_session.add(make_epl_event("api_event", status=EventStatus.FINAL))
+        test_session.add(make_epl_event("no_snapshots", status=EventStatus.FINAL))
+        await test_session.flush()
+        for event_id, source, basis in [
+            ("op_fduk_only", "football_data_uk", "kickoff"),
+            ("api_event", None, None),
+            ("api_event", "oddsportal", None),
+        ]:
+            await store_tagged(
+                test_session,
+                make_tagged_snapshot(
+                    event_id, kickoff - timedelta(hours=2), books, source, fduk_basis=basis
+                ),
+            )
+        await test_session.commit()
+
+    async def _kept(self, session: AsyncSession, data_source: Source | None) -> set[str]:
+        events = await filter_events_by_date_range(
+            session=session,
+            start_date=self.START,
+            end_date=self.END,
+            data_source=data_source,
+        )
+        return {e.id for e in events}
+
+    async def test_none_keeps_every_event(
+        self, test_session: AsyncSession, stored_events: None
+    ) -> None:
+        assert await self._kept(test_session, None) == {"op_fduk_only", "api_event", "no_snapshots"}
+
+    async def test_prefix_does_not_decide_the_source(
+        self, test_session: AsyncSession, stored_events: None
+    ) -> None:
+        """An op_-prefixed event with only FDUK snapshots is an FDUK event, not an OddsPortal one."""
+        assert "op_fduk_only" in await self._kept(test_session, Source.FOOTBALL_DATA_UK)
+        assert "op_fduk_only" not in await self._kept(test_session, Source.ODDSPORTAL)
+
+    async def test_event_with_several_sources_kept_for_each(
+        self, test_session: AsyncSession, stored_events: None
+    ) -> None:
+        assert await self._kept(test_session, Source.ODDS_API) == {"api_event"}
+        assert await self._kept(test_session, Source.ODDSPORTAL) == {"api_event"}
+
+    async def test_source_without_snapshots_keeps_nothing(
+        self, test_session: AsyncSession, stored_events: None
+    ) -> None:
+        assert await self._kept(test_session, Source.BETFAIR) == set()
 
 
 # =============================================================================

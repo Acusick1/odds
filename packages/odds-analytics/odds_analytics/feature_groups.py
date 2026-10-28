@@ -19,6 +19,7 @@ Example:
 
 from __future__ import annotations
 
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Protocol, get_args
@@ -26,10 +27,10 @@ from typing import TYPE_CHECKING, Protocol, get_args
 import numpy as np
 import pandas as pd
 import structlog
-from odds_core.bookmakers import is_reference_only_snapshot
+from odds_core.as_of import by_snapshot
 from odds_core.game_log_models import NbaTeamGameLog
 from odds_core.injury_models import InjuryReport
-from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.models import Event, EventStatus
 from odds_core.player_stats_models import NbaPlayerSeasonStats
 from odds_core.polymarket_models import (
     PolymarketEvent,
@@ -37,8 +38,10 @@ from odds_core.polymarket_models import (
     PolymarketOrderBookSnapshot,
     PolymarketPriceSnapshot,
 )
-from odds_core.snapshot_utils import extract_odds_from_snapshot
-from odds_core.utils import raw_data_has_market
+from odds_core.quotes import Quote, quotes
+from odds_core.vocabulary import Market, PriceOutcome, Side, Source, TimeBasis
+from odds_lambda.fetch_tier import FetchTier
+from odds_lambda.tier_utils import snapshot_tiers
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -60,6 +63,7 @@ logger = structlog.get_logger()
 
 __all__ = [
     "PMEventContext",
+    "SnapshotQuotes",
     "EventDataBundle",
     "collect_event_data",
     "TierSampler",
@@ -69,8 +73,8 @@ __all__ = [
     "PreparedFeatureData",
     "prepare_training_data",
     "filter_completed_events",
-    "resolve_outcome_name",
-    "snapshot_has_bookmaker",
+    "raw_closes",
+    "tiers_of",
     "load_fixtures_df",
 ]
 
@@ -90,13 +94,42 @@ class PMEventContext:
     home_idx: int
 
 
+@dataclass(frozen=True, eq=False)
+class SnapshotQuotes:
+    """The back quotes of one stored snapshot of one market; never empty."""
+
+    quotes: tuple[Quote, ...]
+
+    @property
+    def snapshot_time(self) -> datetime:
+        return self.quotes[0].snapshot_time
+
+    @property
+    def source(self) -> Source:
+        return self.quotes[0].source
+
+    @property
+    def time_basis(self) -> TimeBasis:
+        return self.quotes[0].time_basis
+
+    @property
+    def market(self) -> Market:
+        return self.quotes[0].market
+
+    def has_bookmaker(self, bookmaker: str) -> bool:
+        return any(q.bookmaker == bookmaker for q in self.quotes)
+
+    def outcome_quotes(self, outcome: PriceOutcome) -> list[Quote]:
+        return [q for q in self.quotes if q.outcome is outcome]
+
+
 @dataclass
 class EventDataBundle:
     """All pre-loaded data for a single event."""
 
     event: Event
-    snapshots: list[OddsSnapshot]
-    closing_snapshot: OddsSnapshot | None
+    snapshots: list[SnapshotQuotes]
+    closes: dict[Source, SnapshotQuotes]
     pm_context: PMEventContext | None
     pm_prices: list[PolymarketPriceSnapshot] = field(default_factory=list)
     pm_orderbooks: list[PolymarketOrderBookSnapshot] = field(default_factory=list)
@@ -105,17 +138,28 @@ class EventDataBundle:
     game_logs: list[NbaTeamGameLog] = field(default_factory=list)
 
 
-def snapshot_has_bookmaker(snapshot: OddsSnapshot, bookmaker_key: str, market: str) -> bool:
-    """Check if a snapshot's raw_data contains odds from a specific bookmaker for a market."""
-    raw = snapshot.raw_data
-    if not raw or "bookmakers" not in raw:
-        return False
-    for bm in raw["bookmakers"]:
-        if bm.get("key") == bookmaker_key:
-            for mkt in bm.get("markets", []):
-                if mkt.get("key") == market:
-                    return True
-    return False
+def tiers_of(snapshots: Sequence[SnapshotQuotes], kickoff: datetime) -> list[FetchTier]:
+    """The tier each of an event's snapshots covers (``odds_lambda.tier_utils.snapshot_tiers``),
+    from its time, source, time basis and market; never the stored ``fetch_tier``."""
+    return snapshot_tiers(
+        [(s.snapshot_time, s.source, s.time_basis, s.market) for s in snapshots], kickoff
+    )
+
+
+def raw_closes(
+    snapshots: Sequence[SnapshotQuotes], kickoff: datetime
+) -> dict[Source, SnapshotQuotes]:
+    """The ``raw`` target's close of each source: its latest snapshot whose tier is CLOSING.
+
+    A decision snapshot is compared with its own source's close, so the target never mixes
+    one source's books with another's. This is a multi-book snapshot for the line-movement
+    target, not the Betfair Exchange close ``odds_core.betfair_close`` defines.
+    """
+    closes: dict[Source, SnapshotQuotes] = {}
+    for snapshot, tier in zip(snapshots, tiers_of(snapshots, kickoff), strict=True):
+        if tier is FetchTier.CLOSING:
+            closes[snapshot.source] = snapshot
+    return closes
 
 
 async def collect_event_data(
@@ -125,33 +169,22 @@ async def collect_event_data(
 ) -> EventDataBundle:
     """Load all data for an event in bulk (minimises per-snapshot DB queries).
 
-    - Loads all OddsSnapshot records once
-    - Filters snapshots to those containing the configured market
-    - Takes the latest snapshot of the closing tier as the closing snapshot
+    - Loads the back quotes of the configured market once, as one ``SnapshotQuotes`` per
+      snapshot, leaving out Polymarket's, which carry no retail or target prices to build a
+      decision row from
+    - Takes each source's ``raw`` target close (``raw_closes``)
     - Loads PM context (PM event, moneyline market, home_idx)
     - Bulk-loads all PM prices + orderbooks for the market (2 queries total)
     """
     from odds_lambda.storage.polymarket_reader import PolymarketReader
-    from odds_lambda.storage.readers import OddsReader
 
-    reader = OddsReader(session)
-    all_snapshots_raw = await reader.get_snapshots_for_event(event.id)
-
-    # Filter to snapshots containing the configured market so the sampler
-    # doesn't pick snapshots with data for a different market (e.g. h2h
-    # snapshot when we need totals), and drop prediction-market-only snapshots,
-    # which carry no retail or target prices to build a decision row from.
-    market = config.primary_market
+    quoted = await quotes(session, [event.id], Market(config.primary_market), sides=[Side.BACK])
     all_snapshots = [
-        s
-        for s in all_snapshots_raw
-        if raw_data_has_market(s.raw_data, market) and not is_reference_only_snapshot(s.raw_data)
+        SnapshotQuotes(tuple(group))
+        for group in by_snapshot(quoted)
+        if group[0].source is not Source.POLYMARKET
     ]
-
-    # Derive closing snapshot from already-loaded snapshots (avoid extra DB query)
-    closing_tier_value = config.closing_tier.value
-    closing_candidates = [s for s in all_snapshots if s.fetch_tier == closing_tier_value]
-    closing_snapshot = closing_candidates[-1] if closing_candidates else None
+    closes = raw_closes(all_snapshots, event.commence_time)
 
     # PM context (optional)
     pm_context: PMEventContext | None = None
@@ -233,7 +266,7 @@ async def collect_event_data(
     return EventDataBundle(
         event=event,
         snapshots=all_snapshots,
-        closing_snapshot=closing_snapshot,
+        closes=closes,
         pm_context=pm_context,
         pm_prices=pm_prices,
         pm_orderbooks=pm_orderbooks,
@@ -251,53 +284,50 @@ async def collect_event_data(
 class SnapshotSampler(Protocol):
     """Protocol for snapshot sampling strategies."""
 
-    def sample(self, bundle: EventDataBundle) -> list[OddsSnapshot]:
-        """Return snapshots to use as decision points for this event."""
+    def sample(
+        self, bundle: EventDataBundle, sources: Collection[Source] | None = None
+    ) -> list[SnapshotQuotes]:
+        """Return snapshots to use as decision points for this event, only of ``sources`` when
+        given (the sources whose close a decision can be measured against)."""
         ...
 
 
 class TierSampler:
     """Returns the latest snapshot no closer to game than the decision tier (single row per event).
 
-    Snapshots in the decision tier or any earlier tier (further from game) are
-    candidates. When required_bookmakers is set, only snapshots containing all
-    specified bookmakers for the given market are eligible. The most recent
-    candidate by wall-clock time is returned.
+    A snapshot's tier is the one ``tiers_of`` derives, never the stored ``fetch_tier``.
+    Snapshots in the decision tier
+    or any earlier tier (further from game) are candidates. When required_bookmakers is set,
+    only snapshots quoting at least one of them are eligible, and with ``sources`` only
+    snapshots of those sources. The most recent candidate by wall-clock time is returned.
     """
 
     def __init__(
         self,
         decision_tier: str,
         required_bookmakers: list[str] | None = None,
-        market: str = "h2h",
     ) -> None:
-        from odds_lambda.fetch_tier import FetchTier
-
         self._decision_tier = FetchTier(decision_tier)
         self._required_bookmakers = required_bookmakers or []
-        self._market = market
 
-    def sample(self, bundle: EventDataBundle) -> list[OddsSnapshot]:
-        from odds_lambda.fetch_tier import FetchTier
-
+    def sample(
+        self, bundle: EventDataBundle, sources: Collection[Source] | None = None
+    ) -> list[SnapshotQuotes]:
         tier_order = FetchTier.get_priority_order()  # CLOSING first (closest)
         decision_idx = tier_order.index(self._decision_tier)
+        kickoff = bundle.event.commence_time
 
         candidates = []
-        for s in bundle.snapshots:
-            if s.fetch_tier:
-                try:
-                    tier = FetchTier(s.fetch_tier)
-                    # IN_PLAY is placed last in priority order but is actually
-                    # *closer* to (past) game time than any pre-game tier.
-                    # Exclude it unless explicitly requested.
-                    if tier == FetchTier.IN_PLAY and self._decision_tier != FetchTier.IN_PLAY:
-                        continue
-                    tier_idx = tier_order.index(tier)
-                    if tier_idx >= decision_idx:
-                        candidates.append(s)
-                except ValueError:
-                    pass
+        for s, tier in zip(bundle.snapshots, tiers_of(bundle.snapshots, kickoff), strict=True):
+            if sources is not None and s.source not in sources:
+                continue
+            # IN_PLAY is placed last in priority order but is actually
+            # *closer* to (past) game time than any pre-game tier.
+            # Exclude it unless explicitly requested.
+            if tier == FetchTier.IN_PLAY and self._decision_tier != FetchTier.IN_PLAY:
+                continue
+            if tier_order.index(tier) >= decision_idx:
+                candidates.append(s)
 
         # Filter to snapshots that contain at least one required bookmaker
         # (priority-ordered fallback: e.g. [pinnacle, betfair_exchange])
@@ -305,9 +335,7 @@ class TierSampler:
             candidates = [
                 s
                 for s in candidates
-                if any(
-                    snapshot_has_bookmaker(s, bm, self._market) for bm in self._required_bookmakers
-                )
+                if any(s.has_bookmaker(bm) for bm in self._required_bookmakers)
             ]
 
         if not candidates:
@@ -317,21 +345,28 @@ class TierSampler:
 
 
 class TimeRangeSampler:
-    """Stratified sampling across [min_hours, max_hours] before game."""
+    """Stratified sampling across [min_hours, max_hours] before game, of ``sources`` when given."""
 
     def __init__(self, min_hours: float, max_hours: float, max_samples: int) -> None:
         self._min_hours = min_hours
         self._max_hours = max_hours
         self._max_samples = max_samples
 
-    def sample(self, bundle: EventDataBundle) -> list[OddsSnapshot]:
+    def sample(
+        self, bundle: EventDataBundle, sources: Collection[Source] | None = None
+    ) -> list[SnapshotQuotes]:
         event = bundle.event
         commence = event.commence_time
 
         range_start = commence - timedelta(hours=self._max_hours)
         range_end = commence - timedelta(hours=self._min_hours)
 
-        in_range = [s for s in bundle.snapshots if range_start <= s.snapshot_time <= range_end]
+        in_range = [
+            s
+            for s in bundle.snapshots
+            if range_start <= s.snapshot_time <= range_end
+            and (sources is None or s.source in sources)
+        ]
 
         if not in_range:
             return []
@@ -342,11 +377,11 @@ class TimeRangeSampler:
         # Stratified: divide range into equal bins, pick nearest to each midpoint
         range_seconds = (range_end - range_start).total_seconds()
         bin_size = range_seconds / self._max_samples
-        selected: list[OddsSnapshot] = []
+        selected: list[SnapshotQuotes] = []
 
         for i in range(self._max_samples):
             bin_mid = range_start + timedelta(seconds=(i + 0.5) * bin_size)
-            best: OddsSnapshot | None = None
+            best: SnapshotQuotes | None = None
             best_diff = float("inf")
 
             for s in in_range:
@@ -366,7 +401,7 @@ def _make_sampler(config: FeatureConfig) -> SnapshotSampler:
     """Instantiate the sampler specified in config.sampling."""
     sc = config.sampling
     if sc.strategy == "tier":
-        return TierSampler(sc.decision_tier.value, config.sharp_bookmakers, config.primary_market)
+        return TierSampler(sc.decision_tier.value, config.sharp_bookmakers)
     return TimeRangeSampler(sc.min_hours, sc.max_hours, sc.max_samples_per_event)
 
 
@@ -460,7 +495,7 @@ class FeatureAdapter(Protocol):
     def transform(
         self,
         bundle: EventDataBundle,
-        snapshot: OddsSnapshot,
+        snapshot: SnapshotQuotes,
         config: FeatureConfig,
     ) -> AdapterOutput | None:
         """Extract features for one (event, snapshot) pair. Returns None to skip row."""
@@ -494,27 +529,19 @@ def _static_feature_group_names(config: FeatureConfig) -> list[str]:
     return names
 
 
-def resolve_outcome_name(config: FeatureConfig, event: Event) -> str:
-    """Map config outcome to the outcome name stored in the database."""
-    if config.outcome in ("over", "under"):
-        return config.outcome.capitalize()
-    return event.home_team if config.outcome == "home" else event.away_team
-
-
 def _extract_static_feature_parts(
     bundle: EventDataBundle,
-    snapshot: OddsSnapshot,
+    snapshot: SnapshotQuotes,
     config: FeatureConfig,
 ) -> list[np.ndarray] | None:
     """Extract static feature arrays for all configured groups.
 
-    Returns ``None`` when tabular is configured but odds extraction fails
+    Returns ``None`` when tabular is configured but feature extraction fails
     (the row cannot be used). Other groups NaN-fill on failure.
     Does NOT include ``hours_until_event``.
     """
     event = bundle.event
-    market = config.primary_market
-    outcome = resolve_outcome_name(config, event)
+    outcome = PriceOutcome(config.outcome)
     feature_event = make_feature_event(event)
     tab_extractor = TabularFeatureExtractor.from_config(config)
 
@@ -522,15 +549,11 @@ def _extract_static_feature_parts(
 
     # --- Tabular features ---
     if "tabular" in config.feature_groups:
-        snap_odds = extract_odds_from_snapshot(snapshot, event.id, market=market)
-        if not snap_odds:
-            return None
         try:
             tab_feats = tab_extractor.extract_features(
                 event=feature_event,
-                odds_data=snap_odds,
+                quoted=snapshot.quotes,
                 outcome=outcome,
-                market=market,
             )
             parts.append(tab_feats.to_array())
         except Exception:
@@ -577,17 +600,14 @@ def _extract_static_feature_parts(
 
                     # Try to align SB odds for cross-source features
                     sb_feats = None
-                    sb_odds_at_time = extract_odds_from_snapshot(snapshot, event.id, market=market)
-                    if sb_odds_at_time:
-                        try:
-                            sb_feats = tab_extractor.extract_features(
-                                event=feature_event,
-                                odds_data=sb_odds_at_time,
-                                outcome=outcome,
-                                market=market,
-                            )
-                        except Exception:
-                            pass
+                    try:
+                        sb_feats = tab_extractor.extract_features(
+                            event=feature_event,
+                            quoted=snapshot.quotes,
+                            outcome=outcome,
+                        )
+                    except Exception:
+                        pass
 
                     xsrc_feats = xsrc_extractor.extract(
                         pm_features=pm_feats,
@@ -649,7 +669,7 @@ class XGBoostAdapter:
     def transform(
         self,
         bundle: EventDataBundle,
-        snapshot: OddsSnapshot,
+        snapshot: SnapshotQuotes,
         config: FeatureConfig,
     ) -> AdapterOutput | None:
         parts = _extract_static_feature_parts(bundle, snapshot, config)
@@ -674,19 +694,17 @@ def _make_adapter(config: FeatureConfig) -> FeatureAdapter:
 
 
 def _compute_target(
-    snapshot: OddsSnapshot,
-    closing_snapshot: OddsSnapshot,
-    event: Event,
+    snapshot: SnapshotQuotes,
+    closing_snapshot: SnapshotQuotes,
     config: FeatureConfig,
 ) -> float | None:
     """Average implied-probability delta from one snapshot to the closing snapshot."""
-    market = config.primary_market
-    outcome = resolve_outcome_name(config, event)
-    snap_odds = extract_odds_from_snapshot(snapshot, event.id, market=market, outcome=outcome)
-    closing_odds = extract_odds_from_snapshot(
-        closing_snapshot, event.id, market=market, outcome=outcome
+    outcome = PriceOutcome(config.outcome)
+    return calculate_regression_target(
+        snapshot.outcome_quotes(outcome),
+        closing_snapshot.outcome_quotes(outcome),
+        config.primary_market,
     )
-    return calculate_regression_target(snap_odds, closing_odds, market)
 
 
 # =============================================================================
@@ -797,33 +815,32 @@ async def prepare_training_data(
         # Load all data for this event in bulk
         bundle = await collect_event_data(event, session, config)
 
-        # Closing snapshot is required
-        if bundle.closing_snapshot is None:
+        # A close is required
+        if not bundle.closes:
             skipped_events += 1
             continue
 
-        market = config.primary_market
-
-        # Filter events missing ALL sharp bookmaker closing odds (cross-source features).
-        # Events are kept if at least one sharp bookmaker is present, enabling
+        # Filter events whose closes all miss EVERY sharp bookmaker (cross-source features).
+        # A close is kept if at least one sharp bookmaker is present, enabling
         # priority-ordered fallback (e.g. [pinnacle, betfair_exchange]).
-        has_any_sharp = any(
-            snapshot_has_bookmaker(bundle.closing_snapshot, bm, market)
-            for bm in config.sharp_bookmakers
-        )
-        if not has_any_sharp:
+        sharp_closes = {
+            source: close
+            for source, close in bundle.closes.items()
+            if any(close.has_bookmaker(bm) for bm in config.sharp_bookmakers)
+        }
+        if not sharp_closes:
             sharp_filtered_count += 1
             continue
 
-        # Get sampled decision snapshots
-        decision_snapshots = sampler.sample(bundle)
+        # Decision snapshots only of sources whose close they can be measured against
+        decision_snapshots = sampler.sample(bundle, sources=sharp_closes.keys())
         if not decision_snapshots:
             skipped_events += 1
             continue
 
         event_had_rows = False
         for snapshot in decision_snapshots:
-            target = _compute_target(snapshot, bundle.closing_snapshot, event, config)
+            target = _compute_target(snapshot, sharp_closes[snapshot.source], config)
             if target is None:
                 continue
 

@@ -21,12 +21,19 @@ from odds_analytics.retail_ev_evaluation import (
     WindowEndError,
     load_evaluation_data,
     run_evaluation,
+    snapshot_stamps,
 )
 from odds_core.market_prices import market_outcomes
 from odds_core.models import Event, EventStatus
+from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.storage.readers import OddsReader
 
-from tests.test_helpers import make_epl_event, make_tagged_snapshot, three_way_bookmaker
+from tests.test_helpers import (
+    make_epl_event,
+    make_tagged_snapshot,
+    store_tagged,
+    three_way_bookmaker,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -39,7 +46,7 @@ LATE_EVENT = "fduk_after_window"
 NOW = datetime(2026, 10, 19, tzinfo=UTC)
 
 
-def _add_event(
+async def _add_event(
     session,
     event_id: str,
     kickoff: datetime,
@@ -48,7 +55,8 @@ def _add_event(
     with_close: bool = True,
 ) -> None:
     session.add(make_epl_event(event_id, kickoff, status=status, home_score=1, away_score=0))
-    session.add(
+    await store_tagged(
+        session,
         make_tagged_snapshot(
             event_id,
             kickoff - timedelta(hours=40),
@@ -59,17 +67,18 @@ def _add_event(
             ],
             "football_data_uk",
             "fduk_collection_deadline",
-        )
+        ),
     )
     if with_close:
-        session.add(
+        await store_tagged(
+            session,
             make_tagged_snapshot(
                 event_id,
                 kickoff,
                 [three_way_bookmaker("betfair_exchange", (prices[2], 3.6, 4.0))],
                 "football_data_uk",
                 "kickoff",
-            )
+            ),
         )
 
 
@@ -77,13 +86,13 @@ def _add_event(
 async def evaluation_events(pglite_async_session):
     session = pglite_async_session
     for i in range(TRAINING_EVENTS + WINDOW_EVENTS):
-        _add_event(
+        await _add_event(
             session,
             f"fduk_eval_{i}",
             FIRST_KICKOFF + timedelta(days=7 * i),
             (2.0 + 0.01 * i, 2.1, 2.2 - 0.02 * i),
         )
-    _add_event(session, LATE_EVENT, WINDOW_END + timedelta(days=2), (2.0, 2.1, 2.2))
+    await _add_event(session, LATE_EVENT, WINDOW_END + timedelta(days=2), (2.0, 2.1, 2.2))
     await session.commit()
     return session
 
@@ -140,6 +149,41 @@ class TestWindowEndGuard:
         assert "fduk_eval_0" in loaded
 
 
+class TestSnapshotStamps:
+    async def test_events_are_stamped_with_source_time_basis_and_time(
+        self, evaluation_events
+    ) -> None:
+        event = await evaluation_events.get(Event, "fduk_eval_0")
+        assert event is not None
+
+        stamps = await snapshot_stamps(evaluation_events, [event])
+
+        assert {(s.source, s.time_basis) for s in stamps[event.id]} == {
+            (Source.FOOTBALL_DATA_UK, TimeBasis.UPPER_BOUND),
+            (Source.FOOTBALL_DATA_UK, TimeBasis.CLOSE),
+        }
+        assert {s.time for s in stamps[event.id]} == {
+            event.commence_time - timedelta(hours=40),
+            event.commence_time,
+        }
+
+    async def test_an_event_without_snapshots_has_no_stamps(self, evaluation_events) -> None:
+        bare = make_epl_event("fduk_bare", WINDOW_START)
+        evaluation_events.add(bare)
+        await evaluation_events.flush()
+
+        assert await snapshot_stamps(evaluation_events, [bare]) == {"fduk_bare": []}
+
+    async def test_rows_carry_the_retail_source_and_time_basis(self, evaluation_events) -> None:
+        spec = EvaluationSpec.model_validate(_spec_fields())
+
+        data = await load_evaluation_data(evaluation_events, spec, NOW)
+
+        assert set(data.rows["retail_source"]) == {"football_data_uk"}
+        assert set(data.rows["retail_time_basis"]) == {"upper_bound"}
+        assert set(data.rows["event_type"]) == {"fduk_only"}
+
+
 class TestReadinessGuard:
     @pytest.mark.parametrize(
         ("status", "with_close"),
@@ -148,7 +192,7 @@ class TestReadinessGuard:
     async def test_refuses_an_incomplete_window_unless_allowed(
         self, evaluation_events, status: EventStatus, with_close: bool
     ) -> None:
-        _add_event(
+        await _add_event(
             evaluation_events,
             "fduk_incomplete",
             WINDOW_START + timedelta(days=1),

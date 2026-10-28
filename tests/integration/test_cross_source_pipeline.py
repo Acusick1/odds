@@ -13,20 +13,22 @@ from datetime import UTC, datetime, timedelta
 import numpy as np
 import pytest
 from odds_analytics.feature_groups import (
+    EventDataBundle,
     XGBoostAdapter,
     collect_event_data,
     prepare_training_data,
 )
 from odds_analytics.training import FeatureConfig, SamplingConfig
-from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
-from odds_core.odds_math import american_to_decimal
+from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.polymarket_models import (
     PolymarketEvent,
     PolymarketMarket,
     PolymarketMarketType,
     PolymarketPriceSnapshot,
 )
-from odds_lambda.fetch_tier import FetchTier
+from odds_core.vocabulary import Source
+
+from tests.test_helpers import make_tagged_snapshot, store_tagged
 
 pytestmark = pytest.mark.integration
 
@@ -63,82 +65,36 @@ def make_odds_snapshots(
     home_team: str,
     away_team: str,
 ) -> list[OddsSnapshot]:
-    """Create SB snapshots at early, pregame, and closing tiers."""
+    """Create SB snapshots at early, pregame, and closing times before kick-off."""
     snapshots = []
     bookmakers = ["pinnacle", "fanduel", "draftkings"]
-    for tier_name, hours_before in [("early", 48.0), ("pregame", 7.5), ("closing", 0.5)]:
+    for hours_before in (48.0, 7.5, 0.5):
         t = commence_time - timedelta(hours=hours_before)
-        raw_data = {
-            "bookmakers": [
-                {
-                    "key": bk,
-                    "title": bk.title(),
-                    "last_update": t.isoformat(),
-                    "markets": [
-                        {
-                            "key": "h2h",
-                            "outcomes": [
-                                {"name": home_team, "price": -130},
-                                {"name": away_team, "price": 110},
-                            ],
-                        }
-                    ],
-                }
-                for bk in bookmakers
-            ]
-        }
         snapshots.append(
-            OddsSnapshot(
-                event_id=event_id,
-                snapshot_time=t,
-                raw_data=raw_data,
-                bookmaker_count=len(bookmakers),
-                fetch_tier=tier_name,
-                hours_until_commence=hours_before,
+            make_tagged_snapshot(
+                event_id,
+                t,
+                [
+                    {
+                        "key": bk,
+                        "title": bk.title(),
+                        "last_update": t.isoformat(),
+                        "markets": [
+                            {
+                                "key": "h2h",
+                                "outcomes": [
+                                    {"name": home_team, "price": -130},
+                                    {"name": away_team, "price": 110},
+                                ],
+                            }
+                        ],
+                    }
+                    for bk in bookmakers
+                ],
+                source=None,
             )
         )
     return snapshots
-
-
-def make_odds_records(
-    event_id: str,
-    commence_time: datetime,
-    home_team: str,
-    away_team: str,
-) -> list[Odds]:
-    """Create Odds records aligned with snapshot times."""
-    records = []
-    bookmakers = ["pinnacle", "fanduel", "draftkings"]
-    for hours_before in [48.0, 7.5, 0.5]:
-        t = commence_time - timedelta(hours=hours_before)
-        for bk in bookmakers:
-            records.extend(
-                [
-                    Odds(
-                        event_id=event_id,
-                        bookmaker_key=bk,
-                        bookmaker_title=bk.title(),
-                        market_key="h2h",
-                        outcome_name=home_team,
-                        price_decimal=american_to_decimal(-130),
-                        point=None,
-                        odds_timestamp=t,
-                        last_update=t,
-                    ),
-                    Odds(
-                        event_id=event_id,
-                        bookmaker_key=bk,
-                        bookmaker_title=bk.title(),
-                        market_key="h2h",
-                        outcome_name=away_team,
-                        price_decimal=american_to_decimal(110),
-                        point=None,
-                        odds_timestamp=t,
-                        last_update=t,
-                    ),
-                ]
-            )
-    return records
 
 
 def make_pm_event(event_id: str, commence_time: datetime) -> PolymarketEvent:
@@ -242,9 +198,7 @@ async def cross_source_test_data(pglite_async_session):
         events.append(sb_event)
 
         for snap in make_odds_snapshots(sb_event.id, commence, home, away):
-            pglite_async_session.add(snap)
-        for odds in make_odds_records(sb_event.id, commence, home, away):
-            pglite_async_session.add(odds)
+            await store_tagged(pglite_async_session, snap)
 
     await pglite_async_session.flush()
 
@@ -299,7 +253,6 @@ class TestCollectEventData:
             retail_bookmakers=["fanduel", "draftkings"],
             markets=["h2h"],
             outcome="home",
-            closing_tier=FetchTier.CLOSING,
             feature_groups=groups,
             pm_velocity_window_hours=2.0,
             pm_price_tolerance_minutes=60,
@@ -330,29 +283,86 @@ class TestCollectEventData:
     ):
         event = cross_source_test_data["events"][2]
         before = await collect_event_data(event, pglite_async_session, self._make_config())
-        pglite_async_session.add(
-            OddsSnapshot(
-                event_id=event.id,
-                snapshot_time=event.commence_time - timedelta(minutes=1),
-                raw_data={
-                    "bookmakers": [
-                        {
-                            "key": "polymarket",
-                            "title": "Polymarket",
-                            "markets": [{"key": "h2h", "outcomes": []}],
-                        }
-                    ]
-                },
-                bookmaker_count=1,
-                fetch_tier=FetchTier.CLOSING.value,
-            )
+        await store_tagged(
+            pglite_async_session,
+            make_tagged_snapshot(
+                event.id,
+                event.commence_time - timedelta(minutes=1),
+                [
+                    {
+                        "key": "polymarket",
+                        "title": "Polymarket",
+                        "markets": [{"key": "h2h", "outcomes": []}],
+                        "polymarket_meta": {
+                            "yes_probabilities": {"home": 0.6, "away": 0.4},
+                            "best_ask": {"home": 0.61, "away": 0.41},
+                            "best_bid": {"home": 0.59, "away": 0.39},
+                        },
+                    }
+                ],
+                source="polymarket",
+            ),
         )
         await pglite_async_session.commit()
 
         after = await collect_event_data(event, pglite_async_session, self._make_config())
 
-        assert [s.id for s in after.snapshots] == [s.id for s in before.snapshots]
-        assert after.closing_snapshot == before.closing_snapshot
+        def snapshot_ids(bundle: EventDataBundle) -> list[int]:
+            return [s.quotes[0].snapshot_id for s in bundle.snapshots]
+
+        assert snapshot_ids(after) == snapshot_ids(before)
+        assert after.closes
+        assert {s: c.quotes[0].snapshot_id for s, c in after.closes.items()} == {
+            s: c.quotes[0].snapshot_id for s, c in before.closes.items()
+        }
+
+    async def test_closing_snapshot_is_the_half_hour_snapshot(
+        self, pglite_async_session, cross_source_test_data
+    ) -> None:
+        """Of the early, pregame and closing snapshots, only the last can be the close."""
+        event = cross_source_test_data["events"][2]
+
+        bundle = await collect_event_data(event, pglite_async_session, self._make_config())
+
+        assert bundle.closes[Source.ODDS_API].snapshot_time == event.commence_time - timedelta(
+            hours=0.5
+        )
+
+    async def test_latest_close_candidate_wins_and_in_play_is_never_the_close(
+        self, pglite_async_session, cross_source_test_data
+    ) -> None:
+        event = cross_source_test_data["events"][2]
+        later = event.commence_time - timedelta(minutes=10)
+        in_play = event.commence_time + timedelta(minutes=30)
+        for t in (later, in_play):
+            await store_tagged(
+                pglite_async_session,
+                make_tagged_snapshot(
+                    event.id,
+                    t,
+                    [
+                        {
+                            "key": "pinnacle",
+                            "markets": [
+                                {
+                                    "key": "h2h",
+                                    "outcomes": [
+                                        {"name": event.home_team, "price": -140},
+                                        {"name": event.away_team, "price": 120},
+                                    ],
+                                }
+                            ],
+                        }
+                    ],
+                    source=None,
+                ),
+            )
+        await pglite_async_session.commit()
+
+        bundle = await collect_event_data(event, pglite_async_session, self._make_config())
+
+        assert bundle.closes[Source.ODDS_API].snapshot_time == later
+        assert in_play in [s.snapshot_time for s in bundle.snapshots]
 
     async def test_no_pm_context_when_group_not_requested(
         self, pglite_async_session, cross_source_test_data
@@ -407,7 +417,6 @@ class TestPrepareTrainingDataWithPolymarket:
             retail_bookmakers=["fanduel", "draftkings"],
             markets=["h2h"],
             outcome="home",
-            closing_tier=FetchTier.CLOSING,
             feature_groups=("tabular", "polymarket"),
             pm_velocity_window_hours=2.0,
             pm_price_tolerance_minutes=60,

@@ -4,261 +4,121 @@ from datetime import UTC, datetime
 
 import pytest
 from odds_analytics.targets import calculate_regression_target
-from odds_core.models import Odds
 from odds_core.odds_math import american_to_decimal, devig_probabilities
+from odds_core.quotes import Quote
+from odds_core.vocabulary import Market, PriceOutcome, Side, Source, TimeBasis
+
+TIMESTAMP = datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+
+
+def _quote(
+    bookmaker: str,
+    american_price: int,
+    *,
+    market: Market = Market.H2H,
+    outcome: PriceOutcome = PriceOutcome.HOME,
+    line: float | None = None,
+) -> Quote:
+    """A back quote of the home (or given) outcome, priced from American odds."""
+    return Quote(
+        snapshot_id=1,
+        event_id="test",
+        snapshot_time=TIMESTAMP,
+        created_at=TIMESTAMP,
+        source=Source.ODDS_API,
+        market=market,
+        time_basis=TimeBasis.OBSERVED,
+        in_play=None,
+        market_status=None,
+        total_matched=None,
+        market_start_time=None,
+        bookmaker=bookmaker,
+        outcome=outcome,
+        line=line,
+        side=Side.BACK,
+        price=american_to_decimal(american_price),
+        size=None,
+        matched=None,
+        changed_at=None,
+    )
 
 
 class TestCalculateRegressionTarget:
     """Tests for calculate_regression_target helper function."""
 
-    def test_h2h_probability_delta(self):
+    def test_h2h_probability_delta(self) -> None:
         """Test h2h market uses implied probability delta."""
-        timestamp = datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+        opening = [_quote("pinnacle", -120)]  # ~54.5% implied prob
+        closing = [_quote("pinnacle", -150)]  # ~60% implied prob
 
-        opening_odds = [
-            Odds(
-                event_id="test",
-                bookmaker_key="pinnacle",
-                bookmaker_title="Pinnacle",
-                market_key="h2h",
-                outcome_name="Lakers",
-                price_decimal=american_to_decimal(-120),  # ~54.5% implied prob
-                point=None,
-                odds_timestamp=timestamp,
-                last_update=timestamp,
-            ),
-        ]
-
-        closing_odds = [
-            Odds(
-                event_id="test",
-                bookmaker_key="pinnacle",
-                bookmaker_title="Pinnacle",
-                market_key="h2h",
-                outcome_name="Lakers",
-                price_decimal=american_to_decimal(-150),  # ~60% implied prob
-                point=None,
-                odds_timestamp=timestamp,
-                last_update=timestamp,
-            ),
-        ]
-
-        result = calculate_regression_target(opening_odds, closing_odds, "h2h")
+        result = calculate_regression_target(opening, closing, "h2h")
 
         assert result is not None
-        # Probability should increase (line moved in favor of Lakers)
+        # Probability should increase (line moved in favor of the outcome)
         assert result > 0
         # Approximately 60% - 54.5% = 5.5%
         assert 0.04 < result < 0.07
 
-    def test_spreads_point_delta(self):
+    def test_spreads_point_delta(self) -> None:
         """Test spreads market uses point delta."""
-        timestamp = datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+        opening = [_quote("pinnacle", -110, market=Market.SPREADS, line=-2.5)]
+        closing = [_quote("pinnacle", -110, market=Market.SPREADS, line=-3.5)]
 
-        opening_odds = [
-            Odds(
-                event_id="test",
-                bookmaker_key="pinnacle",
-                bookmaker_title="Pinnacle",
-                market_key="spreads",
-                outcome_name="Lakers",
-                price_decimal=american_to_decimal(-110),
-                point=-2.5,
-                odds_timestamp=timestamp,
-                last_update=timestamp,
-            ),
-        ]
-
-        closing_odds = [
-            Odds(
-                event_id="test",
-                bookmaker_key="pinnacle",
-                bookmaker_title="Pinnacle",
-                market_key="spreads",
-                outcome_name="Lakers",
-                price_decimal=american_to_decimal(-110),
-                point=-3.5,
-                odds_timestamp=timestamp,
-                last_update=timestamp,
-            ),
-        ]
-
-        result = calculate_regression_target(opening_odds, closing_odds, "spreads")
+        result = calculate_regression_target(opening, closing, "spreads")
 
         assert result is not None
         # Point delta: -3.5 - (-2.5) = -1.0
         assert result == -1.0
 
-    def test_totals_point_delta(self):
+    def test_totals_point_delta(self) -> None:
         """Test totals market uses point delta."""
-        timestamp = datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
-
-        opening_odds = [
-            Odds(
-                event_id="test",
-                bookmaker_key="pinnacle",
-                bookmaker_title="Pinnacle",
-                market_key="totals",
-                outcome_name="Over",
-                price_decimal=american_to_decimal(-110),
-                point=215.5,
-                odds_timestamp=timestamp,
-                last_update=timestamp,
-            ),
+        opening = [
+            _quote("pinnacle", -110, market=Market.TOTALS, outcome=PriceOutcome.OVER, line=215.5)
+        ]
+        closing = [
+            _quote("pinnacle", -110, market=Market.TOTALS, outcome=PriceOutcome.OVER, line=218.5)
         ]
 
-        closing_odds = [
-            Odds(
-                event_id="test",
-                bookmaker_key="pinnacle",
-                bookmaker_title="Pinnacle",
-                market_key="totals",
-                outcome_name="Over",
-                price_decimal=american_to_decimal(-110),
-                point=218.5,
-                odds_timestamp=timestamp,
-                last_update=timestamp,
-            ),
-        ]
-
-        result = calculate_regression_target(opening_odds, closing_odds, "totals")
+        result = calculate_regression_target(opening, closing, "totals")
 
         assert result is not None
         # Point delta: 218.5 - 215.5 = 3.0
         assert result == 3.0
 
-    def test_missing_opening_odds(self):
-        """Test handling of missing opening odds."""
-        timestamp = datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+    def test_missing_opening_quotes(self) -> None:
+        """Test handling of missing opening quotes."""
+        assert calculate_regression_target(None, [_quote("pinnacle", -150)], "h2h") is None
 
-        closing_odds = [
-            Odds(
-                event_id="test",
-                bookmaker_key="pinnacle",
-                bookmaker_title="Pinnacle",
-                market_key="h2h",
-                outcome_name="Lakers",
-                price_decimal=american_to_decimal(-150),
-                point=None,
-                odds_timestamp=timestamp,
-                last_update=timestamp,
-            ),
-        ]
+    def test_missing_closing_quotes(self) -> None:
+        """Test handling of missing closing quotes."""
+        assert calculate_regression_target([_quote("pinnacle", -120)], None, "h2h") is None
 
-        result = calculate_regression_target(None, closing_odds, "h2h")
-        assert result is None
+    def test_spreads_without_lines(self) -> None:
+        """A point market whose quotes carry no line has no delta."""
+        opening = [_quote("pinnacle", -110, market=Market.SPREADS)]
+        closing = [_quote("pinnacle", -110, market=Market.SPREADS, line=-3.5)]
 
-    def test_missing_closing_odds(self):
-        """Test handling of missing closing odds."""
-        timestamp = datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+        assert calculate_regression_target(opening, closing, "spreads") is None
 
-        opening_odds = [
-            Odds(
-                event_id="test",
-                bookmaker_key="pinnacle",
-                bookmaker_title="Pinnacle",
-                market_key="h2h",
-                outcome_name="Lakers",
-                price_decimal=american_to_decimal(-120),
-                point=None,
-                odds_timestamp=timestamp,
-                last_update=timestamp,
-            ),
-        ]
-
-        result = calculate_regression_target(opening_odds, None, "h2h")
-        assert result is None
-
-    def test_unknown_market(self):
+    def test_unknown_market(self) -> None:
         """Test handling of unknown market type."""
-        timestamp = datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
+        opening = [_quote("pinnacle", -120)]
+        closing = [_quote("pinnacle", -150)]
 
-        opening_odds = [
-            Odds(
-                event_id="test",
-                bookmaker_key="pinnacle",
-                bookmaker_title="Pinnacle",
-                market_key="unknown",
-                outcome_name="Lakers",
-                price_decimal=american_to_decimal(-120),
-                point=None,
-                odds_timestamp=timestamp,
-                last_update=timestamp,
-            ),
-        ]
+        assert calculate_regression_target(opening, closing, "unknown") is None
 
-        closing_odds = [
-            Odds(
-                event_id="test",
-                bookmaker_key="pinnacle",
-                bookmaker_title="Pinnacle",
-                market_key="unknown",
-                outcome_name="Lakers",
-                price_decimal=american_to_decimal(-150),
-                point=None,
-                odds_timestamp=timestamp,
-                last_update=timestamp,
-            ),
-        ]
-
-        result = calculate_regression_target(opening_odds, closing_odds, "unknown")
-        assert result is None
-
-    def test_multiple_bookmakers_average(self):
+    def test_multiple_bookmakers_average(self) -> None:
         """Test averaging across multiple bookmakers."""
-        timestamp = datetime(2024, 11, 1, 12, 0, 0, tzinfo=UTC)
-
-        opening_odds = [
-            Odds(
-                event_id="test",
-                bookmaker_key="pinnacle",
-                bookmaker_title="Pinnacle",
-                market_key="spreads",
-                outcome_name="Lakers",
-                price_decimal=american_to_decimal(-110),
-                point=-2.5,
-                odds_timestamp=timestamp,
-                last_update=timestamp,
-            ),
-            Odds(
-                event_id="test",
-                bookmaker_key="fanduel",
-                bookmaker_title="FanDuel",
-                market_key="spreads",
-                outcome_name="Lakers",
-                price_decimal=american_to_decimal(-110),
-                point=-3.5,
-                odds_timestamp=timestamp,
-                last_update=timestamp,
-            ),
+        opening = [
+            _quote("pinnacle", -110, market=Market.SPREADS, line=-2.5),
+            _quote("fanduel", -110, market=Market.SPREADS, line=-3.5),
+        ]
+        closing = [
+            _quote("pinnacle", -110, market=Market.SPREADS, line=-4.5),
+            _quote("fanduel", -110, market=Market.SPREADS, line=-5.5),
         ]
 
-        closing_odds = [
-            Odds(
-                event_id="test",
-                bookmaker_key="pinnacle",
-                bookmaker_title="Pinnacle",
-                market_key="spreads",
-                outcome_name="Lakers",
-                price_decimal=american_to_decimal(-110),
-                point=-4.5,
-                odds_timestamp=timestamp,
-                last_update=timestamp,
-            ),
-            Odds(
-                event_id="test",
-                bookmaker_key="fanduel",
-                bookmaker_title="FanDuel",
-                market_key="spreads",
-                outcome_name="Lakers",
-                price_decimal=american_to_decimal(-110),
-                point=-5.5,
-                odds_timestamp=timestamp,
-                last_update=timestamp,
-            ),
-        ]
-
-        result = calculate_regression_target(opening_odds, closing_odds, "spreads")
+        result = calculate_regression_target(opening, closing, "spreads")
 
         assert result is not None
         # Opening avg: (-2.5 + -3.5) / 2 = -3.0

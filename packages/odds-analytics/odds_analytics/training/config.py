@@ -43,8 +43,9 @@ from typing import Any, Literal, get_args
 
 import structlog
 import yaml
+from odds_core.vocabulary import PRICE_SOURCES, Source
 from odds_lambda.fetch_tier import FetchTier
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 logger = structlog.get_logger()
 
@@ -213,11 +214,10 @@ class DataConfig(BaseModel):
         description="Filter events by sport key (e.g. 'basketball_nba', 'soccer_epl'). "
         "None = no filter (all sports).",
     )
-    data_source: Literal["all", "oddsportal", "oddsapi", "football_data_uk"] | None = Field(
+    data_source: Source | None = Field(
         default=None,
-        description="Filter events by data source. 'oddsportal' = historical scrape "
-        "(op_ prefix), 'football_data_uk' = FDUK (fduk_ prefix), "
-        "'oddsapi' = live API. None or 'all' = no filter.",
+        description="Keep only events with a snapshot from this price source "
+        "(e.g. 'oddsportal', 'odds_api', 'football_data_uk'). None = no filter.",
     )
     min_snapshots: int | None = Field(
         default=None,
@@ -225,6 +225,13 @@ class DataConfig(BaseModel):
         description="Minimum number of snapshots required per event. "
         "Useful for filtering to events with dense sequence data.",
     )
+
+    @field_validator("data_source")
+    @classmethod
+    def validate_data_source(cls, v: Source | None) -> Source | None:
+        if v is not None and v not in PRICE_SOURCES:
+            raise ValueError(f"data_source {v.value!r} stores no odds snapshots")
+        return v
 
     # Cross-Validation settings
     use_kfold: bool = Field(
@@ -484,7 +491,6 @@ _RETAIL_EV_UNUSED_FIELDS: tuple[str, ...] = (
     "sharp_bookmakers",
     "retail_bookmakers",
     "outcome",
-    "closing_tier",
     "sampling",
 )
 
@@ -511,7 +517,7 @@ class FeatureConfig(BaseModel):
         description="List of sharp bookmakers for feature calculation",
     )
     retail_bookmakers: list[str] = Field(
-        default=["fanduel", "draftkings", "betmgm"],
+        default=["fanduel", "draftkings", "betmgm_us"],
         min_length=1,
         description="List of retail bookmakers for feature calculation",
     )
@@ -532,12 +538,6 @@ class FeatureConfig(BaseModel):
     outcome: Literal["home", "away", "over", "under"] = Field(
         default="home",
         description="Outcome to predict (home/away for h2h, over/under for totals)",
-    )
-
-    # Tier-based closing line configuration
-    closing_tier: FetchTier = Field(
-        default=FetchTier.CLOSING,
-        description="Tier for closing line (last snapshot in this tier)",
     )
 
     # Sampling configuration
@@ -1072,7 +1072,7 @@ class MLTrainingConfig(BaseModel):
             learning_rate: 0.1
           features:
             sharp_bookmakers: ["pinnacle"]
-            retail_bookmakers: ["fanduel", "draftkings", "betmgm"]
+            retail_bookmakers: ["fanduel", "draftkings", "betmgm_us"]
           output_path: "models"
 
         tuning:

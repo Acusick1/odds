@@ -302,7 +302,7 @@ def _display_bookmaker_coverage(bookmaker_coverage: list):
         status_str = f"[{coverage_color}]{status_symbol}[/{coverage_color}]"
 
         table.add_row(
-            book_info.bookmaker_title,
+            book_info.bookmaker_key,
             games_str,
             coverage_str,
             str(book_info.total_snapshots),

@@ -12,7 +12,7 @@ status: stable
 
 Conventions, file formats and the script inventory are on [Experiment scripts and artifacts](experiment-scripts.md).
 
-1. **Write the script and config.** Put the script in `experiments/scripts/` and reuse a YAML from `experiments/configs/` ([conventions](experiment-scripts.md#script-and-config-conventions)); `experiments/scripts/retail_ev_price_only.py` is the reference for a script that tunes and scores a retail-EV model and slices its rows. A `tuning` section sets `metric`, which fixes the optimisation direction.
+1. **Write the script and config.** Put the script in `experiments/scripts/` and reuse a YAML from `experiments/configs/` ([conventions](experiment-scripts.md#script-and-config-conventions)); `experiments/scripts/retail_ev_price_only.py` is the reference for a script that tunes and scores a retail-EV model and slices its rows by retail source, time basis and close source. A `tuning` section sets `metric`, which fixes the optimisation direction.
    - Set `target_type` and the CV protocol explicitly; the CV code defaults are not walk-forward. `experiments/configs/xgboost_epl_retail_ev.yaml` is the reference.
 2. **Commit the script.** Do this before the run, so the results can record the git SHA of the code that produced them.
 3. **Run it.** `uv run python experiments/scripts/<script>.py`; outputs go to `experiments/results/<experiment_name>/`.

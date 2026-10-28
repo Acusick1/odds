@@ -7,6 +7,7 @@ sources:
   - tests/conftest.py
   - tests/migration/conftest.py
   - tests/integration/conftest.py
+  - tests/test_helpers.py
   - .github/workflows/test.yml
   - .github/workflows/deploy-dev.yml
   - .github/workflows/deploy-prod.yml
@@ -22,7 +23,7 @@ How to run the tests is in [Set up and run locally](howto-develop-locally.md#run
 
 ```
 tests/unit/         ~110 flat files across all five packages; `conftest.py` holds the OddsPortal feed fixtures
-tests/integration/  shared fixtures in conftest.py (e.g. events with opening and closing snapshots and `odds_core.models.Odds` rows priced through `price_decimal`, an `op_live_` event with child rows, among them a paper trade priced through `price_decimal`, an EPL event with a Betfair `1x2` snapshot in the redesigned columns, `mixed_source_event` (an EPL event with an Odds API snapshot and a later Polymarket one carrying mid, ask and bid price rows), and `job_session`, the test session handed to the OddsPortal and Betfair jobs as their session factory)
+tests/integration/  shared fixtures in conftest.py (e.g. an `op_live_` event with child rows, among them a paper trade priced through `price_decimal`, an EPL event with a Betfair `1x2` snapshot in the redesigned columns, `mixed_source_event` (an EPL event kicking off 2026-04-18 with an Odds API snapshot 3 h out and a later Polymarket one carrying mid, ask and bid price rows), and `job_session`, the test session handed to the OddsPortal and Betfair jobs as their session factory)
 tests/migration/    schema and CLI checks against a real database
 tests/fixtures/     sample Odds API JSON
 ```
@@ -31,6 +32,7 @@ tests/fixtures/     sample Odds API JSON
 
 - Class-based tests: pytest is configured with `python_classes = Test*`, `asyncio_mode = "auto"`, `testpaths = ["tests"]` and `pythonpath = ["scripts"]` (root `pyproject.toml`).
 - Shared fixtures go in `conftest.py`; `tests/unit/conftest.py` provides `oddsportal_fixtures` (the directory of captured OddsPortal pages under `tests/fixtures/oddsportal/`), `encrypt_payload` (encrypts JSON as the feed does, for synthetic responses) and `make_ml_config` (a small `odds_analytics.training.config.MLTrainingConfig` with a delta target; it carries a tuning section unless called with `tuning=False`). Other unit tests repeat or import their fixtures.
+- `tests/test_helpers.py` builds tagged snapshots. `make_quotes` gives a unit test the `odds_core.quotes.Quote` rows the writers would store for one, and `store_tagged` stores a snapshot with its price rows in an integration test. A snapshot added to the session alone has no price rows, so the readers of `odds_core.quotes.quotes` see nothing.
 - Markers: `integration` (live external APIs, may be skipped offline) and `live_api` (third-party HTTP, run only by the scheduled live-API workflow). CI runs integration with `-m "not live_api"` and, before the tests, a `deptry` check per package for undeclared imports (`.github/workflows/test.yml`, [Dependency checks](code-conventions.md#dependency-checks)).
 - Any `odds_core` import builds settings (`tests/conftest.py`'s `mock_settings` fixture builds its own, with per-sport bookmakers for NBA only), so tests need a `DATABASE_URL`: `tests/conftest.py` defaults only `ODDS_API_KEY`, and CI supplies `DATABASE_URL` from a secret ([Workspace packages](workspace-packages.md#odds-core)). It overwrites `DISCORD_WEBHOOK_URL` with an empty value and `ALERT_ENABLED` with `false`, so a webhook in the developer's shell or `.env` never receives test alerts.
 

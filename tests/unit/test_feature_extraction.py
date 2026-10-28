@@ -8,15 +8,50 @@ from odds_analytics.feature_extraction import (
     FeatureEvent,
     FeatureExtractor,
     TabularFeatureExtractor,
-    calculate_sharp_retail_metrics,
+    select_sharp_quotes,
 )
 from odds_analytics.training.config import FeatureConfig
-from odds_core.models import EventStatus, Odds
+from odds_core.models import EventStatus
 from odds_core.odds_math import american_to_decimal, calculate_implied_probability
+from odds_core.quotes import Quote
+from odds_core.vocabulary import Market, PriceOutcome, Side, Source, TimeBasis
+
+SNAPSHOT_TIME = datetime(2024, 11, 1, 18, 0, 0, tzinfo=UTC)
+
+
+def _quote(
+    bookmaker: str,
+    outcome: PriceOutcome,
+    american_price: int,
+    *,
+    event_id: str = "test_event",
+) -> Quote:
+    """A back quote of the h2h market in one snapshot, priced from American odds."""
+    return Quote(
+        snapshot_id=1,
+        event_id=event_id,
+        snapshot_time=SNAPSHOT_TIME,
+        created_at=SNAPSHOT_TIME,
+        source=Source.ODDS_API,
+        market=Market.H2H,
+        time_basis=TimeBasis.OBSERVED,
+        in_play=None,
+        market_status=None,
+        total_matched=None,
+        market_start_time=None,
+        bookmaker=bookmaker,
+        outcome=outcome,
+        line=None,
+        side=Side.BACK,
+        price=american_to_decimal(american_price),
+        size=None,
+        matched=None,
+        changed_at=None,
+    )
 
 
 @pytest.fixture
-def sample_event():
+def sample_event() -> FeatureEvent:
     """Create a sample FeatureEvent for testing."""
     return FeatureEvent(
         id="test_event_1",
@@ -30,85 +65,19 @@ def sample_event():
 
 
 @pytest.fixture
-def sample_odds_snapshot(sample_event):
-    """Create sample odds snapshot for testing."""
-    timestamp = datetime(2024, 11, 1, 18, 0, 0, tzinfo=UTC)
+def sample_odds_snapshot(sample_event: FeatureEvent) -> list[Quote]:
+    """Create sample quotes of one snapshot for testing."""
+    event_id = sample_event.id
     return [
         # Pinnacle (sharp book)
-        Odds(
-            id=1,
-            event_id=sample_event.id,
-            bookmaker_key="pinnacle",
-            bookmaker_title="Pinnacle",
-            market_key="h2h",
-            outcome_name=sample_event.home_team,
-            price_decimal=american_to_decimal(-120),
-            point=None,
-            odds_timestamp=timestamp,
-            last_update=timestamp,
-        ),
-        Odds(
-            id=2,
-            event_id=sample_event.id,
-            bookmaker_key="pinnacle",
-            bookmaker_title="Pinnacle",
-            market_key="h2h",
-            outcome_name=sample_event.away_team,
-            price_decimal=american_to_decimal(+100),
-            point=None,
-            odds_timestamp=timestamp,
-            last_update=timestamp,
-        ),
+        _quote("pinnacle", PriceOutcome.HOME, -120, event_id=event_id),
+        _quote("pinnacle", PriceOutcome.AWAY, 100, event_id=event_id),
         # FanDuel (retail book)
-        Odds(
-            id=3,
-            event_id=sample_event.id,
-            bookmaker_key="fanduel",
-            bookmaker_title="FanDuel",
-            market_key="h2h",
-            outcome_name=sample_event.home_team,
-            price_decimal=american_to_decimal(-115),
-            point=None,
-            odds_timestamp=timestamp,
-            last_update=timestamp,
-        ),
-        Odds(
-            id=4,
-            event_id=sample_event.id,
-            bookmaker_key="fanduel",
-            bookmaker_title="FanDuel",
-            market_key="h2h",
-            outcome_name=sample_event.away_team,
-            price_decimal=american_to_decimal(-105),
-            point=None,
-            odds_timestamp=timestamp,
-            last_update=timestamp,
-        ),
+        _quote("fanduel", PriceOutcome.HOME, -115, event_id=event_id),
+        _quote("fanduel", PriceOutcome.AWAY, -105, event_id=event_id),
         # DraftKings (retail book)
-        Odds(
-            id=5,
-            event_id=sample_event.id,
-            bookmaker_key="draftkings",
-            bookmaker_title="DraftKings",
-            market_key="h2h",
-            outcome_name=sample_event.home_team,
-            price_decimal=american_to_decimal(-118),
-            point=None,
-            odds_timestamp=timestamp,
-            last_update=timestamp,
-        ),
-        Odds(
-            id=6,
-            event_id=sample_event.id,
-            bookmaker_key="draftkings",
-            bookmaker_title="DraftKings",
-            market_key="h2h",
-            outcome_name=sample_event.away_team,
-            price_decimal=american_to_decimal(-102),
-            point=None,
-            odds_timestamp=timestamp,
-            last_update=timestamp,
-        ),
+        _quote("draftkings", PriceOutcome.HOME, -118, event_id=event_id),
+        _quote("draftkings", PriceOutcome.AWAY, -102, event_id=event_id),
     ]
 
 
@@ -134,7 +103,7 @@ class TestFeatureExtractorInterface:
         """Test that subclasses must implement get_feature_names."""
 
         class IncompleteExtractor(FeatureExtractor):
-            def extract_features(self, event, odds_data, outcome=None, **kwargs):
+            def extract_features(self, event, quoted, outcome=None, **kwargs):
                 return {}
 
         with pytest.raises(TypeError, match="abstract"):
@@ -144,7 +113,7 @@ class TestFeatureExtractorInterface:
         """Test that base class provides create_feature_vector implementation."""
 
         class MinimalExtractor(FeatureExtractor):
-            def extract_features(self, event, odds_data, outcome=None, **kwargs):
+            def extract_features(self, event, quoted, outcome=None, **kwargs):
                 return {"a": 1.0, "b": 2.0}
 
             def get_feature_names(self):
@@ -169,7 +138,7 @@ class TestTabularFeatureExtractor:
         extractor = TabularFeatureExtractor()
 
         assert extractor.sharp_bookmakers == ["pinnacle"]
-        assert extractor.retail_bookmakers == ["fanduel", "draftkings", "betmgm"]
+        assert extractor.retail_bookmakers == ["fanduel", "draftkings", "betmgm_us"]
 
     def test_initialization_with_custom_bookmakers(self):
         """Test initialization with custom bookmaker lists."""
@@ -186,7 +155,7 @@ class TestTabularFeatureExtractor:
 
         extractor = TabularFeatureExtractor()
         features = extractor.extract_features(
-            sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
+            sample_event, sample_odds_snapshot, outcome=PriceOutcome.HOME
         )
 
         assert isinstance(features, TabularFeatures)
@@ -198,7 +167,7 @@ class TestTabularFeatureExtractor:
         """Test that consensus probability features are calculated."""
         extractor = TabularFeatureExtractor()
         features = extractor.extract_features(
-            sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
+            sample_event, sample_odds_snapshot, outcome=PriceOutcome.HOME
         )
 
         assert features.consensus_prob is not None
@@ -208,7 +177,7 @@ class TestTabularFeatureExtractor:
         """Test that sharp bookmaker features are extracted."""
         extractor = TabularFeatureExtractor()
         features = extractor.extract_features(
-            sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
+            sample_event, sample_odds_snapshot, outcome=PriceOutcome.HOME
         )
 
         assert features.sharp_prob is not None
@@ -217,7 +186,7 @@ class TestTabularFeatureExtractor:
         """Test that retail vs sharp differences are calculated."""
         extractor = TabularFeatureExtractor()
         features = extractor.extract_features(
-            sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
+            sample_event, sample_odds_snapshot, outcome=PriceOutcome.HOME
         )
 
         assert features.retail_sharp_diff is not None
@@ -226,7 +195,7 @@ class TestTabularFeatureExtractor:
         """Test that calendar features are derived from commence_time."""
         extractor = TabularFeatureExtractor()
         features = extractor.extract_features(
-            sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
+            sample_event, sample_odds_snapshot, outcome=PriceOutcome.HOME
         )
 
         # 2024-11-01 is a Friday (weekday=4)
@@ -247,7 +216,7 @@ class TestTabularFeatureExtractor:
             away_score=105,
             status=EventStatus.FINAL,
         )
-        features = extractor.extract_features(saturday_event, [], market="h2h")
+        features = extractor.extract_features(saturday_event, [])
         assert features.day_of_week == 5.0
         assert features.is_weekend == 1.0
 
@@ -261,7 +230,7 @@ class TestTabularFeatureExtractor:
             away_score=105,
             status=EventStatus.FINAL,
         )
-        features = extractor.extract_features(sunday_event, [], market="h2h")
+        features = extractor.extract_features(sunday_event, [])
         assert features.day_of_week == 6.0
         assert features.is_weekend == 1.0
 
@@ -277,7 +246,7 @@ class TestTabularFeatureExtractor:
             away_score=105,
             status=EventStatus.FINAL,
         )
-        features = extractor.extract_features(event, [], market="h2h")
+        features = extractor.extract_features(event, [])
         assert features.day_of_week == 4.0
         assert features.is_weekend == 0.0
 
@@ -293,7 +262,7 @@ class TestTabularFeatureExtractor:
             away_score=105,
             status=EventStatus.FINAL,
         )
-        features = extractor.extract_features(event, [], market="h2h")
+        features = extractor.extract_features(event, [])
         assert features.day_of_week == 5.0
         assert features.is_weekend == 1.0
 
@@ -309,7 +278,7 @@ class TestTabularFeatureExtractor:
             away_score=105,
             status=EventStatus.FINAL,
         )
-        features = extractor.extract_features(event, [], market="h2h")
+        features = extractor.extract_features(event, [])
         assert features.day_of_week == 6.0
         assert features.is_weekend == 1.0
 
@@ -318,9 +287,7 @@ class TestTabularFeatureExtractor:
         from odds_analytics.feature_extraction import TabularFeatures
 
         extractor = TabularFeatureExtractor()
-        features = extractor.extract_features(
-            sample_event, [], market="h2h", outcome=sample_event.home_team
-        )
+        features = extractor.extract_features(sample_event, [], outcome=PriceOutcome.HOME)
 
         assert isinstance(features, TabularFeatures)
         # Odds-derived fields should be None with empty odds
@@ -343,7 +310,7 @@ class TestTabularFeatureExtractor:
         """Test that feature vector maintains correct order."""
         extractor = TabularFeatureExtractor()
         features = extractor.extract_features(
-            sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
+            sample_event, sample_odds_snapshot, outcome=PriceOutcome.HOME
         )
 
         # TabularFeatures.to_array() is called automatically
@@ -378,7 +345,7 @@ class TestTabularFeatureExtractor:
         """Test that create_feature_vector uses get_feature_names() when feature_names=None."""
         extractor = TabularFeatureExtractor()
         features = extractor.extract_features(
-            sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
+            sample_event, sample_odds_snapshot, outcome=PriceOutcome.HOME
         )
 
         # Call without feature_names argument
@@ -394,11 +361,11 @@ class TestTabularFeatureExtractor:
 
         # Extract features twice
         features1 = extractor.extract_features(
-            sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
+            sample_event, sample_odds_snapshot, outcome=PriceOutcome.HOME
         )
 
         features2 = extractor.extract_features(
-            sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
+            sample_event, sample_odds_snapshot, outcome=PriceOutcome.HOME
         )
 
         # Should be identical (dataclass equality)
@@ -423,7 +390,7 @@ class TestFeatureExtractorIntegration:
 
         # Extract features
         features = extractor.extract_features(
-            sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
+            sample_event, sample_odds_snapshot, outcome=PriceOutcome.HOME
         )
 
         # Convert to vector
@@ -440,13 +407,13 @@ class TestFeatureExtractorIntegration:
         # Default extractor uses Pinnacle
         default_extractor = TabularFeatureExtractor()
         default_features = default_extractor.extract_features(
-            sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
+            sample_event, sample_odds_snapshot, outcome=PriceOutcome.HOME
         )
 
         # Custom extractor with FanDuel as sharp (unusual, but tests customization)
         custom_extractor = TabularFeatureExtractor(sharp_bookmakers=["fanduel"])
         custom_features = custom_extractor.extract_features(
-            sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
+            sample_event, sample_odds_snapshot, outcome=PriceOutcome.HOME
         )
 
         # Sharp probabilities should differ (different bookmaker as baseline)
@@ -467,7 +434,7 @@ class TestFeatureExtractorIntegration:
         for extractor in extractors:
             # All should implement the same interface
             features = extractor.extract_features(
-                sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
+                sample_event, sample_odds_snapshot, outcome=PriceOutcome.HOME
             )
             assert isinstance(features, TabularFeatures)
 
@@ -490,7 +457,7 @@ class TestFeatureExtractorFromConfig:
 
         # Should match config defaults
         assert extractor.sharp_bookmakers == ["pinnacle"]
-        assert extractor.retail_bookmakers == ["fanduel", "draftkings", "betmgm"]
+        assert extractor.retail_bookmakers == ["fanduel", "draftkings", "betmgm_us"]
 
     def test_tabular_extractor_from_config_custom_values(self):
         """Test that TabularFeatureExtractor.from_config respects custom config values."""
@@ -517,7 +484,7 @@ class TestFeatureExtractorFromConfig:
 
         # Extract features using extractor created from config
         features = extractor.extract_features(
-            sample_event, sample_odds_snapshot, market="h2h", outcome=sample_event.home_team
+            sample_event, sample_odds_snapshot, outcome=PriceOutcome.HOME
         )
 
         # Should produce valid features
@@ -560,11 +527,9 @@ class TestFeatureExtractorFromConfig:
 
         config = FeatureConfig(
             target_type="raw",
-            closing_tier=FetchTier.CLOSING,
             sampling=SamplingConfig(strategy="tier", decision_tier=FetchTier.PREGAME),
         )
 
-        assert config.closing_tier == FetchTier.CLOSING
         assert config.sampling.decision_tier == FetchTier.PREGAME
 
     def test_feature_config_invalid_hours_range_raises_error(self):
@@ -583,89 +548,58 @@ class TestFeatureExtractorFromConfig:
         assert isinstance(extractor, TabularFeatureExtractor)
 
 
-def _make_odds(
-    bookmaker_key: str,
-    outcome_name: str,
-    price: int,
-    *,
-    event_id: str = "test_event",
-    market_key: str = "h2h",
-) -> Odds:
-    ts = datetime(2024, 11, 1, 18, 0, 0, tzinfo=UTC)
-    return Odds(
-        id=0,
-        event_id=event_id,
-        bookmaker_key=bookmaker_key,
-        bookmaker_title=bookmaker_key.title(),
-        market_key=market_key,
-        outcome_name=outcome_name,
-        price_decimal=american_to_decimal(price),
-        point=None,
-        odds_timestamp=ts,
-        last_update=ts,
-    )
+class TestSelectSharpQuotes:
+    """The sharp book is the first in priority order that quotes the requested outcome."""
 
-
-class TestSharpBookmakerPriorityFallback:
-    """Test priority-ordered fallback for sharp bookmaker selection."""
-
-    def _odds_with_bookmakers(self, bookmaker_keys: list[str]) -> list[Odds]:
-        """Build h2h odds for given bookmakers with distinct prices."""
+    @staticmethod
+    def _quotes(bookmaker_keys: list[str]) -> list[Quote]:
+        """Home and away quotes for each bookmaker, at distinct prices."""
         prices = {"pinnacle": -120, "betfair_exchange": -125, "bet365": -115}
-        odds = []
+        quoted: list[Quote] = []
         for bm in bookmaker_keys:
-            odds.append(_make_odds(bm, "Home", prices.get(bm, -110)))
-            odds.append(_make_odds(bm, "Away", prices.get(bm, -110) + 10))
-        return odds
+            price = prices.get(bm, -110)
+            quoted.append(_quote(bm, PriceOutcome.HOME, price))
+            quoted.append(_quote(bm, PriceOutcome.AWAY, price + 10))
+        return quoted
 
     def test_prefers_first_bookmaker_when_both_present(self) -> None:
-        odds = self._odds_with_bookmakers(["pinnacle", "betfair_exchange", "bet365"])
-        result = calculate_sharp_retail_metrics(
-            odds,
-            sharp_bookmakers=["pinnacle", "betfair_exchange"],
-            retail_bookmakers=["bet365"],
-            outcome="Home",
-        )
-        # sharp_prob should come from pinnacle (-120), not BFE (-125)
-        pinnacle_only = calculate_sharp_retail_metrics(
-            odds, sharp_bookmakers=["pinnacle"], retail_bookmakers=["bet365"], outcome="Home"
-        )
-        assert result["sharp_prob"] == pinnacle_only["sharp_prob"]
+        quoted = self._quotes(["pinnacle", "betfair_exchange", "bet365"])
+
+        sharp = select_sharp_quotes(quoted, ["pinnacle", "betfair_exchange"], PriceOutcome.HOME)
+
+        assert [q.bookmaker for q in sharp] == ["pinnacle"]
 
     def test_falls_back_to_second_bookmaker(self) -> None:
-        odds = self._odds_with_bookmakers(["betfair_exchange", "bet365"])
-        result = calculate_sharp_retail_metrics(
-            odds,
-            sharp_bookmakers=["pinnacle", "betfair_exchange"],
-            retail_bookmakers=["bet365"],
-            outcome="Home",
-        )
-        bfe_only = calculate_sharp_retail_metrics(
-            odds,
-            sharp_bookmakers=["betfair_exchange"],
-            retail_bookmakers=["bet365"],
-            outcome="Home",
-        )
-        assert result["sharp_prob"] == bfe_only["sharp_prob"]
-        assert result["sharp_prob"] is not None
+        quoted = self._quotes(["betfair_exchange", "bet365"])
 
-    def test_returns_none_when_no_sharp_present(self) -> None:
-        odds = self._odds_with_bookmakers(["bet365"])
-        result = calculate_sharp_retail_metrics(
-            odds,
-            sharp_bookmakers=["pinnacle", "betfair_exchange"],
-            retail_bookmakers=["bet365"],
-            outcome="Home",
-        )
-        assert result["sharp_prob"] is None
-        assert result["diff"] is None
+        sharp = select_sharp_quotes(quoted, ["pinnacle", "betfair_exchange"], PriceOutcome.HOME)
 
-    def test_single_bookmaker_list_unchanged(self) -> None:
-        odds = self._odds_with_bookmakers(["pinnacle", "bet365"])
-        result = calculate_sharp_retail_metrics(
-            odds, sharp_bookmakers=["pinnacle"], retail_bookmakers=["bet365"], outcome="Home"
-        )
-        assert result["sharp_prob"] is not None
+        assert [q.bookmaker for q in sharp] == ["betfair_exchange"]
+
+    def test_returns_only_the_requested_outcome(self) -> None:
+        quoted = self._quotes(["pinnacle"])
+
+        sharp = select_sharp_quotes(quoted, ["pinnacle"], PriceOutcome.AWAY)
+
+        assert [q.outcome for q in sharp] == [PriceOutcome.AWAY]
+
+    def test_empty_when_no_sharp_present(self) -> None:
+        quoted = self._quotes(["bet365"])
+
+        sharp = select_sharp_quotes(quoted, ["pinnacle", "betfair_exchange"], PriceOutcome.HOME)
+
+        assert sharp == []
+
+    def test_skips_sharp_book_missing_requested_outcome(self) -> None:
+        quoted = [
+            _quote("pinnacle", PriceOutcome.AWAY, -150),
+            _quote("betfair_exchange", PriceOutcome.HOME, 130),
+            _quote("betfair_exchange", PriceOutcome.AWAY, -140),
+        ]
+
+        sharp = select_sharp_quotes(quoted, ["pinnacle", "betfair_exchange"], PriceOutcome.HOME)
+
+        assert [q.bookmaker for q in sharp] == ["betfair_exchange"]
 
 
 class TestTabularExtractorPriorityFallback:
@@ -683,49 +617,43 @@ class TestTabularExtractorPriorityFallback:
             status=EventStatus.FINAL,
         )
 
-    def _odds_for(self, bookmaker_keys: list[str], event: FeatureEvent) -> list[Odds]:
+    def _quotes_for(self, bookmaker_keys: list[str], event: FeatureEvent) -> list[Quote]:
         prices = {"pinnacle": -120, "betfair_exchange": -125, "bet365": -115}
-        odds = []
+        quoted: list[Quote] = []
         for bm in bookmaker_keys:
             p = prices.get(bm, -110)
-            odds.append(_make_odds(bm, event.home_team, p, event_id=event.id))
-            odds.append(_make_odds(bm, event.away_team, p + 10, event_id=event.id))
-        return odds
+            quoted.append(_quote(bm, PriceOutcome.HOME, p, event_id=event.id))
+            quoted.append(_quote(bm, PriceOutcome.AWAY, p + 10, event_id=event.id))
+        return quoted
 
     def test_uses_primary_sharp_when_available(self, event: FeatureEvent) -> None:
-        odds = self._odds_for(["pinnacle", "betfair_exchange", "bet365"], event)
+        quoted = self._quotes_for(["pinnacle", "betfair_exchange", "bet365"], event)
         extractor = TabularFeatureExtractor(
             sharp_bookmakers=["pinnacle", "betfair_exchange"],
             retail_bookmakers=["bet365"],
         )
-        features = extractor.extract_features(event, odds, market="h2h", outcome=event.home_team)
+        features = extractor.extract_features(event, quoted, outcome=PriceOutcome.HOME)
 
-        pinnacle_extractor = TabularFeatureExtractor(
-            sharp_bookmakers=["pinnacle"], retail_bookmakers=["bet365"]
-        )
-        pinnacle_features = pinnacle_extractor.extract_features(
-            event, odds, market="h2h", outcome=event.home_team
-        )
-        assert features.sharp_prob == pinnacle_features.sharp_prob
+        assert features.sharp_prob == pytest.approx(calculate_implied_probability(-120))
 
     def test_falls_back_when_primary_absent(self, event: FeatureEvent) -> None:
-        odds = self._odds_for(["betfair_exchange", "bet365"], event)
+        quoted = self._quotes_for(["betfair_exchange", "bet365"], event)
         extractor = TabularFeatureExtractor(
             sharp_bookmakers=["pinnacle", "betfair_exchange"],
             retail_bookmakers=["bet365"],
         )
-        features = extractor.extract_features(event, odds, market="h2h", outcome=event.home_team)
+        features = extractor.extract_features(event, quoted, outcome=PriceOutcome.HOME)
 
-        assert features.sharp_prob is not None
+        assert features.sharp_prob == pytest.approx(calculate_implied_probability(-125))
         assert features.retail_sharp_diff is not None
 
     def test_no_sharp_yields_none(self, event: FeatureEvent) -> None:
-        odds = self._odds_for(["bet365"], event)
+        quoted = self._quotes_for(["bet365"], event)
         extractor = TabularFeatureExtractor(
             sharp_bookmakers=["pinnacle", "betfair_exchange"],
             retail_bookmakers=["bet365"],
         )
-        features = extractor.extract_features(event, odds, market="h2h", outcome=event.home_team)
+        features = extractor.extract_features(event, quoted, outcome=PriceOutcome.HOME)
 
         assert features.sharp_prob is None
         assert features.retail_sharp_diff is None
@@ -747,17 +675,17 @@ class TestTabularExtractorOutcomeAwareSharpFallthrough:
         )
 
     def test_skips_sharp_book_missing_requested_outcome(self, event: FeatureEvent) -> None:
-        odds = [
-            _make_odds("pinnacle", "B", -150, event_id=event.id),
-            _make_odds("betfair_exchange", "A", 130, event_id=event.id),
-            _make_odds("betfair_exchange", "B", -140, event_id=event.id),
-            _make_odds("fanduel", "A", 120, event_id=event.id),
+        quoted = [
+            _quote("pinnacle", PriceOutcome.AWAY, -150, event_id=event.id),
+            _quote("betfair_exchange", PriceOutcome.HOME, 130, event_id=event.id),
+            _quote("betfair_exchange", PriceOutcome.AWAY, -140, event_id=event.id),
+            _quote("fanduel", PriceOutcome.HOME, 120, event_id=event.id),
         ]
         extractor = TabularFeatureExtractor(
             sharp_bookmakers=["pinnacle", "betfair_exchange"],
             retail_bookmakers=["fanduel"],
         )
-        features = extractor.extract_features(event, odds, market="h2h", outcome="A")
+        features = extractor.extract_features(event, quoted, outcome=PriceOutcome.HOME)
 
         expected_sharp = calculate_implied_probability(130)
         assert features.sharp_prob == pytest.approx(expected_sharp)
@@ -766,16 +694,16 @@ class TestTabularExtractorOutcomeAwareSharpFallthrough:
         )
 
     def test_none_when_no_sharp_book_quotes_requested_outcome(self, event: FeatureEvent) -> None:
-        odds = [
-            _make_odds("pinnacle", "B", -150, event_id=event.id),
-            _make_odds("betfair_exchange", "B", -140, event_id=event.id),
-            _make_odds("fanduel", "A", 120, event_id=event.id),
+        quoted = [
+            _quote("pinnacle", PriceOutcome.AWAY, -150, event_id=event.id),
+            _quote("betfair_exchange", PriceOutcome.AWAY, -140, event_id=event.id),
+            _quote("fanduel", PriceOutcome.HOME, 120, event_id=event.id),
         ]
         extractor = TabularFeatureExtractor(
             sharp_bookmakers=["pinnacle", "betfair_exchange"],
             retail_bookmakers=["fanduel"],
         )
-        features = extractor.extract_features(event, odds, market="h2h", outcome="A")
+        features = extractor.extract_features(event, quoted, outcome=PriceOutcome.HOME)
 
         assert features.sharp_prob is None
         assert features.retail_sharp_diff is None

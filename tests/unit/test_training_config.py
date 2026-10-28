@@ -29,7 +29,7 @@ from odds_analytics.training import (
     TuningConfig,
     XGBoostConfig,
 )
-from odds_lambda.fetch_tier import FetchTier
+from odds_core.vocabulary import PRICE_SOURCES, Source
 from pydantic import ValidationError
 
 # =============================================================================
@@ -367,14 +367,43 @@ class TestDataConfig:
         assert config.data_source is None
 
     def test_data_source_valid_values(self):
-        """data_source accepts all valid literal values."""
-        for value in ("all", "oddsportal", "oddsapi"):
+        """data_source accepts every price source."""
+        for value in PRICE_SOURCES:
             config = DataConfig(
                 start_date=date(2024, 1, 1),
                 end_date=date(2024, 12, 31),
                 data_source=value,
             )
             assert config.data_source == value
+
+    def test_data_source_accepts_source_string(self) -> None:
+        """data_source parses a source's string value, as YAML supplies it."""
+        config = DataConfig(
+            start_date=date(2024, 1, 1),
+            end_date=date(2024, 12, 31),
+            data_source="oddsportal",
+        )
+        assert config.data_source is Source.ODDSPORTAL
+
+    @pytest.mark.parametrize("value", [Source.ESPN, Source.MLB_STATS_API])
+    def test_data_source_rejects_non_price_source(self, value: Source) -> None:
+        """A source that stores no odds snapshots cannot filter events."""
+        with pytest.raises(ValidationError, match="stores no odds snapshots"):
+            DataConfig(
+                start_date=date(2024, 1, 1),
+                end_date=date(2024, 12, 31),
+                data_source=value,
+            )
+
+    @pytest.mark.parametrize("value", ["all", "oddsapi"])
+    def test_data_source_rejects_retired_values(self, value: str) -> None:
+        """The 'all' and 'oddsapi' spellings are no longer accepted."""
+        with pytest.raises(ValidationError):
+            DataConfig(
+                start_date=date(2024, 1, 1),
+                end_date=date(2024, 12, 31),
+                data_source=value,
+            )
 
     def test_data_source_invalid_value(self):
         """data_source rejects invalid values."""
@@ -560,11 +589,10 @@ class TestFeatureConfig:
             target_type="raw",
         )
         assert config.sharp_bookmakers == ["pinnacle"]
-        assert config.retail_bookmakers == ["fanduel", "draftkings", "betmgm"]
+        assert config.retail_bookmakers == ["fanduel", "draftkings", "betmgm_us"]
         assert config.markets == ["h2h", "spreads", "totals"]
         assert config.outcome == "home"
         assert config.adapter == "xgboost"
-        assert config.closing_tier == FetchTier.CLOSING
         assert config.sampling.strategy == "time_range"
 
     def test_empty_feature_groups_rejected_for_xgboost(self):
@@ -1410,7 +1438,7 @@ class TestConfigInheritance:
                 "features": {
                     "target_type": "raw",
                     "sharp_bookmakers": ["pinnacle"],
-                    "retail_bookmakers": ["fanduel", "draftkings", "betmgm"],
+                    "retail_bookmakers": ["fanduel", "draftkings", "betmgm_us"],
                 },
                 "output_path": "models/base",
             },

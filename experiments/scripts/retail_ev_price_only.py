@@ -143,7 +143,8 @@ async def load_data(config: MLTrainingConfig) -> RunData:
             "commence_time": pd.to_datetime(dataset.commence_times),
             "season": [r.season for r in dataset.rows],
             "horizon": [r.horizon_bucket for r in dataset.rows],
-            "retail_source": [r.retail_kind.value for r in dataset.rows],
+            "retail_source": [r.retail_source.value for r in dataset.rows],
+            "retail_time_basis": [r.retail_time_basis.value for r in dataset.rows],
             "close_source": [r.close.source.value for r in dataset.rows],
             "outcome": [r.outcome.value for r in dataset.rows],
             "book": [r.book for r in dataset.rows],
@@ -153,7 +154,7 @@ async def load_data(config: MLTrainingConfig) -> RunData:
             "w_loss": prepared.sample_weights_train,
         }
     )
-    live_events = set(rows.loc[rows["retail_source"] != "fduk_opening", "event_id"])
+    live_events = set(rows.loc[rows["retail_source"] != "football_data_uk", "event_id"])
     rows["event_type"] = np.where(rows["event_id"].isin(live_events), "live_collected", "fduk_only")
     kickoffs = prepared.commence_times_train
     if not (np.diff(kickoffs.astype("int64")) >= 0).all():

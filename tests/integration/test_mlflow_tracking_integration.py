@@ -28,7 +28,6 @@ from odds_analytics.training import (
     create_tracker,
 )
 from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
-from odds_lambda.fetch_tier import FetchTier
 
 # Mark all tests in this module as integration tests
 pytestmark = pytest.mark.integration
@@ -71,7 +70,6 @@ class TestMLflowTrackingIntegration:
                     markets=["h2h"],
                     sharp_bookmakers=["pinnacle"],
                     retail_bookmakers=["fanduel", "draftkings"],
-                    closing_tier=FetchTier.CLOSING,
                 ),
                 output_path="models/test",
                 model_name="test_model.pkl",

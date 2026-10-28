@@ -20,7 +20,12 @@ from odds_analytics.training import (
 from odds_core.models import EventStatus
 from odds_lambda.fetch_tier import FetchTier
 
-from tests.test_helpers import make_epl_event, make_tagged_snapshot, three_way_bookmaker
+from tests.test_helpers import (
+    make_epl_event,
+    make_tagged_snapshot,
+    store_tagged,
+    three_way_bookmaker,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -36,7 +41,8 @@ async def retail_ev_events(pglite_async_session):
         session.add(
             make_epl_event(event_id, kickoff, status=EventStatus.FINAL, home_score=1, away_score=0)
         )
-        session.add(
+        await store_tagged(
+            session,
             make_tagged_snapshot(
                 event_id,
                 kickoff - timedelta(hours=40),
@@ -47,22 +53,23 @@ async def retail_ev_events(pglite_async_session):
                 ],
                 "football_data_uk",
                 "fduk_collection_deadline",
-            )
+            ),
         )
-        session.add(
+        await store_tagged(
+            session,
             make_tagged_snapshot(
                 event_id,
                 kickoff,
                 [three_way_bookmaker("betfair_exchange", (2.2, 3.6, 4.0))],
                 "football_data_uk",
                 "kickoff",
-            )
+            ),
         )
     await session.commit()
     return session
 
 
-def _add_fduk_event(
+async def _add_fduk_event(
     session,
     event_id: str,
     kickoff: datetime,
@@ -77,7 +84,8 @@ def _add_fduk_event(
             event_id, kickoff, status=status, home_score=home_score, away_score=away_score
         )
     )
-    session.add(
+    await store_tagged(
+        session,
         make_tagged_snapshot(
             event_id,
             kickoff - timedelta(hours=40),
@@ -87,17 +95,18 @@ def _add_fduk_event(
             ],
             "football_data_uk",
             "fduk_collection_deadline",
-        )
+        ),
     )
     if with_close:
-        session.add(
+        await store_tagged(
+            session,
             make_tagged_snapshot(
                 event_id,
                 kickoff,
                 [three_way_bookmaker("betfair_exchange", (2.2, 3.6, 4.0))],
                 "football_data_uk",
                 "kickoff",
-            )
+            ),
         )
 
 
@@ -140,7 +149,7 @@ class TestRetailEvTrainingData:
 
     async def test_selects_events_by_close_not_by_result(self, retail_ev_events) -> None:
         kickoff = FIRST_KICKOFF + timedelta(days=30)
-        _add_fduk_event(
+        await _add_fduk_event(
             retail_ev_events,
             "fduk_unsettled_with_close",
             kickoff,
@@ -148,7 +157,7 @@ class TestRetailEvTrainingData:
             scores=None,
             with_close=True,
         )
-        _add_fduk_event(
+        await _add_fduk_event(
             retail_ev_events,
             "fduk_final_without_scores",
             kickoff + timedelta(days=1),
@@ -156,7 +165,7 @@ class TestRetailEvTrainingData:
             scores=None,
             with_close=True,
         )
-        _add_fduk_event(
+        await _add_fduk_event(
             retail_ev_events,
             "fduk_final_without_close",
             kickoff + timedelta(days=2),
@@ -178,7 +187,7 @@ class TestRetailEvTrainingData:
         }
 
     async def test_events_that_have_not_kicked_off_are_not_selected(self, retail_ev_events) -> None:
-        _add_fduk_event(
+        await _add_fduk_event(
             retail_ev_events,
             "fduk_upcoming",
             datetime.now(UTC) + timedelta(days=2),

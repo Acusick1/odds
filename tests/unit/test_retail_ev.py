@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import get_args
@@ -13,22 +14,30 @@ from odds_analytics.as_of_team_features import TeamHistory, results_known_before
 from odds_analytics.retail_ev import (
     _FEATURE_GROUPS,
     LOSS_WEIGHT_SCALE,
-    RETAIL_KINDS,
+    RETAIL_SOURCES,
+    DropCounts,
     RetailEvDataset,
     RetailEvFeatures,
     RetailEvRow,
+    _polymarket_price,
     build_event_rows,
+    is_exact_time,
 )
 from odds_analytics.standings_features import epl_season_key
 from odds_analytics.training.config import RetailEvFeatureGroupName
-from odds_core.bookmakers import canonical_bookmaker_key
 from odds_core.market_prices import Outcome, market_outcomes
-from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.models import Event, EventStatus
 from odds_core.odds_math import devig_probabilities
-from odds_core.snapshot_sources import FdukTimeBasis, SnapshotKind, snapshot_kind
-from odds_core.vocabulary import Source, TimeBasis
+from odds_core.quotes import Quote
+from odds_core.snapshot_sources import FdukTimeBasis
+from odds_core.vocabulary import Side, Source, TimeBasis
 
-from tests.test_helpers import make_epl_event, make_tagged_snapshot, three_way_bookmaker
+from tests.test_helpers import (
+    betfair_exchange_bookmaker,
+    make_epl_event,
+    make_quotes,
+    three_way_bookmaker,
+)
 
 KICKOFF = datetime(2025, 10, 4, 14, 0, tzinfo=UTC)
 EVENT_ID = "fduk_ARS_CHE_2025-10-04"
@@ -36,22 +45,43 @@ OUTCOMES = market_outcomes("1x2")
 PRICE_GROUPS = RetailEvFeatures(OUTCOMES, ("polymarket_at_t", "dynamics"))
 
 
+# The quotes of one snapshot.
+Snap = list[Quote]
+
+_SNAPSHOT_IDS = itertools.count(1)
+
+
 def _betfair(prices: tuple[float, float, float], inplay: bool = False) -> dict:
-    return three_way_bookmaker(
-        "betfair_exchange", prices, betfair_meta={"inplay": inplay, "market_status": "OPEN"}
+    return betfair_exchange_bookmaker(prices, inplay=inplay)
+
+
+def _quoted(
+    snapshot_time: datetime, books: tuple[dict, ...], source: str | None, basis: str | None = None
+) -> Snap:
+    return make_quotes(
+        make_epl_event(EVENT_ID, KICKOFF),
+        next(_SNAPSHOT_IDS),
+        snapshot_time,
+        list(books),
+        source,
+        basis,
     )
 
 
-def _fduk(hours_before: float, basis: FdukTimeBasis, *books: dict) -> OddsSnapshot:
-    return make_tagged_snapshot(
-        EVENT_ID, KICKOFF - timedelta(hours=hours_before), list(books), "football_data_uk", basis
-    )
+def _fduk(hours_before: float, basis: FdukTimeBasis, *books: dict) -> Snap:
+    return _quoted(KICKOFF - timedelta(hours=hours_before), books, "football_data_uk", basis)
 
 
-def _live(source: str, minutes_before: float, *books: dict) -> OddsSnapshot:
-    return make_tagged_snapshot(
-        EVENT_ID, KICKOFF - timedelta(minutes=minutes_before), list(books), source
-    )
+def _live(source: str | None, minutes_before: float, *books: dict) -> Snap:
+    return _quoted(KICKOFF - timedelta(minutes=minutes_before), books, source)
+
+
+def _build(event: Event, snapshots: list[Snap]) -> tuple[list[RetailEvRow], DropCounts]:
+    return build_event_rows(event, [q for snapshot in snapshots for q in snapshot], "1x2")
+
+
+def _time(snapshot: Snap) -> datetime:
+    return snapshot[0].snapshot_time
 
 
 def _fair(prices: tuple[float, float, float]) -> dict[Outcome, float]:
@@ -72,7 +102,7 @@ def event() -> Event:
 
 
 @pytest.fixture
-def snapshots() -> list[OddsSnapshot]:
+def snapshots() -> list[Snap]:
     return [
         _live("oddsportal_live", 8 * 24 * 60, three_way_bookmaker("bet365", (2.0, 3.3, 4.0))),
         _fduk(
@@ -116,9 +146,7 @@ OP_250_BOOKS = (
 )
 
 
-def _polymarket(
-    minutes_before: float, prices: tuple[float, float, float], **meta: dict
-) -> OddsSnapshot:
+def _polymarket(minutes_before: float, prices: tuple[float, float, float], **meta: dict) -> Snap:
     probs = dict(zip(("home", "draw", "away"), (1 / p for p in prices), strict=True))
     return _live(
         "polymarket",
@@ -130,7 +158,7 @@ def _polymarket(
 
 
 @pytest.fixture
-def rich_snapshots(snapshots: list[OddsSnapshot]) -> list[OddsSnapshot]:
+def rich_snapshots(snapshots: list[Snap]) -> list[Snap]:
     """The base snapshots plus Polymarket prices and denser exchange and retail history."""
     return [
         *snapshots,
@@ -163,54 +191,17 @@ def _row(
     )
 
 
-class TestSnapshotKind:
-    @pytest.mark.parametrize(
-        ("raw_data", "kind"),
-        [
-            ({"bookmakers": []}, SnapshotKind.ODDS_API),
-            ({"source": "betfair_api"}, SnapshotKind.BETFAIR_LIVE),
-            ({"source": "oddsportal_live"}, SnapshotKind.ODDSPORTAL_LIVE),
-            (
-                {"source": "football_data_uk", "timing": {"basis": "fduk_collection_deadline"}},
-                SnapshotKind.FDUK_OPENING,
-            ),
-            (
-                {"source": "football_data_uk", "timing": {"basis": "kickoff"}},
-                SnapshotKind.FDUK_CLOSING,
-            ),
-        ],
-    )
-    def test_classifies_by_tags(self, raw_data: dict, kind: SnapshotKind) -> None:
-        assert snapshot_kind(raw_data) is kind
-
-    def test_unknown_source_raises(self) -> None:
-        with pytest.raises(ValueError):
-            snapshot_kind({"source": "somewhere_new"})
-
-
-class TestCanonicalBookmakerKey:
-    def test_aliases_map_to_one_key(self) -> None:
-        assert canonical_bookmaker_key("betfred_uk", SnapshotKind.ODDS_API) == "betfred"
-        assert canonical_bookmaker_key("betfair", SnapshotKind.ODDSPORTAL_LIVE) == (
-            "betfair_sportsbook"
-        )
-
-    def test_odds_api_betmgm_is_the_us_book(self) -> None:
-        assert canonical_bookmaker_key("betmgm", SnapshotKind.ODDS_API) == "betmgm_us"
-        assert canonical_bookmaker_key("betmgm", SnapshotKind.ODDSPORTAL) == "betmgm"
-
-
 class TestBuildEventRows:
-    def test_row_set(self, event: Event, snapshots: list[OddsSnapshot]) -> None:
-        rows, drops = build_event_rows(event, snapshots, "1x2")
+    def test_row_set(self, event: Event, snapshots: list[Snap]) -> None:
+        rows, drops = _build(event, snapshots)
 
-        keys = {(r.retail_kind, r.book, r.outcome) for r in rows}
+        keys = {(r.retail_source, r.retail_time_basis, r.book, r.outcome) for r in rows}
         assert keys == {
-            (kind, book, outcome)
-            for kind, book in [
-                (SnapshotKind.FDUK_OPENING, "bet365"),
-                (SnapshotKind.ODDSPORTAL_LIVE, "bet365"),
-                (SnapshotKind.ODDSPORTAL_LIVE, "betfair_sportsbook"),
+            (source, basis, book, outcome)
+            for source, basis, book in [
+                (Source.FOOTBALL_DATA_UK, TimeBasis.UPPER_BOUND, "bet365"),
+                (Source.ODDSPORTAL, TimeBasis.OBSERVED, "bet365"),
+                (Source.ODDSPORTAL, TimeBasis.OBSERVED, "betfair_sportsbook"),
             ]
             for outcome in OUTCOMES
         }
@@ -219,59 +210,55 @@ class TestBuildEventRows:
         assert drops.rows_without_exchange == 0
         assert drops.prices_outside_roster == {
             "interwetten": 3,
-            "market_avg": 3,
             "pinnacle": 3,
             "betfair_exchange": 6,
             "stakecom": 3,
         }
 
-    def test_decision_window_bounds(self, event: Event, snapshots: list[OddsSnapshot]) -> None:
-        rows, _ = build_event_rows(event, snapshots, "1x2")
+    def test_decision_window_bounds(self, event: Event, snapshots: list[Snap]) -> None:
+        rows, _ = _build(event, snapshots)
         assert all(
             timedelta(minutes=5) <= KICKOFF - r.decision_time <= timedelta(days=7) for r in rows
         )
-        assert not any(r.retail_kind is SnapshotKind.FDUK_CLOSING for r in rows)
+        assert not any(r.retail_time_basis is TimeBasis.CLOSE for r in rows)
 
     def test_live_close_wins_and_in_play_is_ignored(
-        self, event: Event, snapshots: list[OddsSnapshot]
+        self, event: Event, snapshots: list[Snap]
     ) -> None:
-        rows, _ = build_event_rows(event, snapshots, "1x2")
+        rows, _ = _build(event, snapshots)
         assert {(r.close.source, r.close.time_basis) for r in rows} == {
             (Source.BETFAIR, TimeBasis.OBSERVED)
         }
         assert rows[0].close.fair == pytest.approx(_fair(LIVE_CLOSE))
 
     def test_fduk_close_without_live_close_in_window(
-        self, event: Event, snapshots: list[OddsSnapshot]
+        self, event: Event, snapshots: list[Snap]
     ) -> None:
         early_close = _live("betfair_api", 40, _betfair(LIVE_CLOSE))
-        kept = [s for s in snapshots if s.snapshot_time != KICKOFF - timedelta(minutes=10)]
-        rows, _ = build_event_rows(event, [*kept, early_close], "1x2")
+        kept = [s for s in snapshots if _time(s) != KICKOFF - timedelta(minutes=10)]
+        rows, _ = _build(event, [*kept, early_close])
         assert {(r.close.source, r.close.time_basis) for r in rows} == {
             (Source.FOOTBALL_DATA_UK, TimeBasis.CLOSE)
         }
         assert rows[0].close.fair == pytest.approx(_fair(FDUK_CLOSE))
         assert rows[0].close.time == KICKOFF
 
-    def test_event_without_close_is_dropped(
-        self, event: Event, snapshots: list[OddsSnapshot]
-    ) -> None:
+    def test_event_without_close_is_dropped(self, event: Event, snapshots: list[Snap]) -> None:
         no_close = [
             s
             for s in snapshots
-            if s.snapshot_time < KICKOFF - timedelta(minutes=30)
-            or snapshot_kind(s.raw_data) is SnapshotKind.ODDSPORTAL_LIVE
+            if _time(s) < KICKOFF - timedelta(minutes=30) or s[0].source is Source.ODDSPORTAL
         ]
-        rows, drops = build_event_rows(event, no_close, "1x2")
+        rows, drops = _build(event, no_close)
         assert rows == []
         assert drops.events_without_close == 1
 
-    def test_target_and_baseline(self, event: Event, snapshots: list[OddsSnapshot]) -> None:
-        rows, _ = build_event_rows(event, snapshots, "1x2")
+    def test_target_and_baseline(self, event: Event, snapshots: list[Snap]) -> None:
+        rows, _ = _build(event, snapshots)
         row = next(
             r
             for r in rows
-            if r.retail_kind is SnapshotKind.ODDSPORTAL_LIVE
+            if r.retail_source is Source.ODDSPORTAL
             and r.book == "bet365"
             and r.outcome is Outcome.HOME
         )
@@ -284,10 +271,10 @@ class TestBuildEventRows:
         assert row.baseline == pytest.approx(_fair(LIVE_BFE)[Outcome.HOME] * 2.05 - 1)
 
     def test_fduk_opening_is_its_own_exchange_price(
-        self, event: Event, snapshots: list[OddsSnapshot]
+        self, event: Event, snapshots: list[Snap]
     ) -> None:
-        rows, _ = build_event_rows(event, snapshots, "1x2")
-        fduk = [r for r in rows if r.retail_kind is SnapshotKind.FDUK_OPENING]
+        rows, _ = _build(event, snapshots)
+        fduk = [r for r in rows if r.retail_source is Source.FOOTBALL_DATA_UK]
         assert {(r.exchange.source, r.exchange.time_basis) for r in fduk} == {
             (Source.FOOTBALL_DATA_UK, TimeBasis.UPPER_BOUND)
         }
@@ -299,7 +286,7 @@ class TestBuildEventRows:
             _live("oddsportal_live", 60 - 1, three_way_bookmaker("bet365", OP_BET365)),
             _live("betfair_api", 10, _betfair(LIVE_CLOSE)),
         ]
-        rows, drops = build_event_rows(event, snapshots, "1x2")
+        rows, drops = _build(event, snapshots)
         assert rows == []
         assert drops.rows_stale_exchange == 3
 
@@ -310,44 +297,43 @@ class TestBuildEventRows:
             _live("oddsportal_live", 2 * 60 - 1, three_way_bookmaker("bet365", OP_BET365)),
             _live("betfair_api", 10, _betfair(LIVE_CLOSE)),
         ]
-        rows, drops = build_event_rows(event, snapshots, "1x2")
+        rows, drops = _build(event, snapshots)
         assert drops.wide_exchange_snapshots == 1
         assert {r.exchange.fair[Outcome.HOME] for r in rows} == {_fair(LIVE_BFE)[Outcome.HOME]}
 
 
 class TestNoLookAhead:
     def test_rows_depend_only_on_data_at_or_before_t(
-        self, event: Event, rich_snapshots: list[OddsSnapshot]
+        self, event: Event, rich_snapshots: list[Snap]
     ) -> None:
         snapshots = rich_snapshots
-        rows, _ = build_event_rows(event, snapshots, "1x2")
+        rows, _ = _build(event, snapshots)
         assert rows
         closes = [
             s
             for s in snapshots
-            if snapshot_kind(s.raw_data) in {SnapshotKind.BETFAIR_LIVE, SnapshotKind.FDUK_CLOSING}
-            and s.snapshot_time >= KICKOFF - timedelta(minutes=30)
+            if (s[0].source is Source.BETFAIR or s[0].time_basis is TimeBasis.CLOSE)
+            and _time(s) >= KICKOFF - timedelta(minutes=30)
         ]
 
         def at(built: list, t: datetime) -> dict:
             return {
-                (r.retail_kind, r.book, r.outcome): PRICE_GROUPS.row(r)
+                (r.retail_source, r.retail_time_basis, r.book, r.outcome): PRICE_GROUPS.row(r)
                 for r in built
                 if r.decision_time == t
             }
 
         retail_times = {
-            s.snapshot_time
+            _time(s)
             for s in snapshots
-            if snapshot_kind(s.raw_data) in RETAIL_KINDS
-            and timedelta(minutes=5) <= KICKOFF - s.snapshot_time <= timedelta(days=7)
+            if s[0].source in RETAIL_SOURCES
+            and s[0].time_basis is not TimeBasis.CLOSE
+            and timedelta(minutes=5) <= KICKOFF - _time(s) <= timedelta(days=7)
         }
         assert {r.decision_time for r in rows} < retail_times
         for t in sorted(retail_times):
-            past = [s for s in snapshots if s.snapshot_time <= t]
-            truncated, _ = build_event_rows(
-                event, past + [c for c in closes if c.snapshot_time > t], "1x2"
-            )
+            past = [s for s in snapshots if _time(s) <= t]
+            truncated, _ = _build(event, past + [c for c in closes if _time(c) > t])
             full_at_t, truncated_at_t = at(rows, t), at(truncated, t)
             assert full_at_t.keys() == truncated_at_t.keys()
             for key, features in full_at_t.items():
@@ -359,11 +345,11 @@ class TestNoLookAhead:
         assert any(m is not None for r in rows for m in r.dynamics.consensus_moves)
 
     def test_future_exchange_move_does_not_reach_earlier_rows(
-        self, event: Event, snapshots: list[OddsSnapshot]
+        self, event: Event, snapshots: list[Snap]
     ) -> None:
-        rows, _ = build_event_rows(event, snapshots, "1x2")
+        rows, _ = _build(event, snapshots)
         shock = _live("betfair_api", 3 * 60 - 1, _betfair((1.2, 8.0, 15.0)))
-        shocked, _ = build_event_rows(event, [*snapshots, shock], "1x2")
+        shocked, _ = _build(event, [*snapshots, shock])
         early = [r for r in rows if r.decision_time <= KICKOFF - timedelta(hours=3)]
         early_shocked = [r for r in shocked if r.decision_time <= KICKOFF - timedelta(hours=3)]
         for a, b in zip(early, early_shocked, strict=True):
@@ -371,10 +357,8 @@ class TestNoLookAhead:
 
 
 class TestFeaturesAndWeights:
-    def test_feature_vector_matches_names(
-        self, event: Event, snapshots: list[OddsSnapshot]
-    ) -> None:
-        rows, _ = build_event_rows(event, snapshots, "1x2")
+    def test_feature_vector_matches_names(self, event: Event, snapshots: list[Snap]) -> None:
+        rows, _ = _build(event, snapshots)
         features = RetailEvFeatures(OUTCOMES)
         row = rows[-1]
         values = dict(zip(features.names, features.row(row), strict=True))
@@ -385,18 +369,18 @@ class TestFeaturesAndWeights:
         assert values["retail_implied_prob"] == pytest.approx(1 / row.retail_decimal)
 
     def test_loss_weight_is_inverse_odds_squared_over_event_rows(
-        self, event: Event, snapshots: list[OddsSnapshot]
+        self, event: Event, snapshots: list[Snap]
     ) -> None:
-        rows, _ = build_event_rows(event, snapshots, "1x2")
+        rows, _ = _build(event, snapshots)
         dataset = RetailEvDataset(rows=rows)
         odds = np.array([r.retail_decimal for r in rows])
         np.testing.assert_allclose(dataset.event_weights, 1 / len(rows))
         np.testing.assert_allclose(dataset.loss_weights, LOSS_WEIGHT_SCALE / odds**2 / len(rows))
 
     def test_loss_weights_do_not_depend_on_other_events(
-        self, event: Event, snapshots: list[OddsSnapshot]
+        self, event: Event, snapshots: list[Snap]
     ) -> None:
-        rows, _ = build_event_rows(event, snapshots, "1x2")
+        rows, _ = _build(event, snapshots)
         dense_rows = [replace(r, event_id="dense") for r in rows for _ in range(10)]
         alone = RetailEvDataset(rows=rows).loss_weights
         with_dense = RetailEvDataset(rows=rows + dense_rows).loss_weights
@@ -416,9 +400,9 @@ class TestRowLabels:
         ],
     )
     def test_horizon_bucket_by_hours_to_kickoff(
-        self, event: Event, snapshots: list[OddsSnapshot], hours: float, bucket: str
+        self, event: Event, snapshots: list[Snap], hours: float, bucket: str
     ) -> None:
-        rows, _ = build_event_rows(event, snapshots, "1x2")
+        rows, _ = _build(event, snapshots)
         row = replace(rows[0], decision_time=rows[0].commence_time - timedelta(hours=hours))
         assert row.horizon_bucket == bucket
 
@@ -431,16 +415,16 @@ class TestRowLabels:
         ],
     )
     def test_season_starts_in_july(
-        self, event: Event, snapshots: list[OddsSnapshot], kickoff: datetime, season: str
+        self, event: Event, snapshots: list[Snap], kickoff: datetime, season: str
     ) -> None:
-        rows, _ = build_event_rows(event, snapshots, "1x2")
+        rows, _ = _build(event, snapshots)
         assert replace(rows[0], commence_time=kickoff).season == season
 
     @pytest.mark.parametrize("hours", [-0.1, 168.1])
     def test_horizon_bucket_rejects_hours_outside_decision_window(
-        self, event: Event, snapshots: list[OddsSnapshot], hours: float
+        self, event: Event, snapshots: list[Snap], hours: float
     ) -> None:
-        rows, _ = build_event_rows(event, snapshots, "1x2")
+        rows, _ = _build(event, snapshots)
         row = replace(rows[0], decision_time=rows[0].commence_time - timedelta(hours=hours))
         with pytest.raises(ValueError, match="outside the decision window"):
             _ = row.horizon_bucket
@@ -448,7 +432,7 @@ class TestRowLabels:
 
 class TestPolymarketAtT:
     def test_latest_price_within_age_cap(self, event: Event, rich_snapshots: list) -> None:
-        rows, _ = build_event_rows(event, rich_snapshots, "1x2")
+        rows, _ = _build(event, rich_snapshots)
         early = _row(rows, 250, "bet365", Outcome.HOME)
         assert early.polymarket is not None
         assert early.polymarket.fair == pytest.approx(_fair(PM_EARLY))
@@ -459,17 +443,17 @@ class TestPolymarketAtT:
         assert late.polymarket.spread[Outcome.AWAY] == pytest.approx(0.02)
 
     def test_no_price_older_than_cap(self, event: Event, rich_snapshots: list) -> None:
-        rows, _ = build_event_rows(event, rich_snapshots, "1x2")
+        rows, _ = _build(event, rich_snapshots)
         assert _row(rows, 48 * 60, "bet365", Outcome.HOME).polymarket is None
         late_only = {KICKOFF - timedelta(minutes=m) for m in (190, 245, 260)}
-        kept = [s for s in rich_snapshots if s.snapshot_time not in late_only]
+        kept = [s for s in rich_snapshots if _time(s) not in late_only]
         kept.append(_polymarket(330, PM_EARLY))
-        rows, _ = build_event_rows(event, kept, "1x2")
+        rows, _ = _build(event, kept)
         assert _row(rows, 250, "bet365", Outcome.HOME).polymarket is not None
         assert _row(rows, 180, "bet365", Outcome.HOME).polymarket is None
 
     def test_features(self, event: Event, rich_snapshots: list) -> None:
-        rows, _ = build_event_rows(event, rich_snapshots, "1x2")
+        rows, _ = _build(event, rich_snapshots)
         row = _row(rows, 180, "bet365", Outcome.AWAY)
         features = RetailEvFeatures(OUTCOMES, ("polymarket_at_t",))
         values = dict(zip(features.names, features.row(row), strict=True))
@@ -488,7 +472,7 @@ class TestDynamics:
     def test_moves_take_the_latest_price_at_or_before_t_minus_window(
         self, event: Event, rich_snapshots: list
     ) -> None:
-        rows, _ = build_event_rows(event, rich_snapshots, "1x2")
+        rows, _ = _build(event, rich_snapshots)
         row = _row(rows, 180, "bet365", Outcome.HOME)
         now = _fair(LIVE_BFE)[Outcome.HOME]
         one_h, three_h, six_h = row.dynamics.exchange_moves
@@ -499,7 +483,7 @@ class TestDynamics:
     def test_consensus_moves_compare_books_of_one_source(
         self, event: Event, rich_snapshots: list
     ) -> None:
-        rows, _ = build_event_rows(event, rich_snapshots, "1x2")
+        rows, _ = _build(event, rich_snapshots)
         row = _row(rows, 180, "bet365", Outcome.HOME)
         bet365_move = 1 / 2.05 - 1 / 2.0
         assert row.dynamics.consensus_moves[0] == pytest.approx(bet365_move)
@@ -511,7 +495,7 @@ class TestDynamics:
             _live("betfair_api", 43 * 60, _betfair(LIVE_BFE)),
             _live("oddsportal_live", 42 * 60, three_way_bookmaker("bet365", OP_BET365)),
         ]
-        rows, _ = build_event_rows(event, [*rich_snapshots, *live_near_fduk], "1x2")
+        rows, _ = _build(event, [*rich_snapshots, *live_near_fduk])
         row = _row(rows, 42 * 60, "bet365", Outcome.HOME)
         assert (row.exchange.source, row.exchange.time_basis) == (
             Source.BETFAIR,
@@ -521,21 +505,36 @@ class TestDynamics:
             "the FDUK opening price lies within the cap of t - 6h but is another source"
         )
 
+    def test_consensus_move_never_crosses_time_basis(
+        self, event: Event, rich_snapshots: list
+    ) -> None:
+        backfilled = [
+            replace(q, time_basis=TimeBasis.UPPER_BOUND)
+            for q in _live(None, 280, three_way_bookmaker("bet365", (2.0, 3.3, 4.0)))
+        ]
+        observed = _live(None, 220, three_way_bookmaker("bet365", (2.1, 3.3, 3.9)))
+        rows, _ = _build(event, [*rich_snapshots, backfilled, observed])
+        row = _row(rows, 220, "bet365", Outcome.HOME)
+        assert (row.retail_source, row.retail_time_basis) == (Source.ODDS_API, TimeBasis.OBSERVED)
+        assert row.dynamics.consensus_moves == (None, None, None), (
+            "the backfilled Odds API snapshot at t - 1h is another time basis"
+        )
+
     def test_fduk_opening_has_no_moves(self, event: Event, rich_snapshots: list) -> None:
-        rows, _ = build_event_rows(event, rich_snapshots, "1x2")
+        rows, _ = _build(event, rich_snapshots)
         row = _row(rows, 48 * 60, "bet365", Outcome.HOME)
         assert row.dynamics.exchange_moves == (None, None, None)
         assert row.dynamics.consensus_moves == (None, None, None)
 
     def test_dispersion_across_uk_books(self, event: Event, rich_snapshots: list) -> None:
-        rows, _ = build_event_rows(event, rich_snapshots, "1x2")
+        rows, _ = _build(event, rich_snapshots)
         row = _row(rows, 180, "bet365", Outcome.HOME)
         assert row.dynamics.retail_dispersion == pytest.approx(np.std([1 / 2.05, 1 / 2.0]))
         single = _row(rows, 48 * 60, "bet365", Outcome.HOME)
         assert single.dynamics.retail_dispersion is None
 
     def test_features_match_names(self, event: Event, rich_snapshots: list) -> None:
-        rows, _ = build_event_rows(event, rich_snapshots, "1x2")
+        rows, _ = _build(event, rich_snapshots)
         features = RetailEvFeatures(OUTCOMES, ("dynamics",))
         values = dict(zip(features.names, features.row(rows[0]), strict=True))
         assert set(values) >= {
@@ -677,11 +676,11 @@ class TestTeamFeaturesAsOfT:
     def test_feature_vector_includes_team_groups(
         self,
         event: Event,
-        snapshots: list[OddsSnapshot],
+        snapshots: list[Snap],
         season: list[Event],
         fixtures: pd.DataFrame,
     ) -> None:
-        rows, _ = build_event_rows(event, snapshots, "1x2")
+        rows, _ = _build(event, snapshots)
         features = RetailEvFeatures(
             OUTCOMES,
             ("standings_as_of_t", "schedule_as_of_t"),
@@ -702,6 +701,72 @@ class TestTeamFeaturesAsOfT:
             RetailEvFeatures(OUTCOMES, ("schedule_as_of_t",))
 
 
+class TestIsExactTime:
+    @pytest.mark.parametrize(
+        ("source", "time_basis", "exact"),
+        [
+            (Source.FOOTBALL_DATA_UK, TimeBasis.UPPER_BOUND, False),
+            (Source.ODDS_API, TimeBasis.UPPER_BOUND, True),
+            (Source.ODDS_API, TimeBasis.OBSERVED, True),
+            (Source.ODDSPORTAL, TimeBasis.SOURCE_STAMPED, True),
+            (Source.BETFAIR, TimeBasis.OBSERVED, True),
+            (Source.FOOTBALL_DATA_UK, TimeBasis.CLOSE, True),
+        ],
+    )
+    def test_only_fduk_upper_bounds_are_inexact(
+        self, source: Source, time_basis: TimeBasis, exact: bool
+    ) -> None:
+        assert is_exact_time(source, time_basis) is exact
+
+    def test_row_carries_its_source_and_time_basis(
+        self, event: Event, snapshots: list[Snap]
+    ) -> None:
+        rows, _ = _build(event, snapshots)
+        fduk = next(r for r in rows if r.retail_source is Source.FOOTBALL_DATA_UK)
+        live = next(r for r in rows if r.retail_source is Source.ODDSPORTAL)
+        assert (fduk.retail_time_basis, fduk.decision_time_is_exact) == (
+            TimeBasis.UPPER_BOUND,
+            False,
+        )
+        assert (live.retail_time_basis, live.decision_time_is_exact) == (TimeBasis.OBSERVED, True)
+
+
+class TestPolymarketPrice:
+    def test_spread_is_the_ask_minus_the_bid_of_each_outcome_with_both(self) -> None:
+        snapshot = _polymarket(
+            190,
+            PM_LATE,
+            best_bid={"home": 0.44, "draw": 0.27},
+            best_ask={"home": 0.46, "away": 0.27},
+        )
+        assert {q.side for q in snapshot} == {Side.MID, Side.BACK, Side.LAY}
+        price = _polymarket_price(snapshot, OUTCOMES)
+        assert price is not None
+        assert price.fair == pytest.approx(_fair(PM_LATE))
+        assert price.spread == {Outcome.HOME: pytest.approx(0.02)}
+
+    def test_missing_midpoint_is_no_price(self) -> None:
+        snapshot = [q for q in _polymarket(190, PM_LATE) if q.outcome.value != "draw"]
+        assert _polymarket_price(snapshot, OUTCOMES) is None
+
+
+class TestLaySide:
+    def test_odds_api_lay_rows_are_not_retail_rows(self, event: Event) -> None:
+        lay = three_way_bookmaker("bet365", (2.6, 3.8, 4.8))
+        back = three_way_bookmaker("bet365", OP_BET365)
+        back["markets"].append({**lay["markets"][0], "key": "h2h_lay"})
+        snapshots = [
+            _live("betfair_api", 4 * 60, _betfair(LIVE_BFE)),
+            _live(None, 3 * 60, back),
+            _live("betfair_api", 10, _betfair(LIVE_CLOSE)),
+        ]
+        rows, drops = _build(event, snapshots)
+        assert {(r.outcome, r.retail_decimal) for r in rows} == set(
+            zip(OUTCOMES, OP_BET365, strict=True)
+        )
+        assert drops.prices_outside_roster == {}
+
+
 class TestFeatureGroupTable:
     def test_every_config_group_has_an_entry(self) -> None:
         assert set(_FEATURE_GROUPS) == set(get_args(RetailEvFeatureGroupName))
@@ -712,7 +777,7 @@ class TestUpperBoundDecisionTime:
         self, event: Event, rich_snapshots: list
     ) -> None:
         pm_before_fduk = _polymarket(48 * 60 + 30, PM_EARLY)
-        rows, _ = build_event_rows(event, [*rich_snapshots, pm_before_fduk], "1x2")
+        rows, _ = _build(event, [*rich_snapshots, pm_before_fduk])
         fduk = _row(rows, 48 * 60, "bet365", Outcome.HOME)
         live = _row(rows, 180, "bet365", Outcome.HOME)
         assert not fduk.decision_time_is_exact
@@ -725,7 +790,7 @@ class TestUpperBoundDecisionTime:
             _fduk(48, FdukTimeBasis.COLLECTION_DEADLINE, three_way_bookmaker("bet365", OP_BET365)),
             _live("betfair_api", 10, _betfair(LIVE_CLOSE)),
         ]
-        rows, drops = build_event_rows(event, snapshots, "1x2")
+        rows, drops = _build(event, snapshots)
         assert rows == []
         assert drops.rows_without_own_exchange == 3
         assert drops.rows_stale_exchange == 0
@@ -733,11 +798,11 @@ class TestUpperBoundDecisionTime:
     def test_fduk_opening_row_has_no_team_features(
         self,
         event: Event,
-        snapshots: list[OddsSnapshot],
+        snapshots: list[Snap],
         season: list[Event],
         fixtures: pd.DataFrame,
     ) -> None:
-        rows, _ = build_event_rows(event, snapshots, "1x2")
+        rows, _ = _build(event, snapshots)
         fduk = _row(rows, 48 * 60, "bet365", Outcome.HOME)
         live = _row(rows, 180, "bet365", Outcome.HOME)
         features = RetailEvFeatures(

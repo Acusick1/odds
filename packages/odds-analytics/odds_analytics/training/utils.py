@@ -87,7 +87,6 @@ def flatten_config_for_tracking(
             "retail_bookmakers": ",".join(features.retail_bookmakers),
             "markets": ",".join(features.markets),
             "outcome": features.outcome,
-            "closing_tier": features.closing_tier.value,
             "sampling_strategy": features.sampling.strategy,
         }
     )

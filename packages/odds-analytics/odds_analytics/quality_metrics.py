@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from collections import Counter, defaultdict
 from datetime import datetime
 
-from odds_core.models import Event, Odds, OddsSnapshot
+from odds_core.models import Event, OddsSnapshot, Price
+from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.fetch_tier import FetchTier
+from odds_lambda.tier_utils import snapshot_tiers
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -74,13 +77,12 @@ class BookmakerCoverage(BaseModel):
     """Result model for bookmaker coverage analysis."""
 
     bookmaker_key: str = Field(description="Bookmaker identifier (e.g., 'fanduel', 'draftkings')")
-    bookmaker_title: str = Field(description="Bookmaker display name")
     total_games: int = Field(description="Total games in the analyzed date range")
     games_with_odds: int = Field(description="Games where this bookmaker provided odds")
     coverage_pct: float = Field(
         description="Percentage of games with odds (games_with_odds / total_games * 100)"
     )
-    total_snapshots: int = Field(description="Total odds records from this bookmaker")
+    total_snapshots: int = Field(description="Snapshots in which this bookmaker has a price")
     avg_snapshots_per_game: float = Field(
         description="Average snapshots per game (total_snapshots / games_with_odds)"
     )
@@ -377,7 +379,7 @@ class QualityMetrics:
                 print(f"{tier_info.tier_name}: {tier_info.coverage_pct}% coverage")
         """
         # Get all events in date range
-        events_query = select(Event.id, Event.commence_time).where(
+        events_query = select(func.count(Event.id)).where(
             and_(
                 Event.commence_time >= start_date,
                 Event.commence_time <= end_date,
@@ -387,47 +389,59 @@ class QualityMetrics:
         if sport_key:
             events_query = events_query.where(Event.sport_key == sport_key)
 
-        events_result = await self.session.execute(events_query)
-        events = events_result.all()
+        # All events are eligible for all tiers (any game could theoretically have
+        # snapshots in any tier depending on when it was discovered)
+        games_in_tier_range = (await self.session.execute(events_query)).scalar_one()
 
-        # Build tier coverage for each FetchTier enum value
-        tier_results = []
-
-        # Iterate through all tiers dynamically
-        for fetch_tier in FetchTier:
-            tier_value = fetch_tier.value  # e.g., "closing"
-
-            # Get snapshot statistics for this tier
-            snapshot_query = (
-                select(
-                    OddsSnapshot.event_id,
-                    func.count(func.distinct(OddsSnapshot.snapshot_time)).label("snapshot_count"),
-                )
-                .join(Event, Event.id == OddsSnapshot.event_id)
-                .where(
-                    and_(
-                        Event.commence_time >= start_date,
-                        Event.commence_time <= end_date,
-                        OddsSnapshot.fetch_tier == tier_value,
-                    )
+        # Each snapshot takes the tier ``snapshot_tiers`` derives over its event's snapshots; an
+        # event's snapshot time counts once per tier its snapshots there cover.
+        snapshots_query = (
+            select(
+                OddsSnapshot.event_id,
+                OddsSnapshot.snapshot_time,
+                OddsSnapshot.source,
+                OddsSnapshot.time_basis,
+                OddsSnapshot.market,
+                Event.commence_time,
+            )
+            .join(Event, Event.id == OddsSnapshot.event_id)
+            .where(
+                and_(
+                    Event.commence_time >= start_date,
+                    Event.commence_time <= end_date,
                 )
             )
+        )
 
-            if sport_key:
-                snapshot_query = snapshot_query.where(Event.sport_key == sport_key)
+        if sport_key:
+            snapshots_query = snapshots_query.where(Event.sport_key == sport_key)
 
-            snapshot_query = snapshot_query.group_by(OddsSnapshot.event_id)
+        by_event: dict[str, list[tuple[datetime, Source | None, TimeBasis | None, str | None]]] = (
+            defaultdict(list)
+        )
+        kickoffs: dict[str, datetime] = {}
+        for event_id, snapshot_time, source, time_basis, market, commence_time in (
+            await self.session.execute(snapshots_query)
+        ).all():
+            by_event[event_id].append((snapshot_time, source, time_basis, market))
+            kickoffs[event_id] = commence_time
 
-            snapshot_result = await self.session.execute(snapshot_query)
-            snapshot_rows = snapshot_result.all()
+        snapshots_per_event: dict[FetchTier, Counter[str]] = defaultdict(Counter)
+        for event_id, snapshots in by_event.items():
+            covered = {
+                (tier, snapshot[0])
+                for snapshot, tier in zip(
+                    snapshots, snapshot_tiers(snapshots, kickoffs[event_id]), strict=True
+                )
+            }
+            for tier, _ in covered:
+                snapshots_per_event[tier][event_id] += 1
 
-            # Calculate metrics
-            games_with_tier_snapshots = len(snapshot_rows)
-            total_snapshots_in_tier = sum(row[1] for row in snapshot_rows)
-
-            # All events are eligible for all tiers (any game could theoretically have
-            # snapshots in any tier depending on when it was discovered)
-            games_in_tier_range = len(events)
+        tier_results = []
+        for fetch_tier in FetchTier:
+            counts = snapshots_per_event[fetch_tier]
+            games_with_tier_snapshots = len(counts)
+            total_snapshots_in_tier = sum(counts.values())
 
             # Calculate coverage percentage
             coverage_pct = (
@@ -443,14 +457,11 @@ class QualityMetrics:
                 else 0.0
             )
 
-            # Get human-readable hours range based on tier
-            hours_range = self._get_tier_hours_range(fetch_tier)
-
             tier_results.append(
                 TierCoverage(
-                    tier=tier_value,
-                    tier_name=tier_value,  # Already lowercase
-                    hours_range=hours_range,
+                    tier=fetch_tier.value,
+                    tier_name=fetch_tier.value,
+                    hours_range=self._get_tier_hours_range(fetch_tier),
                     expected_interval_hours=fetch_tier.interval_hours,
                     games_in_tier_range=games_in_tier_range,
                     games_with_tier_snapshots=games_with_tier_snapshots,
@@ -512,7 +523,7 @@ class QualityMetrics:
                 sport_key="basketball_nba"
             )
             for book in coverage:
-                print(f"{book.bookmaker_title}: {book.coverage_pct}% coverage")
+                print(f"{book.bookmaker_key}: {book.coverage_pct}% coverage")
         """
         # First, get total games in date range
         total_games_result = await self.get_game_counts(
@@ -522,19 +533,15 @@ class QualityMetrics:
         )
         total_games = total_games_result.total_games
 
-        # Query to get bookmaker statistics
-        # We need to:
-        # 1. Count distinct events per bookmaker
-        # 2. Count total odds records per bookmaker
-        # 3. Get bookmaker_title for display
+        # Count distinct events and snapshots per bookmaker
         query = (
             select(
-                Odds.bookmaker_key,
-                Odds.bookmaker_title,
-                func.count(func.distinct(Odds.event_id)).label("games_with_odds"),
-                func.count(Odds.id).label("total_snapshots"),
+                Price.bookmaker,
+                func.count(func.distinct(OddsSnapshot.event_id)).label("games_with_odds"),
+                func.count(func.distinct(Price.snapshot_id)).label("total_snapshots"),
             )
-            .join(Event, Event.id == Odds.event_id)
+            .join(OddsSnapshot, OddsSnapshot.id == Price.snapshot_id)
+            .join(Event, Event.id == OddsSnapshot.event_id)
             .where(
                 and_(
                     Event.commence_time >= start_date,
@@ -546,7 +553,7 @@ class QualityMetrics:
         if sport_key:
             query = query.where(Event.sport_key == sport_key)
 
-        query = query.group_by(Odds.bookmaker_key, Odds.bookmaker_title)
+        query = query.group_by(Price.bookmaker)
 
         result = await self.session.execute(query)
         rows = result.all()
@@ -555,9 +562,8 @@ class QualityMetrics:
         coverage_results = []
         for row in rows:
             bookmaker_key = row[0]
-            bookmaker_title = row[1]
-            games_with_odds = row[2]
-            total_snapshots = row[3]
+            games_with_odds = row[1]
+            total_snapshots = row[2]
 
             # Calculate coverage percentage
             coverage_pct = (games_with_odds / total_games * 100) if total_games > 0 else 0.0
@@ -570,7 +576,6 @@ class QualityMetrics:
             coverage_results.append(
                 BookmakerCoverage(
                     bookmaker_key=bookmaker_key,
-                    bookmaker_title=bookmaker_title,
                     total_games=total_games,
                     games_with_odds=games_with_odds,
                     coverage_pct=coverage_pct,

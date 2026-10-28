@@ -26,8 +26,7 @@ from odds_core.betfair_close import close_quotes, event_close
 from odds_core.market_prices import Outcome, market_outcomes
 from odds_core.models import Event
 from odds_core.quotes import Quote
-from odds_core.snapshot_sources import SnapshotKind
-from odds_core.vocabulary import Market, Source, TimeBasis
+from odds_core.vocabulary import Market, Source
 from odds_lambda.candidate_rules import (
     RULES,
     MarketState,
@@ -82,15 +81,6 @@ FIXED_XGBOOST_PARAMS: dict[str, Any] = {
 }
 
 
-# The retail kind ``odds_analytics.retail_ev`` labels a market state's snapshot with.
-RETAIL_KINDS: dict[tuple[Source, TimeBasis], SnapshotKind] = {
-    (Source.ODDS_API, TimeBasis.OBSERVED): SnapshotKind.ODDS_API,
-    (Source.ODDS_API, TimeBasis.UPPER_BOUND): SnapshotKind.ODDS_API,
-    (Source.ODDSPORTAL, TimeBasis.OBSERVED): SnapshotKind.ODDSPORTAL_LIVE,
-    (Source.ODDSPORTAL, TimeBasis.SOURCE_STAMPED): SnapshotKind.ODDSPORTAL,
-}
-
-
 def state_inputs(state: MarketState) -> list[RetailEvInput]:
     """The state's quotes as model inputs at its snapshot's time; none without an exchange price.
 
@@ -98,10 +88,13 @@ def state_inputs(state: MarketState) -> list[RetailEvInput]:
     exchange = state.exchange.get(None)
     if exchange is None or state.snapshot_time is None:
         return []
+    # The exchange price is read from the state's own snapshot, so it carries that snapshot's
+    # source and time basis.
     return quote_inputs(
         state.event_id,
         state.kickoff,
-        RETAIL_KINDS[(exchange.source, exchange.time_basis)],
+        exchange.source,
+        exchange.time_basis,
         state.snapshot_time,
         state.retail.get(None, {}),
         market_outcomes(state.market),

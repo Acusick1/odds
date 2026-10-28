@@ -29,7 +29,7 @@ status: stable
 
 ## Example search spaces
 
-`experiments/configs/xgboost_tuning_without_feature_selection.yaml` and `experiments/configs/xgboost_feature_selection_tuning.yaml` are the committed XGBoost tuning examples, and the values are authoritative there; the second adds `top_k_features` with feature selection enabled. `odds_analytics.training.config.XGBoostConfig` has no early-stopping field, so a search space tunes `n_estimators` as the only control on boosting length. Neither file sets `target_type`, which `odds_analytics.training.config.FeatureConfig` requires, so a copy needs one added.
+`experiments/configs/xgboost_tuning_without_feature_selection.yaml` and `experiments/configs/xgboost_feature_selection_tuning.yaml` are the committed XGBoost tuning examples, and the values are authoritative there; the second adds `top_k_features` with feature selection enabled. Both set `retail_bookmakers` to `["fanduel", "draftkings", "betmgm_us"]`, the `odds_analytics.training.config.FeatureConfig` default, where US BetMGM is the canonical key `betmgm_us`. `odds_analytics.training.config.XGBoostConfig` has no early-stopping field, so a search space tunes `n_estimators` as the only control on boosting length. Neither file sets `target_type`, which `odds_analytics.training.config.FeatureConfig` requires, so a copy needs one added.
 
 ## Related
 

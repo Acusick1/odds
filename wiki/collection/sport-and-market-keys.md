@@ -6,7 +6,7 @@ sources:
   - odds_core.config.DataCollectionConfig
   - odds_core.config.APIConfig
   - odds_core.sports.SportKey
-  - odds_core.utils.raw_data_has_market
+  - odds_core.quotes.quotes
   - odds_core.utils.relabel_three_way_markets
   - odds_core.team.normalize_team_name
   - odds_lambda.data_fetcher.TheOddsAPIClient.get_odds
@@ -58,7 +58,7 @@ CLI `--sport` defaults differ by command ([odds-cli](../foundations/odds-cli.md#
 
 ## Market-key dialects
 
-A market key is whatever string sits in `raw_data.bookmakers[].markets[].key`, and readers match it exactly (`odds_core.utils.raw_data_has_market`). Writers use different keys for the same two-way bet, and one key for the football three-way bet:
+A market key is whatever string sits in `raw_data.bookmakers[].markets[].key`; the writers store it as the snapshot's `market`, which readers match exactly (`odds_core.quotes.quotes`). Writers use different keys for the same two-way bet, and one key for the football three-way bet:
 
 | Writer | Football 3-way | Two-way moneyline | Totals |
 |---|---|---|---|
