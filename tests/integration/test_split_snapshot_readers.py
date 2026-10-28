@@ -7,11 +7,12 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from odds_core.models import Event
-from odds_core.vocabulary import Market, Source, TimeBasis
+from odds_core.models import Event, Odds
+from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.storage.readers import OddsReader
 from odds_lambda.storage.shaped_snapshots import SnapshotShape
 from odds_lambda.storage.writers import OddsWriter
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from tests.integration.test_odds_api_writers import _book, _listed
@@ -49,7 +50,6 @@ class TestSplitSnapshotReaders:
         reader = OddsReader(pglite_async_session)
 
         assert await reader.get_snapshot_count_for_event("apihex1") == 2
-        assert sum((await reader.get_tier_coverage_for_event("apihex1")).values()) == 2
 
     async def test_min_snapshots_counts_fetches(
         self, pglite_async_session: AsyncSession, event_with_two_fetches: Event
@@ -60,22 +60,20 @@ class TestSplitSnapshotReaders:
         assert len(await reader.get_events_by_date_range(*window, min_snapshots=2)) == 1
         assert await reader.get_events_by_date_range(*window, min_snapshots=3) == []
 
-    async def test_latest_snapshot_without_a_market_is_deterministic(
-        self, pglite_async_session: AsyncSession, event_with_two_fetches: Event
-    ) -> None:
-        reader = OddsReader(pglite_async_session)
-
-        latest = await reader.get_latest_snapshot("apihex1")
-
-        assert latest is not None
-        assert latest.market is Market.ONE_X_TWO
-        assert latest.snapshot_time == KICKOFF - timedelta(hours=2)
-
     async def test_each_odds_row_sits_on_its_markets_snapshot(
         self, pglite_async_session: AsyncSession, event_with_two_fetches: Event
     ) -> None:
         reader = OddsReader(pglite_async_session)
-        odds = await reader.get_odds_at_time("apihex1", KICKOFF - timedelta(hours=2))
+        odds = list(
+            (
+                await pglite_async_session.execute(
+                    select(Odds).where(
+                        Odds.event_id == "apihex1",
+                        Odds.odds_timestamp == KICKOFF - timedelta(hours=2),
+                    )
+                )
+            ).scalars()
+        )
         snapshots = {s.id: s for s in await reader.get_snapshots_for_event("apihex1")}
 
         assert {o.market_key for o in odds} == {"1x2", "totals"}

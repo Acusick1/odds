@@ -59,7 +59,7 @@ status: stable
 
 ## Dependencies
 
-`odds-mcp` declares odds-core, odds-lambda, odds-analytics and fastmcp. The only odds-analytics import is `odds_analytics.utils.per_book_market_holds` (it takes decimal prices), used by `odds_mcp.server.find_retail_edges` ([workspace packages](../foundations/workspace-packages.md)). `odds_mcp.server` also imports `odds_lambda.jobs.fetch_oddsportal.LEAGUE_SPEC_BY_NAME` from `odds_lambda.jobs.fetch_oddsportal` and `odds_lambda.oddsportal_client.FEED_MARKETS`.
+`odds-mcp` declares odds-core, odds-lambda, odds-analytics and fastmcp. The only odds-analytics import is `odds_analytics.utils.per_book_market_holds` (it takes decimal prices), used by `odds_mcp.server.find_retail_edges` ([workspace packages](../foundations/workspace-packages.md)). `odds_mcp.server` also imports `odds_lambda.jobs.fetch_oddsportal.LEAGUE_SPEC_BY_NAME` and `odds_lambda.oddsportal_client.FEED_MARKETS`.
 
 ## Scrape and scheduling tools
 

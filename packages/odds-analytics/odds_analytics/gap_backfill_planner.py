@@ -13,11 +13,12 @@ from datetime import date, datetime
 
 import structlog
 from odds_core.time import utc_isoformat
+from odds_core.vocabulary import TimeBasis
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.odds_api_events import odds_api_id_of
 from odds_lambda.storage.readers import OddsReader
 from odds_lambda.storage.tier_validator import TierCoverageValidator
-from odds_lambda.tier_utils import calculate_tier_from_timestamps
+from odds_lambda.tier_utils import snapshot_tier
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_analytics.game_selector import GameSelector
@@ -443,11 +444,12 @@ class GapBackfillPlanner:
             # Calculate all expected snapshot times
             expected_snapshots = selector.calculate_snapshot_times(game.commence_time)
 
-            # Only include snapshots for tiers that are actually missing
-            # Use game.missing_tiers from gap analysis (based on fetch_tier field)
+            # Only include snapshots for tiers that are actually missing. The backfill stores
+            # each fetch as upper_bound at the requested time, so the planned time covers what
+            # an upper_bound snapshot there covers.
             missing_snapshot_times = []
             for snapshot_time in expected_snapshots:
-                tier = calculate_tier_from_timestamps(snapshot_time, game.commence_time)
+                tier = snapshot_tier(snapshot_time, game.commence_time, TimeBasis.UPPER_BOUND)
                 if tier in game.missing_tiers:
                     missing_snapshot_times.append(snapshot_time)
 

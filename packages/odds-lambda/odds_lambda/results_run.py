@@ -9,8 +9,9 @@ from datetime import UTC, datetime, timedelta
 
 import structlog
 from odds_core.database import async_session_maker
-from odds_core.models import AlertHistory, Event, EventStatus
+from odds_core.models import AlertHistory, Event, EventExternalId, EventStatus
 from odds_core.sports import SportKey
+from odds_core.vocabulary import Source
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -53,7 +54,7 @@ class PendingEvent:
     id: str
     commence_time: datetime
     status: EventStatus
-    mlb_game_pk: int | None = None
+    game_pk: int | None = None
 
 
 async def get_pending_events(
@@ -74,16 +75,22 @@ async def get_pending_events(
     if since is not None:
         conditions.append(Event.commence_time >= since)
     result = await session.execute(
-        select(Event.id, Event.commence_time, Event.status, Event.mlb_game_pk).where(
-            and_(*conditions)
+        select(Event.id, Event.commence_time, Event.status, EventExternalId.external_id)
+        .outerjoin(
+            EventExternalId,
+            and_(
+                EventExternalId.event_id == Event.surrogate_id,  # type: ignore[arg-type]
+                EventExternalId.source == Source.MLB_STATS_API,
+            ),
         )
+        .where(and_(*conditions))
     )
     return [
         PendingEvent(
             id=row.id,
             commence_time=row.commence_time,
             status=row.status,
-            mlb_game_pk=row.mlb_game_pk,
+            game_pk=None if row.external_id is None else int(row.external_id),
         )
         for row in result.all()
     ]

@@ -415,35 +415,6 @@ class TestResolveMlbEvent:
         assert log.raw_data is not None and "held by event" in log.raw_data["reason"]
 
     @pytest.mark.asyncio
-    async def test_refuses_a_game_pk_when_the_event_holds_another(
-        self, pglite_async_session
-    ) -> None:
-        stored = Event(
-            id="legacy",
-            sport_key=MLB,
-            sport_title="MLB",
-            commence_time=GAME_1_START,
-            home_team=YANKEES,
-            away_team=RED_SOX,
-            mlb_game_pk=1001,
-        )
-        pglite_async_session.add(stored)
-        await pglite_async_session.flush()
-        pglite_async_session.add(
-            EventExternalId(
-                source=Source.MLB_STATS_API, external_id="999", event_id=stored.surrogate_id
-            )
-        )
-        await pglite_async_session.flush()
-
-        resolved = await resolve_event(pglite_async_session, mlb_listing(1001, GAME_1_START))
-
-        assert resolved.event.id == "legacy"
-        assert await external_ids(pglite_async_session, stored) == {Source.MLB_STATS_API: "999"}
-        [log] = await refusals(pglite_async_session)
-        assert log.raw_data is not None and log.raw_data["external_id"] == "1001"
-
-    @pytest.mark.asyncio
     async def test_doubleheader_games_get_one_event_each(self, pglite_async_session) -> None:
         game_1 = await resolve_event(
             pglite_async_session,
@@ -476,28 +447,6 @@ class TestResolveMlbEvent:
             Source.MLB_STATS_API: "1002",
             Source.BETFAIR: "bf-2",
         }
-
-    @pytest.mark.asyncio
-    async def test_finds_an_event_holding_its_game_pk_only_in_the_column(
-        self, pglite_async_session
-    ) -> None:
-        stored = Event(
-            id="legacy",
-            sport_key=MLB,
-            sport_title="MLB",
-            commence_time=GAME_1_START,
-            home_team=YANKEES,
-            away_team=RED_SOX,
-            mlb_game_pk=1001,
-        )
-        pglite_async_session.add(stored)
-        await pglite_async_session.flush()
-
-        resolved = await resolve_event(pglite_async_session, mlb_listing(1001, GAME_1_START))
-
-        assert resolved.resolution is Resolution.BY_GAME_PK
-        assert resolved.event.id == "legacy"
-        assert await external_ids(pglite_async_session, stored) == {Source.MLB_STATS_API: "1001"}
 
     @pytest.mark.asyncio
     async def test_claims_a_nearby_event_holding_no_game_pk(self, pglite_async_session) -> None:

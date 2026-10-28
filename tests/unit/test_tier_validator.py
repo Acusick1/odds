@@ -4,8 +4,11 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.storage.tier_validator import TierCoverageReport, TierCoverageValidator
+
+from tests.test_helpers import TIER_HOURS_BEFORE
 
 
 @pytest.fixture
@@ -177,14 +180,12 @@ class TestTierCoverageValidator:
             (FetchTier.CLOSING, -1),  # 1 hour before
         ]
 
-        for tier, hours_offset in tiers_and_offsets:
+        for _tier, hours_offset in tiers_and_offsets:
             snapshot = OddsSnapshot(
                 event_id=sample_event.id,
                 snapshot_time=game_time + timedelta(hours=hours_offset),
                 raw_data={"test": "data"},
                 bookmaker_count=8,
-                fetch_tier=tier.value,
-                hours_until_commence=abs(hours_offset),
             )
             test_session.add(snapshot)
 
@@ -210,14 +211,12 @@ class TestTierCoverageValidator:
             (FetchTier.CLOSING, -1),
         ]
 
-        for tier, hours_offset in tiers_and_offsets:
+        for _tier, hours_offset in tiers_and_offsets:
             snapshot = OddsSnapshot(
                 event_id=sample_event.id,
                 snapshot_time=game_time + timedelta(hours=hours_offset),
                 raw_data={"test": "data"},
                 bookmaker_count=8,
-                fetch_tier=tier.value,
-                hours_until_commence=abs(hours_offset),
             )
             test_session.add(snapshot)
 
@@ -243,14 +242,12 @@ class TestTierCoverageValidator:
             (FetchTier.CLOSING, -1),
         ]
 
-        for tier, hours_offset in tiers_and_offsets:
+        for _tier, hours_offset in tiers_and_offsets:
             snapshot = OddsSnapshot(
                 event_id=sample_event.id,
                 snapshot_time=game_time + timedelta(hours=hours_offset),
                 raw_data={"test": "data"},
                 bookmaker_count=8,
-                fetch_tier=tier.value,
-                hours_until_commence=abs(hours_offset),
             )
             test_session.add(snapshot)
 
@@ -264,6 +261,53 @@ class TestTierCoverageValidator:
         assert report.is_complete
         assert len(report.tiers_present) == 2
         assert len(report.tiers_missing) == 0
+
+    @pytest.mark.asyncio
+    async def test_tiers_come_from_the_time_to_kickoff_not_the_stored_tier(
+        self, test_session, sample_event
+    ):
+        test_session.add(
+            OddsSnapshot(
+                event_id=sample_event.id,
+                snapshot_time=sample_event.commence_time - timedelta(hours=2),
+                raw_data={},
+                bookmaker_count=1,
+                fetch_tier=FetchTier.OPENING.value,
+            )
+        )
+        await test_session.commit()
+
+        report = await TierCoverageValidator(test_session).validate_game(sample_event.id)
+
+        assert report.snapshots_by_tier == {FetchTier.CLOSING: 1}
+
+    @pytest.mark.asyncio
+    async def test_coverage_follows_the_time_basis(self, test_session, sample_event):
+        kickoff = sample_event.commence_time
+        for taken, source, basis in (
+            (kickoff - timedelta(hours=40), Source.ODDSPORTAL, TimeBasis.SOURCE_STAMPED),
+            (kickoff + timedelta(minutes=20), Source.ODDSPORTAL, TimeBasis.SOURCE_STAMPED),
+            (kickoff - timedelta(hours=3), Source.FOOTBALL_DATA_UK, TimeBasis.UPPER_BOUND),
+        ):
+            test_session.add(
+                OddsSnapshot(
+                    event_id=sample_event.id,
+                    snapshot_time=taken,
+                    raw_data={},
+                    bookmaker_count=1,
+                    source=source,
+                    time_basis=basis,
+                )
+            )
+        await test_session.commit()
+
+        report = await TierCoverageValidator(test_session).validate_game(sample_event.id)
+
+        assert report.snapshots_by_tier == {
+            FetchTier.EARLY: 1,
+            FetchTier.CLOSING: 1,
+            FetchTier.PREGAME: 1,
+        }
 
     @pytest.mark.asyncio
     async def test_validate_game_nonexistent_event(self, test_session):
@@ -285,8 +329,6 @@ class TestTierCoverageValidator:
                 snapshot_time=game_time + timedelta(hours=-1, minutes=-i * 10),
                 raw_data={"test": f"data_{i}"},
                 bookmaker_count=8,
-                fetch_tier=FetchTier.CLOSING.value,
-                hours_until_commence=1.0 + (i * 10 / 60),
             )
             test_session.add(snapshot)
 
@@ -328,11 +370,9 @@ class TestTierCoverageValidatorDailyValidation:
             for tier in FetchTier:
                 snapshot = OddsSnapshot(
                     event_id=event.id,
-                    snapshot_time=event.commence_time - timedelta(hours=1),
+                    snapshot_time=event.commence_time - timedelta(hours=TIER_HOURS_BEFORE[tier]),
                     raw_data={"test": "data"},
                     bookmaker_count=8,
-                    fetch_tier=tier.value,
-                    hours_until_commence=1.0,
                 )
                 test_session.add(snapshot)
 
@@ -376,11 +416,9 @@ class TestTierCoverageValidatorDailyValidation:
             for tier in tiers:
                 snapshot = OddsSnapshot(
                     event_id=event.id,
-                    snapshot_time=event.commence_time - timedelta(hours=1),
+                    snapshot_time=event.commence_time - timedelta(hours=TIER_HOURS_BEFORE[tier]),
                     raw_data={"test": "data"},
                     bookmaker_count=8,
-                    fetch_tier=tier.value,
-                    hours_until_commence=1.0,
                 )
                 test_session.add(snapshot)
 
@@ -432,11 +470,9 @@ class TestTierCoverageValidatorDailyValidation:
             for tier in tiers:
                 snapshot = OddsSnapshot(
                     event_id=event.id,
-                    snapshot_time=event.commence_time - timedelta(hours=1),
+                    snapshot_time=event.commence_time - timedelta(hours=TIER_HOURS_BEFORE[tier]),
                     raw_data={"test": "data"},
                     bookmaker_count=8,
-                    fetch_tier=tier.value,
-                    hours_until_commence=1.0,
                 )
                 test_session.add(snapshot)
 
@@ -478,11 +514,9 @@ class TestTierCoverageValidatorDailyValidation:
             for tier in [FetchTier.OPENING, FetchTier.EARLY, FetchTier.SHARP, FetchTier.PREGAME]:
                 snapshot = OddsSnapshot(
                     event_id=event.id,
-                    snapshot_time=event.commence_time - timedelta(hours=1),
+                    snapshot_time=event.commence_time - timedelta(hours=TIER_HOURS_BEFORE[tier]),
                     raw_data={"test": "data"},
                     bookmaker_count=8,
-                    fetch_tier=tier.value,
-                    hours_until_commence=1.0,
                 )
                 test_session.add(snapshot)
 

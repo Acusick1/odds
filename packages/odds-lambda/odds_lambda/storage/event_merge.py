@@ -15,8 +15,9 @@ from sqlalchemy import and_, delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.storage.data_quality import record_issue
-from odds_lambda.storage.event_unmatched import clear_unmatched, holds_game_pk
-from odds_lambda.tier_utils import calculate_hours_until_commence, calculate_tier_from_timestamps
+from odds_lambda.storage.event_unmatched import clear_unmatched
+from odds_lambda.storage.game_pks import game_pks_of, holds_game_pk
+from odds_lambda.tier_utils import calculate_hours_until_commence, snapshot_tiers
 
 logger = structlog.get_logger()
 
@@ -27,10 +28,6 @@ SEASON_START_MONTH = 8
 
 class ConflictingGamePks(ValueError):
     """Events holding different MLB ``gamePk``s are different games and are never merged."""
-
-
-def _game_pks(events: Sequence[Event]) -> set[int]:
-    return {e.mlb_game_pk for e in events if e.mlb_game_pk is not None}
 
 
 @dataclass(frozen=True)
@@ -124,18 +121,23 @@ async def find_historical_candidates(
 
 
 async def retime_snapshots(session: AsyncSession, event_id: str, commence_time: datetime) -> int:
-    """Recompute ``hours_until_commence`` and ``fetch_tier`` of an event's snapshots against
-    ``commence_time``. Flushes; returns the number of snapshots re-timed."""
+    """Recompute ``hours_until_commence`` and ``fetch_tier`` (``snapshot_tiers``, by each
+    snapshot's time basis) of an event's snapshots against ``commence_time``. Flushes; returns
+    the number of snapshots re-timed."""
     snapshots = (
         (await session.execute(select(OddsSnapshot).where(OddsSnapshot.event_id == event_id)))
         .scalars()
         .all()
     )
     commence = ensure_utc(commence_time)
-    for snapshot in snapshots:
+    tiers = snapshot_tiers(
+        [(ensure_utc(s.snapshot_time), s.source, s.time_basis, s.market) for s in snapshots],
+        commence,
+    )
+    for snapshot, tier in zip(snapshots, tiers, strict=True):
         snapshot_time = ensure_utc(snapshot.snapshot_time)
         snapshot.hours_until_commence = calculate_hours_until_commence(snapshot_time, commence)
-        snapshot.fetch_tier = calculate_tier_from_timestamps(snapshot_time, commence).value
+        snapshot.fetch_tier = tier.value
     await session.flush()
     return len(snapshots)
 
@@ -147,7 +149,7 @@ class EventMerger:
     event lacks are carried over, and the duplicates are deleted. The kept
     event keeps its own commence time: it is the best source, and the Odds API
     id is kept because score and status jobs match on it. The kept event takes
-    a duplicate's ``mlb_game_pk`` when it has none; events holding different
+    a duplicate's ``gamePk`` when it has none; events holding different
     ``gamePk``s raise ``ConflictingGamePks``. Runs in the caller's transaction.
     """
 
@@ -180,15 +182,16 @@ class EventMerger:
                 clusters.append(cluster)
                 cluster = [event]
             clusters.append(cluster)
+        clusters = [cluster for cluster in clusters if len(cluster) > 1]
+        held = await game_pks_of(self.session, [e for cluster in clusters for e in cluster])
         groups: list[list[Event]] = []
         for cluster in clusters:
-            if len(cluster) < 2:
-                continue
-            if len(_game_pks(cluster)) > 1:
+            game_pks = {held[e.id] for e in cluster if e.id in held}
+            if len(game_pks) > 1:
                 logger.warning(
                     "twin_group_conflicting_game_pks",
                     event_ids=[e.id for e in cluster],
-                    game_pks=sorted(_game_pks(cluster)),
+                    game_pks=sorted(game_pks),
                 )
                 continue
             groups.append(cluster)
@@ -229,7 +232,7 @@ class EventMerger:
         return await self.merge(by_id[keep_id], duplicates)
 
     async def merge(self, keep: Event, duplicates: Sequence[Event]) -> MergeReport:
-        game_pks = _game_pks([keep, *duplicates])
+        game_pks = set((await game_pks_of(self.session, [keep, *duplicates])).values())
         if len(game_pks) > 1:
             raise ConflictingGamePks(
                 f"refusing to merge {[d.id for d in duplicates]} into {keep.id}: "

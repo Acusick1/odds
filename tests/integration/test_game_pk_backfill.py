@@ -10,8 +10,15 @@ import typer
 from odds_cli.commands import events as events_cli
 from odds_core.config import get_settings
 from odds_core.match_brief_models import BriefDecision, MatchBrief
-from odds_core.models import Event, EventStatus, HealthCheckAcknowledgement, OddsSnapshot
+from odds_core.models import (
+    Event,
+    EventExternalId,
+    EventStatus,
+    HealthCheckAcknowledgement,
+    OddsSnapshot,
+)
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
+from odds_core.vocabulary import Source
 from odds_lambda.health_monitor import HealthMonitor
 from odds_lambda.mlb_game_resolver import UnresolvedReason
 from odds_lambda.mlb_stats_fetcher import MlbGameResult, MlbGameState
@@ -27,8 +34,11 @@ from odds_lambda.storage.game_pk_backfill import (
     plan_hand_assignment,
     run_assignments,
 )
+from odds_lambda.storage.game_pks import game_pks_of
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from tests.test_helpers import hold_game_pks
 
 MLB = "baseball_mlb"
 CUBS, CARDINALS = "Chicago Cubs", "St. Louis Cardinals"
@@ -107,6 +117,12 @@ def _event(
     )
 
 
+async def _game_pk(session: AsyncSession, event_id: str) -> int | None:
+    event = await session.get(Event, event_id)
+    assert event is not None
+    return (await game_pks_of(session, [event])).get(event_id)
+
+
 def _snapshot(event_id: str, at: datetime, home_price: float) -> OddsSnapshot:
     return OddsSnapshot(
         event_id=event_id,
@@ -161,6 +177,7 @@ class TestAssignGamePks:
     async def test_single_event_takes_its_game_pk(self, pglite_async_session: AsyncSession) -> None:
         session = pglite_async_session
         session.add(_event("op_live_CHC_STL", AFTERNOON))
+        await hold_game_pks(session)
         await session.commit()
         fetcher = FakeFetcher([_game(824101, AFTERNOON)])
 
@@ -169,7 +186,7 @@ class TestAssignGamePks:
         assert [(o.game_pk, o.kept_id, o.merged_ids) for o in outcomes] == [
             (824101, "op_live_CHC_STL", ())
         ]
-        assert (await session.get(Event, "op_live_CHC_STL")).mlb_game_pk == 824101
+        assert await _game_pk(session, "op_live_CHC_STL") == 824101
         assert fetcher.ranges == [(AFTERNOON.date(), TODAY)]
 
     async def test_doubleheader_twins_with_split_snapshots_merge_per_game(
@@ -196,6 +213,7 @@ class TestAssignGamePks:
                 _snapshot("op_live_g2_twin", EVENING - timedelta(hours=3), 1.7),
             ]
         )
+        await hold_game_pks(session)
         await session.commit()
         fetcher = FakeFetcher([_game(824101, AFTERNOON, 1), _game(824102, EVENING, 2)])
 
@@ -210,8 +228,8 @@ class TestAssignGamePks:
         assert merge.rows_moved == {"odds_snapshots": 3}
         assert (merge.pairs.identical, merge.pairs.conflicting) == (1, 1)
         assert await session.get(Event, "op_live_g2_twin") is None
-        assert (await session.get(Event, "op_live_g1")).mlb_game_pk == 824101
-        assert (await session.get(Event, "op_live_g2")).mlb_game_pk == 824102
+        assert await _game_pk(session, "op_live_g1") == 824101
+        assert await _game_pk(session, "op_live_g2") == 824102
         assert await _count(session, OddsSnapshot, "op_live_g2") == 5
 
     async def test_twins_of_game_one_are_not_paired_with_game_two(
@@ -224,6 +242,7 @@ class TestAssignGamePks:
                 _event("op_live_g1_twin", AFTERNOON + timedelta(minutes=5)),
             ]
         )
+        await hold_game_pks(session)
         await session.commit()
         fetcher = FakeFetcher([_game(824101, AFTERNOON, 1), _game(824102, EVENING, 2)])
 
@@ -244,6 +263,7 @@ class TestAssignGamePks:
                 _event("op_live_10th", AFTERNOON),
             ]
         )
+        await hold_game_pks(session)
         await session.commit()
         fetcher = FakeFetcher([_game(824101, AFTERNOON)])
 
@@ -260,12 +280,14 @@ class TestAssignGamePks:
                 _event("op_live_free", AFTERNOON, home=YANKEES, away=RED_SOX),
             ]
         )
+        await hold_game_pks(session)
         await session.commit()
         fetcher = FakeFetcher(
             [_game(824101, AFTERNOON), _game(824102, AFTERNOON, home=YANKEES, away=RED_SOX)]
         )
         plan = await plan_game_pks(session, fetcher, None, TODAY)  # type: ignore[arg-type]
         session.add(_event("op_live_racer", AFTERNOON + timedelta(days=3), 824101))
+        await hold_game_pks(session)
         await session.commit()
 
         outcomes = await run_assignments(session, plan.assignments, commit=True)
@@ -274,8 +296,8 @@ class TestAssignGamePks:
             (824101, OutcomeStatus.FAILED),
             (824102, OutcomeStatus.APPLIED),
         ]
-        assert (await session.get(Event, "op_live_taken")).mlb_game_pk is None
-        assert (await session.get(Event, "op_live_free")).mlb_game_pk == 824102
+        assert await _game_pk(session, "op_live_taken") is None
+        assert await _game_pk(session, "op_live_free") == 824102
 
     async def test_event_holding_the_game_pk_is_kept(
         self, pglite_async_session: AsyncSession
@@ -289,6 +311,7 @@ class TestAssignGamePks:
         )
         await session.flush()
         session.add(_snapshot("op_live_legacy", AFTERNOON - timedelta(hours=1), 1.8))
+        await hold_game_pks(session)
         await session.commit()
         fetcher = FakeFetcher([_game(824101, AFTERNOON)])
 
@@ -298,7 +321,7 @@ class TestAssignGamePks:
             ("op_live_holder", ("op_live_legacy",))
         ]
         holder = await session.get(Event, "op_live_holder")
-        assert holder.mlb_game_pk == 824101
+        assert await _game_pk(session, holder.id) == 824101
         assert holder.commence_time == AFTERNOON
         snapshot = (await session.execute(select(OddsSnapshot))).scalar_one()
         assert snapshot.event_id == "op_live_holder"
@@ -311,6 +334,7 @@ class TestAssignGamePks:
         session.add(_event("op_live_postponed", EVENING, status=EventStatus.POSTPONED))
         await session.flush()
         session.add(_snapshot("op_live_postponed", EVENING - timedelta(minutes=30), 1.8))
+        await hold_game_pks(session)
         await session.commit()
         fetcher = FakeFetcher(
             [_game(824101, EVENING, state=MlbGameState.POSTPONED), _game(824101, played)]
@@ -319,7 +343,7 @@ class TestAssignGamePks:
         await _plan_and_apply(session, fetcher)
 
         event = await session.get(Event, "op_live_postponed")
-        assert (event.mlb_game_pk, event.commence_time, event.status) == (
+        assert (await _game_pk(session, event.id), event.commence_time, event.status) == (
             824101,
             played,
             EventStatus.SCHEDULED,
@@ -340,6 +364,7 @@ class TestAssignGamePks:
         )
         await session.flush()
         session.add(_snapshot("op_live_no_game", AFTERNOON - timedelta(hours=1), 1.8))
+        await hold_game_pks(session)
         await session.commit()
         fetcher = FakeFetcher([_game(824101, AFTERNOON, 1), _game(824102, EVENING, 2)])
 
@@ -351,14 +376,15 @@ class TestAssignGamePks:
             ("op_live_no_game", UnresolvedReason.NO_GAME),
         ]
         assert plan.ghost_ids == ("op_live_ghost",)
-        stored = (await session.execute(select(Event.mlb_game_pk))).scalars().all()
-        assert stored == [None] * 3
+        stored = (await session.execute(select(Event))).scalars().all()
+        assert await game_pks_of(session, stored) == {}
 
     async def test_doubleheader_whose_held_game_resolves_elsewhere_is_left_alone(
         self, pglite_async_session: AsyncSession
     ) -> None:
         session = pglite_async_session
         session.add_all([_event("op_live_g1", AFTERNOON, 824102), _event("op_live_g2", EVENING)])
+        await hold_game_pks(session)
         await session.commit()
         fetcher = FakeFetcher([_game(824101, AFTERNOON, 1), _game(824102, EVENING, 2)])
 
@@ -396,6 +422,7 @@ class TestAssignGamePks:
                 ),
             ]
         )
+        await hold_game_pks(session)
         await session.commit()
         fetcher = FakeFetcher([_game(824101, AFTERNOON)])
 
@@ -444,6 +471,7 @@ class TestMergeRefusesClashingDecisions:
                 decision_id=decisions[1].id,
             )
         )
+        await hold_game_pks(session)
         await session.commit()
         fetcher = FakeFetcher([_game(824101, AFTERNOON)])
 
@@ -455,7 +483,7 @@ class TestMergeRefusesClashingDecisions:
         )
         assert outcome.rows_deleted == {"candidate_decisions": 1, "paper_trades": 1}
         assert await session.get(Event, "op_live_b") is not None
-        assert (await session.get(Event, "op_live_a")).mlb_game_pk is None
+        assert await _game_pk(session, "op_live_a") is None
         assert await _count(session, CandidateDecision, "op_live_b") == 1
         assert await _count(session, PaperTrade, "op_live_b") == 1
 
@@ -493,6 +521,7 @@ class TestTbdReplay:
                 _snapshot("op_live_2026-04-25T2011", self.POSTPONED_AT - timedelta(hours=1), 1.9),
             ]
         )
+        await hold_game_pks(session)
         await session.commit()
 
         plan, [outcome] = await _plan_and_apply(session, FakeFetcher(self._schedule()))
@@ -504,7 +533,7 @@ class TestTbdReplay:
         )
         assert (outcome.moved_from, outcome.start_tbd) == (None, True)
         kept = await session.get(Event, "op_live_2026-04-26T2111")
-        assert (kept.mlb_game_pk, kept.commence_time) == (823637, self.LISTED_AT)
+        assert (await _game_pk(session, kept.id), kept.commence_time) == (823637, self.LISTED_AT)
         hours = (
             (
                 await session.execute(
@@ -521,6 +550,7 @@ class TestTbdReplay:
     ) -> None:
         session = pglite_async_session
         session.add(_event("op_live_2026-04-25T2011", self.POSTPONED_AT))
+        await hold_game_pks(session)
         await session.commit()
 
         plan, [outcome] = await _plan_and_apply(session, FakeFetcher(self._schedule()))
@@ -540,6 +570,7 @@ class TestScoresAndSettlement:
         session = pglite_async_session
         played = AFTERNOON + timedelta(days=1)
         session.add(_event("op_live_postponed", EVENING, status=EventStatus.POSTPONED))
+        await hold_game_pks(session)
         await session.commit()
         fetcher = FakeFetcher(
             [
@@ -564,6 +595,7 @@ class TestScoresAndSettlement:
                 "op_live_scored", AFTERNOON, status=EventStatus.FINAL, home_score=4, away_score=3
             )
         )
+        await hold_game_pks(session)
         await session.commit()
         fetcher = FakeFetcher([_game(824101, AFTERNOON, score=(5, 3))])
 
@@ -574,7 +606,8 @@ class TestScoresAndSettlement:
             "stored_4-3_vs_mlb_5-3",
         )
         event = await session.get(Event, "op_live_scored")
-        assert (event.home_score, event.away_score, event.mlb_game_pk) == (4, 3, 824101)
+        assert (event.home_score, event.away_score) == (4, 3)
+        assert await _game_pk(session, event.id) == 824101
 
     async def test_duplicate_score_is_carried_and_a_differing_one_reported(
         self, pglite_async_session: AsyncSession
@@ -603,6 +636,7 @@ class TestScoresAndSettlement:
                 ),
             ]
         )
+        await hold_game_pks(session)
         await session.commit()
         fetcher = FakeFetcher(
             [_game(824101, AFTERNOON), _game(824102, EVENING, home=YANKEES, away=RED_SOX)]
@@ -654,6 +688,7 @@ class TestAssignGamePksCommand:
                 _event("op_live_ghost", AFTERNOON, home=YANKEES, away=RED_SOX),
             ]
         )
+        await hold_game_pks(session)
         await session.commit()
         cli.append(FakeFetcher([_game(824101, AFTERNOON)]))
 
@@ -674,7 +709,7 @@ class TestAssignGamePksCommand:
 
         assert await session.get(Event, "op_live_b") is None
         assert await session.get(Event, "op_live_ghost") is None
-        assert (await session.get(Event, "op_live_a")).mlb_game_pk == 824101
+        assert await _game_pk(session, "op_live_a") == 824101
 
 
 class TestApplyIsIdempotent:
@@ -701,6 +736,7 @@ class TestApplyIsIdempotent:
         )
         await session.flush()
         session.add(_snapshot("op_live_b", AFTERNOON - timedelta(hours=1), 1.8))
+        await hold_game_pks(session)
         await session.commit()
         cli.append(
             FakeFetcher(
@@ -718,12 +754,18 @@ class TestApplyIsIdempotent:
             rows = await session.execute(
                 select(
                     Event.id,
-                    Event.mlb_game_pk,
+                    EventExternalId.external_id,
                     Event.commence_time,
                     Event.status,
                     Event.home_score,
                     Event.away_score,
-                ).order_by(Event.id)
+                )
+                .outerjoin(
+                    EventExternalId,
+                    (EventExternalId.event_id == Event.surrogate_id)
+                    & (EventExternalId.source == Source.MLB_STATS_API),
+                )
+                .order_by(Event.id)
             )
             snapshots = await session.execute(
                 select(
@@ -744,8 +786,8 @@ class TestApplyIsIdempotent:
         assert await state() == after_first
         assert "MLB events without a gamePk: 0" in capsys.readouterr().out
         assert [row[:2] for row in after_first[:2]] == [
-            ("op_live_a", 824101),
-            ("op_live_postponed", 824102),
+            ("op_live_a", "824101"),
+            ("op_live_postponed", "824102"),
         ]
 
 
@@ -760,6 +802,7 @@ class TestSetGamePk:
                 _event("op_live_stray", EVENING),
             ]
         )
+        await hold_game_pks(session)
         await session.commit()
         cli.append(
             FakeFetcher(
@@ -777,13 +820,14 @@ class TestSetGamePk:
         await events_cli._set_game_pk("op_live_stray", 824101, merge=True, apply=True)
 
         assert await session.get(Event, "op_live_stray") is None
-        assert (await session.get(Event, "op_live_holder")).mlb_game_pk == 824101
+        assert await _game_pk(session, "op_live_holder") == 824101
 
     async def test_sets_the_game_pk_and_scheduled_start(
         self, pglite_async_session: AsyncSession, cli: list[FakeFetcher]
     ) -> None:
         session = pglite_async_session
         session.add(_event("op_live_stray", EVENING))
+        await hold_game_pks(session)
         await session.commit()
         cli.append(
             FakeFetcher(
@@ -797,11 +841,13 @@ class TestSetGamePk:
         await events_cli._set_game_pk("op_live_stray", 824101, merge=False, apply=True)
 
         event = await session.get(Event, "op_live_stray")
-        assert (event.mlb_game_pk, event.commence_time) == (824101, AFTERNOON + timedelta(days=1))
+        assert event.commence_time == AFTERNOON + timedelta(days=1)
+        assert await _game_pk(session, event.id) == 824101
 
     async def test_refuses_a_game_of_other_teams(self, pglite_async_session: AsyncSession) -> None:
         session = pglite_async_session
         session.add(_event("op_live_stray", EVENING))
+        await hold_game_pks(session)
         await session.commit()
         fetcher = FakeFetcher([_game(824101, EVENING, home=YANKEES, away=RED_SOX)])
 
@@ -813,6 +859,7 @@ class TestSetGamePk:
     ) -> None:
         session = pglite_async_session
         session.add(_event("op_live_stray", EVENING))
+        await hold_game_pks(session)
         await session.commit()
         fetcher = FakeFetcher([_game(824101, EVENING + timedelta(days=30))])
 
@@ -834,6 +881,7 @@ class TestMarkUnassignable:
                 _event("orphan", now - timedelta(days=2), None, created_at=now - timedelta(days=3)),
             ]
         )
+        await hold_game_pks(session)
         await session.commit()
         monitor = HealthMonitor(session, get_settings())
         assert await monitor.check_event_identity(now) == [
@@ -841,6 +889,7 @@ class TestMarkUnassignable:
         ]
 
         await mark_no_game_pk(session, "orphan", "no MLB game matches")
+        await hold_game_pks(session)
         await session.commit()
 
         assert await monitor.check_event_identity(now) == []
@@ -852,6 +901,7 @@ class TestMarkUnassignable:
     ) -> None:
         session = pglite_async_session
         session.add(_event("orphan", EVENING))
+        await hold_game_pks(session)
         await session.commit()
         await mark_no_game_pk(session, "orphan", "unknown")
         fetcher = FakeFetcher([_game(824101, EVENING)])
@@ -860,23 +910,57 @@ class TestMarkUnassignable:
         await run_assignments(session, [assignment], commit=True)
 
         event = await session.get(Event, "orphan")
-        assert (event.mlb_game_pk, event.no_game_pk_reason) == (824101, None)
+        assert await _game_pk(session, event.id) == 824101
         assert event.status is EventStatus.SCHEDULED
         assert await _acknowledged_reasons(session, event) == []
+
+    async def test_a_marked_final_event_is_not_planned_or_listed(
+        self, pglite_async_session: AsyncSession
+    ) -> None:
+        session = pglite_async_session
+        now = datetime.now(UTC)
+        session.add_all(
+            [
+                _event(
+                    "assigned", now - timedelta(days=4), 824101, created_at=now - timedelta(days=5)
+                ),
+                _event(
+                    "allstar",
+                    now - timedelta(days=2),
+                    status=EventStatus.FINAL,
+                    home_score=0,
+                    away_score=4,
+                    created_at=now - timedelta(days=3),
+                ),
+            ]
+        )
+        await hold_game_pks(session)
+        await session.commit()
+
+        await mark_no_game_pk(session, "allstar", "All-Star Game")
+        await session.commit()
+
+        event = await session.get(Event, "allstar")
+        assert event.status is EventStatus.FINAL
+        monitor = HealthMonitor(session, get_settings())
+        assert await monitor.check_event_identity(now) == []
+        plan = await plan_game_pks(session, FakeFetcher([]), None, TODAY)  # type: ignore[arg-type]
+        assert (plan.pending, plan.marked) == (0, {"allstar": "All-Star Game"})
 
     async def test_marking_makes_the_event_unmatched_with_an_acknowledgement(
         self, pglite_async_session: AsyncSession
     ) -> None:
         session = pglite_async_session
         session.add(_event("orphan", EVENING))
+        await hold_game_pks(session)
         await session.commit()
 
         await mark_no_game_pk(session, "orphan", " no MLB game matches ")
+        await hold_game_pks(session)
         await session.commit()
 
         event = await session.get(Event, "orphan")
         assert event.status is EventStatus.UNMATCHED
-        assert event.no_game_pk_reason == "no MLB game matches"
         assert await _acknowledged_reasons(session, event) == ["no MLB game matches"]
 
     async def test_refuses_an_event_holding_a_game_pk(
@@ -884,6 +968,7 @@ class TestMarkUnassignable:
     ) -> None:
         session = pglite_async_session
         session.add(_event("assigned", EVENING, 824101))
+        await hold_game_pks(session)
         await session.commit()
 
         with pytest.raises(GamePkRefused, match="already holds gamePk 824101"):

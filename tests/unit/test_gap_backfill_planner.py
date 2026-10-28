@@ -5,7 +5,10 @@ from datetime import UTC, date, datetime, timedelta
 import pytest
 from odds_analytics.gap_backfill_planner import GapBackfillPlanner
 from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.fetch_tier import FetchTier
+
+from tests.test_helpers import TIER_HOURS_BEFORE
 
 
 @pytest.fixture
@@ -57,11 +60,9 @@ async def sample_events_with_gaps(test_session):
     for tier in [FetchTier.OPENING, FetchTier.EARLY, FetchTier.SHARP, FetchTier.PREGAME]:
         snapshot = OddsSnapshot(
             event_id=event1.id,
-            snapshot_time=event1.commence_time - timedelta(hours=tier.interval_hours),
+            snapshot_time=event1.commence_time - timedelta(hours=TIER_HOURS_BEFORE[tier]),
             raw_data={},
             bookmaker_count=8,
-            fetch_tier=tier.value,
-            hours_until_commence=tier.interval_hours,
         )
         test_session.add(snapshot)
 
@@ -69,11 +70,9 @@ async def sample_events_with_gaps(test_session):
     for tier in [FetchTier.SHARP, FetchTier.PREGAME, FetchTier.CLOSING]:
         snapshot = OddsSnapshot(
             event_id=event2.id,
-            snapshot_time=event2.commence_time - timedelta(hours=tier.interval_hours),
+            snapshot_time=event2.commence_time - timedelta(hours=TIER_HOURS_BEFORE[tier]),
             raw_data={},
             bookmaker_count=8,
-            fetch_tier=tier.value,
-            hours_until_commence=tier.interval_hours,
         )
         test_session.add(snapshot)
 
@@ -81,11 +80,9 @@ async def sample_events_with_gaps(test_session):
     for tier in FetchTier.get_priority_order():
         snapshot = OddsSnapshot(
             event_id=event3.id,
-            snapshot_time=event3.commence_time - timedelta(hours=tier.interval_hours),
+            snapshot_time=event3.commence_time - timedelta(hours=TIER_HOURS_BEFORE[tier]),
             raw_data={},
             bookmaker_count=8,
-            fetch_tier=tier.value,
-            hours_until_commence=tier.interval_hours,
         )
         test_session.add(snapshot)
 
@@ -137,10 +134,9 @@ class TestGapBackfillPlanner:
         for tier in FetchTier.get_priority_order():
             snapshot = OddsSnapshot(
                 event_id=event.id,
-                snapshot_time=event.commence_time - timedelta(hours=tier.interval_hours),
+                snapshot_time=event.commence_time - timedelta(hours=TIER_HOURS_BEFORE[tier]),
                 raw_data={},
                 bookmaker_count=8,
-                fetch_tier=tier.value,
             )
             test_session.add(snapshot)
 
@@ -210,6 +206,41 @@ class TestGapBackfillPlanner:
         # Since event_missing_closing has 1 missing snapshot and event_missing_opening has 2
         assert plan["total_games"] <= 2
         assert plan["estimated_quota_usage"] <= 60
+
+    async def test_planned_fetches_stored_as_upper_bound_close_the_gap(self, test_session):
+        event = Event(
+            id="event_unfetched",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=datetime(2024, 10, 24, 19, 0, 0, tzinfo=UTC),
+            home_team="Lakers",
+            away_team="Celtics",
+            status=EventStatus.FINAL,
+            home_score=110,
+            away_score=105,
+        )
+        test_session.add(event)
+        await test_session.commit()
+        planner = GapBackfillPlanner(test_session)
+        window = (date(2024, 10, 24), date(2024, 10, 24))
+
+        plan = await planner.generate_plan(*window)
+        [game] = plan["games"]
+        for planned in game["snapshots"]:
+            test_session.add(
+                OddsSnapshot(
+                    event_id=event.id,
+                    snapshot_time=datetime.fromisoformat(planned.replace("Z", "+00:00")),
+                    raw_data={},
+                    bookmaker_count=1,
+                    source=Source.ODDS_API,
+                    time_basis=TimeBasis.UPPER_BOUND,
+                )
+            )
+        await test_session.commit()
+
+        assert game["snapshot_count"] == 5
+        assert (await planner.analyze_gaps(*window)).games_with_gaps == 0
 
     async def test_generate_plan_unlimited_quota(self, test_session, sample_events_with_gaps):
         """Test that generate_plan includes all games when no quota limit."""

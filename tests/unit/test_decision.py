@@ -139,17 +139,16 @@ class TestDecideForward:
     @pytest.mark.parametrize(
         ("hours_until", "tier", "interval"),
         [
-            # Exactly on a boundary: strict ``<`` means the game falls into the
-            # NEXT tier up, not the tier whose ``max_hours`` it equals. This is
-            # where classify_tier intentionally differs from calculate_tier (``<=``).
+            # Exactly on a boundary, the game falls into the tier whose ``max_hours``
+            # it equals (``calculate_tier``'s ``<=``).
             (0.0, FetchTier.CLOSING, 0.5),  # IN_PLAY is only < 0
-            (3.0, FetchTier.PREGAME, 3.0),  # not CLOSING (max 3.0)
-            (12.0, FetchTier.SHARP, 12.0),  # not PREGAME (max 12.0)
-            (24.0, FetchTier.EARLY, 24.0),  # not SHARP (max 24.0)
-            (72.0, FetchTier.OPENING, 48.0),  # not EARLY (max 72.0)
+            (3.0, FetchTier.CLOSING, 0.5),
+            (12.0, FetchTier.PREGAME, 3.0),
+            (24.0, FetchTier.SHARP, 12.0),
+            (72.0, FetchTier.EARLY, 24.0),
         ],
     )
-    async def test_tier_boundary_uses_strict_less_than(
+    async def test_tier_boundary_belongs_to_the_nearer_tier(
         self, hours_until: float, tier: FetchTier, interval: float
     ) -> None:
         decision = await decide_forward(

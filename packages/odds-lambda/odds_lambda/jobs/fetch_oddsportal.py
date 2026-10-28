@@ -29,7 +29,6 @@ from datetime import UTC, datetime, timedelta
 import structlog
 from odds_core.candidates import candidates_dir, load_candidates
 from odds_core.database import async_session_maker
-from odds_core.snapshot_sources import SnapshotSource
 from odds_core.vocabulary import Source, TimeBasis
 
 from odds_lambda.candidate_rules import decision_leads
@@ -77,7 +76,7 @@ LIVE_REQUEST_ID_PREFIX = "oddsportal_live_"
 SOURCE = CollectionSource(
     key="oddsportal",
     job_name="fetch-oddsportal",
-    snapshot_source=SnapshotSource.ODDSPORTAL_LIVE,
+    source=Source.ODDSPORTAL,
     cadence=CADENCE,
     fixture_horizons={"soccer_epl": timedelta(hours=48), "baseball_mlb": timedelta(hours=48)},
     skips_overnight=True,

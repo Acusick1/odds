@@ -2,7 +2,8 @@
 Copy data from production database to local database.
 
 Replicates events with their external ids and health-check acknowledgements, and their
-snapshots, odds and price rows, for a given sport and date range.
+snapshots and price rows, for a given sport and date range. A production event is matched to its
+local event by its external ids, since surrogate ids are numbered per database.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ from rich.progress import (
     TextColumn,
     TimeElapsedColumn,
 )
-from sqlalchemy import delete, insert, or_, select
+from sqlalchemy import delete, insert, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from odds_lambda.storage.event_merge import EventMerger
@@ -45,10 +46,8 @@ class CopyStats:
     events_copied: int = 0
     events_skipped: int = 0
     snapshots_copied: int = 0
-    odds_copied: int = 0
     prices_copied: int = 0
     external_ids_copied: int = 0
-    external_ids_skipped: int = 0
     local_twin_matches: int = 0
     failed_event_ids: list[str] = field(default_factory=list)
 
@@ -58,7 +57,7 @@ class CopyStats:
 
 
 class ProductionDataCopier:
-    """Replaces local events' snapshots and odds with production's."""
+    """Replaces local events' snapshots and prices with production's."""
 
     def __init__(
         self,
@@ -144,7 +143,19 @@ class ProductionDataCopier:
             self.local_session_maker() as local_session,
             self.prod_session_maker() as prod_session,
         ):
-            if self.skip_existing and await local_session.get(Event, event.id) is not None:
+            prod_external_ids = list(
+                (
+                    await prod_session.execute(
+                        select(EventExternalId).where(
+                            EventExternalId.event_id == event.surrogate_id
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            local_event = await self._local_event(local_session, event, prod_external_ids)
+            if self.skip_existing and local_event is not None:
                 self.stats.events_skipped += 1
                 logger.debug("skipping_existing_event", event_id=event.id)
                 return
@@ -169,38 +180,11 @@ class ProductionDataCopier:
                 )
                 return
 
-            prod_odds = list(
-                (
-                    await prod_session.execute(
-                        select(Odds).where(
-                            Odds.event_id == event.id,
-                            or_(
-                                Odds.snapshot_id.in_([s.id for s in prod_snapshots]),
-                                Odds.snapshot_id.is_(None),
-                            ),
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
-
             prod_prices = list(
                 (
                     await prod_session.execute(
                         select(Price).where(
                             Price.snapshot_id.in_([s.id for s in prod_snapshots])  # type: ignore[union-attr]
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            prod_external_ids = list(
-                (
-                    await prod_session.execute(
-                        select(EventExternalId).where(
-                            EventExternalId.event_id == event.surrogate_id
                         )
                     )
                 )
@@ -219,15 +203,20 @@ class ProductionDataCopier:
                 .all()
             )
 
-            await local_session.execute(delete(Odds).where(Odds.event_id == event.id))
-            await local_session.execute(
-                delete(OddsSnapshot).where(OddsSnapshot.event_id == event.id)
-            )
             # Surrogate ids are numbered per database, so a copied event keeps the local one.
             copied = Event(**event.model_dump(exclude={"surrogate_id"}))
-            local_event = await local_session.get(Event, event.id)
             if local_event is not None:
+                copied.id = local_event.id
                 copied.surrogate_id = local_event.surrogate_id
+                # The odds table references the snapshots without a cascade.
+                await local_session.execute(delete(Odds).where(Odds.event_id == local_event.id))
+                await local_session.execute(
+                    delete(OddsSnapshot).where(OddsSnapshot.event_id == local_event.id)
+                )
+            elif await local_session.get(Event, event.id) is not None:
+                raise ValueError(
+                    f"a local event of another fixture holds production's event id {event.id}"
+                )
             local_event = await local_session.merge(copied)
             await local_session.flush()
             await self._copy_identity(
@@ -237,7 +226,10 @@ class ProductionDataCopier:
             # Payloads are an archive read only to re-parse after an adapter bug, so they stay
             # on production and a local snapshot points at none.
             local_snapshots = [
-                OddsSnapshot(**snapshot.model_dump(exclude={"id", "payload_id"}))
+                OddsSnapshot(
+                    **snapshot.model_dump(exclude={"id", "payload_id", "event_id"}),
+                    event_id=local_event.id,
+                )
                 for snapshot in prod_snapshots
             ]
             local_session.add_all(local_snapshots)
@@ -247,20 +239,6 @@ class ProductionDataCopier:
                 prod.id: local.id
                 for prod, local in zip(prod_snapshots, local_snapshots, strict=True)
             }
-            if prod_odds:
-                await local_session.execute(
-                    insert(Odds),
-                    [
-                        row.model_dump(exclude={"id"})
-                        | {
-                            "snapshot_id": None
-                            if row.snapshot_id is None
-                            else local_snapshot_ids[row.snapshot_id]
-                        }
-                        for row in prod_odds
-                    ],
-                )
-
             if prod_prices:
                 await local_session.execute(
                     insert(Price),
@@ -276,9 +254,74 @@ class ProductionDataCopier:
 
         self.stats.events_copied += 1
         self.stats.snapshots_copied += len(local_snapshots)
-        self.stats.odds_copied += len(prod_odds)
         self.stats.prices_copied += len(prod_prices)
         logger.info("event_copied", event_id=event.id, snapshot_count=len(local_snapshots))
+
+    async def _local_event(
+        self, session: AsyncSession, event: Event, external_ids: list[EventExternalId]
+    ) -> Event | None:
+        """The local event a production event is: the one holding any of its external ids, else
+        the one under its event id when that has its sport and teams (an Odds API id replaced or a
+        kick-off moved since an earlier copy), else the one of its sport, teams and kick-off that
+        holds no other id from a source the production event has an id from. Raises
+        ``ValueError`` when its ids are held by several local events, which are twins to merge
+        first."""
+        keys = set(
+            (
+                await session.execute(
+                    select(EventExternalId.event_id).where(
+                        tuple_(EventExternalId.source, EventExternalId.external_id).in_(
+                            [(row.source, row.external_id) for row in external_ids]
+                        )
+                    )
+                )
+            ).scalars()
+            if external_ids
+            else ()
+        )
+        if len(keys) > 1:
+            raise ValueError(
+                f"production event {event.id}'s external ids are held by {len(keys)} local "
+                "events; run `odds events merge-twins --apply` first"
+            )
+        if not keys:
+            same_id = await session.get(Event, event.id)
+            if same_id is not None and (
+                same_id.sport_key,
+                same_id.home_team,
+                same_id.away_team,
+            ) == (event.sport_key, event.home_team, event.away_team):
+                return same_id
+        if keys:
+            return (
+                await session.execute(select(Event).where(Event.surrogate_id == keys.pop()))
+            ).scalar_one()
+        fixture = (
+            await session.execute(
+                select(Event)
+                .where(
+                    Event.sport_key == event.sport_key,
+                    Event.home_team == event.home_team,
+                    Event.away_team == event.away_team,
+                    Event.commence_time == event.commence_time,
+                )
+                .order_by(Event.surrogate_id)
+            )
+        ).scalars()
+        ids = {row.source: row.external_id for row in external_ids}
+        for candidate in fixture:
+            held = (
+                await session.execute(
+                    select(EventExternalId).where(
+                        EventExternalId.event_id == candidate.surrogate_id
+                    )
+                )
+            ).scalars()
+            # A different id from one source is another production event: matching it would
+            # copy two production twins onto one local event.
+            if not any(ids.get(row.source, row.external_id) != row.external_id for row in held):
+                return candidate
+        return None
 
     async def _copy_identity(
         self,
@@ -288,7 +331,8 @@ class ProductionDataCopier:
         acknowledgements: list[HealthCheckAcknowledgement],
     ) -> None:
         """Replace the local event's external ids and acknowledgements with production's,
-        keyed to its local surrogate id. An id another local event holds stays with it."""
+        keyed to its local surrogate id. No other local event holds one of the ids, since the
+        event was found by them (``_local_event``)."""
         assert event.surrogate_id is not None
         await session.execute(
             delete(EventExternalId).where(EventExternalId.event_id == event.surrogate_id)  # type: ignore[arg-type]
@@ -299,17 +343,6 @@ class ProductionDataCopier:
             )
         )
         for row in external_ids:
-            held = await session.get(EventExternalId, (row.source, row.external_id))
-            if held is not None:
-                self.stats.external_ids_skipped += 1
-                logger.warning(
-                    "copy_external_id_held_locally",
-                    event_id=event.id,
-                    source=row.source.value,
-                    external_id=row.external_id,
-                    local_event_key=held.event_id,
-                )
-                continue
             session.add(
                 EventExternalId(
                     source=row.source,
@@ -338,14 +371,8 @@ class ProductionDataCopier:
         console.print(f"  Events skipped: [yellow]{self.stats.events_skipped}[/yellow]")
         console.print(f"  Snapshots copied: [green]{self.stats.snapshots_copied}[/green]")
 
-        console.print(f"  Odds rows copied: [green]{self.stats.odds_copied}[/green]")
         console.print(f"  Price rows copied: [green]{self.stats.prices_copied}[/green]")
         console.print(f"  External ids copied: [green]{self.stats.external_ids_copied}[/green]")
-        if self.stats.external_ids_skipped:
-            console.print(
-                f"  External ids held by another local event: "
-                f"[yellow]{self.stats.external_ids_skipped}[/yellow]"
-            )
         if self.stats.local_twin_matches:
             console.print(
                 f"  Local matches stored as several events: "

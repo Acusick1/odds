@@ -29,9 +29,9 @@ class FetchTier(Enum):
     def max_hours(self) -> float:
         """Upper boundary (hours before kickoff) for this tier.
 
-        A game falls into a tier when hours_before < tier.max_hours (and
-        >= the next-lower tier's max_hours).  OPENING has no upper bound
-        so returns inf.
+        A time falls into a tier when hours_before <= tier.max_hours and above the
+        next-lower tier's max_hours (``odds_lambda.tier_utils.calculate_tier``). OPENING has
+        no upper bound so returns inf.
         """
         bounds: dict[FetchTier, float] = {
             FetchTier.IN_PLAY: 0.0,

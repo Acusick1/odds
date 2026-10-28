@@ -10,7 +10,14 @@ import pytest
 from odds_cli.commands import events as events_cli
 from odds_core.models import Event, EventStatus
 from odds_lambda.mlb_stats_fetcher import MlbGameResult, MlbStatsFetcher
-from odds_lambda.storage.mlb_score_repair import ScoreOutcome, check_scores, repair_scores
+from odds_lambda.storage.mlb_score_repair import (
+    ScoreCheck,
+    ScoreOutcome,
+    check_scores,
+    repair_scores,
+)
+
+from tests.test_helpers import hold_game_pks
 
 T0 = datetime(2026, 5, 1, 23, 10, tzinfo=UTC)
 HOME, AWAY = "Boston Red Sox", "St.Louis Cardinals"
@@ -50,6 +57,14 @@ def _game(
     return MlbGameResult(pk, start, home, away, is_final, scores[0], scores[1], **extra)
 
 
+def _pks(events: list[Event]) -> dict[str, int]:
+    return {e.id: e.mlb_game_pk for e in events if e.mlb_game_pk is not None}
+
+
+def _check(events: list[Event], games: list[MlbGameResult]) -> list[ScoreCheck]:
+    return check_scores(events, _pks(events), games)
+
+
 def _outcomes(checks) -> dict[str, ScoreOutcome]:
     return {c.event.id: c.outcome for c in checks}
 
@@ -62,13 +77,13 @@ class TestCheckScores:
         ]
         games = [_game(1, T0), _game(2, T0 + timedelta(days=1))]
 
-        assert _outcomes(check_scores(events, games)) == {
+        assert _outcomes(_check(events, games)) == {
             "wrong": ScoreOutcome.MISMATCH,
             "right": ScoreOutcome.CORRECT,
         }
 
     def test_scoreless_final_event_is_a_mismatch(self) -> None:
-        checks = check_scores([_event("e", scores=(None, None))], [_game(1)])
+        checks = _check([_event("e", scores=(None, None))], [_game(1)])
 
         assert _outcomes(checks) == {"e": ScoreOutcome.MISMATCH}
 
@@ -84,7 +99,7 @@ class TestCheckScores:
             _event("game_two", g1 + timedelta(hours=4), (7, 6), game_pk=823358),
         ]
 
-        checks = {c.event.id: c for c in check_scores(events, games)}
+        checks = {c.event.id: c for c in _check(events, games)}
 
         assert checks["op_live_PITPIR_MILBRE_2026-07-11T1605"].mlb_score == (7, 6)
         assert checks["game_two"].mlb_score == (3, 2)
@@ -102,7 +117,7 @@ class TestCheckScores:
             official_date=date(2026, 4, 30),
         )
 
-        checks = check_scores([_event("e", scores=(1, 1), game_pk=9)], [postponed, _game(9)])
+        checks = _check([_event("e", scores=(1, 1), game_pk=9)], [postponed, _game(9)])
 
         assert _outcomes(checks) == {"e": ScoreOutcome.MISMATCH}
 
@@ -110,7 +125,7 @@ class TestCheckScores:
         events = [_event("allstar", game_pk=None), _event("pending", game_pk=2)]
         games = [_game(2, is_final=False)]
 
-        checks = {c.event.id: c for c in check_scores(events, games)}
+        checks = {c.event.id: c for c in _check(events, games)}
 
         assert {c.outcome for c in checks.values()} == {ScoreOutcome.UNMATCHED}
         assert (checks["allstar"].reason, checks["pending"].reason) == (
@@ -149,6 +164,7 @@ class TestRepairScores:
                 _event("epl", sport_key="soccer_epl", scores=(9, 9), game_pk=None),
             ]
         )
+        await hold_game_pks(test_session)
         await test_session.commit()
         fetcher = _fetcher([_game(1, T0, (3, 2))])
 
@@ -169,6 +185,7 @@ class TestRepairScores:
         self, test_session
     ) -> None:
         test_session.add(_event("moved", scores=(0, 0), game_pk=5))
+        await hold_game_pks(test_session)
         await test_session.commit()
         fetcher = _fetcher([], {5: [_game(5, T0 + timedelta(days=20), (4, 1))]})
 
@@ -180,6 +197,7 @@ class TestRepairScores:
     @pytest.mark.asyncio
     async def test_dry_run_command_writes_nothing(self, test_session, monkeypatch, capsys) -> None:
         test_session.add(_event("wrong", scores=(1, 0)))
+        await hold_game_pks(test_session)
         await test_session.commit()
         monkeypatch.setattr(events_cli, "async_session_maker", _session_maker(test_session))
         monkeypatch.setattr(events_cli, "MlbStatsFetcher", lambda: _fetcher([_game(1)]))

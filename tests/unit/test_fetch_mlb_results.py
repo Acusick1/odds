@@ -15,6 +15,8 @@ from odds_lambda.mlb_stats_fetcher import MlbGameResult, MlbGameState
 from odds_lambda.scheduling.jobs import JobContext
 from sqlalchemy import select
 
+from tests.test_helpers import hold_game_pks
+
 HOME, AWAY = "Pittsburgh Pirates", "Milwaukee Brewers"
 START = datetime.now(UTC).replace(hour=16, minute=5, second=0, microsecond=0) - timedelta(days=3)
 
@@ -90,6 +92,7 @@ class TestProcessResults:
     @pytest.mark.asyncio
     async def test_final_game_settles_the_event_with_mlb_score(self, test_session) -> None:
         test_session.add(_event("e", 823357, status=EventStatus.LIVE))
+        await hold_game_pks(test_session)
         await test_session.commit()
 
         stats = await _run(test_session, _fetcher([_slot(823357, score=(7, 6))]))
@@ -104,6 +107,7 @@ class TestProcessResults:
         self, test_session
     ) -> None:
         test_session.add(_event("e", 5))
+        await hold_game_pks(test_session)
         await test_session.commit()
         postponed = _slot(5, state=MlbGameState.POSTPONED, score=None)
         fetcher = _fetcher([postponed], {5: [postponed]})
@@ -120,6 +124,7 @@ class TestProcessResults:
     ) -> None:
         played = START + timedelta(days=1)
         test_session.add(_event("slot", 823357, status=EventStatus.POSTPONED))
+        await hold_game_pks(test_session)
         await test_session.commit()
         schedule = [
             _slot(823357, state=MlbGameState.POSTPONED, score=None),
@@ -137,6 +142,7 @@ class TestProcessResults:
     async def test_replay_booked_later_moves_the_event_there(self, test_session) -> None:
         replay = datetime.now(UTC).replace(microsecond=0) + timedelta(days=10)
         test_session.add(_event("slot", 9, status=EventStatus.POSTPONED))
+        await hold_game_pks(test_session)
         await test_session.commit()
         postponed = _slot(9, state=MlbGameState.POSTPONED, score=None)
         fetcher = _fetcher(
@@ -153,6 +159,7 @@ class TestProcessResults:
     @pytest.mark.asyncio
     async def test_cancelled_game_cancels_the_event(self, test_session) -> None:
         test_session.add(_event("e", 6))
+        await hold_game_pks(test_session)
         await test_session.commit()
         cancelled = _slot(6, state=MlbGameState.CANCELLED, score=None)
 
@@ -165,6 +172,7 @@ class TestProcessResults:
     @pytest.mark.asyncio
     async def test_event_without_a_game_pk_is_untouched(self, test_session) -> None:
         test_session.add(_event("allstar", None))
+        await hold_game_pks(test_session)
         await test_session.commit()
         fetcher = _fetcher([_slot(1)])
 
@@ -179,6 +187,7 @@ class TestProcessResults:
     async def test_doubleheader_games_settle_their_own_events(self, test_session) -> None:
         game_two = START + timedelta(hours=4)
         test_session.add_all([_event("g1", 101), _event("g2", 102, start=game_two)])
+        await hold_game_pks(test_session)
         await test_session.commit()
         schedule = [
             _slot(102, start=START + timedelta(minutes=6), score=(7, 6), game_number=2, tbd=True),
@@ -197,6 +206,7 @@ class TestProcessResults:
     @pytest.mark.asyncio
     async def test_game_in_progress_leaves_the_event_pending(self, test_session) -> None:
         test_session.add(_event("e", 7, status=EventStatus.LIVE))
+        await hold_game_pks(test_session)
         await test_session.commit()
 
         stats = await _run(test_session, _fetcher([_slot(7, state=MlbGameState.LIVE)]))

@@ -9,9 +9,23 @@ from odds_core.api_models import EventsResponse, HistoricalOddsResponse, OddsRes
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.quotes import Quote
 from odds_core.vocabulary import Source, TimeBasis
+from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.price_rows import expand_envelope
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_shaped_snapshot
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+# Hours before kick-off that odds_lambda.tier_utils.calculate_tier puts in each fetch tier, at the
+# Odds API backfill's snapshot time where one lies in the tier
+# (odds_analytics.game_selector.GameSelector.calculate_snapshot_times); IN_PLAY is after kick-off.
+TIER_HOURS_BEFORE: dict[FetchTier, float] = {
+    FetchTier.OPENING: 100,
+    FetchTier.EARLY: 72,
+    FetchTier.SHARP: 24,
+    FetchTier.PREGAME: 12,
+    FetchTier.CLOSING: 0.5,
+    FetchTier.IN_PLAY: -1,
+}
 
 
 async def add_event(session: AsyncSession, event: Event) -> Event:
@@ -19,6 +33,19 @@ async def add_event(session: AsyncSession, event: Event) -> Event:
     session.add(event)
     await session.flush()
     return event
+
+
+async def hold_game_pks(session: AsyncSession) -> None:
+    """Give each stored event with an ``mlb_game_pk`` its ``mlb_stats_api`` external id, which
+    is where readers find the ``gamePk``. Flushes the session first."""
+    await session.flush()
+    await session.execute(
+        text(
+            "INSERT INTO event_external_ids (source, external_id, event_id, created_at) "
+            "SELECT 'mlb_stats_api', mlb_game_pk::text, surrogate_id, now() FROM events "
+            "WHERE mlb_game_pk IS NOT NULL ON CONFLICT DO NOTHING"
+        )
+    )
 
 
 class StubOddsClient:

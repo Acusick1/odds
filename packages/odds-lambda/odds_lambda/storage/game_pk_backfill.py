@@ -36,7 +36,13 @@ from odds_lambda.mlb_game_resolver import (
 from odds_lambda.mlb_stats_fetcher import MlbStatsFetcher
 from odds_lambda.storage.event_kickoff import move_kickoff
 from odds_lambda.storage.event_merge import EventMerger
-from odds_lambda.storage.event_unmatched import clear_unmatched, mark_unmatched
+from odds_lambda.storage.event_resolver import record_game_pk
+from odds_lambda.storage.event_unmatched import mark_unmatched, unmatched_reasons
+from odds_lambda.storage.game_pks import (
+    event_holding_game_pk,
+    events_holding_game_pks_by_pk,
+    game_pks_of,
+)
 from odds_lambda.storage.same_time_pairs import SnapshotPairs, event_same_time_pairs
 from odds_lambda.storage.writers import OddsWriter
 
@@ -125,7 +131,8 @@ class UnresolvedEvent:
 @dataclass(frozen=True)
 class GamePkPlan:
     """``ghost_ids`` are unresolved ``no_game`` events nothing references; ``unresolved`` leaves
-    them out. ``marked`` maps events marked as having no gamePk to the reason given."""
+    them out. ``marked`` maps events marked as having no game (``mark_unmatched``) to the reason
+    given."""
 
     pending: int
     assignments: tuple[GamePkAssignment, ...]
@@ -226,7 +233,9 @@ def _choose_kept(
 async def plan_game_pks(
     session: AsyncSession, fetcher: MlbStatsFetcher, since: date | None, today: date
 ) -> GamePkPlan:
-    """Resolve every MLB event without a ``gamePk`` and not marked as having none.
+    """Resolve every MLB event without a ``gamePk`` and not marked as having no game
+    (``mark_unmatched``, which leaves a final event's status alone, so the mark is read rather
+    than the ``UNMATCHED`` status).
 
     ``since`` limits the events to MLB dates on or after it. The schedule is fetched once, from
     the earliest of their MLB dates to ``today`` (so a postponed game's played slot is in it).
@@ -246,17 +255,18 @@ async def plan_game_pks(
         for e in (await session.execute(query.order_by(Event.commence_time, Event.id))).scalars()
         if since is None or mlb_date(ensure_utc(e.commence_time)) >= since
     ]
+    game_pks = await game_pks_of(session, events)
     marked = {
-        e.id: e.no_game_pk_reason
-        for e in events
-        if e.mlb_game_pk is None and e.no_game_pk_reason is not None
+        event_id: reason
+        for event_id, reason in (await unmatched_reasons(session, events)).items()
+        if event_id not in game_pks
     }
-    pending = [e for e in events if e.mlb_game_pk is None and e.no_game_pk_reason is None]
+    pending = [e for e in events if e.id not in game_pks and e.id not in marked]
     if not pending:
         return GamePkPlan(0, (), (), (), marked)
 
     pending_keys = {_pair_date(e) for e in pending}
-    held = [e for e in events if e.mlb_game_pk is not None and _pair_date(e) in pending_keys]
+    held = [e for e in events if e.id in game_pks and _pair_date(e) in pending_keys]
     row_of = _rows_by_event([*pending, *held])
     rows = list(dict.fromkeys(row_of.values()))
     first_day = min(mlb_date(row.start) for row in rows)
@@ -269,8 +279,8 @@ async def plan_game_pks(
     mismatched: dict[_PairDate, str] = {}
     for event in held:
         resolution = resolutions[row_of[event.id]]
-        if not (isinstance(resolution, ResolvedGame) and resolution.game_pk == event.mlb_game_pk):
-            mismatched[_pair_date(event)] = f"{event.id} holds {event.mlb_game_pk}"
+        if not (isinstance(resolution, ResolvedGame) and resolution.game_pk == game_pks[event.id]):
+            mismatched[_pair_date(event)] = f"{event.id} holds {game_pks[event.id]}"
 
     unresolved: list[UnresolvedEvent] = []
     by_pk: dict[int, list[Event]] = defaultdict(list)
@@ -288,12 +298,7 @@ async def plan_game_pks(
             by_pk[resolution.game_pk].append(event)
             resolved_by_pk[resolution.game_pk] = resolution
 
-    holders = {
-        e.mlb_game_pk: e
-        for e in (
-            await session.execute(select(Event).where(Event.mlb_game_pk.in_(list(by_pk))))
-        ).scalars()
-    }
+    holders = await events_holding_game_pks_by_pk(session, list(by_pk))
     assignments: list[GamePkAssignment] = []
     for game_pk in sorted(by_pk):
         resolution = resolved_by_pk[game_pk]
@@ -356,9 +361,9 @@ async def apply_assignment(
         if report.rows_deleted:
             raise MergeClash(report.rows_deleted)
         rows_moved = report.rows_moved
-    if kept.mlb_game_pk is None:
-        kept.assign_game_pk(assignment.game_pk)
-        await clear_unmatched(session, kept)
+    if assignment.game_pk not in (await game_pks_of(session, [kept])).values():
+        if not await record_game_pk(session, kept, assignment.game_pk):
+            raise GamePkRefused(f"{kept_id} cannot take gamePk {assignment.game_pk}")
     await move_kickoff(
         session, kept, Source.MLB_STATS_API, assignment.target_start(), now=datetime.now(UTC)
     )
@@ -471,8 +476,9 @@ async def _mlb_event_without_game_pk(session: AsyncSession, event_id: str) -> Ev
         raise GamePkRefused(f"no event {event_id}")
     if event.sport_key != MLB_SPORT_KEY:
         raise GamePkRefused(f"{event_id} is a {event.sport_key} event")
-    if event.mlb_game_pk is not None:
-        raise GamePkRefused(f"{event_id} already holds gamePk {event.mlb_game_pk}")
+    held = await game_pks_of(session, [event])
+    if event_id in held:
+        raise GamePkRefused(f"{event_id} already holds gamePk {held[event_id]}")
     return event
 
 
@@ -507,9 +513,7 @@ async def plan_hand_assignment(
         )
     played = played_slots(slots).get(game_pk)
     final = final_scores(slots).get(game_pk)
-    holder = (
-        await session.execute(select(Event).where(Event.mlb_game_pk == game_pk))
-    ).scalar_one_or_none()
+    holder = await event_holding_game_pk(session, game_pk)
     if holder is None:
         return GamePkAssignment(game_pk, event, (), played, None, final)
     if not merge:
@@ -518,9 +522,8 @@ async def plan_hand_assignment(
 
 
 async def mark_no_game_pk(session: AsyncSession, event_id: str, reason: str) -> Event:
-    """Record why an MLB event has no ``gamePk``, so the health check stops listing it: the event
-    becomes ``UNMATCHED`` with the reason as its acknowledgement (``mark_unmatched``), and the
-    reason is still written to ``no_game_pk_reason``, which the filters read. Caller commits."""
+    """Record why an MLB event has no ``gamePk`` (``mark_unmatched``), so the health check,
+    settlement and the planning leave it out. Caller commits."""
     if not reason.strip():
         raise GamePkRefused("a reason is required")
     event = await _mlb_event_without_game_pk(session, event_id)
@@ -528,5 +531,4 @@ async def mark_no_game_pk(session: AsyncSession, event_id: str, reason: str) -> 
         await mark_unmatched(session, event, reason)
     except ValueError as e:
         raise GamePkRefused(str(e)) from e
-    event.no_game_pk_reason = reason.strip()
     return event

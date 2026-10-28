@@ -12,7 +12,7 @@ status: stable
 
 # Copy production data locally
 
-`odds copy from-prod START END` copies events (listed in kick-off order by `odds_lambda.storage.readers.OddsReader.get_events_by_date_range`) with their external ids and health-check acknowledgements, and their odds snapshots, odds rows and price rows, for one sport and date range from the production database into the local database, so local work runs on real data. Snapshot payloads are not copied. Both databases must be at the same migration, because the copier reads and writes every model column ([what it copies](databases-and-environments.md#copying-production-data)). The CLI wrapper is `odds_cli.commands.copy_from_prod`; the logic is in `odds_lambda.copy_from_production` (`odds_lambda.copy_from_production.copy_from_prod`, `odds_lambda.copy_from_production.ProductionDataCopier`). Environments are described in [Databases and environments](databases-and-environments.md#environments).
+`odds copy from-prod START END` copies events (listed in kick-off order by `odds_lambda.storage.readers.OddsReader.get_events_by_date_range`, and matched to local events by their external ids) with their external ids and health-check acknowledgements, and their odds snapshots and price rows, for one sport and date range from the production database into the local database, so local work runs on real data. Snapshot payloads are not copied. Both databases must be at the same migration, because the copier reads and writes every model column ([what it copies](databases-and-environments.md#copying-production-data)). The CLI wrapper is `odds_cli.commands.copy_from_prod`; the logic is in `odds_lambda.copy_from_production` (`odds_lambda.copy_from_production.copy_from_prod`, `odds_lambda.copy_from_production.ProductionDataCopier`). Environments are described in [Databases and environments](databases-and-environments.md#environments).
 
 ## Steps
 
@@ -23,7 +23,7 @@ status: stable
    odds copy from-prod 2025-08-01 2026-04-10 --sport soccer_epl --dry-run
    ```
 
-3. **Run without `--dry-run`.** Events already present locally are skipped; add `--overwrite` to replace them, which deletes each replaced event's local snapshots and odds, including any that exist only locally, and copies production's. Local events for the same match under another id are left untouched, and the summary counts them; merge them with `odds events merge-twins` ([Event merge](../storage/event-merge.md)).
+3. **Run without `--dry-run`.** Events already present locally, found by their external ids (else by event id with the same teams, else by sport, teams and kick-off when the local event holds no different id from the same source), are skipped; add `--overwrite` to replace them, which deletes each replaced event's local snapshots and odds, including any that exist only locally, and copies production's. An event whose ids several local events hold fails until they are merged. Other local events for the same match are left untouched, and the summary counts them; merge them with `odds events merge-twins` ([Event merge](../storage/event-merge.md)).
 4. **Check the summary.** A failed event is rolled back, listed by id and counted in `events_failed`, and the run continues; the command exits 1 if any event failed, so rerun after fixing the cause.
 
 ## Related

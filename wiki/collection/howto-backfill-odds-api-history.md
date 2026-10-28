@@ -51,6 +51,7 @@ Loads historical Odds API snapshots and scores for NBA. It spends paid quota and
    ```bash
    uv run odds backfill gaps --start 2025-01-01 --end 2025-01-07 --max-quota 500 --output gap.json
    ```
+   - A game is planned only for its missing tiers; the planner tiers each fetch as the `upper_bound` snapshot the backfill stores ([the tier a snapshot covers](../storage/fetch-tier.md#the-tier-a-snapshot-covers)).
    - Nothing is saved without `--output`.
    - Under `--max-quota` games are included whole or not at all, and it errors if even the first game exceeds the cap.
 2. Execute the gap plan.

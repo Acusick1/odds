@@ -62,8 +62,7 @@ async def _show_status(verbose: bool):
             table.add_row("Events (Scheduled)", f"{events_by_status.get('scheduled', 0):,}")
             table.add_row("Events (Total)", f"{stats.get('total_events', 0):,}")
 
-            # Odds records
-            table.add_row("Odds Records", f"{stats.get('total_odds_records', 0):,}")
+            table.add_row("Price Rows", f"{stats.get('total_price_rows', 0):,}")
             table.add_row("Snapshots", f"{stats.get('total_snapshots', 0):,}")
 
             # API quota

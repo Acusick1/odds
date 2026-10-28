@@ -13,7 +13,6 @@ from scripts.ingest_football_data_uk import (
     _extract_three_way_odds,
     build_event_id,
     normalize_team,
-    opening_fetch_tier,
     opening_snapshot_time,
     parse_kickoff,
 )
@@ -305,19 +304,6 @@ class TestOpeningSnapshotTime:
             kickoff = start + timedelta(hours=hours)
             opening = opening_snapshot_time(kickoff)
             assert opening is None or opening < kickoff
-
-
-class TestOpeningFetchTier:
-    def test_never_closing_tier(self) -> None:
-        for tenths in range(0, 1000):
-            assert opening_fetch_tier(tenths / 10) != "closing"
-
-    @pytest.mark.parametrize(
-        ("hours", "tier"),
-        [(0.5, "pregame"), (7.0, "pregame"), (19.5, "sharp"), (47.5, "early"), (75.0, "opening")],
-    )
-    def test_tiers(self, hours: float, tier: str) -> None:
-        assert opening_fetch_tier(hours) == tier
 
 
 class TestSnapshotTimingMetadata:

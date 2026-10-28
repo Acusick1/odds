@@ -39,7 +39,7 @@ from odds_lambda.storage.shaped_snapshots import (
     store_payload,
     store_shaped_snapshot,
 )
-from odds_lambda.tier_utils import calculate_hours_until_commence, calculate_tier
+from odds_lambda.tier_utils import calculate_hours_until_commence, snapshot_tier
 
 logger = structlog.get_logger()
 
@@ -84,7 +84,7 @@ def _snapshot(event: Event, envelope: dict[str, Any], point: GridPoint) -> OddsS
         raw_data=envelope,
         bookmaker_count=1,
         api_request_id=HISTORY_REQUEST_ID,
-        fetch_tier=calculate_tier(hours).value,
+        fetch_tier=snapshot_tier(point.time, event.commence_time, TimeBasis.OBSERVED).value,
         hours_until_commence=hours,
     )
 

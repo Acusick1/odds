@@ -164,7 +164,7 @@ async def _repair_scores(apply: bool) -> None:
             if check.outcome is ScoreOutcome.MISMATCH and check.mlb_score is not None:
                 console.print(
                     f"  MISMATCH {label}: stored {event.home_score}-{event.away_score}, "
-                    f"MLB {check.mlb_score[0]}-{check.mlb_score[1]} (game {event.mlb_game_pk})"
+                    f"MLB {check.mlb_score[0]}-{check.mlb_score[1]} (game {check.game_pk})"
                 )
             elif check.outcome is ScoreOutcome.UNMATCHED:
                 console.print(f"  UNMATCHED {label}: {check.reason}")

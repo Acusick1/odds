@@ -57,14 +57,14 @@ Nothing happens when no start is given or it equals the stored kick-off. Otherwi
 
 - `commence_time` becomes the new start and `updated_at` is set.
 - A POSTPONED event becomes SCHEDULED, and so does a LIVE event moved to a start after `now` (a delayed kick-off).
-- Every stored snapshot of the event has `hours_until_commence` and `fetch_tier` recomputed against the new start (`odds_lambda.storage.event_merge.retime_snapshots`), so the pre-move snapshots of a postponed game lose their closing tier.
+- Every stored snapshot of the event has `hours_until_commence` and `fetch_tier` recomputed against the new start (`odds_lambda.storage.event_merge.retime_snapshots`; the tier follows each snapshot's time basis and the OddsPortal closing rule, [where tiers are written](fetch-tier.md#where-tiers-are-written-and-read)), so the pre-move snapshots of a postponed game lose their closing tier.
 - `event_rescheduled` is logged with the source and both times.
 
 ## Callers
 
-- `odds_lambda.storage.event_resolver.resolve_event` ([Event resolver](event-resolver.md)), for the live OddsPortal and Betfair jobs and the historical ingest scripts (it alone offers the start; `odds_lambda.storage.event_resolver.attach_event` offers none; [live MLB events](event-matching.md#live-mlb-events)): the MLB Stats API with the schedule's start for MLB, else the listing source with its listed start. An OddsPortal historical listing is always in the past, so it never moves a played event.
+- `odds_lambda.storage.event_resolver.resolve_event` ([Event resolver](event-resolver.md)), for the live OddsPortal and Betfair jobs and the historical ingest scripts (it alone offers the start; `odds_lambda.storage.event_resolver.attach_event` offers none; [live MLB events](event-matching.md#live-mlb-events)): the MLB Stats API with the schedule's start for MLB, after recording the `gamePk`, else the listing source with its listed start. An OddsPortal historical listing is always in the past, so it never moves a played event.
 - `odds_lambda.jobs.fetch_mlb_results` ([fetch-mlb-results](../collection/results-jobs.md#fetch-mlb-results)), with the MLB Stats API.
-- `odds_lambda.storage.game_pk_backfill.apply_assignment` ([assigning gamePks](event-merge.md#assigning-gamepks)), with the MLB Stats API.
+- `odds_lambda.storage.game_pk_backfill.apply_assignment` ([assigning gamePks](event-merge.md#assigning-gamepks)), with the MLB Stats API, after recording the `gamePk` (`odds_lambda.storage.event_resolver.record_game_pk`).
 - `odds_lambda.odds_api_events.resolve_odds_api_event` ([events](events.md#writing-events)), for Odds API ingestion, event sync, `odds discover games` and the historical backfill (the API's reissued id replaces the recorded `odds_api` external id), through `odds_lambda.storage.event_resolver.resolve_event`: the Odds API with the listed start.
 
 ## After a twin merge

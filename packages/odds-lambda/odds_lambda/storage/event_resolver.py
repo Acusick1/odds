@@ -24,8 +24,9 @@ from odds_lambda.storage.event_merge import (
     find_historical_candidates,
     find_match_candidates,
 )
-from odds_lambda.storage.event_unmatched import (
-    clear_unmatched,
+from odds_lambda.storage.event_unmatched import clear_unmatched
+from odds_lambda.storage.game_pks import (
+    event_holding_game_pk,
     events_holding_game_pks,
     holds_game_pk,
 )
@@ -154,7 +155,7 @@ async def resolve_event(session: AsyncSession, game: ListedGame) -> ResolvedEven
         await _record_external_id(session, event, game.source, game.external_id)
     now = datetime.now(UTC)
     if game.mlb_game is not None:
-        await _record_game_pk(session, event, game.mlb_game.game_pk)
+        await record_game_pk(session, event, game.mlb_game.game_pk, log_repeats=True)
         await move_kickoff(session, event, Source.MLB_STATS_API, game.mlb_game.start, now=now)
     else:
         await move_kickoff(session, event, game.source, game.commence_time, now=now)
@@ -290,7 +291,7 @@ async def _find(
     session: AsyncSession, game: ListedGame, home_team: str, away_team: str
 ) -> ResolvedEvent | None:
     if game.mlb_game is not None:
-        held = await _by_game_pk(session, game.mlb_game.game_pk)
+        held = await event_holding_game_pk(session, game.mlb_game.game_pk)
         if held is not None:
             return ResolvedEvent(held, Resolution.BY_GAME_PK)
     if game.external_id is not None:
@@ -315,15 +316,6 @@ async def _by_external_id(session: AsyncSession, source: Source, external_id: st
 async def event_keyed_by_odds_api_id(session: AsyncSession, odds_api_id: str) -> Event | None:
     # Events stored before the external-id table existed are keyed by the API's own id.
     return await session.get(Event, odds_api_id)
-
-
-async def _by_game_pk(session: AsyncSession, game_pk: int) -> Event | None:
-    held = await _by_external_id(session, Source.MLB_STATS_API, str(game_pk))
-    if held is not None:
-        return held
-    # Events keyed before the external-id table existed hold their gamePk only in the column.
-    result = await session.execute(select(Event).where(Event.mlb_game_pk == game_pk))
-    return result.scalar_one_or_none()
 
 
 async def _match(
@@ -439,12 +431,21 @@ async def _create(session: AsyncSession, game: ListedGame, home_team: str, away_
     return event
 
 
-async def _record_game_pk(session: AsyncSession, event: Event, game_pk: int) -> None:
-    if await _record_external_id(session, event, Source.MLB_STATS_API, str(game_pk)):
-        if event.mlb_game_pk is None:
-            event.assign_game_pk(game_pk)
-            await clear_unmatched(session, event)
-            await session.flush()
+async def record_game_pk(
+    session: AsyncSession, event: Event, game_pk: int, *, log_repeats: bool = False
+) -> bool:
+    """Record ``game_pk`` as the event's ``mlb_stats_api`` id (``record_external_id``'s rules)
+    and undo ``mark_unmatched``; whether the event now holds it. A refusal already logged for the
+    event is logged again only with ``log_repeats``. Flushes; the caller commits."""
+    if not await _record_external_id(
+        session, event, Source.MLB_STATS_API, str(game_pk), log_repeats=log_repeats
+    ):
+        return False
+    if event.mlb_game_pk is None:
+        event.assign_game_pk(game_pk)
+    await clear_unmatched(session, event)
+    await session.flush()
+    return True
 
 
 class IdDecision(StrEnum):

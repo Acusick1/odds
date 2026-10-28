@@ -41,11 +41,11 @@ from odds_core.paper_trade_models import CandidateDecision
 from odds_core.snapshot_sources import FdukTimeBasis, SnapshotSource
 from odds_core.team import team_abbrev
 from odds_core.vocabulary import Source, TimeBasis
-from odds_lambda.fetch_tier import FetchTier
-from odds_lambda.oddsportal_common import IngestionStats, hours_to_tier
+from odds_lambda.oddsportal_common import IngestionStats
 from odds_lambda.storage.data_quality import record_issue
 from odds_lambda.storage.event_resolver import ListedGame, MatchWindow, Resolution, resolve_event
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload, store_shaped_snapshot
+from odds_lambda.tier_utils import snapshot_tiers
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from team_names import normalize_team as _normalize_team_central
@@ -64,8 +64,6 @@ SPORT_KEY = "soccer_epl"
 SPORT_TITLE = "EPL"
 EVENT_ID_PREFIX = "fduk"
 MARKET_KEY = "1x2"
-CLOSING_TIER = FetchTier.CLOSING.value
-OPENING_MIN_TIER = FetchTier.PREGAME.value
 KICKOFF_MISMATCH_TOLERANCE = timedelta(minutes=15)
 
 # Season label → URL path segment
@@ -218,12 +216,6 @@ def opening_snapshot_time(commence_time: datetime) -> datetime | None:
     days_back = (local.weekday() - slot.weekday) % 7
     deadline = _slot_instant(slot, local.date() - timedelta(days=days_back))
     return deadline if deadline < commence_time else None
-
-
-def opening_fetch_tier(hours_before: float) -> str:
-    """Tier for an opening snapshot; never the closing tier, which selects closing prices."""
-    tier = hours_to_tier(hours_before)
-    return OPENING_MIN_TIER if tier == CLOSING_TIER else tier
 
 
 def _safe_float(value: str | None) -> float | None:
@@ -530,6 +522,7 @@ async def _ingest_one_match(
                 log.info(f"  {event_id}: opening deadline at or after kick-off, not stamped")
                 continue
         hours_before = (commence_time - snapshot_time).total_seconds() / 3600
+        time_basis = TimeBasis.CLOSE if use_closing else TimeBasis.UPPER_BOUND
         for bk in raw_data["bookmakers"]:
             bk["last_update"] = snapshot_time.isoformat().replace("+00:00", "Z")
         new_snapshots.append(
@@ -540,14 +533,21 @@ async def _ingest_one_match(
                     raw_data=raw_data,
                     bookmaker_count=len(raw_data["bookmakers"]),
                     api_request_id=SOURCE_TAG,
-                    fetch_tier=hours_to_tier(hours_before)
-                    if use_closing
-                    else opening_fetch_tier(hours_before),
                     hours_until_commence=hours_before,
                 ),
-                TimeBasis.CLOSE if use_closing else TimeBasis.UPPER_BOUND,
+                time_basis,
             )
         )
+
+    tiers = snapshot_tiers(
+        [
+            (snap.snapshot_time, Source.FOOTBALL_DATA_UK, basis, MARKET_KEY)
+            for snap, basis in new_snapshots
+        ],
+        commence_time,
+    )
+    for (snap, _), tier in zip(new_snapshots, tiers, strict=True):
+        snap.fetch_tier = tier.value
 
     # Snapshots stored before the redesign carry no source, only the request-id tag.
     existing_snaps = list(
@@ -620,7 +620,6 @@ def _snapshot_content(snap: OddsSnapshot, source: Source | None, basis: TimeBasi
         source,
         basis,
         snap.snapshot_time,
-        snap.fetch_tier,
         snap.hours_until_commence,
         snap.bookmaker_count,
         snap.raw_data,

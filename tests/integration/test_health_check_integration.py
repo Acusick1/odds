@@ -14,6 +14,7 @@ from odds_core.models import (
     FetchLog,
     OddsSnapshot,
 )
+from odds_core.vocabulary import Source, TimeBasis
 from sqlalchemy import select
 
 
@@ -89,6 +90,8 @@ async def _create_stale_oddsportal_source(session, *, hours_ago: float = 40) -> 
             snapshot_time=now - timedelta(hours=hours_ago),
             raw_data={"source": "oddsportal_live"},
             bookmaker_count=1,
+            source=Source.ODDSPORTAL,
+            time_basis=TimeBasis.OBSERVED,
         )
     )
     await session.commit()

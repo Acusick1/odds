@@ -89,7 +89,7 @@ LOOKBACK_HOURS = 12
 SOURCE = CollectionSource(
     key="betfair_exchange",
     job_name="fetch-betfair-exchange",
-    snapshot_source=SnapshotSource.BETFAIR_API,
+    source=Source.BETFAIR,
     cadence=CADENCE,
     fixture_horizons={"soccer_epl": timedelta(hours=72), "baseball_mlb": timedelta(hours=6)},
     skips_overnight=True,

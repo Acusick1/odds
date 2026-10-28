@@ -13,6 +13,7 @@ from datetime import timedelta
 import structlog
 from odds_core.alerts import job_alert_context, send_outage_warning, send_scheduling_failure
 from odds_core.config import Settings, get_settings
+from odds_core.vocabulary import Source
 
 from odds_lambda.collection_calendar import CollectionSource, require_rows_for_fixtures
 from odds_lambda.data_fetcher import TheOddsAPIClient
@@ -44,7 +45,7 @@ CADENCE = CadenceConfig(
 SOURCE = CollectionSource(
     key="odds_api",
     job_name="fetch-odds",
-    snapshot_source=None,
+    source=Source.ODDS_API,
     cadence=CADENCE,
     fixture_horizons={"soccer_epl": timedelta(hours=48)},
     skips_overnight=False,

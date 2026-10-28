@@ -20,6 +20,8 @@ import pytest
 from apscheduler import AsyncScheduler
 from odds_core.api_models import OddsResponse, api_dict_to_event
 from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.quotes import quotes
+from odds_core.vocabulary import Market
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.ingestion import OddsIngestionService
 from odds_lambda.scheduling.jobs import JobContext
@@ -232,12 +234,10 @@ async def test_scheduler_end_to_end(
     assert snapshots[0].bookmaker_count == 2
 
     reader = OddsReader(test_session)
-    odds_list = await reader.get_odds_at_time(
-        event_id=EVENT_ID, timestamp=datetime.now(UTC), tolerance_minutes=5
-    )
+    stored = await quotes(test_session, [EVENT_ID], Market.H2H)
 
-    assert len(odds_list) > 0, "Normalized odds should exist"
-    bookmakers = {odd.bookmaker_key for odd in odds_list}
+    assert stored, "Price rows should exist"
+    bookmakers = {quote.bookmaker for quote in stored}
     assert "fanduel" in bookmakers
     assert "draftkings" in bookmakers
 

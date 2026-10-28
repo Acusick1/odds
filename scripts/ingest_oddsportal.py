@@ -44,11 +44,11 @@ from odds_lambda.oddsportal_common import (
     IngestionStats,
     build_raw_data,
     event_id_from_match_link,
-    hours_to_tier,
     parse_match_date,
 )
 from odds_lambda.storage.event_resolver import ListedGame, MatchWindow, Resolution, resolve_event
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload, store_shaped_snapshot
+from odds_lambda.tier_utils import snapshot_tiers
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -424,7 +424,19 @@ async def _ingest_one_game(
         await store_payload(session, [raw_data for raw_data, _ in envelopes]),
     )
     commence_time = event.commence_time
-    for raw_data, snapshot_time in envelopes:
+    tiers = snapshot_tiers(
+        [
+            (
+                snapshot_time,
+                Source.ODDSPORTAL,
+                TimeBasis.SOURCE_STAMPED,
+                raw_data["bookmakers"][0]["markets"][0]["key"],
+            )
+            for raw_data, snapshot_time in envelopes
+        ],
+        commence_time,
+    )
+    for index, (raw_data, snapshot_time) in enumerate(envelopes):
         hours_before = (commence_time - snapshot_time).total_seconds() / 3600
         snapshot = OddsSnapshot(
             event_id=event_id,
@@ -432,7 +444,7 @@ async def _ingest_one_game(
             raw_data=raw_data,
             bookmaker_count=len(raw_data["bookmakers"]),
             api_request_id=source_tag,
-            fetch_tier=hours_to_tier(hours_before),
+            fetch_tier=tiers[index].value,
             hours_until_commence=max(0.0, hours_before),
         )
         if (await store_shaped_snapshot(session, snapshot, event, shape)).inserted:

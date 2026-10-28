@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_shaped_snapshot
 from odds_lambda.storage.snapshot_store import SnapshotWriteOutcome
 from odds_lambda.storage.validators import OddsValidator
-from odds_lambda.tier_utils import calculate_hours_until_commence, calculate_tier_from_timestamps
+from odds_lambda.tier_utils import calculate_hours_until_commence, snapshot_tier
 
 logger = structlog.get_logger()
 
@@ -86,8 +86,9 @@ class OddsWriter:
         if event:
             event_commence = ensure_utc(event.commence_time)
             hours_until = calculate_hours_until_commence(snapshot_time, event_commence)
-            calculated_tier = calculate_tier_from_timestamps(snapshot_time, event_commence)
-            tier_value = calculated_tier.value
+            tier_value = snapshot_tier(
+                snapshot_time, event_commence, shape.time_basis if shape else None
+            ).value
 
         # Validate if enabled
         if validate:

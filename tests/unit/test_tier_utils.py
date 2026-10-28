@@ -3,12 +3,16 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.tier_utils import (
     calculate_hours_until_commence,
     calculate_tier,
-    calculate_tier_from_timestamps,
+    snapshot_tier,
+    snapshot_tiers,
 )
+
+from tests.test_helpers import TIER_HOURS_BEFORE
 
 
 class TestCalculateTier:
@@ -113,15 +117,15 @@ class TestCalculateTier:
         assert FetchTier.OPENING.interval_hours == 48.0
 
 
-class TestCalculateTierFromTimestamps:
-    """Test tier calculation from timestamps."""
+class TestSnapshotTierObserved:
+    """An observed time is tiered by calculate_tier."""
 
     def test_closing_tier_from_timestamps(self):
         """Test CLOSING tier calculated from timestamps."""
         now = datetime.now(UTC)
         game_time = now + timedelta(hours=2)
 
-        tier = calculate_tier_from_timestamps(now, game_time)
+        tier = snapshot_tier(now, game_time, TimeBasis.OBSERVED)
         assert tier == FetchTier.CLOSING
 
     def test_pregame_tier_from_timestamps(self):
@@ -129,7 +133,7 @@ class TestCalculateTierFromTimestamps:
         now = datetime.now(UTC)
         game_time = now + timedelta(hours=8)
 
-        tier = calculate_tier_from_timestamps(now, game_time)
+        tier = snapshot_tier(now, game_time, TimeBasis.OBSERVED)
         assert tier == FetchTier.PREGAME
 
     def test_sharp_tier_from_timestamps(self):
@@ -137,7 +141,7 @@ class TestCalculateTierFromTimestamps:
         now = datetime.now(UTC)
         game_time = now + timedelta(hours=18)
 
-        tier = calculate_tier_from_timestamps(now, game_time)
+        tier = snapshot_tier(now, game_time, TimeBasis.OBSERVED)
         assert tier == FetchTier.SHARP
 
     def test_early_tier_from_timestamps(self):
@@ -145,7 +149,7 @@ class TestCalculateTierFromTimestamps:
         now = datetime.now(UTC)
         game_time = now + timedelta(days=2)  # 48 hours
 
-        tier = calculate_tier_from_timestamps(now, game_time)
+        tier = snapshot_tier(now, game_time, TimeBasis.OBSERVED)
         assert tier == FetchTier.EARLY
 
     def test_opening_tier_from_timestamps(self):
@@ -153,7 +157,7 @@ class TestCalculateTierFromTimestamps:
         now = datetime.now(UTC)
         game_time = now + timedelta(days=5)  # 120 hours
 
-        tier = calculate_tier_from_timestamps(now, game_time)
+        tier = snapshot_tier(now, game_time, TimeBasis.OBSERVED)
         assert tier == FetchTier.OPENING
 
     def test_past_game_from_timestamps(self):
@@ -161,7 +165,7 @@ class TestCalculateTierFromTimestamps:
         now = datetime.now(UTC)
         game_time = now - timedelta(hours=1)  # Game started 1 hour ago
 
-        tier = calculate_tier_from_timestamps(now, game_time)
+        tier = snapshot_tier(now, game_time, TimeBasis.OBSERVED)
         assert tier == FetchTier.IN_PLAY
 
     def test_exact_boundary_3_hours(self):
@@ -169,7 +173,7 @@ class TestCalculateTierFromTimestamps:
         now = datetime.now(UTC)
         game_time = now + timedelta(hours=3)
 
-        tier = calculate_tier_from_timestamps(now, game_time)
+        tier = snapshot_tier(now, game_time, TimeBasis.OBSERVED)
         assert tier == FetchTier.CLOSING
 
     def test_exact_boundary_12_hours(self):
@@ -177,7 +181,7 @@ class TestCalculateTierFromTimestamps:
         now = datetime.now(UTC)
         game_time = now + timedelta(hours=12)
 
-        tier = calculate_tier_from_timestamps(now, game_time)
+        tier = snapshot_tier(now, game_time, TimeBasis.OBSERVED)
         assert tier == FetchTier.PREGAME
 
     def test_exact_boundary_24_hours(self):
@@ -185,7 +189,7 @@ class TestCalculateTierFromTimestamps:
         now = datetime.now(UTC)
         game_time = now + timedelta(hours=24)
 
-        tier = calculate_tier_from_timestamps(now, game_time)
+        tier = snapshot_tier(now, game_time, TimeBasis.OBSERVED)
         assert tier == FetchTier.SHARP
 
     def test_exact_boundary_72_hours(self):
@@ -193,7 +197,7 @@ class TestCalculateTierFromTimestamps:
         now = datetime.now(UTC)
         game_time = now + timedelta(hours=72)
 
-        tier = calculate_tier_from_timestamps(now, game_time)
+        tier = snapshot_tier(now, game_time, TimeBasis.OBSERVED)
         assert tier == FetchTier.EARLY
 
 
@@ -268,7 +272,7 @@ class TestTierUtilsConsistency:
             game_time = now + timedelta(hours=hours)
 
             direct_tier = calculate_tier(hours)
-            timestamp_tier = calculate_tier_from_timestamps(now, game_time)
+            timestamp_tier = snapshot_tier(now, game_time, TimeBasis.OBSERVED)
 
             assert direct_tier == timestamp_tier, (
                 f"Mismatch at {hours} hours: {direct_tier} vs {timestamp_tier}"
@@ -285,3 +289,84 @@ class TestTierUtilsConsistency:
         # 7.5 hours should be PREGAME (3-12 hours range)
         assert tier == FetchTier.PREGAME
         assert 3 < hours <= 12
+
+
+KICKOFF = datetime(2026, 10, 24, 15, 0, tzinfo=UTC)
+
+
+class TestSnapshotTier:
+    @pytest.mark.parametrize("tier", list(FetchTier))
+    def test_test_helper_hours_lie_in_their_tier(self, tier: FetchTier) -> None:
+        assert calculate_tier(TIER_HOURS_BEFORE[tier]) is tier
+
+    def test_a_close_is_the_closing_tier_whatever_its_stamp(self) -> None:
+        assert snapshot_tier(KICKOFF + timedelta(hours=2), KICKOFF, TimeBasis.CLOSE) is (
+            FetchTier.CLOSING
+        )
+        assert snapshot_tier(KICKOFF - timedelta(hours=30), KICKOFF, TimeBasis.CLOSE) is (
+            FetchTier.CLOSING
+        )
+
+    @pytest.mark.parametrize(
+        ("hours", "observed", "upper_bound"),
+        [
+            (3.0, FetchTier.CLOSING, FetchTier.PREGAME),
+            (12.0, FetchTier.PREGAME, FetchTier.SHARP),
+            (24.0, FetchTier.SHARP, FetchTier.EARLY),
+            (72.0, FetchTier.EARLY, FetchTier.OPENING),
+            (2.0, FetchTier.CLOSING, FetchTier.CLOSING),
+        ],
+    )
+    def test_an_upper_bound_on_a_boundary_covers_the_farther_tier_only(
+        self, hours: float, observed: FetchTier, upper_bound: FetchTier
+    ) -> None:
+        taken = KICKOFF - timedelta(hours=hours)
+
+        assert snapshot_tier(taken, KICKOFF, TimeBasis.OBSERVED) is observed
+        assert snapshot_tier(taken, KICKOFF, TimeBasis.UPPER_BOUND) is upper_bound
+
+
+class TestSnapshotTiers:
+    def test_each_markets_latest_oddsportal_history_stamp_is_its_closing(self) -> None:
+        stamped = (Source.ODDSPORTAL, TimeBasis.SOURCE_STAMPED)
+        rows = [
+            (KICKOFF - timedelta(hours=40), *stamped, "1x2"),
+            (KICKOFF + timedelta(minutes=20), *stamped, "1x2"),
+            (KICKOFF - timedelta(hours=30), *stamped, "totals"),
+            (KICKOFF - timedelta(hours=5), *stamped, "totals"),
+            (KICKOFF + timedelta(minutes=30), Source.BETFAIR, TimeBasis.OBSERVED, "1x2"),
+        ]
+
+        assert snapshot_tiers(rows, KICKOFF) == [
+            FetchTier.EARLY,
+            FetchTier.CLOSING,
+            FetchTier.EARLY,
+            FetchTier.CLOSING,
+            FetchTier.IN_PLAY,
+        ]
+
+    @pytest.mark.parametrize(
+        ("offset", "tier"),
+        [(timedelta(hours=-2), FetchTier.CLOSING), (timedelta(hours=30), FetchTier.EARLY)],
+    )
+    def test_a_lone_history_stamp_is_a_closing_only_after_kick_off(
+        self, offset: timedelta, tier: FetchTier
+    ) -> None:
+        # A lone stamp before kick-off may be an opening whose closing was never scraped.
+        rows = [(KICKOFF - offset, Source.ODDSPORTAL, TimeBasis.SOURCE_STAMPED, "1x2")]
+
+        assert snapshot_tiers(rows, KICKOFF) == [tier]
+
+    def test_an_fduk_opening_under_three_hours_is_pregame_beside_its_close(self) -> None:
+        fduk = Source.FOOTBALL_DATA_UK
+        rows = [
+            (KICKOFF - timedelta(hours=2, minutes=30), fduk, TimeBasis.UPPER_BOUND, "1x2"),
+            (KICKOFF, fduk, TimeBasis.CLOSE, "1x2"),
+            (KICKOFF - timedelta(hours=1), Source.BETFAIR, TimeBasis.OBSERVED, "1x2"),
+        ]
+
+        assert snapshot_tiers(rows, KICKOFF) == [
+            FetchTier.PREGAME,
+            FetchTier.CLOSING,
+            FetchTier.CLOSING,
+        ]

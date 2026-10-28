@@ -6,84 +6,115 @@ functions are used by both the live data collection pipeline and historical back
 operations to ensure consistent tier classification across all data.
 """
 
+from collections import defaultdict
+from collections.abc import Sequence
 from datetime import datetime
+
+from odds_core.vocabulary import Source, TimeBasis
 
 from odds_lambda.fetch_tier import FetchTier
 
+_NEARER_TO_FARTHER = (
+    FetchTier.CLOSING,
+    FetchTier.PREGAME,
+    FetchTier.SHARP,
+    FetchTier.EARLY,
+    FetchTier.OPENING,
+)
+
 
 def calculate_tier(hours_until: float) -> FetchTier:
-    """
-    Determine fetch tier based on hours until game commence time.
+    """The tier of a time ``hours_until`` hours before kick-off; negative is in play.
 
-    The fetch tier determines how frequently odds should be collected:
-    - IN_PLAY (<0 hours): Odds collected during the game
-    - CLOSING (0-3 hours): Most critical period, fetch every 30 minutes
-    - PREGAME (3-12 hours): Active betting period, fetch every 3 hours
-    - SHARP (12-24 hours): Professional betting period, fetch every 12 hours
-    - EARLY (1-3 days): Opening line establishment, fetch every 24 hours
-    - OPENING (3+ days): Initial line release, fetch every 48 hours
-
-    Args:
-        hours_until: Hours until game commence time. Can be negative for
-                    games that have already started.
-
-    Returns:
-        Appropriate FetchTier for the given time window.
+    This is the one hours-to-tier rule. A time exactly on a boundary
+    (``FetchTier.max_hours``: 3, 12, 24 or 72 h) belongs to the nearer tier. What a
+    snapshot's time covers also depends on its time basis (``snapshot_tier``).
 
     Example:
-        >>> calculate_tier(1.5)  # 1.5 hours before game
+        >>> calculate_tier(3.0)
         <FetchTier.CLOSING: 'closing'>
-
-        >>> calculate_tier(48.0)  # 2 days before game
+        >>> calculate_tier(48.0)
         <FetchTier.EARLY: 'early'>
-
-        >>> calculate_tier(100.0)  # >3 days before game
-        <FetchTier.OPENING: 'opening'>
     """
     if hours_until < 0:
         return FetchTier.IN_PLAY
-    if hours_until <= 3:
+    return next(tier for tier in _NEARER_TO_FARTHER if hours_until <= tier.max_hours)
+
+
+def snapshot_tier(
+    snapshot_time: datetime, commence_time: datetime, time_basis: TimeBasis | None
+) -> FetchTier:
+    """The tier a snapshot covers, by what its time means (``time_basis``).
+
+    A ``close`` snapshot is the closing price, whatever its stamp. An ``upper_bound`` time
+    says the price was taken at or before it, so one exactly on a boundary covers the farther
+    tier only (an FDUK opening stamped 3.0 h out is not a closing price, and the Odds API
+    backfill's fetches at 72, 24, 12 and 3 h cover OPENING, EARLY, SHARP and PREGAME). Every
+    other time is bucketed by ``calculate_tier``.
+    """
+    if time_basis == TimeBasis.CLOSE:
         return FetchTier.CLOSING
-    elif hours_until <= 12:
-        return FetchTier.PREGAME
-    elif hours_until <= 24:
-        return FetchTier.SHARP
-    elif hours_until <= 72:  # 3 days
-        return FetchTier.EARLY
-    else:
-        return FetchTier.OPENING
+    hours_until = (commence_time - snapshot_time).total_seconds() / 3600
+    tier = calculate_tier(hours_until)
+    if time_basis == TimeBasis.UPPER_BOUND and tier in _NEARER_TO_FARTHER[:-1]:
+        if hours_until == tier.max_hours:
+            return _NEARER_TO_FARTHER[_NEARER_TO_FARTHER.index(tier) + 1]
+    return tier
 
 
-def calculate_tier_from_timestamps(snapshot_time: datetime, commence_time: datetime) -> FetchTier:
+def snapshot_tiers(
+    snapshots: Sequence[tuple[datetime, Source | None, TimeBasis | None, str | None]],
+    commence_time: datetime,
+) -> list[FetchTier]:
+    """The tier of each of an event's snapshots, given as (snapshot time, source, time basis,
+    market).
+
+    Each takes ``snapshot_tier``, with two rules that need the event's other snapshots:
+
+    - A market's latest OddsPortal history (``source_stamped``) time is its closing price,
+      stamped with the latest change among the books, so it is CLOSING however near or after
+      kick-off the stamp lies. A market with a single stamp before kick-off may hold only an
+      opening whose closing was never scraped, so that stamp keeps ``snapshot_tier``; an
+      opening price is never stamped after kick-off.
+    - When a source has a ``close`` snapshot for a market, that is the source's closing price,
+      and none of the source's other snapshots of the market is CLOSING: one that would be
+      covers the farther tier (an FDUK opening stamped under 3 h out is PREGAME).
     """
-    Calculate fetch tier from snapshot and game commence timestamps.
+    stamps: dict[str | None, list[datetime]] = defaultdict(list)
+    closes: set[tuple[Source | None, str | None]] = set()
+    for snapshot_time, source, time_basis, market in snapshots:
+        if source == Source.ODDSPORTAL and time_basis == TimeBasis.SOURCE_STAMPED:
+            stamps[market].append(snapshot_time)
+        if time_basis == TimeBasis.CLOSE:
+            closes.add((source, market))
+    source_closes = {
+        market: max(times)
+        for market, times in stamps.items()
+        if len(set(times)) > 1 or max(times) >= commence_time
+    }
 
-    This is a convenience function that computes hours until game start and
-    determines the appropriate tier. Useful for historical data where you have
-    timestamps but need to determine the tier.
+    def tier(
+        snapshot_time: datetime,
+        source: Source | None,
+        time_basis: TimeBasis | None,
+        market: str | None,
+    ) -> FetchTier:
+        if (
+            source == Source.ODDSPORTAL
+            and time_basis == TimeBasis.SOURCE_STAMPED
+            and snapshot_time == source_closes.get(market)
+        ):
+            return FetchTier.CLOSING
+        covered = snapshot_tier(snapshot_time, commence_time, time_basis)
+        if (
+            covered is FetchTier.CLOSING
+            and time_basis != TimeBasis.CLOSE
+            and (source, market) in closes
+        ):
+            return FetchTier.PREGAME
+        return covered
 
-    Args:
-        snapshot_time: When the odds snapshot was captured (timezone-aware)
-        commence_time: When the game starts (timezone-aware)
-
-    Returns:
-        Appropriate FetchTier for the snapshot timing.
-
-    Example:
-        >>> from datetime import datetime, timedelta, UTC
-        >>> game_time = datetime.now(UTC) + timedelta(hours=6)
-        >>> snapshot_time = datetime.now(UTC)
-        >>> calculate_tier_from_timestamps(snapshot_time, game_time)
-        <FetchTier.PREGAME: 'pregame'>
-
-    Note:
-        Both timestamps should be timezone-aware. If they're not in the same
-        timezone, the calculation will still be correct as Python handles
-        timezone conversion automatically.
-    """
-    time_delta = commence_time - snapshot_time
-    hours_until = time_delta.total_seconds() / 3600
-    return calculate_tier(hours_until)
+    return [tier(*snapshot) for snapshot in snapshots]
 
 
 def calculate_hours_until_commence(snapshot_time: datetime, commence_time: datetime) -> float:

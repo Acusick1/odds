@@ -24,8 +24,15 @@ from odds_core.betfair_close import LIVE_CLOSE_WINDOW, event_close, live_close_q
 from odds_core.config import Settings, get_settings
 from odds_core.database import async_session_maker
 from odds_core.market_prices import THREE_WAY_MARKET
-from odds_core.models import AlertHistory, Event, EventStatus, OddsSnapshot
-from odds_core.vocabulary import Source
+from odds_core.models import (
+    AlertHistory,
+    Event,
+    EventExternalId,
+    EventStatus,
+    HealthCheckAcknowledgement,
+    OddsSnapshot,
+)
+from odds_core.vocabulary import HealthCheck, Source
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,7 +45,6 @@ from odds_lambda.collection_calendar import (
 )
 from odds_lambda.mlb_game_resolver import MLB_SPORT_KEY
 from odds_lambda.scheduling.backends.base import ScheduledJob
-from odds_lambda.scheduling.decision import classify_tier
 from odds_lambda.scheduling.jobs import (
     expected_compound_job_names,
     get_job_cron,
@@ -48,6 +54,7 @@ from odds_lambda.scheduling.jobs import (
 )
 from odds_lambda.storage.event_merge import EventMerger
 from odds_lambda.storage.unsettled_events import find_unsettled_events
+from odds_lambda.tier_utils import calculate_tier
 
 logger = structlog.get_logger()
 
@@ -266,7 +273,7 @@ class HealthMonitor:
                 )
                 if calendar.next_kickoff is None or not calendar.kickoffs_in_horizon:
                     continue
-                last = await latest_snapshot_time(self.session, sport_key, source.snapshot_source)
+                last = await latest_snapshot_time(self.session, sport_key, source.source)
                 if last is None:
                     logger.info("stale_check_no_history", source=source.key, sport=sport_key)
                     continue
@@ -275,9 +282,9 @@ class HealthMonitor:
                 threshold = max(
                     alerts.stale_data_hours,
                     alerts.stale_cadence_multiplier
-                    * source.cadence.interval_for(classify_tier(hours_to_kickoff)),
+                    * source.cadence.interval_for(calculate_tier(hours_to_kickoff)),
                     alerts.stale_last_interval_multiplier
-                    * source.cadence.interval_for(classify_tier(hours_at_last)),
+                    * source.cadence.interval_for(calculate_tier(hours_at_last)),
                 )
                 reference = max(last, calendar.next_kickoff - horizon)
                 active = active_hours_between(reference, moment, source.overnight_window(sport_key))
@@ -458,23 +465,35 @@ class HealthMonitor:
         return is_healthy, total_errors
 
     async def find_mlb_events_without_game_pk(self, now: datetime) -> list[str]:
-        """MLB events created over ``GAME_PK_GRACE`` ago with no ``mlb_game_pk`` and not marked as
-        having none (``no_game_pk_reason``).
+        """MLB events created over ``GAME_PK_GRACE`` ago with no ``gamePk`` (``mlb_stats_api``
+        external id) and no ``missing_mlb_game_pk`` acknowledgement (``mark_unmatched``).
 
         Only events created since the earliest event that holds a ``gamePk`` count, so events
         stored before the live jobs assigned ``gamePk``s are left out.
         """
-        first_assigned = (
-            select(func.min(Event.created_at))
-            .where(Event.mlb_game_pk.is_not(None))
-            .scalar_subquery()
+        holds_game_pk = (
+            select(EventExternalId.event_id)
+            .where(
+                EventExternalId.event_id == Event.surrogate_id,
+                EventExternalId.source == Source.MLB_STATS_API,
+            )
+            .exists()
         )
+        acknowledged = (
+            select(HealthCheckAcknowledgement.event_id)
+            .where(
+                HealthCheckAcknowledgement.event_id == Event.surrogate_id,
+                HealthCheckAcknowledgement.check_name == HealthCheck.MISSING_MLB_GAME_PK,
+            )
+            .exists()
+        )
+        first_assigned = select(func.min(Event.created_at)).where(holds_game_pk).scalar_subquery()
         result = await self.session.execute(
             select(Event.id)
             .where(
                 Event.sport_key == MLB_SPORT_KEY,
-                Event.mlb_game_pk.is_(None),
-                Event.no_game_pk_reason.is_(None),
+                ~holds_game_pk,
+                ~acknowledged,
                 Event.created_at < now - GAME_PK_GRACE,
                 Event.created_at >= first_assigned,
             )

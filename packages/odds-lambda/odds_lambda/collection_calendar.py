@@ -8,7 +8,7 @@ from odds_core.database import async_session_maker
 from odds_core.epl_data_models import ESPN_STATUS_POSTPONED, EspnFixture
 from odds_core.mlb_data_models import UNPLAYED_GAME_STATUSES, MlbProbablePitchers
 from odds_core.models import Event, EventStatus, OddsSnapshot
-from odds_core.snapshot_sources import SnapshotSource
+from odds_core.vocabulary import Source, TimeBasis
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -60,13 +60,13 @@ class CollectionSource:
     ``cadence`` is the job's own polling cadence, so the expected gap between
     rows follows the tier of the next fixture. ``fixture_horizons`` is how far
     ahead a scheduled fixture of each sport must be before the source is
-    expected to price it. ``snapshot_source`` is the ``raw_data["source"]`` tag
-    of its snapshots; ``None`` is The Odds API, which writes none.
+    expected to price it. ``source`` is the ``source`` of the snapshots its job
+    writes, all of them ``observed``.
     """
 
     key: str
     job_name: str
-    snapshot_source: SnapshotSource | None
+    source: Source
     cadence: CadenceConfig
     fixture_horizons: Mapping[str, timedelta]
     skips_overnight: bool
@@ -258,16 +258,17 @@ async def decide_collection_run(
 
 
 async def latest_snapshot_time(
-    session: AsyncSession, sport_key: str, source: SnapshotSource | None
+    session: AsyncSession, sport_key: str, source: Source
 ) -> datetime | None:
-    tag = OddsSnapshot.raw_data["source"].as_string()  # type: ignore[index]
+    """The time of the latest ``observed`` snapshot ``source`` wrote for the sport."""
     return (
         await session.execute(
             select(OddsSnapshot.snapshot_time)
             .join(Event, Event.id == OddsSnapshot.event_id)
             .where(
                 Event.sport_key == sport_key,
-                tag.is_(None) if source is None else tag == source.value,
+                OddsSnapshot.source == source,
+                OddsSnapshot.time_basis == TimeBasis.OBSERVED,
             )
             .order_by(OddsSnapshot.snapshot_time.desc())
             .limit(1)

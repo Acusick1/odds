@@ -6,6 +6,7 @@ sources:
   - odds_lambda.storage.event_resolver
   - odds_core.models.EventExternalId
   - odds_lambda.storage.event_unmatched
+  - odds_lambda.storage.game_pks
 mentions:
   - odds_lambda.storage.event_merge.find_historical_candidates
   - odds_lambda.mlb_game_resolver.ResolvedGame
@@ -35,7 +36,7 @@ The result is an `odds_lambda.storage.event_resolver.ResolvedEvent`: the event a
 Team names are normalized with `odds_core.team.normalize_team_name` first.
 
 1. **Lock.** A transaction advisory lock (`pg_advisory_xact_lock`) on `odds_lambda.storage.event_resolver.event_lock_key` of (sport, home, away), held until the caller's transaction ends. Writers resolving the same fixture therefore run one after the other, and the second sees the event the first created. The key leaves out the date, so two sources placing one game on different UTC dates take the same lock. See [locks and transactions](#locks-and-transactions) for the order rule.
-2. **MLB by `gamePk`.** The event holding the `gamePk` as an `mlb_stats_api` external id, else the one holding it in `events.mlb_game_pk`.
+2. **MLB by `gamePk`.** The event holding the `gamePk` as an `mlb_stats_api` external id (`odds_lambda.storage.game_pks.event_holding_game_pk`).
 3. **By source id.** The event holding (`source`, `external_id`); for the Odds API, else the event keyed by the id, which an event stored before ids were recorded is. For MLB an event found this way counts only when it holds no `gamePk`, since the `gamePk` is the game's identity.
 4. **Match.** For a live game, the nearest event of the same sport and teams within ±2 h (`odds_lambda.storage.event_merge.find_match_candidates`) of the game's kick-off: for MLB the schedule's start when it has one, else the listed start. Ties go to the event with the lowest `surrogate_id`, the one stored first. For MLB only events holding no `gamePk` count, and none matches when another game of the pair that day (`sibling_starts`) is scheduled nearer to the nearest event, so a doubleheader's second game never takes the first game's event.
 5. **Create.** A SCHEDULED event at that kick-off with id `legacy_id`. When that id belongs to another event, the id with the `gamePk` (MLB) or the source id appended after `_` is used and `event_id_collision` is logged. Each id is checked before the insert, so when every choice is taken `odds_lambda.storage.event_resolver.EventIdTaken` is raised with nothing written and the caller's transaction intact.
@@ -43,7 +44,7 @@ Team names are normalized with `odds_core.team.normalize_team_name` first.
 Then it records the ids and moves the kick-off:
 
 - The source's id, when the game has one.
-- For MLB, the `gamePk` as an `mlb_stats_api` id; an event recording it that has no `mlb_game_pk` also takes it there (`odds_core.models.Event.assign_game_pk`).
+- For MLB, the `gamePk` as an `mlb_stats_api` id (`odds_lambda.storage.event_resolver.record_game_pk`), which also writes it to `events.mlb_game_pk` (`odds_core.models.Event.assign_game_pk`) and undoes [no game in the schedule](#no-game-in-the-schedule). Readers find an event's `gamePk`, and the event holding a `gamePk`, in `event_external_ids` only (`odds_lambda.storage.game_pks`, whose `odds_lambda.storage.game_pks.events_holding_game_pks_by_pk` looks up many at once).
 - `odds_lambda.storage.event_kickoff.move_kickoff` once, with the current time as the clock (the MLB Stats API and football-data.co.uk may move an event to a past start): for MLB with the MLB Stats API and the schedule's start; for other sports with the source and its listed start. `odds_lambda.storage.event_kickoff.move_kickoff` alone decides whether it moves: only a sport's schedule authority moves the event, and an in-play start after the stored kick-off is refused, and football-data.co.uk moves only an event no other source has a snapshot on ([Kick-off authority](kickoff-authority.md)).
 
 It flushes and never commits ([Commit contract](storage-layer.md#commit-contract)).
@@ -62,7 +63,7 @@ A historical game (`odds_lambda.storage.event_resolver.MatchWindow.HISTORICAL`) 
 
 ## No game in the schedule
 
-`odds_lambda.storage.event_unmatched.mark_unmatched(session, event, reason)` records that an MLB event has no game in MLB's schedule. It sets the status to UNMATCHED and stores `reason` as the event's `missing_mlb_game_pk` acknowledgement (`odds_core.models.HealthCheckAcknowledgement`, [Events table](events.md#health-check-acknowledgements)), replacing an earlier reason. An event whose status cannot become UNMATCHED (`odds_core.models.EventStatus.can_become`, a FINAL one) keeps its status and still gets the acknowledgement. It raises `ValueError` for an empty reason, a non-MLB event or one holding a `gamePk`. `odds_lambda.storage.game_pk_backfill.mark_no_game_pk` (`odds events mark-unassignable`) is its caller and also writes `events.no_game_pk_reason`, the column settlement and the gamePk planning read. `odds_lambda.storage.event_unmatched.clear_unmatched` undoes it when the event gets a `gamePk`, from the resolver or from `odds_lambda.storage.game_pk_backfill.apply_assignment`: the acknowledgement is deleted and an UNMATCHED event becomes SCHEDULED ([Event status lifecycle](../collection/event-status-lifecycle.md)).
+`odds_lambda.storage.event_unmatched.mark_unmatched(session, event, reason)` records that an MLB event has no game in MLB's schedule. It sets the status to UNMATCHED and stores `reason` as the event's `missing_mlb_game_pk` acknowledgement (`odds_core.models.HealthCheckAcknowledgement`, [Events table](events.md#health-check-acknowledgements)), replacing an earlier reason. An event whose status cannot become UNMATCHED (`odds_core.models.EventStatus.can_become`, a FINAL one) keeps its status and still gets the acknowledgement. It raises `ValueError` for an empty reason, a non-MLB event or one holding a `gamePk`. `odds_lambda.storage.game_pk_backfill.mark_no_game_pk` (`odds events mark-unassignable`) is its caller. Settlement leaves the event out by its UNMATCHED status (`odds_lambda.storage.unsettled_events.find_unsettled_events` takes only SCHEDULED and LIVE events). The `gamePk` health check and the gamePk planning read the acknowledgement instead (`odds_lambda.storage.event_unmatched.unmatched_reasons`), because a FINAL event keeps its status when marked and would otherwise be listed and planned again on every run. `odds_lambda.storage.event_unmatched.clear_unmatched` undoes it when the event gets a `gamePk` (`odds_lambda.storage.event_resolver.record_game_pk`, from the resolver or from `odds_lambda.storage.game_pk_backfill.apply_assignment`): the acknowledgement is deleted and an UNMATCHED event becomes SCHEDULED ([Event status lifecycle](../collection/event-status-lifecycle.md)).
 
 ## Locks and transactions
 
