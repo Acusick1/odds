@@ -121,6 +121,6 @@ class TestRunnerThenParity:
 
         assert [d.status for d in report.decisions] == [ParityStatus.MATCH]
         [difference] = report.data_differences
-        assert difference.replayed == (("home", "bet365", 2.2, 1.0),)
-        assert difference.db_replayed == (("home", "bet365", 2.5, 1.0),)
+        assert difference.replayed == (("home", None, "bet365", 2.2, 1.0),)
+        assert difference.db_replayed == (("home", None, "bet365", 2.5, 1.0),)
         assert report.ok

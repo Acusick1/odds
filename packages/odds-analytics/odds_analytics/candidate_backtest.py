@@ -16,12 +16,10 @@ from enum import StrEnum
 
 from odds_core.betfair_close import close_quotes
 from odds_core.candidates import MechanicalCandidate
-from odds_core.market_prices import Outcome
 from odds_core.models import Event, EventStatus
-from odds_core.odds_math import calculate_profit_from_decimal, determine_h2h_winner
+from odds_core.odds_math import calculate_profit_from_decimal, selection_won
 from odds_lambda.candidate_rules import (
     RULES,
-    BetIntent,
     ModelRuleSpec,
     RetailEvModelParams,
     RuleParams,
@@ -134,18 +132,6 @@ async def final_events(session: AsyncSession, sport: str, start: date, end: date
     return await canonical_events(session, result.scalars().all())
 
 
-def won(intent: BetIntent, home_score: int, away_score: int) -> bool:
-    """Whether the bet won: its outcome is the result, or the goals are over or under its line."""
-    goals = home_score + away_score
-    if intent.outcome is Outcome.OVER:
-        assert intent.line is not None  # noqa: S101
-        return goals > intent.line
-    if intent.outcome is Outcome.UNDER:
-        assert intent.line is not None  # noqa: S101
-        return goals < intent.line
-    return intent.outcome.value == determine_h2h_winner(home_score, away_score)
-
-
 @dataclass
 class _Counts:
     decisions: int = 0
@@ -200,7 +186,12 @@ async def _decide(
                         pnl=calculate_profit_from_decimal(
                             intent.stake,
                             intent.price_decimal,
-                            won=won(intent, event.home_score, event.away_score),
+                            won=selection_won(
+                                intent.outcome.value,
+                                intent.line,
+                                event.home_score,
+                                event.away_score,
+                            ),
                         ),
                         price_decimal=intent.price_decimal,
                         p_close=selection_close_probability(

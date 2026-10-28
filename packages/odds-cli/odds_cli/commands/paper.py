@@ -4,6 +4,7 @@ import asyncio
 
 import typer
 from odds_core.database import async_session_maker
+from odds_core.paper_trade_models import PaperTrade
 from odds_lambda.paper_trading import (
     get_exposure_by_event,
     get_open_trades,
@@ -16,6 +17,10 @@ from rich.table import Table
 
 app = typer.Typer()
 console = Console()
+
+
+def _selection(trade: PaperTrade) -> str:
+    return trade.selection if trade.line is None else f"{trade.selection} {trade.line:g}"
 
 
 @app.command("list")
@@ -57,7 +62,7 @@ async def _list_trades(settled: bool, limit: int) -> None:
                 row = [
                     str(trade.id),
                     trade.event_id[:12] + "...",
-                    trade.selection,
+                    _selection(trade),
                     trade.bookmaker,
                     f"{trade.price_decimal:.2f}",
                     f"{trade.stake:.2f}",
@@ -120,7 +125,7 @@ async def _settle() -> None:
                 table.add_row(
                     str(trade.id),
                     trade.event_id[:12] + "...",
-                    trade.selection,
+                    _selection(trade),
                     f"[{result_color}]{result_str}[/{result_color}]",
                     pnl_str,
                 )

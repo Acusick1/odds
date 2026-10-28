@@ -18,7 +18,7 @@ from enum import StrEnum
 import numpy as np
 from odds_core.betfair_close import close_quotes, event_close
 from odds_core.candidates import Candidate, CandidateStatus, MechanicalCandidate
-from odds_core.market_prices import THREE_WAY_MARKET, Outcome
+from odds_core.market_prices import Outcome
 from odds_core.models import Event
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade, TradeResult
 from odds_core.quotes import Quote
@@ -320,8 +320,14 @@ async def load_scored_trades(session: AsyncSession) -> list[ScoredBet]:
         .order_by(PaperTrade.placed_at, PaperTrade.id)  # type: ignore[arg-type]
     )
     rows = (await session.execute(stmt)).all()
-    events = {event.id: event for trade, event in rows if trade.market == THREE_WAY_MARKET}
-    closes = await close_quotes(session, list(events.values()), THREE_WAY_MARKET)
+    events: dict[str, dict[str, Event]] = defaultdict(dict)
+    for trade, event in rows:
+        if trade.market in CLOSE_MARKETS:
+            events[trade.market][event.id] = event
+    closes = {
+        market: await close_quotes(session, list(by_id.values()), market)
+        for market, by_id in events.items()
+    }
 
     scored: list[ScoredBet] = []
     for trade, event in rows:
@@ -335,9 +341,12 @@ async def load_scored_trades(session: AsyncSession) -> list[ScoredBet]:
                 stake=trade.stake,
                 pnl=trade.pnl,
                 price_decimal=trade.price_decimal,
-                # A paper trade records no line: the live runner bets only markets without lines.
                 p_close=selection_close_probability(
-                    Market(trade.market), trade.selection, None, event, closes.get(event.id, [])
+                    Market(trade.market),
+                    trade.selection,
+                    trade.line,
+                    event,
+                    closes.get(trade.market, {}).get(event.id, []),
                 ),
                 placed_at=trade.placed_at,
             )

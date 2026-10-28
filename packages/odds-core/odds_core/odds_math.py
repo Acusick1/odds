@@ -104,6 +104,22 @@ def determine_h2h_winner(home_score: int, away_score: int) -> str:
     return "draw"
 
 
+def selection_won(selection: str, line: float | None, home_score: int, away_score: int) -> bool:
+    """Whether a selection won on the final score: home, draw or away is the result, and over
+    or under a half ``line`` compares the total score with it.
+
+    Raises ``ValueError`` for an over or under without a half line, which could push.
+    """
+    if selection in ("over", "under"):
+        if line is None or line % 1 != 0.5:
+            raise ValueError(f"A totals selection needs a half line, got {line}")
+        total = home_score + away_score
+        return total > line if selection == "over" else total < line
+    if line is not None:
+        raise ValueError(f"Selection {selection!r} takes no line, got {line}")
+    return selection == determine_h2h_winner(home_score, away_score)
+
+
 def calculate_profit_from_odds(stake: float, american_odds: int, won: bool) -> float:
     """Profit (positive) or loss (negative) for a bet at given American odds.
 

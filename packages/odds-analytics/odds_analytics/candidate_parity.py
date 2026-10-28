@@ -39,7 +39,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-BetKey = tuple[str, str, float, float]
+BetKey = tuple[str, float | None, str, float, float]
 
 
 class ParityStatus(StrEnum):
@@ -88,13 +88,15 @@ class ParityReport:
         return not self.of(ParityStatus.MISMATCH)
 
 
-def bet_key(outcome: str, bookmaker: str, price: float, stake: float) -> BetKey:
-    return (outcome, bookmaker, round(price, 9), round(stake, 9))
+def bet_key(outcome: str, line: float | None, bookmaker: str, price: float, stake: float) -> BetKey:
+    return (outcome, line, bookmaker, round(price, 9), round(stake, 9))
 
 
 def intent_keys(intents: list[BetIntent]) -> tuple[BetKey, ...]:
     return tuple(
-        sorted(bet_key(i.outcome.value, i.bookmaker, i.price_decimal, i.stake) for i in intents)
+        sorted(
+            bet_key(i.outcome.value, i.line, i.bookmaker, i.price_decimal, i.stake) for i in intents
+        )
     )
 
 
@@ -204,7 +206,7 @@ async def check_parity(
             trades[trade.decision_id].append(trade)
 
     # Selections bet so far per event, live and by the database replay; decisions come in
-    # live order. A paper trade records no line.
+    # live order.
     live_selections: dict[str, set[Selection]] = defaultdict(set)
     db_replayed_selections: dict[str, set[Selection]] = defaultdict(set)
     results: list[DecisionParity] = []
@@ -214,7 +216,7 @@ async def check_parity(
         assert event is not None  # noqa: S101
         live = tuple(
             sorted(
-                bet_key(t.selection, t.bookmaker, t.price_decimal, t.stake)
+                bet_key(t.selection, t.line, t.bookmaker, t.price_decimal, t.stake)
                 for t in trades[decision.id]
             )
         )
@@ -237,7 +239,7 @@ async def check_parity(
             db_replayed_selections[decision.event_id],
         )
         live_selections[decision.event_id].update(
-            (Outcome(t.selection), None) for t in trades[decision.id]
+            (Outcome(t.selection), t.line) for t in trades[decision.id]
         )
         db_replayed_selections[decision.event_id].update(b.selection for b in db_replayed_bets)
         replayed, db_replayed = intent_keys(replayed_bets), intent_keys(db_replayed_bets)

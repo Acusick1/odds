@@ -33,6 +33,7 @@ from tests.test_helpers import (
     make_tagged_snapshot,
     store_tagged,
     three_way_bookmaker,
+    totals_book,
 )
 
 N_BOOT = 400
@@ -508,6 +509,44 @@ class TestLoadScoredBets:
         assert home.ev == pytest.approx(0.5 * 2.2 - 1)
         assert draw.p_close == pytest.approx(0.25)
         assert draw.ev == pytest.approx(0.25 * 4.5 - 1)
+
+    @pytest.mark.asyncio
+    async def test_each_trade_is_scored_against_the_close_on_its_line(
+        self, test_session: AsyncSession
+    ) -> None:
+        from odds_analytics.candidate_report import load_scored_trades
+
+        session = test_session
+        e1 = make_epl_event("e1", KICKOFF, status=EventStatus.FINAL)
+        session.add(e1)
+        await session.flush()
+        await _store_close(session, e1)
+        # The live totals close prices 2.5 only, so the trade on 3.5 has no close.
+        await store_tagged(
+            session,
+            make_tagged_snapshot(
+                e1.id,
+                KICKOFF - timedelta(minutes=10),
+                [totals_book("betfair_exchange", {2.5: (2.1, 1.9)}, betfair_runners=True)],
+                "betfair_api",
+            ),
+        )
+        session.add(_paper_trade("e1", 1))
+        session.add(
+            _paper_trade("e1", 2, market="totals", selection="over", line=2.5, price_decimal=2.3)
+        )
+        session.add(
+            _paper_trade("e1", 3, market="totals", selection="under", line=3.5, price_decimal=1.6)
+        )
+        await session.flush()
+
+        home, over, under = await load_scored_trades(session)
+
+        assert home.p_close == pytest.approx(0.5)
+        over_close = (1 / 2.1) / (1 / 2.1 + 1 / 1.9)
+        assert over.p_close == pytest.approx(over_close)
+        assert over.ev == pytest.approx(over_close * 2.3 - 1)
+        assert under.p_close is None
 
     @pytest.mark.asyncio
     async def test_close_quotes_give_the_close_of_all_quotes(

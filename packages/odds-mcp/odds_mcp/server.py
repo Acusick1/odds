@@ -134,6 +134,7 @@ def _trade_to_dict(trade: PaperTrade) -> dict[str, Any]:
         "event_id": trade.event_id,
         "market": trade.market,
         "selection": trade.selection,
+        "line": trade.line,
         "bookmaker": trade.bookmaker,
         "price_decimal": trade.price_decimal,
         "stake": trade.stake,
