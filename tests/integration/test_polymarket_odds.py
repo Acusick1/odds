@@ -30,6 +30,11 @@ from odds_lambda.polymarket_odds import (
 )
 from odds_lambda.polymarket_odds_backfill import backfill_sport
 from odds_lambda.scheduling.jobs import JobContext
+from odds_lambda.storage.shaped_snapshots import (
+    SnapshotShape,
+    store_payload,
+    store_shaped_snapshot,
+)
 from sqlalchemy import select
 
 from tests.test_helpers import (
@@ -179,6 +184,26 @@ class TestBackfill:
                 [polymarket_bookmaker((0.5, 0.25, 0.25))],
                 "polymarket",
             ),
+        )
+        await pglite_async_session.commit()
+
+        report = await backfill_sport("soccer_epl", since=KICKOFF - timedelta(days=1))
+
+        assert (report.events_skipped_existing, report.events_written) == (0, 1)
+
+    async def test_a_live_snapshot_without_quotes_is_not_history(
+        self, pglite_async_session: Any, finished_event: Any, patch_backfill: FakeClient
+    ) -> None:
+        bookmaker = polymarket_bookmaker((0.5, 0.25, 0.25))
+        bookmaker["polymarket_meta"] |= {"best_bid": {}, "best_ask": {}}
+        envelope = {"bookmakers": [bookmaker]}
+        payload_id = await store_payload(pglite_async_session, [envelope])
+        await store_shaped_snapshot(
+            pglite_async_session,
+            finished_event,
+            envelope,
+            KICKOFF - timedelta(hours=7, minutes=1),
+            SnapshotShape(Source.POLYMARKET, TimeBasis.OBSERVED, payload_id),
         )
         await pglite_async_session.commit()
 

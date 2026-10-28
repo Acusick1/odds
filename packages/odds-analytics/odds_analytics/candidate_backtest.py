@@ -77,8 +77,8 @@ class Coverage:
 @dataclass(frozen=True)
 class BacktestResult:
     """``overall`` is the estimate over every bet with a close in the scoreable prefix,
-    beyond the checkpoint cap of the verdict. ``range_events`` counts the canonical events in
-    the range, a model rule's training prefix included; ``tuning`` and ``refits`` record a model
+    beyond the checkpoint cap of the verdict. ``range_events`` counts the events in the
+    range, a model rule's training prefix included; ``tuning`` and ``refits`` record a model
     rule's hyperparameters chosen on that prefix and its fits, and ``library_versions`` the
     versions of the libraries that fitted and tuned it. ``comparison`` is another candidate replayed on the same decided events."""
 

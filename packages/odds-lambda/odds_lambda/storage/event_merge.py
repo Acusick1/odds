@@ -14,6 +14,7 @@ from sqlalchemy import and_, delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.storage.data_quality import record_issue
+from odds_lambda.storage.event_kickoff import KICKOFF_AUTHORITY
 from odds_lambda.storage.event_unmatched import clear_unmatched
 from odds_lambda.storage.game_pks import game_pks_of, holds_game_pk
 
@@ -70,15 +71,40 @@ async def find_match_id(
     commence_time: datetime,
     sport_key: str,
 ) -> str | None:
-    """The event within ``EVENT_MATCH_WINDOW``, the first stored when there are several
-    (``first_stored``). Read-only."""
+    """The event within ``EVENT_MATCH_WINDOW``; of several, the one a merge would keep
+    (``kept_event``). Read-only."""
     events = await find_match_candidates(session, home_team, away_team, commence_time, sport_key)
-    return first_stored(events).id if events else None
+    return (await kept_event(session, events)).id if events else None
 
 
 def first_stored(events: Sequence[Event]) -> Event:
-    """The event stored first, by surrogate key: the one kept when several name one match."""
+    """The event stored first, by surrogate key."""
     return min(events, key=lambda event: (event.surrogate_id is None, event.surrogate_id or 0))
+
+
+async def kept_event(session: AsyncSession, events: Sequence[Event]) -> Event:
+    """The event of one match that a merge keeps: the one holding an id from the source its
+    sport's kick-off authority order (``KICKOFF_AUTHORITY``) ranks highest, so the kept kick-off
+    is the best source's; events no ranked source names, and ties, go to the first stored.
+    Read-only."""
+    if len(events) == 1:
+        return events[0]
+    order = KICKOFF_AUTHORITY.get(events[0].sport_key, ())  # type: ignore[call-overload]
+    rows = await session.execute(
+        select(EventExternalId.event_id, EventExternalId.source).where(
+            EventExternalId.event_id.in_([e.surrogate_id for e in events])  # type: ignore[attr-defined]
+        )
+    )
+    rank: dict[int, int] = {}
+    for event_id, source in rows.all():
+        if source in order:
+            rank[event_id] = min(rank.get(event_id, len(order)), order.index(source))
+
+    def rank_of(event: Event) -> int:
+        return rank.get(event.surrogate_id, len(order)) if event.surrogate_id else len(order)
+
+    best = min(rank_of(e) for e in events)
+    return first_stored([e for e in events if rank_of(e) == best])
 
 
 async def find_match_candidates(
@@ -181,8 +207,8 @@ class EventMerger:
         return groups
 
     async def merge_group(self, events: Sequence[Event]) -> MergeReport:
-        """Merge twins into the first stored of them (``first_stored``)."""
-        keep = first_stored(events)
+        """Merge twins into the one ``kept_event`` picks."""
+        keep = await kept_event(self.session, events)
         duplicates = sorted((e for e in events if e is not keep), key=lambda e: e.id)
         return await self.merge(keep, duplicates)
 

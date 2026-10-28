@@ -112,7 +112,7 @@ class EventDataBundle:
 
 def tiers_of(snapshots: Sequence[SnapshotQuotes], kickoff: datetime) -> list[FetchTier]:
     """The tier each of an event's snapshots covers (``odds_lambda.tier_utils.snapshot_tiers``),
-    from its time, source, time basis and market; never the stored ``fetch_tier``."""
+    from its time, source, time basis and market."""
     return snapshot_tiers(
         [(s.snapshot_time, s.source, s.time_basis, s.market) for s in snapshots], kickoff
     )
@@ -226,7 +226,7 @@ class SnapshotSampler(Protocol):
 class TierSampler:
     """Returns the latest snapshot no closer to game than the decision tier (single row per event).
 
-    A snapshot's tier is the one ``tiers_of`` derives, never the stored ``fetch_tier``.
+    A snapshot's tier is the one ``tiers_of`` derives.
     Snapshots in the decision tier
     or any earlier tier (further from game) are candidates. When required_bookmakers is set,
     only snapshots quoting at least one of them are eligible, and with ``sources`` only

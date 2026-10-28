@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.betfair.adapter import canonical_teams
 from odds_lambda.betfair.constants import SPORT_CONFIG
-from odds_lambda.storage.event_merge import EventMerger, MergeReport, first_stored
+from odds_lambda.storage.event_merge import EventMerger, MergeReport, kept_event
 
 logger = structlog.get_logger()
 
@@ -166,8 +166,8 @@ async def find_misnamed_events(
 async def repair_team_names(session: AsyncSession, sport_key: str) -> NameRepairReport:
     """Give Betfair-created events their canonical team names and merge the twins that creates.
 
-    A merged group keeps its first-stored event that was never renamed, so the
-    kept event has the real kick-off and a clean id; only a group made solely of
+    A merged group keeps an event that was never renamed, so the kept event has a
+    clean id, the best-sourced of them by ``kept_event``; only a group made solely of
     renamed events keeps one of those. Doubleheader games stay apart: groups
     are events of the same teams within ``EVENT_MATCH_WINDOW``. Runs in the
     caller's transaction and is a no-op once every name is canonical.
@@ -186,7 +186,7 @@ async def repair_team_names(session: AsyncSession, sport_key: str) -> NameRepair
             continue
         status_by_id.update({event.id: event.status for event in group})
         originals = [event for event in group if event.id not in renamed_ids]
-        keep = first_stored(originals or group)
+        keep = await kept_event(session, originals or group)
         duplicates = [event for event in group if event is not keep]
         merges.append(await merger.merge(keep, duplicates))
 

@@ -9,7 +9,9 @@ sources:
   - odds_lambda.storage.event_merge.find_match_id
   - odds_lambda.storage.event_merge.find_match_candidates
   - odds_lambda.storage.event_merge.find_historical_candidates
+  - odds_lambda.storage.event_merge.kept_event
   - odds_lambda.storage.event_merge.first_stored
+  - odds_lambda.storage.event_kickoff.KICKOFF_AUTHORITY
   - odds_lambda.storage.event_name_repair.repair_team_names
   - odds_lambda.storage.game_pk_backfill
   - odds_lambda.storage.event_kickoff.move_kickoff
@@ -30,20 +32,20 @@ A match must be one `events` row, because rows that join prices from several sou
 
 ## Kept event
 
-When nothing else decides which event of a match to keep, the first stored is kept: `odds_lambda.storage.event_merge.first_stored` picks the lowest `surrogate_id`. Jobs find an event by its external ids, not its key, so which id survives does not matter to them. The kept event keeps its own commence time.
+When nothing else decides which event of a match to keep, `odds_lambda.storage.event_merge.kept_event` keeps the one holding an external id from the source its sport's [kick-off authority](kickoff-authority.md) order (`odds_lambda.storage.event_kickoff.KICKOFF_AUTHORITY`) ranks highest, since the kept event keeps its own commence time and that source's kick-off is the best. Events no ranked source names (a football-data.co.uk event holds no id) come last, and ties go to the first stored (`odds_lambda.storage.event_merge.first_stored`, the lowest `surrogate_id`). Jobs find an event by its external ids, not its key, so which key survives does not matter to them.
 
 Events holding different MLB `gamePk`s (`mlb_stats_api` external ids, `odds_lambda.storage.game_pks.game_pks_of`; [Event matching](event-matching.md#mlb-gamepk-resolver)) are different games, so they are never twins and never merge.
 
 ## Finding and merging are separate
 
-The finders only read. `odds_lambda.storage.event_merge.find_match_id` (±2 h, used by `odds_lambda.live_events.LiveEventFinder.fixture_key`) returns the first-stored candidate; `odds_lambda.storage.event_merge.find_match_candidates` returns every candidate, for the [event resolver](event-resolver.md#steps) and the MLB claim rules ([live MLB events](event-matching.md#live-mlb-events)). `odds_lambda.storage.event_merge.find_historical_candidates` (±24 h, same sport) returns every candidate for the historical loaders, which the resolver reduces to a lone candidate or the nearest within ±2 h ([Event resolver](event-resolver.md#steps)), so neighbouring fixtures of the same teams (an NBA back-to-back) are never conflated. No finder merges or deletes.
+The finders only read. `odds_lambda.storage.event_merge.find_match_id` (±2 h, used by `odds_lambda.live_events.LiveEventFinder.fixture_key`) returns the candidate `odds_lambda.storage.event_merge.kept_event` picks; `odds_lambda.storage.event_merge.find_match_candidates` returns every candidate, for the [event resolver](event-resolver.md#steps) and the MLB claim rules ([live MLB events](event-matching.md#live-mlb-events)). `odds_lambda.storage.event_merge.find_historical_candidates` (±24 h, same sport) returns every candidate for the historical loaders, which the resolver reduces to a lone candidate or the nearest within ±2 h ([Event resolver](event-resolver.md#steps)), so neighbouring fixtures of the same teams (an NBA back-to-back) are never conflated. No finder merges or deletes.
 
 Merging happens in three places only:
 
 | Caller | Entry point |
 |---|---|
-| `odds events repair-names --apply` | `odds_lambda.storage.event_name_repair.repair_team_names`: fixes annotated, cut-off and `Game N` team names of live-scraped events, taking full Betfair runner names from the snapshot payload of each event's latest Betfair snapshot (`snapshot_payloads`; a run payload's envelope is the one carrying the event's Betfair id, or one it was refused, replaced or dropped for in `data_quality_logs`, and an event whose envelope is not found is logged as `betfair_envelope_not_found`; and a database copied with `odds copy from-prod` has no payloads, so only the name cleaning applies there), then merges each resulting twin group into its first-stored event that was never renamed |
-| `odds events merge-twins --apply` | `odds_lambda.storage.event_merge.EventMerger.merge_group` for every twin group, keeping its first-stored event |
+| `odds events repair-names --apply` | `odds_lambda.storage.event_name_repair.repair_team_names`: fixes annotated, cut-off and `Game N` team names of live-scraped events, taking full Betfair runner names from the snapshot payload of each event's latest Betfair snapshot (`snapshot_payloads`; a run payload's envelope is the one carrying the event's Betfair id, or one it was refused, replaced or dropped for in `data_quality_logs`, and an event whose envelope is not found is logged as `betfair_envelope_not_found`; and a database copied with `odds copy from-prod` has no payloads, so only the name cleaning applies there), then merges each resulting twin group into the event `odds_lambda.storage.event_merge.kept_event` picks among those never renamed |
+| `odds events merge-twins --apply` | `odds_lambda.storage.event_merge.EventMerger.merge_group` for every twin group, keeping the event `odds_lambda.storage.event_merge.kept_event` picks |
 | `odds events assign-game-pks --apply`, `odds events set-game-pk --merge --apply` | `odds_lambda.storage.game_pk_backfill.apply_assignment`: the events of one MLB `gamePk` ([Assigning gamePks](#assigning-gamepks)) |
 
 The production copier does not merge. It replaces the rows of the one local event it matched (by external id, event id or fixture; a fixture match holding a different id from one of the production event's sources is refused, [copying](../foundations/databases-and-environments.md#copying-production-data)), so merging a local twin into that event first would delete the twin's own rows (football-data.co.uk, Polymarket, Betfair history) with the replaced ones, and a scraper event could absorb an Odds API event. It leaves local twins in place and reports how many matches have them.

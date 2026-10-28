@@ -8,11 +8,10 @@ from datetime import datetime
 
 import structlog
 from odds_core.database import async_session_maker
-from odds_core.models import Event, EventStatus, OddsSnapshot, Price
+from odds_core.models import Event, EventStatus, OddsSnapshot, SnapshotPayload
 from odds_core.sports import SportKey
-from odds_core.vocabulary import Side as PriceSide
 from odds_core.vocabulary import Source, TimeBasis
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -75,19 +74,18 @@ async def _fetch_series(
 
 
 async def _history_event_ids(session: AsyncSession) -> set[str]:
-    """Events holding a Polymarket history snapshot: history snapshots hold midpoints only,
-    where live ones also hold the bid and ask quotes (``build_envelope`` with quotes)."""
-    quoted = (
-        select(Price.id)
-        .where(
-            col(Price.snapshot_id) == col(OddsSnapshot.id),
-            col(Price.side).in_((PriceSide.BACK, PriceSide.LAY)),
-        )
-        .exists()
-    )
+    """Events holding a Polymarket history snapshot: one whose payload is its own envelope with
+    no quotes, where a live run's envelopes, listed in its payload, always carry the bid and ask
+    keys (``build_envelope`` with ``include_quotes``)."""
+    meta = SnapshotPayload.payload[("bookmakers", 0, "polymarket_meta")]  # type: ignore[index]
     rows = await session.execute(
         select(OddsSnapshot.event_id)
-        .where(OddsSnapshot.source == Source.POLYMARKET, ~quoted)
+        .join(SnapshotPayload, col(SnapshotPayload.id) == col(OddsSnapshot.payload_id))
+        .where(
+            OddsSnapshot.source == Source.POLYMARKET,
+            func.jsonb_typeof(SnapshotPayload.payload) == "object",
+            ~meta.has_key("best_bid"),
+        )
         .distinct()
     )
     return set(rows.scalars())

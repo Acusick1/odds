@@ -15,7 +15,11 @@ health-check acknowledgement (#658). This drops what they replace:
 - the ``polymarket_*`` tables and their ``polymarketmarkettype`` enum.
 
 The upgrade first refuses, dropping nothing, while any of them holds data found nowhere else
-(``_GUARDS``). The downgrade recreates the structures empty; the dropped data does not come back.
+(``_GUARDS``): odds rows, raw_data, gamePks, no-gamePk reasons, legacy Polymarket moneyline prices
+of linked events and order books. It drops knowingly the legacy Polymarket rows the history
+migration left out (games linked to no event, spread and total markets, probabilities outside
+0 to 1) and ``polymarket_fetch_logs``. The downgrade recreates the structures empty; the dropped
+data does not come back.
 """
 
 import sqlalchemy as sa
@@ -69,6 +73,12 @@ _GUARDS: tuple[tuple[str, str], ...] = (
         " AND ps.outcome_1_price > 0 AND ps.outcome_1_price < 1"
         " AND NOT EXISTS (SELECT 1 FROM odds_snapshots s WHERE s.event_id = pe.event_id"
         " AND s.source = 'polymarket' AND s.snapshot_time = ps.snapshot_time)",
+    ),
+    (
+        "legacy Polymarket order books no payload archives",
+        "SELECT count(*) FROM polymarket_orderbook_snapshots b WHERE NOT EXISTS ("
+        " SELECT 1 FROM snapshot_payloads p WHERE p.payload ? 'polymarket_order_book'"
+        " AND (p.payload -> 'polymarket_order_book' ->> 'id')::int = b.id)",
     ),
 )
 

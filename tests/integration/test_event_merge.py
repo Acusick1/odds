@@ -204,6 +204,36 @@ class TestMergeGroup:
         assert await _stored_event_ids(session) == {FDUK_EVENT_ID}
 
     @pytest.mark.asyncio
+    async def test_keeps_the_event_of_the_highest_ranked_kickoff_source(
+        self, pglite_async_session
+    ) -> None:
+        session = pglite_async_session
+        fduk = make_epl_event(FDUK_EVENT_ID)
+        api = make_epl_event(API_EVENT_ID, TWIN_KICKOFF + timedelta(minutes=30))
+        live = make_epl_event(TWIN_EVENT_ID, TWIN_KICKOFF + timedelta(minutes=15))
+        for event in (fduk, api, live):
+            session.add(event)
+            await session.flush()
+        session.add_all(
+            [
+                EventExternalId(
+                    source=Source.ODDS_API, external_id="apihex", event_id=api.surrogate_id
+                ),
+                EventExternalId(
+                    source=Source.ODDSPORTAL, external_id="Kl1AOZN9", event_id=live.surrogate_id
+                ),
+            ]
+        )
+        await session.flush()
+
+        [group] = await EventMerger(session).find_twin_groups("soccer_epl")
+        report = await EventMerger(session).merge_group(group)
+
+        assert report.kept_id == TWIN_EVENT_ID
+        kept = await session.get(Event, TWIN_EVENT_ID)
+        assert kept is not None and kept.commence_time == TWIN_KICKOFF + timedelta(minutes=15)
+
+    @pytest.mark.asyncio
     async def test_moves_rows_from_every_duplicate(self, live_twin_with_rows) -> None:
         session = live_twin_with_rows
         session.add_all([make_epl_event(API_EVENT_ID), make_epl_event(FDUK_EVENT_ID)])
