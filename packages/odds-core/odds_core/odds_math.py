@@ -55,7 +55,7 @@ def decimal_to_implied_probability(decimal_odds: float) -> float:
 
 
 def outcome_price_decimal(outcome: Mapping[str, Any]) -> float:
-    """Decimal price of a ``raw_data`` outcome.
+    """Decimal price of an envelope outcome.
 
     Snapshots built by this pipeline carry the source's decimal price under
     ``price_decimal``. The Odds API's own responses carry its integer American

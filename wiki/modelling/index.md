@@ -12,7 +12,7 @@ These pages cover the training targets (the `retail_ev` target and the `raw` lin
 
 - [Cross-validation](cross-validation.md) — How cross_validation.py builds walk-forward folds, the other CV methods, per-fold metrics and train_with_cv.
 - [EPL standings and schedule features](epl-context-features.md) — The standings and epl_schedule extractors behind the retail-EV as-of-t groups, with their inputs, windows, point-in-time rules and data dependencies.
-- [Feature groups](feature-groups.md) — The catalogue of static feature groups and column counts, the tabular extractor and its sharp and retail defaults, and the NBA injury, rest and Polymarket groups.
+- [Feature groups](feature-groups.md) — The catalogue of static feature groups and column counts, the tabular extractor and its sharp and retail defaults, and the NBA injury and rest groups.
 - [Feature pipeline](feature-pipeline.md) — The five layers of odds_analytics.feature_groups, samplers, adapters, orchestrator, NaN-fill and variance policy.
 - [Hyperparameter tuner (Optuna)](hyperparameter-tuner.md) — OptunaTuner, the objective, search-space schema, feature selection and CLI options, with the example search spaces cited by file.
 - [Line-movement model (XGBoost)](line-movement-models.md) — The XGBoost regressor wrapper behind odds train, covering fitting, base margin, config-driven training, and saving and loading.

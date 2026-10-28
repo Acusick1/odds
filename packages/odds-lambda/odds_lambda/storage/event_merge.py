@@ -6,8 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 import structlog
-from odds_core.event_source import EventSource, canonical_event_id
-from odds_core.models import Event, EventExternalId, HealthCheckAcknowledgement, OddsSnapshot
+from odds_core.models import Event, EventExternalId, HealthCheckAcknowledgement
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from odds_core.time import ensure_utc
 from odds_core.vocabulary import HealthCheck, Source
@@ -17,7 +16,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from odds_lambda.storage.data_quality import record_issue
 from odds_lambda.storage.event_unmatched import clear_unmatched
 from odds_lambda.storage.game_pks import game_pks_of, holds_game_pk
-from odds_lambda.tier_utils import calculate_hours_until_commence, snapshot_tiers
 
 logger = structlog.get_logger()
 
@@ -36,10 +34,6 @@ class MergeReport:
     merged_ids: tuple[str, ...]
     rows_moved: dict[str, int] = field(default_factory=dict)
     rows_deleted: dict[str, int] = field(default_factory=dict)
-
-
-def source_pair(group: Sequence[Event]) -> tuple[EventSource, ...]:
-    return tuple(sorted({EventSource.of(event.id) for event in group}, key=lambda s: s.rank))
 
 
 def season_start_year(commence_time: datetime) -> int:
@@ -76,21 +70,15 @@ async def find_match_id(
     commence_time: datetime,
     sport_key: str,
 ) -> str | None:
-    """The canonical event within ``EVENT_MATCH_WINDOW``. Read-only."""
+    """The event within ``EVENT_MATCH_WINDOW``, the first stored when there are several
+    (``first_stored``). Read-only."""
     events = await find_match_candidates(session, home_team, away_team, commence_time, sport_key)
-    return canonical_event_id([e.id for e in events]) if events else None
+    return first_stored(events).id if events else None
 
 
-async def canonical_events(session: AsyncSession, events: Sequence[Event]) -> list[Event]:
-    """``events`` with each match's twins collapsed to its canonical event, order kept. Read-only."""
-    canonical: list[Event] = []
-    for event in events:
-        match_id = await find_match_id(
-            session, event.home_team, event.away_team, event.commence_time, event.sport_key
-        )
-        if match_id == event.id:
-            canonical.append(event)
-    return canonical
+def first_stored(events: Sequence[Event]) -> Event:
+    """The event stored first, by surrogate key: the one kept when several name one match."""
+    return min(events, key=lambda event: (event.surrogate_id is None, event.surrogate_id or 0))
 
 
 async def find_match_candidates(
@@ -120,37 +108,15 @@ async def find_historical_candidates(
     )
 
 
-async def retime_snapshots(session: AsyncSession, event_id: str, commence_time: datetime) -> int:
-    """Recompute ``hours_until_commence`` and ``fetch_tier`` (``snapshot_tiers``, by each
-    snapshot's time basis) of an event's snapshots against ``commence_time``. Flushes; returns
-    the number of snapshots re-timed."""
-    snapshots = (
-        (await session.execute(select(OddsSnapshot).where(OddsSnapshot.event_id == event_id)))
-        .scalars()
-        .all()
-    )
-    commence = ensure_utc(commence_time)
-    tiers = snapshot_tiers(
-        [(ensure_utc(s.snapshot_time), s.source, s.time_basis, s.market) for s in snapshots],
-        commence,
-    )
-    for snapshot, tier in zip(snapshots, tiers, strict=True):
-        snapshot_time = ensure_utc(snapshot.snapshot_time)
-        snapshot.hours_until_commence = calculate_hours_until_commence(snapshot_time, commence)
-        snapshot.fetch_tier = tier.value
-    await session.flush()
-    return len(snapshots)
-
-
 class EventMerger:
     """The one way to collapse several events for one match into a single event.
 
-    Every ``event_id`` foreign key moves to the kept event, results the kept
+    Every foreign key to ``events`` moves to the kept event, results the kept
     event lacks are carried over, and the duplicates are deleted. The kept
-    event keeps its own commence time: it is the best source, and the Odds API
-    id is kept because score and status jobs match on it. The kept event takes
-    a duplicate's ``gamePk`` when it has none; events holding different
-    ``gamePk``s raise ``ConflictingGamePks``. Runs in the caller's transaction.
+    event keeps its own commence time. It takes a duplicate's external ids from
+    sources it holds none from, its ``gamePk`` among them; events holding
+    different ``gamePk``s raise ``ConflictingGamePks``. Runs in the caller's
+    transaction.
     """
 
     def __init__(self, session: AsyncSession) -> None:
@@ -214,22 +180,11 @@ class EventMerger:
                     groups.append(season_events)
         return groups
 
-    async def merge_all_twins(
-        self, sport_key: str | None = None, window: timedelta = EVENT_MATCH_WINDOW
-    ) -> list[MergeReport]:
-        return [
-            await self.merge_group(group)
-            for group in await self.find_twin_groups(sport_key, window)
-        ]
-
     async def merge_group(self, events: Sequence[Event]) -> MergeReport:
-        by_id = {event.id: event for event in events}
-        keep_id = canonical_event_id(list(by_id))
-        duplicates = sorted(
-            (event for event in events if event.id != keep_id),
-            key=lambda event: (EventSource.of(event.id).rank, event.id),
-        )
-        return await self.merge(by_id[keep_id], duplicates)
+        """Merge twins into the first stored of them (``first_stored``)."""
+        keep = first_stored(events)
+        duplicates = sorted((e for e in events if e is not keep), key=lambda e: e.id)
+        return await self.merge(keep, duplicates)
 
     async def merge(self, keep: Event, duplicates: Sequence[Event]) -> MergeReport:
         game_pks = set((await game_pks_of(self.session, [keep, *duplicates])).values())
@@ -241,7 +196,6 @@ class EventMerger:
         rows_moved: dict[str, int] = {}
         rows_deleted: dict[str, int] = {}
         for duplicate in duplicates:
-            await self._rebase_snapshot_timing(duplicate, keep)
             for table, count in (await self._drop_clashing_decisions(duplicate, keep)).items():
                 rows_deleted[table] = rows_deleted.get(table, 0) + count
             for table, count in (await self._drop_clashing_identity_rows(duplicate, keep)).items():
@@ -250,10 +204,6 @@ class EventMerger:
                 rows_moved[table] = rows_moved.get(table, 0) + count
             self._carry_result(keep, duplicate)
             await self.session.delete(duplicate)
-        if keep.mlb_game_pk is None and game_pks:
-            # The duplicate's row must be gone before the kept event takes its unique gamePk.
-            await self.session.flush()
-            keep.assign_game_pk(game_pks.pop())
         if await holds_game_pk(self.session, keep):
             # An acknowledgement that the event has no game moved with a duplicate's rows.
             await clear_unmatched(self.session, keep)
@@ -329,12 +279,6 @@ class EventMerger:
             )
         )
         return set(rows.scalars())
-
-    async def _rebase_snapshot_timing(self, duplicate: Event, keep: Event) -> None:
-        """Recompute moved snapshots' hours and tier against the kept event's kick-off."""
-        if ensure_utc(duplicate.commence_time) == ensure_utc(keep.commence_time):
-            return
-        await retime_snapshots(self.session, duplicate.id, keep.commence_time)
 
     async def _drop_clashing_decisions(self, duplicate: Event, keep: Event) -> dict[str, int]:
         """Delete the duplicate's decisions, and their trades, that the kept event has too.

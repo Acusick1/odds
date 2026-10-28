@@ -873,7 +873,7 @@ class TestMLTrainingConfig:
         )
 
     def test_tuned_feature_groups_valid_choices_accepted(self):
-        config = self._with_tuned_feature_groups([["tabular"], ["tabular", "polymarket"]])
+        config = self._with_tuned_feature_groups([["tabular"], ["tabular", "injuries"]])
         assert config.tuning is not None
 
     def test_tuned_feature_groups_unknown_choice_rejected(self):

@@ -7,7 +7,6 @@ from datetime import timedelta
 import pytest
 from odds_core.models import Event, EventExternalId, EventStatus, OddsSnapshot
 from odds_core.vocabulary import Source
-from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.storage.event_kickoff import KICKOFF_AUTHORITY, move_kickoff
 
 from tests.test_helpers import TWIN_KICKOFF
@@ -42,20 +41,7 @@ async def _hold_oddsportal_id(session, event: Event) -> None:
 
 class TestMoveKickoff:
     @pytest.mark.asyncio
-    async def test_the_schedule_authority_moves_and_retimes(
-        self, pglite_async_session, mlb_event
-    ) -> None:
-        snapshot = OddsSnapshot(
-            event_id=mlb_event.id,
-            snapshot_time=TWIN_KICKOFF - timedelta(hours=1),
-            raw_data={},
-            bookmaker_count=0,
-            fetch_tier=FetchTier.CLOSING.value,
-            hours_until_commence=1.0,
-        )
-        pglite_async_session.add(snapshot)
-        await pglite_async_session.flush()
-
+    async def test_the_schedule_authority_moves(self, pglite_async_session, mlb_event) -> None:
         moved = await move_kickoff(
             pglite_async_session, mlb_event, Source.MLB_STATS_API, MOVED, now=BEFORE
         )
@@ -63,8 +49,6 @@ class TestMoveKickoff:
         assert moved
         assert mlb_event.commence_time == MOVED
         assert mlb_event.status is EventStatus.SCHEDULED
-        assert snapshot.hours_until_commence == pytest.approx(49.0)
-        assert snapshot.fetch_tier != FetchTier.CLOSING.value
 
     @pytest.mark.asyncio
     async def test_a_price_source_never_moves_an_mlb_event(
@@ -171,12 +155,10 @@ class TestMoveKickoffAfterTheStoredKickoff:
         assert stored_epl_event.status == EventStatus.SCHEDULED
 
 
-def _snapshot(event: Event, tag: str | None, source: Source | None = None) -> OddsSnapshot:
+def _snapshot(event: Event, source: Source) -> OddsSnapshot:
     return OddsSnapshot(
         event_id=event.id,
         snapshot_time=TWIN_KICKOFF - timedelta(hours=1),
-        raw_data={} if tag is None else {"source": tag},
-        bookmaker_count=0,
         source=source,
     )
 
@@ -200,12 +182,7 @@ class TestFootballDataUkMovesOnlyEventsOnlyItObserved:
     async def test_an_event_with_only_its_own_snapshots_moves(
         self, pglite_async_session, stored_epl_event
     ) -> None:
-        pglite_async_session.add_all(
-            [
-                _snapshot(stored_epl_event, "football_data_uk"),
-                _snapshot(stored_epl_event, None, Source.FOOTBALL_DATA_UK),
-            ]
-        )
+        pglite_async_session.add(_snapshot(stored_epl_event, Source.FOOTBALL_DATA_UK))
         await pglite_async_session.flush()
 
         assert await move_kickoff(
@@ -217,24 +194,14 @@ class TestFootballDataUkMovesOnlyEventsOnlyItObserved:
         )
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize(
-        ("tag", "source"),
-        [
-            ("oddsportal", None),
-            ("oddsportal_live", None),
-            (None, None),
-            (None, Source.ODDSPORTAL),
-            ("football_data_uk", Source.BETFAIR),
-        ],
-        ids=["legacy-oddsportal", "legacy-live", "legacy-odds-api", "shaped", "shaped-over-tag"],
-    )
+    @pytest.mark.parametrize("source", [Source.ODDSPORTAL, Source.BETFAIR, Source.ODDS_API])
     async def test_an_event_another_source_observed_does_not_move(
-        self, pglite_async_session, stored_epl_event, tag: str | None, source: Source | None
+        self, pglite_async_session, stored_epl_event, source: Source
     ) -> None:
         pglite_async_session.add_all(
             [
-                _snapshot(stored_epl_event, "football_data_uk"),
-                _snapshot(stored_epl_event, tag, source),
+                _snapshot(stored_epl_event, Source.FOOTBALL_DATA_UK),
+                _snapshot(stored_epl_event, source),
             ]
         )
         await pglite_async_session.flush()
@@ -252,7 +219,7 @@ class TestFootballDataUkMovesOnlyEventsOnlyItObserved:
     async def test_the_top_source_is_not_held_to_it(
         self, pglite_async_session, stored_epl_event
     ) -> None:
-        pglite_async_session.add(_snapshot(stored_epl_event, "football_data_uk"))
+        pglite_async_session.add(_snapshot(stored_epl_event, Source.FOOTBALL_DATA_UK))
         await pglite_async_session.flush()
 
         assert await move_kickoff(

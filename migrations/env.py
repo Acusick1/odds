@@ -17,19 +17,15 @@ from odds_core.models import (  # noqa: F401
     AlertHistory,
     DataQualityLog,
     Event,
+    EventExternalId,
     FetchLog,
-    Odds,
+    HealthCheckAcknowledgement,
     OddsSnapshot,
+    Price,
+    SnapshotPayload,
 )
 from odds_core.paper_trade_models import PaperTrade  # noqa: F401
 from odds_core.player_stats_models import NbaPlayerSeasonStats  # noqa: F401
-from odds_core.polymarket_models import (  # noqa: F401
-    PolymarketEvent,
-    PolymarketFetchLog,
-    PolymarketMarket,
-    PolymarketOrderBookSnapshot,
-    PolymarketPriceSnapshot,
-)
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config

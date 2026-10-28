@@ -28,8 +28,6 @@ Observation = tuple[datetime, float]
 BOOKMAKER_KEY = "polymarket"
 BOOKMAKER_TITLE = "Polymarket"
 SNAPSHOT_SOURCE = "polymarket"
-HISTORY_REQUEST_ID = "polymarket_history"
-LIVE_REQUEST_ID_PREFIX = "polymarket_live_"
 DRAW_OUTCOME = "Draw"
 DRAW_SLUG_SUFFIX = "draw"
 
@@ -248,7 +246,7 @@ def resample(
     return result
 
 
-def build_raw_data(
+def build_envelope(
     match: PolymarketMatch,
     sport: PolymarketSportConfig,
     prices: Prices,

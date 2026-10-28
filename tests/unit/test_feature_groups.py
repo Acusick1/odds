@@ -266,7 +266,6 @@ class TestRawClosesBySource:
             event=_make_event(),
             snapshots=snapshots,
             closes=raw_closes(snapshots, KICKOFF),
-            pm_context=None,
         )
         config = FeatureConfig(
             target_type="raw",
@@ -296,9 +295,7 @@ class TestSamplerSourcesWithASharpClose:
         oddsportal = _snapshot(
             snapshot_id=2, hours_before=4, source=Source.ODDSPORTAL, bookmakers=("pinnacle",)
         )
-        bundle = EventDataBundle(
-            event=_make_event(), snapshots=[betfair, oddsportal], closes={}, pm_context=None
-        )
+        bundle = EventDataBundle(event=_make_event(), snapshots=[betfair, oddsportal], closes={})
         sampler = TierSampler("pregame", required_bookmakers=["pinnacle", "betfair_exchange"])
 
         assert sampler.sample(bundle) == [oddsportal]
@@ -339,7 +336,6 @@ class TestSamplerSourcesWithASharpClose:
             event=_make_event(),
             snapshots=snapshots,
             closes=raw_closes(snapshots, KICKOFF),
-            pm_context=None,
         )
         config = FeatureConfig(
             target_type="raw",
@@ -364,7 +360,7 @@ class TestTierSamplerDerivedTiers:
 
     @staticmethod
     def _bundle(snapshots: list[SnapshotQuotes]) -> EventDataBundle:
-        return EventDataBundle(event=_make_event(), snapshots=snapshots, closes={}, pm_context=None)
+        return EventDataBundle(event=_make_event(), snapshots=snapshots, closes={})
 
     def test_picks_the_latest_snapshot_of_the_decision_tier_or_earlier(self) -> None:
         early = _snapshot(snapshot_id=1, hours_before=48)

@@ -18,7 +18,7 @@ from odds_core.models import (
     OddsSnapshot,
 )
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
-from odds_core.vocabulary import Source
+from odds_core.vocabulary import Market, Source, TimeBasis
 from odds_lambda.health_monitor import HealthMonitor
 from odds_lambda.mlb_game_resolver import UnresolvedReason
 from odds_lambda.mlb_stats_fetcher import MlbGameResult, MlbGameState
@@ -38,7 +38,7 @@ from odds_lambda.storage.game_pks import game_pks_of
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.test_helpers import hold_game_pks
+from tests.test_helpers import hold_game_pks, with_game_pk
 
 MLB = "baseball_mlb"
 CUBS, CARDINALS = "Chicago Cubs", "St. Louis Cardinals"
@@ -105,15 +105,17 @@ def _event(
     away: str = CARDINALS,
     **fields: Any,
 ) -> Event:
-    return Event(
-        id=event_id,
-        sport_key=MLB,
-        sport_title="MLB",
-        commence_time=commence,
-        home_team=home,
-        away_team=away,
-        mlb_game_pk=game_pk,
-        **fields,
+    return with_game_pk(
+        Event(
+            id=event_id,
+            sport_key=MLB,
+            sport_title="MLB",
+            commence_time=commence,
+            home_team=home,
+            away_team=away,
+            **fields,
+        ),
+        game_pk,
     )
 
 
@@ -127,26 +129,9 @@ def _snapshot(event_id: str, at: datetime, home_price: float) -> OddsSnapshot:
     return OddsSnapshot(
         event_id=event_id,
         snapshot_time=at,
-        raw_data={
-            "bookmakers": [
-                {
-                    "key": "bet365",
-                    "title": "bet365",
-                    "markets": [
-                        {
-                            "key": "h2h",
-                            "outcomes": [
-                                {"name": CUBS, "price_decimal": home_price},
-                                {"name": CARDINALS, "price_decimal": 2.1},
-                            ],
-                        }
-                    ],
-                }
-            ],
-            "source": "oddsportal_live",
-        },
-        bookmaker_count=1,
-        hours_until_commence=1.0,
+        source=Source.ODDSPORTAL,
+        market=Market.H2H,
+        time_basis=TimeBasis.OBSERVED,
     )
 
 
@@ -202,14 +187,12 @@ class TestAssignGamePks:
             ]
         )
         await session.flush()
-        conflict_at = EVENING - timedelta(hours=1)
-        same_at = EVENING - timedelta(hours=2)
         session.add_all(
             [
-                _snapshot("op_live_g2", conflict_at, 1.8),
-                _snapshot("op_live_g2_twin", conflict_at, 1.6),
-                _snapshot("op_live_g2", same_at, 1.9),
-                _snapshot("op_live_g2_twin", same_at, 1.9),
+                _snapshot("op_live_g2", EVENING - timedelta(hours=1), 1.8),
+                _snapshot("op_live_g2_twin", EVENING - timedelta(minutes=90), 1.6),
+                _snapshot("op_live_g2", EVENING - timedelta(hours=2), 1.9),
+                _snapshot("op_live_g2_twin", EVENING - timedelta(minutes=150), 1.9),
                 _snapshot("op_live_g2_twin", EVENING - timedelta(hours=3), 1.7),
             ]
         )
@@ -226,7 +209,6 @@ class TestAssignGamePks:
             ("op_live_g2_twin",),
         )
         assert merge.rows_moved == {"odds_snapshots": 3}
-        assert (merge.pairs.identical, merge.pairs.conflicting) == (1, 1)
         assert await session.get(Event, "op_live_g2_twin") is None
         assert await _game_pk(session, "op_live_g1") == 824101
         assert await _game_pk(session, "op_live_g2") == 824102
@@ -349,7 +331,7 @@ class TestAssignGamePks:
             EventStatus.SCHEDULED,
         )
         snapshot = (await session.execute(select(OddsSnapshot))).scalar_one()
-        assert snapshot.hours_until_commence == pytest.approx(18.0 + 25 / 60)
+        assert snapshot.snapshot_time == EVENING - timedelta(minutes=30)
 
     async def test_unresolved_events_are_left_alone_and_ghosts_listed(
         self, pglite_async_session: AsyncSession
@@ -534,16 +516,15 @@ class TestTbdReplay:
         assert (outcome.moved_from, outcome.start_tbd) == (None, True)
         kept = await session.get(Event, "op_live_2026-04-26T2111")
         assert (await _game_pk(session, kept.id), kept.commence_time) == (823637, self.LISTED_AT)
-        hours = (
-            (
-                await session.execute(
-                    select(OddsSnapshot.hours_until_commence).order_by(OddsSnapshot.snapshot_time)
-                )
-            )
+        times = (
+            (await session.execute(select(OddsSnapshot.snapshot_time).order_by(OddsSnapshot.id)))
             .scalars()
             .all()
         )
-        assert hours == [pytest.approx(26.0 + 1 / 60), pytest.approx(1.0)]
+        assert times == [
+            self.LISTED_AT - timedelta(hours=1),
+            self.POSTPONED_AT - timedelta(hours=1),
+        ]
 
     async def test_lone_postponed_slot_event_moves_to_the_placeholder_on_the_played_date(
         self, pglite_async_session: AsyncSession
@@ -698,8 +679,7 @@ class TestAssignGamePksCommand:
         assert "merge groups: 1 (read-only: 0; events merged: 1)" in out
         assert (
             "MERGE game_pk=824101 kept=op_live_a rule=single_game merged=op_live_b rows=none"
-            " moved=no score=none settled=no same_time_pairs_identical=0"
-            " same_time_pairs_conflicting=0"
+            " moved=no score=none settled=no"
         ) in out.splitlines()
         assert "GHOST event=op_live_ghost" in out
         assert await session.get(Event, "op_live_b") is not None
@@ -771,8 +751,7 @@ class TestApplyIsIdempotent:
                 select(
                     OddsSnapshot.id,
                     OddsSnapshot.event_id,
-                    OddsSnapshot.hours_until_commence,
-                    OddsSnapshot.fetch_tier,
+                    OddsSnapshot.snapshot_time,
                 ).order_by(OddsSnapshot.id)
             )
             return [*rows.all(), *snapshots.all()]

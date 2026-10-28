@@ -1,10 +1,9 @@
 ---
 type: reference
 title: Kick-off authority
-description: Which source may move an event's commence_time for each sport, the move_kickoff function every move goes through, and what a move does to the event and its snapshots.
+description: Which source may move an event's commence_time for each sport, the move_kickoff function every move goes through, and what a move does to the event.
 sources:
   - odds_lambda.storage.event_kickoff
-  - odds_lambda.storage.event_merge.retime_snapshots
 status: stable
 ---
 
@@ -49,7 +48,7 @@ For every source except those in `odds_lambda.storage.event_kickoff.PLAYED_START
 - **Before the stored kick-off** (`now` earlier), the rank rule above applies.
 - **Once it has passed**, a start at or before `now` is refused, since a live feed reports the actual start. A start still ahead is accepted from any source in the order, whatever ids the event holds, so a postponement the top source stopped listing is still followed.
 
-The MLB Stats API and football-data.co.uk are the sources in `odds_lambda.storage.event_kickoff.PLAYED_START_SOURCES`. The MLB schedule dates a postponed game by when it was played, and football-data.co.uk records the kick-off of a match already played, so each may move an event to a start in the past and skips the after-kick-off rule. The rank rule still applies to them. A source in that set that the order ranks below another (football-data.co.uk for EPL) moves only an event no other source has observed, because the events stored before external ids were recorded hold none: every snapshot of the event must have `source` equal to it, or, for a snapshot with no `source`, a `raw_data` tag equal to it (`odds_lambda.storage.event_kickoff._observed_by_another`; no tag is the Odds API). An event with no snapshots qualifies.
+The MLB Stats API and football-data.co.uk are the sources in `odds_lambda.storage.event_kickoff.PLAYED_START_SOURCES`. The MLB schedule dates a postponed game by when it was played, and football-data.co.uk records the kick-off of a match already played, so each may move an event to a start in the past and skips the after-kick-off rule. The rank rule still applies to them. A source in that set that the order ranks below another (football-data.co.uk for EPL) moves only an event no other source has observed, because the events stored before external ids were recorded hold none: every snapshot of the event must have `source` equal to it (`odds_lambda.storage.event_kickoff._observed_by_another`). An event with no snapshots qualifies.
 
 ## A move
 
@@ -57,7 +56,7 @@ Nothing happens when no start is given or it equals the stored kick-off. Otherwi
 
 - `commence_time` becomes the new start and `updated_at` is set.
 - A POSTPONED event becomes SCHEDULED, and so does a LIVE event moved to a start after `now` (a delayed kick-off).
-- Every stored snapshot of the event has `hours_until_commence` and `fetch_tier` recomputed against the new start (`odds_lambda.storage.event_merge.retime_snapshots`; the tier follows each snapshot's time basis and the OddsPortal closing rule, [where tiers are written](fetch-tier.md#where-tiers-are-written-and-read)), so the pre-move snapshots of a postponed game lose their closing tier.
+- The event's snapshots are not touched. Their tiers are derived against the current kick-off ([Fetch tier](fetch-tier.md#the-tier-a-snapshot-covers)), so the pre-move snapshots of a postponed game lose their closing tier.
 - `event_rescheduled` is logged with the source and both times.
 
 ## Callers
@@ -66,10 +65,6 @@ Nothing happens when no start is given or it equals the stored kick-off. Otherwi
 - `odds_lambda.jobs.fetch_mlb_results` ([fetch-mlb-results](../collection/results-jobs.md#fetch-mlb-results)), with the MLB Stats API.
 - `odds_lambda.storage.game_pk_backfill.apply_assignment` ([assigning gamePks](event-merge.md#assigning-gamepks)), with the MLB Stats API, after recording the `gamePk` (`odds_lambda.storage.event_resolver.record_game_pk`).
 - `odds_lambda.odds_api_events.resolve_odds_api_event` ([events](events.md#writing-events)), for Odds API ingestion, event sync, `odds discover games` and the historical backfill (the API's reissued id replaces the recorded `odds_api` external id), through `odds_lambda.storage.event_resolver.resolve_event`: the Odds API with the listed start.
-
-## After a twin merge
-
-`odds_lambda.storage.event_kickoff.settle_merged_kickoff` sets the kick-off of an event that twins were merged into, for the [shape backfill](shape-backfill.md#steps). It takes, per source that observed one of the twins, that twin's stored kick-off, and follows the highest-ranked of those sources in the sport's order. The kick-offs are stored ones rather than listings, so neither the after-kick-off rule nor the outranking rule above applies; a move does what [A move](#a-move) describes. With no observing source in the order, the event keeps its own kick-off.
 
 ## Related
 

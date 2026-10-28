@@ -12,7 +12,6 @@ from odds_core.candidates import MechanicalCandidate, candidates_dir, load_candi
 from odds_core.exchange_price import ExchangePrice
 from odds_core.market_prices import Outcome
 from odds_core.quotes import Quote
-from odds_core.snapshot_sources import FdukTimeBasis
 from odds_core.vocabulary import Market, Side, Source, TimeBasis
 from odds_lambda.candidate_rules import (
     RULES,
@@ -233,7 +232,7 @@ class TestBuildMarketState:
             T - timedelta(minutes=2),
             [_betfair((2.0, 4.0, 4.0)), BET365],
             "football_data_uk",
-            FdukTimeBasis.COLLECTION_DEADLINE,
+            "fduk_collection_deadline",
         )
         assert not _state([snapshot]).has_input
 

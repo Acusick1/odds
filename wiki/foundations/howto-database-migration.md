@@ -33,4 +33,4 @@ Every change to a model under `packages/odds-core/odds_core/` needs an Alembic m
 ## Related
 
 - [Databases and environments](databases-and-environments.md)
-- [Events table](../storage/events.md) and [Odds snapshot and odds tables](../storage/odds-tables.md) — examples of what models map to
+- [Events table](../storage/events.md) and [Odds snapshots table](../storage/odds-tables.md) — examples of what models map to

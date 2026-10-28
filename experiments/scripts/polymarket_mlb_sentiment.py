@@ -221,12 +221,13 @@ async def probe_sharp_vs_pm(session: aiohttp.ClientSession) -> None:
             # Pull latest bet365 h2h odds
             q_odds = text(
                 """
-                SELECT bookmaker_key, outcome_name, price, last_update
-                FROM odds
-                WHERE event_id=:eid
-                  AND market_key='h2h'
-                  AND is_valid=true
-                ORDER BY last_update DESC
+                SELECT p.bookmaker, p.outcome, p.price, s.snapshot_time
+                FROM prices p
+                JOIN odds_snapshots s ON s.id = p.snapshot_id
+                WHERE s.event_id=:eid
+                  AND s.market='h2h'
+                  AND p.side='back'
+                ORDER BY s.snapshot_time DESC
                 LIMIT 60
                 """
             )
@@ -255,12 +256,10 @@ async def probe_sharp_vs_pm(session: aiohttp.ClientSession) -> None:
 
             # Latest book prices per bookmaker for h2h — devig
             latest_by_book: dict[str, dict[str, float]] = {}
-            for bk, name, price, _ in odds_rows:
+            for bk, outcome, price, _ in odds_rows:
                 latest_by_book.setdefault(bk, {})
-                if name == row["home"]:
-                    latest_by_book[bk].setdefault("home", float(price))
-                elif name == row["away"]:
-                    latest_by_book[bk].setdefault("away", float(price))
+                if outcome in ("home", "away"):
+                    latest_by_book[bk].setdefault(outcome, float(price))
 
             # Devig each book, prefer betfair_ex_eu/pinnacle/bet365
             book_priority = [

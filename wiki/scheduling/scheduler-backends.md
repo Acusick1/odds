@@ -70,7 +70,7 @@ The Lambda role in `deployment/aws/terraform/lambda.tf` grants only `PutRule`, `
 
 ### Rules and Terraform
 
-`deployment/aws/terraform/eventbridge.tf` pre-creates every self-scheduling rule `DISABLED` with a `rate(1 day)` placeholder and `lifecycle { ignore_changes = [schedule_expression, state] }`, so `terraform plan` never shows live cadences. A rule is named `{rule_prefix}-{job}[-{sport suffix}]`, which is why jobs use [compound names](job-registry.md#compound-job-names). The post-deploy Lambda invocations in the deploy workflows activate the placeholders, so a run of `deploy-prod.yml` re-enables every dormant rule ([CI/CD workflows](../operations/ci-cd-workflows.md)). Live state is not in the repo: run `odds scheduler list-jobs --backend aws` ([Deployed state](job-deployment-matrix.md#deployed-state)).
+`deployment/aws/terraform/eventbridge.tf` pre-creates every self-scheduling rule `DISABLED` with a `rate(1 day)` placeholder and `lifecycle { ignore_changes = [schedule_expression, state] }`, so `terraform plan` never shows live cadences. The jobs with a rule are `fetch-odds` and `fetch-scores` per sport, `fetch-betfair-exchange` per sport when `betfair_enabled`, and the global `update-status` and `check-health`; no fixed-schedule rule is declared. A rule is named `{rule_prefix}-{job}[-{sport suffix}]`, which is why jobs use [compound names](job-registry.md#compound-job-names). The post-deploy Lambda invocations in the deploy workflows activate the placeholders, so a run of `deploy-prod.yml` re-enables every dormant rule ([CI/CD workflows](../operations/ci-cd-workflows.md)). Live state is not in the repo: run `odds scheduler list-jobs --backend aws` ([Deployed state](job-deployment-matrix.md#deployed-state)).
 
 ### Env-var contract
 

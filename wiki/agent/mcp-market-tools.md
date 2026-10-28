@@ -43,7 +43,7 @@ Response: `event` plus `snapshot` with `anchor_snapshot_id`, `snapshot_time` (ne
 
 ## `get_odds_history(event_id, market)`
 
-Every snapshot of `market` that holds a book price, in time order, each with its prices instead of raw JSON, plus `snapshot_count`. A snapshot carries `id`, `event_id`, `snapshot_time`, `created_at`, `bookmaker_count`, `source`, `time_basis`, `hours_until_commence` and `odds[]`. There is no pagination or limit, so a long-lived event returns a large payload; it is one `odds_core.quotes.quotes` read of the event's market ([reading quotes](../storage/price-tables.md#reading-quotes)).
+Every snapshot of `market` that holds a book price, in time order, each with its prices instead of raw JSON, plus `snapshot_count`. A snapshot carries `id`, `event_id`, `snapshot_time`, `created_at`, `bookmaker_count` and `hours_until_commence` (both computed per response from the snapshot's prices and the event's kick-off), `source`, `time_basis` and `odds[]`. There is no pagination or limit, so a long-lived event returns a large payload; it is one `odds_core.quotes.quotes` read of the event's market ([reading quotes](../storage/price-tables.md#reading-quotes)).
 
 ## Market vocabulary
 

@@ -72,7 +72,7 @@ status: stable
 
 ## Citations
 
-- **Python in the installed packages** (`odds_core`, `odds_lambda`, `odds_analytics`, `odds_mcp`, `odds_cli`): cite by dotted import path in backticks, the convention Sphinx, mkdocstrings and griffe share. Examples: `` `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` ``, and `` `odds_lambda.jobs.fetch_odds` `` for a whole module.
+- **Python in the installed packages** (`odds_core`, `odds_lambda`, `odds_analytics`, `odds_mcp`, `odds_cli`): cite by dotted import path in backticks, the convention Sphinx, mkdocstrings and griffe share. Examples: `` `odds_lambda.storage.writers.OddsWriter.store_envelope` ``, and `` `odds_lambda.jobs.fetch_odds` `` for a whole module.
 - **Everything else:** cite by repo-relative path. That covers scripts, experiments, Terraform, workflows, `pyproject.toml`, and agent prompts under `packages/odds-mcp/agents/`.
 - **Bare identifiers:** an identifier in backticks that names a definition in the packages must be written as its dotted path. Short forms hide the claim from the staleness check.
 - **Coverage:** every non-obvious factual claim carries an inline citation or is covered by `sources`. Cite values, defaults and flags rather than restating them bare.

@@ -44,7 +44,7 @@ Team names are normalized with `odds_core.team.normalize_team_name` first.
 Then it records the ids and moves the kick-off:
 
 - The source's id, when the game has one.
-- For MLB, the `gamePk` as an `mlb_stats_api` id (`odds_lambda.storage.event_resolver.record_game_pk`), which also writes it to `events.mlb_game_pk` (`odds_core.models.Event.assign_game_pk`) and undoes [no game in the schedule](#no-game-in-the-schedule). Readers find an event's `gamePk`, and the event holding a `gamePk`, in `event_external_ids` only (`odds_lambda.storage.game_pks`, whose `odds_lambda.storage.game_pks.events_holding_game_pks_by_pk` looks up many at once).
+- For MLB, the `gamePk` as an `mlb_stats_api` id (`odds_lambda.storage.event_resolver.record_game_pk`), which also undoes [no game in the schedule](#no-game-in-the-schedule). Readers find an event's `gamePk`, and the event holding a `gamePk`, in `event_external_ids` only (`odds_lambda.storage.game_pks`, whose `odds_lambda.storage.game_pks.events_holding_game_pks_by_pk` looks up many at once).
 - `odds_lambda.storage.event_kickoff.move_kickoff` once, with the current time as the clock (the MLB Stats API and football-data.co.uk may move an event to a past start): for MLB with the MLB Stats API and the schedule's start; for other sports with the source and its listed start. `odds_lambda.storage.event_kickoff.move_kickoff` alone decides whether it moves: only a sport's schedule authority moves the event, and an in-play start after the stored kick-off is refused, and football-data.co.uk moves only an event no other source has a snapshot on ([Kick-off authority](kickoff-authority.md)).
 
 It flushes and never commits ([Commit contract](storage-layer.md#commit-contract)).
@@ -55,7 +55,7 @@ A historical game (`odds_lambda.storage.event_resolver.MatchWindow.HISTORICAL`) 
 
 `odds_lambda.storage.event_resolver.attach_event(session, game)` is for a source that creates no events (Polymarket, through `odds_lambda.polymarket_odds.listed_game`). It takes the fixture lock and looks the game up as `odds_lambda.storage.event_resolver.resolve_event` does (steps 1 to 4), then records the source's id on the event it found. It returns `None`, creating nothing, when no event matches and when the id is [refused](#refused-ids): the caller writes nothing for that game. A refusal is logged once per event and description, not on every run. It does not offer the listed start to `odds_lambda.storage.event_kickoff.move_kickoff`, since such a source is not a schedule authority. `odds_lambda.storage.event_resolver.attach_events` attaches a batch in lock-key order and answers in input order, as `odds_lambda.storage.event_resolver.resolve_events` does. A game needs `legacy_id` (`odds_lambda.storage.event_resolver.ListedGame`) only for `odds_lambda.storage.event_resolver.resolve_event` to create an event; without one that raises `ValueError`. Both flush and never commit, and the [lock order](#locks-and-transactions) applies.
 
-`odds_lambda.storage.event_resolver.find_event(session, game)` is the same lookup without the lock and without recording anything, for a read-only count of what attaching would do (the [shape backfill](shape-backfill.md#steps) preflight).
+`odds_lambda.storage.event_resolver.find_event(session, game)` is the same lookup without the lock and without recording anything, for a read-only count of what attaching would do.
 
 ## MLB without the schedule
 
@@ -69,7 +69,7 @@ A historical game (`odds_lambda.storage.event_resolver.MatchWindow.HISTORICAL`) 
 
 The fixture lock is released only when the caller's transaction commits or rolls back. Two transactions that each hold one fixture lock and wait for the other's would deadlock, so within one transaction `odds_lambda.storage.event_resolver.resolve_event` takes fixture locks in ascending key order: a new lock below one the transaction already holds raises `odds_lambda.storage.event_resolver.LockOrderError` before it is requested. Re-taking a held lock is allowed. A caller resolving several fixtures in one transaction passes them to `odds_lambda.storage.event_resolver.resolve_events`, which resolves them in key order and returns the results in input order. A caller that commits after each fixture can use `odds_lambda.storage.event_resolver.resolve_event` in any order.
 
-Code that changes a stored event's identity outside the resolver takes the same lock with `odds_lambda.storage.event_resolver.lock_fixture`, under the same order rule, and records an id the event's stored data holds with `odds_lambda.storage.event_resolver.record_external_id`, which applies the rules of [Refused ids](#refused-ids) and logs each refusal once per event and id. The [shape backfill](shape-backfill.md#steps) uses both.
+Code that changes a stored event's identity outside the resolver takes the same lock with `odds_lambda.storage.event_resolver.lock_fixture`, under the same order rule, and records an id the event's stored data holds with `odds_lambda.storage.event_resolver.record_external_id`, which applies the rules of [Refused ids](#refused-ids) and logs each refusal once per event and id.
 
 ## Refused ids
 

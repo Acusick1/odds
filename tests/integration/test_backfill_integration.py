@@ -4,9 +4,9 @@ from datetime import UTC
 
 import pytest
 from odds_analytics.backfill_executor import BackfillExecutor
-from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
+from odds_core.models import Event, EventExternalId, EventStatus, OddsSnapshot, Price
 from odds_core.time import parse_api_datetime
-from odds_core.vocabulary import TimeBasis
+from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.storage.readers import OddsReader
 from sqlalchemy import select
 
@@ -39,6 +39,7 @@ def simple_backfill_plan():
         "games": [
             {
                 "event_id": "integration_test_1",
+                "odds_api_id": "integration_test_1",
                 "home_team": "Test Lakers",
                 "away_team": "Test Celtics",
                 "commence_time": "2024-01-15T19:00:00Z",
@@ -100,15 +101,14 @@ class TestBackfillIntegration:
         # One snapshot per market (h2h and spreads) at each of the plan's two times
         assert len(snapshots) == 4
 
-        # Check odds were created
+        # Check price rows were created
         result = await test_session.execute(
-            select(Odds).where(Odds.event_id == "integration_test_1")
+            select(Price).where(Price.snapshot_id.in_([s.id for s in snapshots]))
         )
-        odds_records = list(result.scalars().all())
-        # 2 bookmakers × 2 snapshots × 3 outcomes each (fanduel has 4, draftkings has 2)
+        prices = list(result.scalars().all())
         # FanDuel: 2 h2h + 2 spreads = 4, DraftKings: 2 h2h = 2
-        # Total per snapshot: 6 outcomes, × 2 snapshots = 12
-        assert len(odds_records) == 12
+        # Total per time: 6 prices, × 2 times = 12
+        assert len(prices) == 12
 
     @pytest.mark.asyncio
     async def test_skip_existing_snapshots(
@@ -156,7 +156,7 @@ class TestBackfillIntegration:
     async def test_stored_event_is_found_by_its_api_id(
         self, test_session, mock_session_factory, simple_backfill_plan, mock_api_response_factory
     ):
-        """The backfill stores its snapshot on the event the API's id names, and adds no event."""
+        """The backfill stores its snapshot on the event holding the API's id, and adds no event."""
         from unittest.mock import AsyncMock
 
         # Create event with old data
@@ -170,6 +170,13 @@ class TestBackfillIntegration:
         }
         event = _api_dict_to_event(event_data)
         await add_event(test_session, event)
+        test_session.add(
+            EventExternalId(
+                source=Source.ODDS_API,
+                external_id="integration_test_1",
+                event_id=event.surrogate_id,
+            )
+        )
         await test_session.commit()
 
         # Run backfill - should attach to the stored event

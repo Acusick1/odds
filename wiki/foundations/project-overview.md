@@ -22,7 +22,7 @@ Design principles `(inferred)`: robust collection and storage before analysis; a
 
 ## Sports
 
-EPL and MLB data collection is active. The agents run by hand on the production host, not autonomously, and are paused. NBA code (injuries, game logs, Polymarket targeting) exists but is deprioritized. `odds_core.sports.SportKey` allows all three. EPL odds are stored under market key `1x2` and MLB under `h2h`; see [Sport, market and bookmaker keys](../collection/sport-and-market-keys.md).
+EPL and MLB data collection is active. The agents run by hand on the production host, not autonomously, and are paused. NBA code (injuries, game logs, team-name normalization) exists but is deprioritized. `odds_core.sports.SportKey` allows all three. EPL odds are stored under market key `1x2` and MLB under `h2h`; see [Sport, market and bookmaker keys](../collection/sport-and-market-keys.md).
 
 ## Goal
 
@@ -38,7 +38,7 @@ Per-job table: [Where each job runs](../scheduling/job-deployment-matrix.md#wher
 
 The repo carries the residue of three pivots (PRs `#214`, `#217`, `#267`, `#387`). Knowing which era a module comes from tells you whether its defaults match the active sports.
 
-1. **NBA to EPL and MLB.** The first experiments are NBA (February 2026); EPL work starts in March (PRs `#214`, `#217`). NBA code remains (injuries, game logs, Polymarket targeting).
+1. **NBA to EPL and MLB.** The first experiments are NBA (February 2026); EPL work starts in March (PRs `#214`, `#217`). NBA code remains (injuries, game logs, team-name normalization).
 2. **Model edge to information edge**, in April 2026 (`#290`, [ADR-0005](../../docs/adr/0005-information-edge.md)).
 3. **Structural consolidations**: alerts moved from odds-cli to odds-core (`#267`), self-scheduling unified into one decision module (`#387`). See [Alerts and the alert_history table](../operations/alerts.md), [Self-scheduling](../scheduling/self-scheduling.md).
 
@@ -49,7 +49,7 @@ Each fails quietly on EPL and MLB data: the symptom is an empty result (no event
 - CLI `--sport` defaults to `basketball_nba` in several commands ([Sport defaults](odds-cli.md#sport-defaults)); the root banner describes the tool as NBA (`odds_cli.main.app`).
 - `backfill plan` and `backfill scores` hardcode `sport_key="basketball_nba"` (`odds_cli.commands.backfill`), as does `odds_analytics.backfill_executor.BackfillExecutor`, which skips a game whose plan `odds_api_id` is null and stores each snapshot on the event the plan's `odds_api_id` names ([Odds API historical backfill](../collection/odds-api-backfill.md)).
 - Completeness checks discover NBA games only, and `odds_lambda.storage.readers.OddsReader.get_games_by_date` buckets days noon-to-noon UTC "to capture a full NBA game day" and has no sport filter, so it serves all sports (`odds_lambda.storage.tier_validator.TierCoverageValidator`, which counts snapshots as distinct snapshot times and tiers them by time basis and market; [Coverage and completeness checks](../storage/coverage-checks.md), [OddsReader](../storage/odds-reader.md)).
-- The Polymarket price and order-book tables and the job target NBA (`odds_lambda.jobs.fetch_polymarket.main`, not in the default bootstrap jobs); EPL match prices (fetched with `odds_lambda.polymarket_fetcher.PolymarketClient`) are stored as odds snapshots ([Polymarket pipeline and tables](../collection/polymarket.md), [Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md)).
+- `odds polymarket discover` lists NBA events (`odds_cli.commands.polymarket.discover`); EPL match prices (fetched with `odds_lambda.polymarket_fetcher.PolymarketClient`) are stored as `polymarket` snapshots ([Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md)).
 - `.env.example` sets `SPORTS=basketball_nba` ([Configuration](configuration.md)); alert intervals are `odds_core.config.AlertConfig` fields with no template variable ([Alerts](../operations/alerts.md#alert-history)).
 
 ## Related

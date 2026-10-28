@@ -43,7 +43,7 @@ These filters apply only to Odds API requests ([configuration](../foundations/co
 ## OddsPortal and FDUK coverage
 
 - OddsPortal names map through `odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP` (32 entries; unmapped names fall back to `odds_lambda.oddsportal_common.slugify`). The map holds Pinnacle, BetMGM, DraftKings, FanDuel, Betfair Exchange, William Hill, Ladbrokes and others.
-- FDUK issues no event id. Its snapshots carry `raw_data["source"]` `odds_core.snapshot_sources.SnapshotSource.FOOTBALL_DATA_UK` and source `football_data_uk`, and FDUK maps its column prefixes in `BOOKMAKER_PREFIXES` (`scripts/ingest_football_data_uk.py`): pinnacle, bet365, bwin, betfair_exchange (`BFE`), betfair_sportsbook (`BF`), interwetten, williamhill, betvictor (`VC`, `BV`), betfred (`BFD`), paddypower (`PP`), skybet (`SKB`), betmgm (`BMGM`), coral (`CL`), ladbrokes, onexbet, plus pseudo-books `market_max` / `market_avg` (`AGGREGATE_PREFIXES`).
+- FDUK issues no event id. Its snapshots carry source `football_data_uk` (the envelope's `source` is the same string), and FDUK maps its column prefixes in `BOOKMAKER_PREFIXES` (`scripts/ingest_football_data_uk.py`): pinnacle, bet365, bwin, betfair_exchange (`BFE`), betfair_sportsbook (`BF`), interwetten, williamhill, betvictor (`VC`, `BV`), betfred (`BFD`), paddypower (`PP`), skybet (`SKB`), betmgm (`BMGM`), coral (`CL`), ladbrokes, onexbet, plus pseudo-books `market_max` / `market_avg` (`AGGREGATE_PREFIXES`).
 - Betfair Exchange covers EPL and MLB (`odds_lambda.betfair.constants.SPORT_CONFIG`): match odds for both, and over/under 2.5 goals for EPL (the line is on `odds_lambda.betfair.constants.BetfairMarketSpec`).
 
 ## Sport keys
@@ -58,12 +58,12 @@ CLI `--sport` defaults differ by command ([odds-cli](../foundations/odds-cli.md#
 
 ## Market-key dialects
 
-A market key is whatever string sits in `raw_data.bookmakers[].markets[].key`; the writers store it as the snapshot's `market`, which readers match exactly (`odds_core.quotes.quotes`). Writers use different keys for the same two-way bet, and one key for the football three-way bet:
+A market key is whatever string sits in an envelope's `bookmakers[].markets[].key`; the writers store it as the snapshot's `market`, which readers match exactly (`odds_core.quotes.quotes`). Writers use different keys for the same two-way bet, and one key for the football three-way bet:
 
 | Writer | Football 3-way | Two-way moneyline | Totals |
 |---|---|---|---|
 | The Odds API | `1x2` (relabelled from `h2h` for soccer) | `h2h` | `totals` |
-| FDUK loader (`scripts/ingest_football_data_uk.py`, opening and closing `1x2` only, tiered together by time basis) | `1x2` | none | none |
+| FDUK loader (`scripts/ingest_football_data_uk.py`, opening and closing `1x2` only) | `1x2` | none | none |
 | OddsPortal adapter | `1x2` | `h2h` (scraped as `home_away`) | `totals`, point 2.5 (scraped as `over_under_2_5`) |
 | Betfair (`odds_lambda.betfair.constants.SPORT_CONFIG`) | `1x2` (EPL) | `h2h` (MLB) | `totals`, point 2.5 (EPL, `OVER_UNDER_25`) |
 | Polymarket (`odds_lambda.polymarket_sports.POLYMARKET_SPORTS`) | `1x2` (EPL) | none | none |
@@ -73,7 +73,7 @@ A market key is whatever string sits in `raw_data.bookmakers[].markets[].key`; t
 - OddsPortal scrape names (`1x2`, `over_under_2_5`, `home_away`) are the keys of `odds_lambda.oddsportal_client.FEED_MARKETS`, the only ones the live scrape accepts; `odds_mcp.server.refresh_scrape` rejects any other value. They are inputs to `odds_mcp.server.refresh_scrape` and `odds scrape --market`, not stored keys. The totals spelling is `over_under_2_5` (not `over_under_2.5`), and `odds_lambda.oddsportal_adapter.convert_market` raises `ValueError("Unsupported market")` for anything else ([oddsportal-scraper](oddsportal-scraper.md)).
 - MCP read tools accept `odds_mcp.server.MarketKey` (`h2h`, `1x2`, `totals`, `spreads`) and match it exactly, so EPL queries need `1x2`, MLB queries need `h2h`, and a wrong key returns an empty result rather than an error (#433; [mcp-market-tools](../agent/mcp-market-tools.md)).
 
-A market's outcomes are priced by `price` (integer American, The Odds API) or `price_decimal` (FDUK, OddsPortal, Betfair, and Polymarket from the current ingest code; older stored snapshots can still carry `price`, see [Price encodings](../foundations/odds-math.md#price-encodings)); readers go through `odds_core.odds_math.outcome_price_decimal`.
+A market's outcomes are priced by `price` (integer American, The Odds API) or `price_decimal` (FDUK, OddsPortal, Betfair, and Polymarket from the current ingest code; archived envelopes can still carry `price`, see [Price encodings](../foundations/odds-math.md#price-encodings)); price rows are built through `odds_core.odds_math.outcome_price_decimal`.
 
 Bookmaker keys: OddsPortal display names map through `odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP` with a slug fallback; the default Odds API list is under [Odds API scope](#odds-api-scope).
 

@@ -231,7 +231,6 @@ async def test_scheduler_end_to_end(
 
     # One snapshot per market quoted in the envelope
     assert snapshots, "Odds snapshot should exist"
-    assert snapshots[0].bookmaker_count == 2
 
     reader = OddsReader(test_session)
     stored = await quotes(test_session, [EVENT_ID], Market.H2H)

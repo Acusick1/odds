@@ -76,7 +76,6 @@ SCHEDULE_OVERDUE_GRACE = timedelta(minutes=15)
 _JOB_ENABLED: dict[str, Callable[[Settings], bool]] = {
     "fetch-betfair-exchange": lambda settings: settings.betfair.enabled,
     "fetch-polymarket-odds": lambda settings: settings.polymarket.enabled,
-    "fetch-polymarket": lambda settings: settings.polymarket.enabled,
 }
 
 

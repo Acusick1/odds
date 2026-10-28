@@ -1,8 +1,7 @@
 """Betfair Exchange API integration.
 
-Direct ingestion of each sport's markets via the delayed application key, written into
-``odds_snapshots.raw_data`` with ``key="betfair_exchange"`` so the existing
-agent / analytics / sharp-fallback consumers pick it up unchanged.
+Direct ingestion of each sport's markets via the delayed application key, stored as
+``betfair`` snapshots whose price rows are under the bookmaker ``betfair_exchange``.
 """
 
 from odds_lambda.betfair.adapter import (

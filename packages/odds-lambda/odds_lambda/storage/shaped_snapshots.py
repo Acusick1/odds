@@ -1,9 +1,10 @@
-"""Store an envelope snapshot with its source, market and price rows, one snapshot per market."""
+"""Store an envelope as snapshots with their source, market and price rows, one per market."""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from odds_core.models import Event, OddsSnapshot, Price, SnapshotPayload
@@ -11,7 +12,7 @@ from odds_core.vocabulary import Source, TimeBasis
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_lambda.price_rows import MarketSnapshot, PriceSpec, expand_envelope, market_envelope
+from odds_lambda.price_rows import MarketSnapshot, PriceSpec, expand_envelope
 from odds_lambda.storage.data_quality import record_issue
 from odds_lambda.storage.snapshot_store import SnapshotWrite, SnapshotWriteOutcome, store_snapshot
 
@@ -28,9 +29,9 @@ class SnapshotShape:
 
 @dataclass(frozen=True)
 class ShapedWrite:
-    """``first`` is the write of the snapshot the writer built, ``None`` when the envelope
-    quoted no market and the snapshot was added without a key; ``others`` are its other
-    markets' snapshots."""
+    """``snapshot`` is the stored snapshot of the envelope's first market. ``first`` is that
+    market's write, ``None`` when the envelope quoted no market and ``snapshot`` was added
+    without a key; ``others`` are its other markets' writes."""
 
     snapshot: OddsSnapshot
     first: SnapshotWrite | None
@@ -56,59 +57,56 @@ async def discard_payload(session: AsyncSession, payload_id: int) -> None:
 
 
 async def store_shaped_snapshot(
-    session: AsyncSession, snapshot: OddsSnapshot, event: Event, shape: SnapshotShape
+    session: AsyncSession,
+    event: Event,
+    envelope: Mapping[str, Any],
+    snapshot_time: datetime,
+    shape: SnapshotShape,
+    *,
+    created_at: datetime | None = None,
 ) -> ShapedWrite:
-    """Store ``snapshot`` (its ``raw_data`` envelope and the envelope columns already set) under
-    the key of the envelope's first market, filling its source, market, time basis, market
-    metadata, payload and price rows.
+    """Store ``envelope``, what ``shape.source`` gave for ``event`` at ``snapshot_time``, as one
+    snapshot per market it quotes, each with its source, market, time basis, market metadata,
+    payload and price rows.
 
-    An envelope quoting several markets (the Odds API's 1x2, spreads and totals) becomes one
-    snapshot per market, each with ``raw_data`` cut to its own market; ``snapshot`` takes the
-    first. A snapshot whose key is already stored is not written
-    (``odds_lambda.storage.snapshot_store.store_snapshot``). An envelope that quotes no market is
-    added as it is, with no market and no prices. What the envelope held but no row could take is
-    logged to ``data_quality_logs``. Flushes; the caller commits.
+    The envelope is read with ``odds_lambda.price_rows.expand_envelope``; its markets are stored
+    in ``odds_lambda.price_rows.MARKET_ORDER``, the first as ``ShapedWrite.first``. A snapshot
+    whose key is already stored is not written (``odds_lambda.storage.snapshot_store.store_snapshot``).
+    An envelope that quotes no market is stored as one snapshot with no market and no prices.
+    What the envelope held but no row could take is logged to ``data_quality_logs``. Flushes;
+    the caller commits.
     """
-    expanded = expand_envelope(snapshot.raw_data, shape.source, event.home_team, event.away_team)
+    expanded = expand_envelope(envelope, shape.source, event.home_team, event.away_team)
     for issue in expanded.issues:
         record_issue(session, event.id, issue.issue_type.value, issue.description, issue.context)
     if not expanded.markets:
-        _set_shape(snapshot, shape)
+        snapshot = _snapshot(event, snapshot_time, shape, created_at)
         session.add(snapshot)
         await session.flush()
         return ShapedWrite(snapshot, None, ())
 
-    envelope = snapshot.raw_data
-    split = len(expanded.markets) > 1
     writes: list[SnapshotWrite] = []
-    for i, market in enumerate(expanded.markets):
-        target = snapshot if i == 0 else _sibling(snapshot)
-        if split:
-            target.raw_data = market_envelope(envelope, market.market)
-            target.bookmaker_count = len(target.raw_data["bookmakers"])
-        _set_shape(target, shape)
-        _set_market(target, market)
-        writes.append(await store_snapshot(session, target, _prices(market.prices)))
+    for market in expanded.markets:
+        snapshot = _snapshot(event, snapshot_time, shape, created_at)
+        _set_market(snapshot, market)
+        writes.append(await store_snapshot(session, snapshot, _prices(market.prices)))
     first, *others = writes
     return ShapedWrite(first.snapshot, first, tuple(others))
 
 
-def _sibling(snapshot: OddsSnapshot) -> OddsSnapshot:
-    return OddsSnapshot(
-        event_id=snapshot.event_id,
-        snapshot_time=snapshot.snapshot_time,
-        raw_data={},
-        bookmaker_count=0,
-        api_request_id=snapshot.api_request_id,
-        fetch_tier=snapshot.fetch_tier,
-        hours_until_commence=snapshot.hours_until_commence,
+def _snapshot(
+    event: Event, snapshot_time: datetime, shape: SnapshotShape, created_at: datetime | None
+) -> OddsSnapshot:
+    snapshot = OddsSnapshot(
+        event_id=event.id,
+        snapshot_time=snapshot_time,
+        source=shape.source,
+        time_basis=shape.time_basis,
+        payload_id=shape.payload_id,
     )
-
-
-def _set_shape(snapshot: OddsSnapshot, shape: SnapshotShape) -> None:
-    snapshot.source = shape.source
-    snapshot.time_basis = shape.time_basis
-    snapshot.payload_id = shape.payload_id
+    if created_at is not None:
+        snapshot.created_at = created_at
+    return snapshot
 
 
 def _set_market(snapshot: OddsSnapshot, market: MarketSnapshot) -> None:

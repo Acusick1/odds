@@ -17,10 +17,12 @@ from odds_lambda.storage.mlb_score_repair import (
     repair_scores,
 )
 
-from tests.test_helpers import hold_game_pks
+from tests.test_helpers import hold_game_pks, with_game_pk
 
 T0 = datetime(2026, 5, 1, 23, 10, tzinfo=UTC)
 HOME, AWAY = "Boston Red Sox", "St.Louis Cardinals"
+# The gamePk each ``_event`` was built with, by event id.
+_GAME_PKS: dict[str, int] = {}
 
 
 def _event(
@@ -31,17 +33,22 @@ def _event(
     sport_key: str = "baseball_mlb",
     game_pk: int | None = 1,
 ) -> Event:
-    return Event(
-        id=event_id,
-        sport_key=sport_key,
-        sport_title="MLB",
-        commence_time=start,
-        home_team=HOME,
-        away_team=AWAY,
-        status=status,
-        home_score=scores[0],
-        away_score=scores[1],
-        mlb_game_pk=game_pk,
+    _GAME_PKS.pop(event_id, None)
+    if game_pk is not None:
+        _GAME_PKS[event_id] = game_pk
+    return with_game_pk(
+        Event(
+            id=event_id,
+            sport_key=sport_key,
+            sport_title="MLB",
+            commence_time=start,
+            home_team=HOME,
+            away_team=AWAY,
+            status=status,
+            home_score=scores[0],
+            away_score=scores[1],
+        ),
+        game_pk,
     )
 
 
@@ -58,7 +65,7 @@ def _game(
 
 
 def _pks(events: list[Event]) -> dict[str, int]:
-    return {e.id: e.mlb_game_pk for e in events if e.mlb_game_pk is not None}
+    return {e.id: _GAME_PKS[e.id] for e in events if e.id in _GAME_PKS}
 
 
 def _check(events: list[Event], games: list[MlbGameResult]) -> list[ScoreCheck]:

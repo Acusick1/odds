@@ -53,7 +53,6 @@ logger = structlog.get_logger()
 # derives its static-group dispatch set from this.
 FeatureGroupName = Literal[
     "tabular",
-    "polymarket",
     "injuries",
     "rest",
 ]
@@ -556,7 +555,7 @@ class FeatureConfig(BaseModel):
     feature_groups: tuple[FeatureGroupName | RetailEvFeatureGroupName, ...] = Field(
         default=("tabular",),
         description="Feature groups to compose. Empty only for "
-        "retail_ev. Available: tabular, polymarket, injuries, rest; retail_ev takes only "
+        "retail_ev. Available: tabular, injuries, rest; retail_ev takes only "
         "polymarket_at_t, dynamics, schedule_as_of_t, standings_as_of_t.",
     )
 
@@ -574,20 +573,6 @@ class FeatureConfig(BaseModel):
         ge=0.0,
         le=0.1,
         description="Probability change threshold for counting significant movements (0.5% default)",
-    )
-
-    # Polymarket feature configuration
-    pm_velocity_window_hours: float = Field(
-        default=2.0,
-        ge=0.5,
-        le=12.0,
-        description="Hours of recent PM price history used for velocity/acceleration features",
-    )
-    pm_price_tolerance_minutes: int = Field(
-        default=30,
-        ge=5,
-        le=120,
-        description="Tolerance in minutes for matching PM snapshots to a target timestamp",
     )
 
     # Variance filter

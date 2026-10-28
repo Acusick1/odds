@@ -23,7 +23,6 @@ from odds_analytics.retail_ev import RetailEvInput
 from odds_core.market_prices import Outcome, market_outcomes
 from odds_core.models import Event
 from odds_core.quotes import Quote
-from odds_core.snapshot_sources import FdukTimeBasis
 from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.candidate_rules import RetailEvModelParams, SharpInput, build_market_state
 
@@ -126,7 +125,7 @@ class TestTrainingRows:
             KICKOFF,
             [_betfair((1.9, 4.2, 4.4))],
             "football_data_uk",
-            FdukTimeBasis.KICKOFF,
+            "kickoff",
         )
         assert training_rows(EVENT, "1x2", CO_TIMED + fduk_close) == []
         assert training_rows(EVENT, "1x2", CO_TIMED + fduk_close + CLOSE) != []

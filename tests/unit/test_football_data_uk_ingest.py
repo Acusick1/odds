@@ -9,7 +9,7 @@ import pytest
 from scripts.ingest_football_data_uk import (
     SEASONS,
     UK_TZ,
-    _build_snapshot_raw_data,
+    _build_envelope,
     _extract_three_way_odds,
     build_event_id,
     normalize_team,
@@ -126,7 +126,7 @@ class TestBuildSnapshotRawData:
 
     def test_opening_uses_non_c_columns(self) -> None:
         row = self._make_row()
-        result = _build_snapshot_raw_data(row, "Arsenal", "Chelsea", use_closing=False)
+        result = _build_envelope(row, "Arsenal", "Chelsea", use_closing=False)
 
         assert result is not None
         assert result["source"] == "football_data_uk"
@@ -140,7 +140,7 @@ class TestBuildSnapshotRawData:
 
     def test_closing_uses_c_columns(self) -> None:
         row = self._make_row()
-        result = _build_snapshot_raw_data(row, "Arsenal", "Chelsea", use_closing=True)
+        result = _build_envelope(row, "Arsenal", "Chelsea", use_closing=True)
 
         assert result is not None
         pinnacle = next(bk for bk in result["bookmakers"] if bk["key"] == "pinnacle")
@@ -149,7 +149,7 @@ class TestBuildSnapshotRawData:
 
     def test_returns_none_when_no_bookmakers(self) -> None:
         row = {"HomeTeam": "Arsenal", "AwayTeam": "Chelsea"}
-        result = _build_snapshot_raw_data(row, "Arsenal", "Chelsea", use_closing=False)
+        result = _build_envelope(row, "Arsenal", "Chelsea", use_closing=False)
         assert result is None
 
     def test_includes_aggregates(self) -> None:
@@ -161,7 +161,7 @@ class TestBuildSnapshotRawData:
             "AvgD": "3.30",
             "AvgA": "2.85",
         }
-        result = _build_snapshot_raw_data(row, "Arsenal", "Chelsea", use_closing=False)
+        result = _build_envelope(row, "Arsenal", "Chelsea", use_closing=False)
 
         assert result is not None
         keys = {bk["key"] for bk in result["bookmakers"]}
@@ -177,7 +177,7 @@ class TestBuildSnapshotRawData:
             "AvgCD": "3.30",
             "AvgCA": "2.85",
         }
-        result = _build_snapshot_raw_data(row, "Arsenal", "Chelsea", use_closing=True)
+        result = _build_envelope(row, "Arsenal", "Chelsea", use_closing=True)
 
         assert result is not None
         keys = {bk["key"] for bk in result["bookmakers"]}
@@ -186,7 +186,7 @@ class TestBuildSnapshotRawData:
 
     def test_betfair_exchange_prefix(self) -> None:
         row = {"BFEH": "2.50", "BFED": "3.40", "BFEA": "2.80"}
-        result = _build_snapshot_raw_data(row, "Arsenal", "Chelsea", use_closing=False)
+        result = _build_envelope(row, "Arsenal", "Chelsea", use_closing=False)
 
         assert result is not None
         keys = {bk["key"] for bk in result["bookmakers"]}
@@ -211,14 +211,14 @@ class TestBuildSnapshotRawData:
             "VCD": "3.30",
             "VCA": "2.90",
         }
-        opening = _build_snapshot_raw_data(row, "Arsenal", "Chelsea", use_closing=False)
+        opening = _build_envelope(row, "Arsenal", "Chelsea", use_closing=False)
         assert opening is not None
         opening_keys = {bk["key"] for bk in opening["bookmakers"]}
         assert "pinnacle" in opening_keys
         assert "interwetten" in opening_keys
         assert "betvictor" in opening_keys
 
-        closing = _build_snapshot_raw_data(row, "Arsenal", "Chelsea", use_closing=True)
+        closing = _build_envelope(row, "Arsenal", "Chelsea", use_closing=True)
         assert closing is not None
         closing_keys = {bk["key"] for bk in closing["bookmakers"]}
         assert "pinnacle" in closing_keys
@@ -227,7 +227,7 @@ class TestBuildSnapshotRawData:
 
     def test_betfair_sportsbook_bf_prefix(self) -> None:
         row = {"BFH": "2.50", "BFD": "3.40", "BFA": "2.80"}
-        result = _build_snapshot_raw_data(row, "Arsenal", "Chelsea", use_closing=False)
+        result = _build_envelope(row, "Arsenal", "Chelsea", use_closing=False)
 
         assert result is not None
         keys = {bk["key"] for bk in result["bookmakers"]}
@@ -309,14 +309,14 @@ class TestOpeningSnapshotTime:
 class TestSnapshotTimingMetadata:
     def test_opening_and_closing_record_basis(self) -> None:
         row = {"B365H": "2.4", "B365D": "3.3", "B365A": "2.9"}
-        opening = _build_snapshot_raw_data(row, "Arsenal", "Chelsea", use_closing=False)
+        opening = _build_envelope(row, "Arsenal", "Chelsea", use_closing=False)
         assert opening is not None
         assert opening["timing"] == {
             "basis": "fduk_collection_deadline",
             "kickoff_time_assumed": False,
         }
         closing_row = {"B365CH": "2.4", "B365CD": "3.3", "B365CA": "2.9"}
-        closing = _build_snapshot_raw_data(
+        closing = _build_envelope(
             closing_row, "Arsenal", "Chelsea", use_closing=True, kickoff_time_assumed=True
         )
         assert closing is not None
@@ -345,7 +345,7 @@ class TestRetailBookmakerPrefixes:
             f"{prefix}CA": "3.7",
         }
         for use_closing in (False, True):
-            result = _build_snapshot_raw_data(row, "Arsenal", "Chelsea", use_closing=use_closing)
+            result = _build_envelope(row, "Arsenal", "Chelsea", use_closing=use_closing)
             assert result is not None
             assert [bk["key"] for bk in result["bookmakers"]] == [key]
 
@@ -358,7 +358,7 @@ class TestDuplicateBookmakerKeys:
             "MaxH": "2.5", "MaxD": "3.5", "MaxA": "4.5",
             "BbMxH": "2.6", "BbMxD": "3.6", "BbMxA": "4.6",
         }  # fmt: skip
-        result = _build_snapshot_raw_data(row, "Arsenal", "Chelsea", use_closing=False)
+        result = _build_envelope(row, "Arsenal", "Chelsea", use_closing=False)
         assert result is not None
         keys = [bk["key"] for bk in result["bookmakers"]]
         assert sorted(keys) == ["betvictor", "market_max"]

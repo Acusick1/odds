@@ -7,12 +7,11 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from odds_core.models import Event, Odds
+from odds_core.models import Event
 from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.storage.readers import OddsReader
 from odds_lambda.storage.shaped_snapshots import SnapshotShape
 from odds_lambda.storage.writers import OddsWriter
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from tests.integration.test_odds_api_writers import _book, _listed
@@ -24,7 +23,7 @@ SHAPE = SnapshotShape(Source.ODDS_API, TimeBasis.OBSERVED, None)
 
 async def _store(session: AsyncSession, event: Event, at: datetime) -> None:
     envelope: dict[str, Any] = {**_listed(event.id, KICKOFF), "bookmakers": [_book("bet365")]}
-    await OddsWriter(session).store_odds_snapshot(
+    await OddsWriter(session).store_envelope(
         event.id, envelope, snapshot_time=at, validate=False, shape=SHAPE
     )
     await session.flush()
@@ -59,27 +58,6 @@ class TestSplitSnapshotReaders:
 
         assert len(await reader.get_events_by_date_range(*window, min_snapshots=2)) == 1
         assert await reader.get_events_by_date_range(*window, min_snapshots=3) == []
-
-    async def test_each_odds_row_sits_on_its_markets_snapshot(
-        self, pglite_async_session: AsyncSession, event_with_two_fetches: Event
-    ) -> None:
-        reader = OddsReader(pglite_async_session)
-        odds = list(
-            (
-                await pglite_async_session.execute(
-                    select(Odds).where(
-                        Odds.event_id == "apihex1",
-                        Odds.odds_timestamp == KICKOFF - timedelta(hours=2),
-                    )
-                )
-            ).scalars()
-        )
-        snapshots = {s.id: s for s in await reader.get_snapshots_for_event("apihex1")}
-
-        assert {o.market_key for o in odds} == {"1x2", "totals"}
-        for row in odds:
-            held = snapshots[row.snapshot_id].raw_data["bookmakers"]
-            assert {m["key"] for b in held for m in b["markets"]} == {row.market_key}
 
     async def test_odds_history_returns_only_snapshots_of_the_requested_market(
         self, pglite_async_engine: Any, event_with_two_fetches: Event

@@ -36,7 +36,7 @@ The sharp reference anchors the `retail_sharp_diff` feature, the retail-sharp di
 
 ## Why a sharp reference
 
-- Pinnacle first posts NBA lines 12-24 h before the game `(inferred)`; the measurement behind it is an Odds API snapshot analysis whose date and query were not recorded, so re-check against `odds_snapshots`. Opening-tier snapshots (72+ h) hold only soft-book lines ([fetch tier](../storage/fetch-tier.md)).
+- Pinnacle first posts NBA lines 12-24 h before the game `(inferred)`; the measurement behind it is an Odds API snapshot analysis whose date and query were not recorded, so re-check against `odds_snapshots`. Snapshots of the opening tier (72+ h before kick-off) hold only soft-book lines ([fetch tier](../storage/fetch-tier.md)).
 - The agent prompt treats sharp prices as strong but imperfect (`packages/odds-mcp/agents/common.md`); why the prompt says so is `(inferred)`.
 
 ## Retail-sharp divergence

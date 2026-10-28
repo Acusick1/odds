@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Ingest football-data.co.uk EPL CSVs into the database.
 
-Downloads CSVs from football-data.co.uk and writes Event + OddsSnapshot records
-following the same raw_data format as ingest_oddsportal.py, so the training
-pipeline reads them via extract_odds_from_snapshot() without changes.
+Downloads CSVs from football-data.co.uk and stores each match's opening and closing
+prices as ``football_data_uk`` snapshots with their price rows, through the same
+envelope writer as ingest_oddsportal.py.
 
 Usage:
     # Download and ingest all seasons (dry-run first)
@@ -29,24 +29,25 @@ import logging
 import math
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
 from zoneinfo import ZoneInfo
 
 from odds_core.database import async_session_maker
-from odds_core.models import EventStatus, Odds, OddsSnapshot, SnapshotPayload
+from odds_core.models import Event, EventStatus, OddsSnapshot, Price, SnapshotPayload
 from odds_core.odds_math import PRICE_DECIMAL_KEY
 from odds_core.paper_trade_models import CandidateDecision
-from odds_core.snapshot_sources import FdukTimeBasis, SnapshotSource
 from odds_core.team import team_abbrev
 from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.oddsportal_common import IngestionStats
+from odds_lambda.price_rows import PriceSpec, expand_envelope
 from odds_lambda.storage.data_quality import record_issue
 from odds_lambda.storage.event_resolver import ListedGame, MatchWindow, Resolution, resolve_event
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload, store_shaped_snapshot
-from odds_lambda.tier_utils import snapshot_tiers
-from sqlalchemy import delete, func, or_, select
+from odds_lambda.storage.snapshot_store import PriceRow, price_row
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from team_names import normalize_team as _normalize_team_central
 
@@ -59,7 +60,7 @@ log = logging.getLogger("ingest_football_data_uk")
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "football_data_uk"
 BASE_URL = "https://www.football-data.co.uk/mmz4281"
-SOURCE_TAG = SnapshotSource.FOOTBALL_DATA_UK.value
+SOURCE_TAG = "football_data_uk"
 SPORT_KEY = "soccer_epl"
 SPORT_TITLE = "EPL"
 EVENT_ID_PREFIX = "fduk"
@@ -110,6 +111,14 @@ AGGREGATE_PREFIXES: dict[str, str] = {
     "BbMx": "market_max",
     "BbAv": "market_avg",
 }
+
+
+class FdukTimeBasis(StrEnum):
+    """``timing.basis`` of a football-data.co.uk envelope: what its snapshot time means."""
+
+    COLLECTION_DEADLINE = "fduk_collection_deadline"
+    KICKOFF = "kickoff"
+
 
 UK_TZ = ZoneInfo("Europe/London")
 DEFAULT_KICKOFF = time(15, 0)
@@ -274,8 +283,7 @@ def _extract_three_way_odds(
 
 
 # Match stats columns: (csv_column, json_key) pairs.
-# These are post-match stats from the FDUK CSVs stored in raw_data for
-# downstream rolling feature computation.
+# These are post-match stats from the FDUK CSVs, kept in the archived envelope.
 MATCH_STATS_COLUMNS: list[tuple[str, str]] = [
     ("HS", "home_shots"),
     ("AS", "away_shots"),
@@ -309,7 +317,7 @@ def _extract_match_stats(row: dict[str, str]) -> dict[str, Any]:
     return stats
 
 
-def _build_snapshot_raw_data(
+def _build_envelope(
     row: dict[str, str],
     home_team: str,
     away_team: str,
@@ -317,7 +325,7 @@ def _build_snapshot_raw_data(
     use_closing: bool,
     kickoff_time_assumed: bool = False,
 ) -> dict[str, Any] | None:
-    """Build raw_data dict from a CSV row for one timing (opening or closing).
+    """Build the envelope of a CSV row for one timing (opening or closing).
 
     Opening odds: columns like PSH, PSD, PSA, B365H, B365D, B365A
     Closing odds: columns like PSCH, PSCD, PSCA, B365CH, B365CD, B365CA
@@ -344,7 +352,7 @@ def _build_snapshot_raw_data(
         return None
 
     basis = FdukTimeBasis.KICKOFF if use_closing else FdukTimeBasis.COLLECTION_DEADLINE
-    raw_data: dict[str, Any] = {
+    envelope: dict[str, Any] = {
         "bookmakers": bookmakers,
         "source": SOURCE_TAG,
         "timing": {"basis": basis.value, "kickoff_time_assumed": kickoff_time_assumed},
@@ -352,9 +360,9 @@ def _build_snapshot_raw_data(
 
     match_stats = _extract_match_stats(row)
     if match_stats:
-        raw_data["match_stats"] = match_stats
+        envelope["match_stats"] = match_stats
 
-    return raw_data
+    return envelope
 
 
 def build_event_id(
@@ -502,16 +510,16 @@ async def _ingest_one_match(
             if not created:
                 stats.results_filled += 1
 
-    new_snapshots: list[tuple[OddsSnapshot, TimeBasis]] = []
+    new_snapshots: list[NewSnapshot] = []
     for use_closing in (False, True):
-        raw_data = _build_snapshot_raw_data(
+        envelope = _build_envelope(
             row,
             home_team,
             away_team,
             use_closing=use_closing,
             kickoff_time_assumed=kickoff.time_assumed,
         )
-        if raw_data is None:
+        if envelope is None:
             continue
         if use_closing:
             snapshot_time: datetime | None = commence_time
@@ -521,45 +529,21 @@ async def _ingest_one_match(
                 stats.openings_withheld += 1
                 log.info(f"  {event_id}: opening deadline at or after kick-off, not stamped")
                 continue
-        hours_before = (commence_time - snapshot_time).total_seconds() / 3600
-        time_basis = TimeBasis.CLOSE if use_closing else TimeBasis.UPPER_BOUND
-        for bk in raw_data["bookmakers"]:
+        for bk in envelope["bookmakers"]:
             bk["last_update"] = snapshot_time.isoformat().replace("+00:00", "Z")
         new_snapshots.append(
-            (
-                OddsSnapshot(
-                    event_id=event_id,
-                    snapshot_time=snapshot_time,
-                    raw_data=raw_data,
-                    bookmaker_count=len(raw_data["bookmakers"]),
-                    api_request_id=SOURCE_TAG,
-                    hours_until_commence=hours_before,
-                ),
-                time_basis,
+            NewSnapshot(
+                envelope, snapshot_time, TimeBasis.CLOSE if use_closing else TimeBasis.UPPER_BOUND
             )
         )
 
-    tiers = snapshot_tiers(
-        [
-            (snap.snapshot_time, Source.FOOTBALL_DATA_UK, basis, MARKET_KEY)
-            for snap, basis in new_snapshots
-        ],
-        commence_time,
-    )
-    for (snap, _), tier in zip(new_snapshots, tiers, strict=True):
-        snap.fetch_tier = tier.value
-
-    # Snapshots stored before the redesign carry no source, only the request-id tag.
     existing_snaps = list(
         (
             await session.execute(
                 select(OddsSnapshot)
                 .where(
                     OddsSnapshot.event_id == event_id,
-                    or_(
-                        OddsSnapshot.source == Source.FOOTBALL_DATA_UK,
-                        OddsSnapshot.api_request_id == SOURCE_TAG,
-                    ),
+                    OddsSnapshot.source == Source.FOOTBALL_DATA_UK,
                 )
                 .order_by(OddsSnapshot.snapshot_time)
             )
@@ -567,8 +551,8 @@ async def _ingest_one_match(
         .scalars()
         .all()
     )
-    if [_snapshot_content(snap, snap.source, snap.time_basis) for snap in existing_snaps] == [
-        _snapshot_content(snap, Source.FOOTBALL_DATA_UK, basis) for snap, basis in new_snapshots
+    if [await _stored_content(session, snap) for snap in existing_snaps] == [
+        _new_content(event, snap) for snap in new_snapshots
     ]:
         return
     if existing_snaps:
@@ -589,21 +573,24 @@ async def _ingest_one_match(
         stats.snapshots_updated += len(existing_snaps)
     if not new_snapshots:
         return
-    payload_id = await store_payload(session, [snap.raw_data for snap, _ in new_snapshots])
-    for snap, basis in new_snapshots:
+    payload_id = await store_payload(session, [snap.envelope for snap in new_snapshots])
+    for snap in new_snapshots:
         write = await store_shaped_snapshot(
-            session, snap, event, SnapshotShape(Source.FOOTBALL_DATA_UK, basis, payload_id)
+            session,
+            event,
+            snap.envelope,
+            snap.snapshot_time,
+            SnapshotShape(Source.FOOTBALL_DATA_UK, snap.time_basis, payload_id),
         )
         if write.inserted:
             stats.snapshots_inserted += 1
 
 
 async def _delete_snapshots(session: AsyncSession, snapshots: list[OddsSnapshot]) -> None:
-    """Delete ``snapshots`` with their odds rows (prices cascade), and the payloads no other
-    snapshot references."""
+    """Delete ``snapshots`` (their prices cascade), and the payloads no other snapshot
+    references."""
     ids = [snap.id for snap in snapshots]
     payload_ids = {snap.payload_id for snap in snapshots if snap.payload_id is not None}
-    await session.execute(delete(Odds).where(Odds.snapshot_id.in_(ids)))
     await session.execute(delete(OddsSnapshot).where(OddsSnapshot.id.in_(ids)))
     if payload_ids:
         still_used = select(OddsSnapshot.payload_id).where(OddsSnapshot.payload_id.in_(payload_ids))
@@ -614,15 +601,42 @@ async def _delete_snapshots(session: AsyncSession, snapshots: list[OddsSnapshot]
         )
 
 
-def _snapshot_content(snap: OddsSnapshot, source: Source | None, basis: TimeBasis | None) -> Any:
-    """What a re-ingest compares: the stored snapshot's, or a new one's with its intended shape."""
-    return (
-        source,
-        basis,
-        snap.snapshot_time,
-        snap.hours_until_commence,
-        snap.bookmaker_count,
-        snap.raw_data,
+@dataclass(frozen=True)
+class NewSnapshot:
+    """One timing's envelope of a CSV row, with its snapshot time and what that time means."""
+
+    envelope: dict[str, Any]
+    snapshot_time: datetime
+    time_basis: TimeBasis
+
+
+# What a re-ingest compares: a snapshot's time basis, time and price rows.
+SnapshotContent = tuple[TimeBasis | None, datetime, frozenset[PriceRow]]
+
+
+async def _stored_content(session: AsyncSession, snap: OddsSnapshot) -> SnapshotContent:
+    prices = (await session.execute(select(Price).where(Price.snapshot_id == snap.id))).scalars()
+    return (snap.time_basis, snap.snapshot_time, frozenset(price_row(p) for p in prices))
+
+
+def _new_content(event: Event, snap: NewSnapshot) -> SnapshotContent:
+    expanded = expand_envelope(
+        snap.envelope, Source.FOOTBALL_DATA_UK, event.home_team, event.away_team
+    )
+    rows = frozenset(_spec_row(spec) for market in expanded.markets for spec in market.prices)
+    return (snap.time_basis, snap.snapshot_time, rows)
+
+
+def _spec_row(spec: PriceSpec) -> PriceRow:
+    return PriceRow(
+        bookmaker=spec.bookmaker,
+        outcome=spec.outcome.value,
+        line=spec.line,
+        side=spec.side.value,
+        price=spec.price,
+        size=spec.size,
+        matched=spec.matched,
+        changed_at=spec.changed_at,
     )
 
 

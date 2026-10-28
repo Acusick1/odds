@@ -36,7 +36,7 @@ Rows with ESPN `state` `in` (live) are skipped from both lists. A row counts as 
 
 `get_probable_pitchers(lookahead_hours=48, refresh=True)` is read-only (clamped to 1-168 hours). With `refresh=True` it fetches the MLB Stats API for the dates covering the window (`odds_lambda.mlb_stats_fetcher.dates_for_window` pads one day each side because MLBAM resolves dates in US Eastern) and returns current state without persisting; `fetch_status` is `live`. On an `httpx.HTTPError` it falls back to the cached `mlb_probable_pitchers` snapshots with `stale_db_only`. `refresh=False` reads the cache only (`db_only`). Both paths use `odds_core.mlb_data_models.select_latest_in_window`: newest `fetched_at` per `game_pk` inside the window, ordered by kickoff.
 
-Each game carries `home_pitcher_name`/`id` and `away_pitcher_name`/`id`, nullable because MLBAM omits the pitcher until announced (null means "not yet announced"), and `hours_until_commence`. The tool cannot tell a starter from an opener; that needs a web search. The cache is written only by the fetch-mlb-probables job, a daily cron on the production host ([MLB probable pitchers](../collection/mlb-probable-pitchers.md)).
+Each game carries `home_pitcher_name`/`id` and `away_pitcher_name`/`id`, nullable because MLBAM omits the pitcher until announced (null means "not yet announced"), and `hours_until_commence` (the tool's own kick-off minus now; no such value is stored). The tool cannot tell a starter from an opener; that needs a web search. The cache is written only by the fetch-mlb-probables job, a daily cron on the production host ([MLB probable pitchers](../collection/mlb-probable-pitchers.md)).
 
 ## Behaviour to know
 

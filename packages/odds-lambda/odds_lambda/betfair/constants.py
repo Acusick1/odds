@@ -89,6 +89,3 @@ SPORT_CONFIG: dict[SportKey, SportBetfairConfig] = {
         name_order="away_first",
     ),
 }
-
-# ``api_request_id`` prefix of every snapshot the fetch-betfair-exchange job writes.
-LIVE_REQUEST_ID_PREFIX = "betfair_api_"

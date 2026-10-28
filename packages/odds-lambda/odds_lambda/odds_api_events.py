@@ -6,7 +6,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 import structlog
-from odds_core.event_ids import is_odds_api_event_id
 from odds_core.models import Event, EventExternalId
 from odds_core.vocabulary import Source
 from sqlalchemy import select
@@ -17,7 +16,6 @@ from odds_lambda.mlb_game_resolver import GameRow
 from odds_lambda.storage.event_resolver import (
     Resolution,
     ResolvedEvent,
-    event_keyed_by_odds_api_id,
 )
 
 logger = structlog.get_logger()
@@ -90,8 +88,7 @@ async def find_event_by_odds_api_id(session: AsyncSession, odds_api_id: str) -> 
             EventExternalId.source == Source.ODDS_API, EventExternalId.external_id == odds_api_id
         )
     )
-    event = held.scalar_one_or_none()
-    return event if event is not None else await event_keyed_by_odds_api_id(session, odds_api_id)
+    return held.scalar_one_or_none()
 
 
 async def odds_api_id_of(session: AsyncSession, event_id: str) -> str | None:
@@ -100,8 +97,4 @@ async def odds_api_id_of(session: AsyncSession, event_id: str) -> str | None:
         .join(Event, EventExternalId.event_id == Event.surrogate_id)  # type: ignore[arg-type]
         .where(EventExternalId.source == Source.ODDS_API, Event.id == event_id)
     )
-    recorded = held.scalar_one_or_none()
-    if recorded is not None:
-        return recorded
-    # An event stored before ids were recorded is keyed by the API's id when it came from the API.
-    return event_id if is_odds_api_event_id(event_id) else None
+    return held.scalar_one_or_none()

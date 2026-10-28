@@ -61,8 +61,6 @@ async def sample_events_with_gaps(test_session):
         snapshot = OddsSnapshot(
             event_id=event1.id,
             snapshot_time=event1.commence_time - timedelta(hours=TIER_HOURS_BEFORE[tier]),
-            raw_data={},
-            bookmaker_count=8,
         )
         test_session.add(snapshot)
 
@@ -71,8 +69,6 @@ async def sample_events_with_gaps(test_session):
         snapshot = OddsSnapshot(
             event_id=event2.id,
             snapshot_time=event2.commence_time - timedelta(hours=TIER_HOURS_BEFORE[tier]),
-            raw_data={},
-            bookmaker_count=8,
         )
         test_session.add(snapshot)
 
@@ -81,8 +77,6 @@ async def sample_events_with_gaps(test_session):
         snapshot = OddsSnapshot(
             event_id=event3.id,
             snapshot_time=event3.commence_time - timedelta(hours=TIER_HOURS_BEFORE[tier]),
-            raw_data={},
-            bookmaker_count=8,
         )
         test_session.add(snapshot)
 
@@ -135,8 +129,6 @@ class TestGapBackfillPlanner:
             snapshot = OddsSnapshot(
                 event_id=event.id,
                 snapshot_time=event.commence_time - timedelta(hours=TIER_HOURS_BEFORE[tier]),
-                raw_data={},
-                bookmaker_count=8,
             )
             test_session.add(snapshot)
 
@@ -231,8 +223,6 @@ class TestGapBackfillPlanner:
                 OddsSnapshot(
                     event_id=event.id,
                     snapshot_time=datetime.fromisoformat(planned.replace("Z", "+00:00")),
-                    raw_data={},
-                    bookmaker_count=1,
                     source=Source.ODDS_API,
                     time_basis=TimeBasis.UPPER_BOUND,
                 )

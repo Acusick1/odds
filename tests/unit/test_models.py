@@ -3,8 +3,8 @@
 from datetime import UTC, datetime
 
 import pytest
-from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds, OddsSnapshot
-from odds_core.odds_math import american_to_decimal
+from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, OddsSnapshot
+from odds_core.vocabulary import Market, Source, TimeBasis
 
 
 class TestEventModel:
@@ -100,81 +100,19 @@ class TestEventStatusTransitions:
 class TestOddsSnapshotModel:
     """Tests for OddsSnapshot model."""
 
-    def test_odds_snapshot_creation(self, sample_odds_data):
+    def test_odds_snapshot_creation(self):
         """Test creating an OddsSnapshot instance."""
         snapshot = OddsSnapshot(
             event_id="test123",
             snapshot_time=datetime.now(UTC),
-            raw_data=sample_odds_data,
-            bookmaker_count=2,
+            source=Source.ODDS_API,
+            market=Market.H2H,
+            time_basis=TimeBasis.OBSERVED,
         )
 
         assert snapshot.event_id == "test123"
-        assert snapshot.bookmaker_count == 2
-        assert isinstance(snapshot.raw_data, dict)
-        assert "bookmakers" in snapshot.raw_data
-
-
-class TestOddsModel:
-    """Tests for Odds model."""
-
-    def test_odds_creation(self):
-        """Test creating an Odds instance."""
-        odds = Odds(
-            event_id="test123",
-            bookmaker_key="fanduel",
-            bookmaker_title="FanDuel",
-            market_key="h2h",
-            outcome_name="Lakers",
-            price_decimal=american_to_decimal(-110),
-            odds_timestamp=datetime.now(UTC),
-            last_update=datetime.now(UTC),
-            is_valid=True,
-        )
-
-        assert odds.event_id == "test123"
-        assert odds.bookmaker_key == "fanduel"
-        assert odds.market_key == "h2h"
-        assert odds.outcome_name == "Lakers"
-        assert odds.price_decimal == pytest.approx(1.90909, abs=1e-5)
-        assert odds.american_price == -110
-        assert odds.point is None
-        assert odds.is_valid is True
-
-    def test_odds_with_point(self):
-        """Test Odds with spread/total line."""
-        odds = Odds(
-            event_id="test123",
-            bookmaker_key="fanduel",
-            bookmaker_title="FanDuel",
-            market_key="spreads",
-            outcome_name="Lakers",
-            price_decimal=american_to_decimal(-110),
-            point=-2.5,
-            odds_timestamp=datetime.now(UTC),
-            last_update=datetime.now(UTC),
-        )
-
-        assert odds.market_key == "spreads"
-        assert odds.point == -2.5
-
-    def test_odds_validation_flag(self):
-        """Test Odds validation flag."""
-        odds = Odds(
-            event_id="test123",
-            bookmaker_key="fanduel",
-            bookmaker_title="FanDuel",
-            market_key="h2h",
-            outcome_name="Lakers",
-            price_decimal=american_to_decimal(50000),  # Invalid odds
-            odds_timestamp=datetime.now(UTC),
-            last_update=datetime.now(UTC),
-            is_valid=False,
-            validation_notes="Price out of valid range",
-        )
-
-        assert odds.is_valid is False
-        assert odds.validation_notes is not None
+        assert snapshot.source is Source.ODDS_API
+        assert snapshot.payload_id is None
 
 
 class TestDataQualityLogModel:

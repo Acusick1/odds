@@ -35,7 +35,7 @@ from odds_lambda.jobs import (
 from odds_lambda.scheduling.decision import ScheduleDecision
 from odds_lambda.scheduling.jobs import JobContext
 
-from tests.test_helpers import store_tagged, totals_book
+from tests.test_helpers import make_tagged_snapshot, store_tagged, three_way_bookmaker, totals_book
 
 NOW = datetime(2026, 10, 19, 12, 0, tzinfo=UTC)
 OP = Source.ODDSPORTAL
@@ -93,8 +93,6 @@ def seed(pglite_async_session: Any) -> Callable[..., Any]:
                 OddsSnapshot(
                     event_id=f"event_{counter}",
                     snapshot_time=taken,
-                    raw_data={},
-                    bookmaker_count=1,
                     source=source,
                     time_basis=time_basis,
                 )
@@ -642,14 +640,11 @@ class TestCheckMissingBetfairCloses:
                 )
             )
             await pglite_async_session.flush()
-            for taken, raw_data in snapshots:
+            for taken, envelope in snapshots:
                 await store_tagged(
                     pglite_async_session,
-                    OddsSnapshot(
-                        event_id=event_id,
-                        snapshot_time=taken,
-                        raw_data=raw_data,
-                        bookmaker_count=1,
+                    make_tagged_snapshot(
+                        event_id, taken, envelope["bookmakers"], envelope["source"]
                     ),
                 )
             await pglite_async_session.commit()
@@ -663,7 +658,10 @@ class TestCheckMissingBetfairCloses:
 
     @staticmethod
     def _op(kickoff: datetime, minutes_before: int = 20) -> tuple[datetime, dict[str, Any]]:
-        return kickoff - timedelta(minutes=minutes_before), {"source": "oddsportal_live"}
+        return kickoff - timedelta(minutes=minutes_before), {
+            "source": "oddsportal_live",
+            "bookmakers": [three_way_bookmaker("bet365", (2.0, 4.0, 4.0), "Home FC", "Away FC")],
+        }
 
     async def test_event_without_a_snapshot_in_the_window_is_missing(
         self, pglite_async_session: Any, seed_event: Callable[..., Any]

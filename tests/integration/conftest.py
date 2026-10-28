@@ -9,8 +9,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from odds_core.models import Event, Odds, OddsSnapshot
-from odds_core.odds_math import american_to_decimal
+from odds_core.models import Event, OddsSnapshot
 from odds_core.vocabulary import Market, Source, TimeBasis
 from odds_lambda import collection_calendar
 from odds_lambda.jobs import fetch_betfair_exchange, fetch_oddsportal
@@ -49,7 +48,7 @@ def job_session(
 
 @pytest.fixture
 async def live_twin_with_rows(pglite_async_session):
-    """An op_live_ event owning a snapshot, odds, paper trade and match brief."""
+    """An op_live_ event owning a snapshot, paper trade and match brief."""
     from odds_core.match_brief_models import BriefDecision, MatchBrief
     from odds_core.paper_trade_models import PaperTrade
 
@@ -57,27 +56,18 @@ async def live_twin_with_rows(pglite_async_session):
     session.add(make_epl_event(TWIN_EVENT_ID))
     await session.flush()
 
-    snapshot = OddsSnapshot(
-        event_id=TWIN_EVENT_ID,
-        snapshot_time=TWIN_KICKOFF - timedelta(hours=3),
-        raw_data={},
-        bookmaker_count=1,
+    await store_tagged(
+        session,
+        make_tagged_snapshot(
+            TWIN_EVENT_ID,
+            TWIN_KICKOFF - timedelta(hours=3),
+            [three_way_bookmaker("bet365", (2.5, 3.4, 2.9))],
+            "oddsportal_live",
+        ),
     )
-    session.add(snapshot)
-    await session.flush()
 
     session.add_all(
         [
-            Odds(
-                event_id=TWIN_EVENT_ID,
-                bookmaker_key="bet365",
-                bookmaker_title="bet365",
-                market_key="1x2",
-                outcome_name="Arsenal",
-                price_decimal=american_to_decimal(150),
-                odds_timestamp=snapshot.snapshot_time,
-                last_update=snapshot.snapshot_time,
-            ),
             PaperTrade(
                 event_id=TWIN_EVENT_ID,
                 market="h2h",
@@ -114,8 +104,6 @@ async def epl_snapshot(pglite_async_session, stored_epl_event) -> OddsSnapshot:
     snapshot = OddsSnapshot(
         event_id=stored_epl_event.id,
         snapshot_time=TWIN_KICKOFF - timedelta(hours=1),
-        raw_data={"bookmakers": []},
-        bookmaker_count=1,
         source=Source.BETFAIR,
         market=Market.ONE_X_TWO,
         time_basis=TimeBasis.OBSERVED,

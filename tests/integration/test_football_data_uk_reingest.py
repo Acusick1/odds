@@ -17,10 +17,11 @@ from odds_core.models import (
 )
 from odds_core.paper_trade_models import CandidateDecision
 from odds_core.vocabulary import Market, PriceOutcome, Side, Source, TimeBasis
+from odds_lambda.fetch_tier import FetchTier
+from odds_lambda.tier_utils import snapshot_tiers
 from sqlalchemy import func, select
 
 from scripts.ingest_football_data_uk import (
-    SOURCE_TAG,
     FdukStats,
     ingest_row,
 )
@@ -62,9 +63,10 @@ class TestShape:
         ]
         assert snaps[0].snapshot_time == datetime(2024, 8, 16, 16, 0, tzinfo=UTC)
         assert snaps[1].snapshot_time == datetime(2024, 8, 17, 11, 30, tzinfo=UTC)
-        assert {s.api_request_id for s in snaps} == {SOURCE_TAG}
         assert snaps[0].payload_id is not None and snaps[0].payload_id == snaps[1].payload_id
-        assert {bk["key"] for bk in snaps[0].raw_data["bookmakers"]} == {
+        payload = await session.get(SnapshotPayload, snaps[0].payload_id)
+        assert payload is not None
+        assert {bk["key"] for bk in payload.payload[0]["bookmakers"]} == {
             "bet365",
             "paddypower",
             "market_max",
@@ -141,14 +143,14 @@ class TestReplacementRefusal:
 
 class TestReplacement:
     @pytest.mark.asyncio
-    async def test_replaces_snapshots_stored_before_the_redesign(
-        self, pglite_async_session
-    ) -> None:
+    async def test_replaces_snapshots_whose_content_differs(self, pglite_async_session) -> None:
         session = pglite_async_session
-        legacy_kickoff = datetime(2024, 8, 17, 11, 30, tzinfo=UTC)
-        session.add(_event(FDUK_ID, legacy_kickoff))
+        stale_kickoff = datetime(2024, 8, 17, 11, 30, tzinfo=UTC)
+        session.add(_event(FDUK_ID, stale_kickoff))
         for offset in (24, 1):
-            session.add(_snapshot(FDUK_ID, SOURCE_TAG, legacy_kickoff - timedelta(hours=offset)))
+            session.add(
+                _snapshot(FDUK_ID, Source.FOOTBALL_DATA_UK, stale_kickoff - timedelta(hours=offset))
+            )
         await session.flush()
 
         stats = FdukStats()
@@ -156,10 +158,7 @@ class TestReplacement:
         await session.flush()
 
         snaps = await _snaps(session, FDUK_ID)
-        assert [(s.time_basis, s.fetch_tier, s.hours_until_commence) for s in snaps] == [
-            (TimeBasis.UPPER_BOUND, "sharp", 19.5),
-            (TimeBasis.CLOSE, "closing", 0.0),
-        ]
+        assert [s.time_basis for s in snaps] == [TimeBasis.UPPER_BOUND, TimeBasis.CLOSE]
         assert (stats.snapshots_updated, stats.snapshots_inserted) == (2, 2)
 
     @pytest.mark.asyncio
@@ -227,16 +226,9 @@ def _event(event_id: str, commence: datetime) -> Event:
     )
 
 
-def _snapshot(event_id: str, tag: str, when: datetime) -> OddsSnapshot:
-    return OddsSnapshot(
-        event_id=event_id,
-        snapshot_time=when,
-        raw_data={"bookmakers": [], "source": tag},
-        bookmaker_count=0,
-        api_request_id=tag,
-        fetch_tier="early",
-        hours_until_commence=24.0,
-    )
+def _snapshot(event_id: str, source: Source, when: datetime) -> OddsSnapshot:
+    """A stored snapshot that holds no prices."""
+    return OddsSnapshot(event_id=event_id, snapshot_time=when, source=source)
 
 
 async def _hold_oddsportal_id(session, event: Event) -> None:
@@ -267,7 +259,7 @@ class TestMatchedAndAmbiguousEvents:
         session.add(op_event)
         await _hold_oddsportal_id(session, op_event)
         op_snapshot_time = op_kickoff - timedelta(hours=5)
-        session.add(_snapshot(OP_ID, "oddsportal", op_snapshot_time))
+        session.add(_snapshot(OP_ID, Source.ODDSPORTAL, op_snapshot_time))
         await session.flush()
 
         stats = FdukStats()
@@ -277,13 +269,12 @@ class TestMatchedAndAmbiguousEvents:
         event = await session.get(Event, OP_ID)
         assert event is not None and event.commence_time == op_kickoff
         snaps = await _snaps(session, OP_ID)
-        assert [s.api_request_id for s in snaps] == [
-            "football_data_uk",
-            "oddsportal",
-            "football_data_uk",
+        assert [s.source for s in snaps] == [
+            Source.FOOTBALL_DATA_UK,
+            Source.ODDSPORTAL,
+            Source.FOOTBALL_DATA_UK,
         ]
         assert snaps[-1].snapshot_time == op_kickoff
-        assert snaps[-1].hours_until_commence == 0.0
         assert stats.kickoff_mismatches == 1
 
     @pytest.mark.asyncio
@@ -324,7 +315,7 @@ class TestMatchedAndAmbiguousEvents:
         session = pglite_async_session
         listed = datetime(2024, 8, 17, 12, 30, tzinfo=UTC)
         session.add(_event(OP_ID, listed))
-        session.add(_snapshot(OP_ID, "oddsportal", listed - timedelta(hours=5)))
+        session.add(_snapshot(OP_ID, Source.ODDSPORTAL, listed - timedelta(hours=5)))
         await session.flush()
 
         stats = FdukStats()
@@ -433,7 +424,7 @@ class TestOpeningWithheld:
         await session.flush()
 
         snaps = await _snaps(session, "fduk_2023-2024_ARS_WOL_2023-12-26")
-        assert [s.raw_data["timing"]["basis"] for s in snaps] == ["kickoff"]
+        assert [s.time_basis for s in snaps] == [TimeBasis.CLOSE]
         assert stats.openings_withheld == 1
 
     @pytest.mark.asyncio
@@ -446,8 +437,13 @@ class TestOpeningWithheld:
         await ingest_row(session, row, "2024-2025", FdukStats())
         await session.flush()
 
-        snaps = await _snaps(session, "fduk_2024-2025_ARS_WOL_2025-01-14")
-        assert [s.fetch_tier for s in snaps] == ["pregame", "closing"]
+        event = await session.get(Event, "fduk_2024-2025_ARS_WOL_2025-01-14")
+        assert event is not None
+        snaps = await _snaps(session, event.id)
+        assert snapshot_tiers(
+            [(s.snapshot_time, s.source, s.time_basis, s.market) for s in snaps],
+            event.commence_time,
+        ) == [FetchTier.PREGAME, FetchTier.CLOSING]
 
 
 class TestAtomicityAndIdempotency:
@@ -458,13 +454,13 @@ class TestAtomicityAndIdempotency:
         session = pglite_async_session
         kickoff = datetime(2024, 8, 17, 11, 30, tzinfo=UTC)
         session.add(_event(FDUK_ID, kickoff))
-        session.add(_snapshot(FDUK_ID, SOURCE_TAG, kickoff - timedelta(hours=24)))
+        session.add(_snapshot(FDUK_ID, Source.FOOTBALL_DATA_UK, kickoff - timedelta(hours=24)))
         await session.flush()
 
-        def boom(*_args, **_kwargs) -> None:
+        async def boom(*_args, **_kwargs) -> None:
             raise RuntimeError("insert failed")
 
-        monkeypatch.setattr(session, "add_all", boom)
+        monkeypatch.setattr("scripts.ingest_football_data_uk.store_shaped_snapshot", boom)
         stats = FdukStats()
         await ingest_row(session, ROW, "2024-2025", stats)
 

@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 from odds_core import database
 from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.time import ensure_utc
+from odds_core.vocabulary import Source
 from sqlalchemy import func, select
 
-from odds_lambda.betfair.constants import LIVE_REQUEST_ID_PREFIX, SPORT_CONFIG
+from odds_lambda.betfair.constants import SPORT_CONFIG
 
 # Betfair can turn a market in play at its own start, before the event's kickoff (an hour early
 # for the 2026-10-24 World Series game). A start further ahead of the kickoff than this is taken
@@ -16,17 +18,6 @@ from odds_lambda.betfair.constants import LIVE_REQUEST_ID_PREFIX, SPORT_CONFIG
 MAX_BETFAIR_START_LEAD = timedelta(hours=3)
 # Only the match odds market dates a kick-off; the sport's other markets carry their own starts.
 _MATCH_ODDS_MARKETS = {sport: cfg.match_odds.market for sport, cfg in SPORT_CONFIG.items()}
-
-
-def parse_betfair_start(raw: object) -> datetime | None:
-    """A stored ``betfair_meta.market_start_time``, or None when it is missing or malformed."""
-    if not isinstance(raw, str):
-        return None
-    try:
-        start = datetime.fromisoformat(raw)
-    except ValueError:
-        return None
-    return start if start.tzinfo is not None else start.replace(tzinfo=UTC)
 
 
 def next_close_target(
@@ -69,22 +60,19 @@ async def next_betfair_kickoff(sport_key: str, *, now: datetime) -> datetime | N
                 )
             )
         ).all()
-        start_path = OddsSnapshot.raw_data[  # type: ignore[index]
-            ("bookmakers", 0, "betfair_meta", "market_start_time")
-        ].as_string()
         latest = (
             await session.execute(
-                select(OddsSnapshot.event_id, start_path)
+                select(OddsSnapshot.event_id, OddsSnapshot.market_start_time)
                 .where(
                     OddsSnapshot.event_id.in_([event_id for event_id, _ in events]),  # type: ignore[attr-defined]
-                    OddsSnapshot.api_request_id.like(f"{LIVE_REQUEST_ID_PREFIX}%"),  # type: ignore[union-attr]
+                    OddsSnapshot.source == Source.BETFAIR,
                     OddsSnapshot.market == _MATCH_ODDS_MARKETS[sport_key],
                 )
                 .distinct(OddsSnapshot.event_id)
                 .order_by(OddsSnapshot.event_id, OddsSnapshot.snapshot_time.desc())  # type: ignore[attr-defined]
             )
         ).all()
-    starts = {event_id: parse_betfair_start(raw) for event_id, raw in latest}
+    starts = {event_id: None if start is None else ensure_utc(start) for event_id, start in latest}
     return min(
         next_close_target(commence, starts.get(event_id), now) for event_id, commence in events
     )

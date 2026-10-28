@@ -29,7 +29,6 @@ from odds_core.market_prices import Outcome, market_outcomes
 from odds_core.models import Event, EventStatus
 from odds_core.odds_math import devig_probabilities
 from odds_core.quotes import Quote
-from odds_core.snapshot_sources import FdukTimeBasis
 from odds_core.vocabulary import Side, Source, TimeBasis
 
 from tests.test_helpers import (
@@ -68,7 +67,7 @@ def _quoted(
     )
 
 
-def _fduk(hours_before: float, basis: FdukTimeBasis, *books: dict) -> Snap:
+def _fduk(hours_before: float, basis: str, *books: dict) -> Snap:
     return _quoted(KICKOFF - timedelta(hours=hours_before), books, "football_data_uk", basis)
 
 
@@ -107,7 +106,7 @@ def snapshots() -> list[Snap]:
         _live("oddsportal_live", 8 * 24 * 60, three_way_bookmaker("bet365", (2.0, 3.3, 4.0))),
         _fduk(
             48,
-            FdukTimeBasis.COLLECTION_DEADLINE,
+            "fduk_collection_deadline",
             three_way_bookmaker("bet365", (2.0, 3.5, 4.0)),
             three_way_bookmaker("interwetten", (2.0, 3.4, 4.0)),
             three_way_bookmaker("market_avg", (2.0, 3.4, 4.0)),
@@ -129,7 +128,7 @@ def snapshots() -> list[Snap]:
         _live("betfair_api", 1, _betfair((5.0, 5.0, 1.5), inplay=True)),
         _fduk(
             0,
-            FdukTimeBasis.KICKOFF,
+            "kickoff",
             three_way_bookmaker("bet365", (2.2, 3.4, 3.7)),
             three_way_bookmaker("betfair_exchange", FDUK_CLOSE),
         ),
@@ -787,7 +786,7 @@ class TestUpperBoundDecisionTime:
     def test_fduk_opening_row_pairs_only_with_its_own_exchange_price(self, event: Event) -> None:
         snapshots = [
             _live("betfair_api", 49 * 60, _betfair(LIVE_BFE)),
-            _fduk(48, FdukTimeBasis.COLLECTION_DEADLINE, three_way_bookmaker("bet365", OP_BET365)),
+            _fduk(48, "fduk_collection_deadline", three_way_bookmaker("bet365", OP_BET365)),
             _live("betfair_api", 10, _betfair(LIVE_CLOSE)),
         ]
         rows, drops = _build(event, snapshots)

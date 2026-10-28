@@ -6,7 +6,6 @@ import pytest
 from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.tier_utils import (
-    calculate_hours_until_commence,
     calculate_tier,
     snapshot_tier,
     snapshot_tiers,
@@ -201,65 +200,6 @@ class TestSnapshotTierObserved:
         assert tier == FetchTier.EARLY
 
 
-class TestCalculateHoursUntilCommence:
-    """Test hours calculation between timestamps."""
-
-    def test_positive_hours(self):
-        """Test positive hours until game."""
-        now = datetime.now(UTC)
-        game_time = now + timedelta(hours=5)
-
-        hours = calculate_hours_until_commence(now, game_time)
-        assert hours == pytest.approx(5.0, rel=1e-3)
-
-    def test_negative_hours(self):
-        """Test negative hours (game already started)."""
-        now = datetime.now(UTC)
-        game_time = now - timedelta(hours=2)
-
-        hours = calculate_hours_until_commence(now, game_time)
-        assert hours == pytest.approx(-2.0, rel=1e-3)
-
-    def test_fractional_hours(self):
-        """Test fractional hours calculation."""
-        now = datetime.now(UTC)
-        game_time = now + timedelta(hours=2, minutes=30)
-
-        hours = calculate_hours_until_commence(now, game_time)
-        assert hours == pytest.approx(2.5, rel=1e-3)
-
-    def test_zero_hours(self):
-        """Test zero hours (game starting now)."""
-        now = datetime.now(UTC)
-
-        hours = calculate_hours_until_commence(now, now)
-        assert hours == pytest.approx(0.0, rel=1e-6)
-
-    def test_days_converted_to_hours(self):
-        """Test multi-day time differences."""
-        now = datetime.now(UTC)
-        game_time = now + timedelta(days=3)
-
-        hours = calculate_hours_until_commence(now, game_time)
-        assert hours == pytest.approx(72.0, rel=1e-3)
-
-    def test_minutes_converted_to_hours(self):
-        """Test minute-level precision."""
-        now = datetime.now(UTC)
-        game_time = now + timedelta(minutes=90)
-
-        hours = calculate_hours_until_commence(now, game_time)
-        assert hours == pytest.approx(1.5, rel=1e-3)
-
-    def test_seconds_converted_to_hours(self):
-        """Test second-level precision."""
-        now = datetime.now(UTC)
-        game_time = now + timedelta(seconds=3600)
-
-        hours = calculate_hours_until_commence(now, game_time)
-        assert hours == pytest.approx(1.0, rel=1e-3)
-
-
 class TestTierUtilsConsistency:
     """Test consistency between tier calculation methods."""
 
@@ -277,18 +217,6 @@ class TestTierUtilsConsistency:
             assert direct_tier == timestamp_tier, (
                 f"Mismatch at {hours} hours: {direct_tier} vs {timestamp_tier}"
             )
-
-    def test_calculate_hours_matches_tier_logic(self):
-        """Test that hours calculation integrates correctly with tier logic."""
-        now = datetime.now(UTC)
-        game_time = now + timedelta(hours=7.5)
-
-        hours = calculate_hours_until_commence(now, game_time)
-        tier = calculate_tier(hours)
-
-        # 7.5 hours should be PREGAME (3-12 hours range)
-        assert tier == FetchTier.PREGAME
-        assert 3 < hours <= 12
 
 
 KICKOFF = datetime(2026, 10, 24, 15, 0, tzinfo=UTC)

@@ -126,7 +126,7 @@ def fix_odds_timestamp(odds_ts: datetime, match_dt: datetime) -> datetime:
     return fixed
 
 
-def build_raw_data(
+def build_envelope(
     bookmaker_odds: list[dict],
     home_team: str,
     away_team: str,
@@ -138,7 +138,7 @@ def build_raw_data(
     outcome_names: tuple[str, ...] | None = None,
     line: float | None = None,
 ) -> dict[str, Any] | None:
-    """Convert OddsPortal bookmaker data into The Odds API raw_data format.
+    """Convert OddsPortal bookmaker data into the envelope shape (The Odds API format).
 
     Args:
         bookmaker_odds: List of bookmaker dicts from the market data

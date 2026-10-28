@@ -4,7 +4,8 @@ from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
-from odds_core.models import Event, EventStatus
+from odds_core.models import Event, EventExternalId, EventStatus
+from odds_core.vocabulary import Source
 from sqlalchemy import select
 
 
@@ -82,6 +83,14 @@ class TestDiscoverIntegration:
             status=EventStatus.SCHEDULED,
         )
         test_session.add(existing_event)
+        await test_session.flush()
+        test_session.add(
+            EventExternalId(
+                source=Source.ODDS_API,
+                external_id="event1",
+                event_id=existing_event.surrogate_id,
+            )
+        )
         await test_session.commit()
 
         mock_client = mock_api_client_factory(mock_historical_events_response)

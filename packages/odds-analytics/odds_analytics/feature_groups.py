@@ -32,27 +32,13 @@ from odds_core.game_log_models import NbaTeamGameLog
 from odds_core.injury_models import InjuryReport
 from odds_core.models import Event, EventStatus
 from odds_core.player_stats_models import NbaPlayerSeasonStats
-from odds_core.polymarket_models import (
-    PolymarketEvent,
-    PolymarketMarket,
-    PolymarketOrderBookSnapshot,
-    PolymarketPriceSnapshot,
-)
 from odds_core.quotes import Quote, quotes
 from odds_core.vocabulary import Market, PriceOutcome, Side, Source, TimeBasis
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.tier_utils import snapshot_tiers
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_analytics.feature_extraction import FeatureEvent, TabularFeatureExtractor
-from odds_analytics.polymarket_features import (
-    CrossSourceFeatureExtractor,
-    CrossSourceFeatures,
-    PolymarketFeatureExtractor,
-    PolymarketTabularFeatures,
-    resolve_home_outcome_index,
-)
 from odds_analytics.targets import calculate_regression_target
 from odds_analytics.training.config import FeatureGroupName
 
@@ -62,7 +48,6 @@ if TYPE_CHECKING:
 logger = structlog.get_logger()
 
 __all__ = [
-    "PMEventContext",
     "SnapshotQuotes",
     "EventDataBundle",
     "collect_event_data",
@@ -82,16 +67,6 @@ __all__ = [
 # =============================================================================
 # Layer 1: Collection
 # =============================================================================
-
-
-@dataclass
-class PMEventContext:
-    """Polymarket context for a sportsbook event."""
-
-    pm_event: PolymarketEvent
-    sb_event: Event
-    market: PolymarketMarket
-    home_idx: int
 
 
 @dataclass(frozen=True, eq=False)
@@ -130,9 +105,6 @@ class EventDataBundle:
     event: Event
     snapshots: list[SnapshotQuotes]
     closes: dict[Source, SnapshotQuotes]
-    pm_context: PMEventContext | None
-    pm_prices: list[PolymarketPriceSnapshot] = field(default_factory=list)
-    pm_orderbooks: list[PolymarketOrderBookSnapshot] = field(default_factory=list)
     injury_reports: list[InjuryReport] = field(default_factory=list)
     player_stats: dict[str, NbaPlayerSeasonStats] = field(default_factory=dict)
     game_logs: list[NbaTeamGameLog] = field(default_factory=list)
@@ -173,11 +145,7 @@ async def collect_event_data(
       snapshot, leaving out Polymarket's, which carry no retail or target prices to build a
       decision row from
     - Takes each source's ``raw`` target close (``raw_closes``)
-    - Loads PM context (PM event, moneyline market, home_idx)
-    - Bulk-loads all PM prices + orderbooks for the market (2 queries total)
     """
-    from odds_lambda.storage.polymarket_reader import PolymarketReader
-
     quoted = await quotes(session, [event.id], Market(config.primary_market), sides=[Side.BACK])
     all_snapshots = [
         SnapshotQuotes(tuple(group))
@@ -185,40 +153,6 @@ async def collect_event_data(
         if group[0].source is not Source.POLYMARKET
     ]
     closes = raw_closes(all_snapshots, event.commence_time)
-
-    # PM context (optional)
-    pm_context: PMEventContext | None = None
-    pm_prices: list[PolymarketPriceSnapshot] = []
-    pm_orderbooks: list[PolymarketOrderBookSnapshot] = []
-
-    if "polymarket" in config.feature_groups:
-        pm_result = await session.execute(
-            select(PolymarketEvent).where(PolymarketEvent.event_id == event.id)
-        )
-        pm_event = pm_result.scalars().first()
-
-        if pm_event is not None:
-            pm_reader = PolymarketReader(session)
-            market = await pm_reader.get_moneyline_market(pm_event.id)
-
-            if market is not None:
-                home_idx = resolve_home_outcome_index(market, event.home_team)
-                if home_idx is not None:
-                    pm_context = PMEventContext(
-                        pm_event=pm_event,
-                        sb_event=event,
-                        market=market,
-                        home_idx=home_idx,
-                    )
-                    # Bulk-load all PM data for this market (2 queries)
-                    pm_prices = await pm_reader.get_prices_for_market(market.id)
-                    pm_orderbooks = await pm_reader.get_orderbooks_for_market(market.id)
-                else:
-                    logger.debug(
-                        "pm_home_outcome_unresolved",
-                        event_id=event.id,
-                        home_team=event.home_team,
-                    )
 
     # Injury reports (bulk-load all, filter by time in adapter)
     injury_reports: list[InjuryReport] = []
@@ -267,9 +201,6 @@ async def collect_event_data(
         event=event,
         snapshots=all_snapshots,
         closes=closes,
-        pm_context=pm_context,
-        pm_prices=pm_prices,
-        pm_orderbooks=pm_orderbooks,
         injury_reports=injury_reports,
         player_stats=player_stats,
         game_logs=game_logs,
@@ -437,42 +368,6 @@ def make_feature_event(event: Event) -> FeatureEvent:
     )
 
 
-def _find_nearest_pm_price(
-    prices: list[PolymarketPriceSnapshot],
-    target_time: datetime,
-    tolerance_minutes: int,
-) -> PolymarketPriceSnapshot | None:
-    """Return the price snapshot closest to (and not after) target_time within tolerance."""
-    time_lower = target_time - timedelta(minutes=tolerance_minutes)
-    candidates = [p for p in prices if time_lower <= p.snapshot_time <= target_time]
-    if not candidates:
-        return None
-    return min(candidates, key=lambda p: abs((p.snapshot_time - target_time).total_seconds()))
-
-
-def _find_nearest_pm_orderbook(
-    orderbooks: list[PolymarketOrderBookSnapshot],
-    target_time: datetime,
-    tolerance_minutes: int,
-) -> PolymarketOrderBookSnapshot | None:
-    """Return the orderbook snapshot closest to (and not after) target_time within tolerance."""
-    time_lower = target_time - timedelta(minutes=tolerance_minutes)
-    candidates = [o for o in orderbooks if time_lower <= o.snapshot_time <= target_time]
-    if not candidates:
-        return None
-    return min(candidates, key=lambda o: abs((o.snapshot_time - target_time).total_seconds()))
-
-
-def _find_velocity_prices(
-    prices: list[PolymarketPriceSnapshot],
-    target_time: datetime,
-    velocity_window_hours: float,
-) -> list[PolymarketPriceSnapshot]:
-    """Return prices in the velocity window ending at target_time."""
-    window_start = target_time - timedelta(hours=velocity_window_hours)
-    return [p for p in prices if window_start <= p.snapshot_time <= target_time]
-
-
 # =============================================================================
 # Layer 4: Adapters
 # =============================================================================
@@ -515,9 +410,6 @@ def _static_feature_group_names(config: FeatureConfig) -> list[str]:
         from odds_analytics.feature_extraction import TabularFeatures
 
         names.extend(f"tab_{n}" for n in TabularFeatures.get_feature_names())
-    if "polymarket" in config.feature_groups:
-        names.extend(f"pm_{n}" for n in PolymarketTabularFeatures.get_feature_names())
-        names.extend(f"xsrc_{n}" for n in CrossSourceFeatures.get_feature_names())
     if "injuries" in config.feature_groups:
         from odds_analytics.injury_features import InjuryFeatures
 
@@ -559,64 +451,6 @@ def _extract_static_feature_parts(
         except Exception:
             logger.debug("tabular_extraction_failed", event_id=event.id)
             return None
-
-    # --- Polymarket features (NaN-fill when unavailable to keep row) ---
-    if "polymarket" in config.feature_groups:
-        n_pm = len(PolymarketTabularFeatures.get_feature_names())
-        n_xsrc = len(CrossSourceFeatures.get_feature_names())
-        nan_block = np.full(n_pm + n_xsrc, np.nan)
-
-        if bundle.pm_context is None:
-            parts.append(nan_block)
-        else:
-            ctx = bundle.pm_context
-            target_time = snapshot.snapshot_time
-            price_snap = _find_nearest_pm_price(
-                bundle.pm_prices, target_time, config.pm_price_tolerance_minutes
-            )
-
-            if price_snap is None:
-                parts.append(nan_block)
-            else:
-                ob_snap = _find_nearest_pm_orderbook(
-                    bundle.pm_orderbooks, target_time, config.pm_price_tolerance_minutes
-                )
-                recent = _find_velocity_prices(
-                    bundle.pm_prices, target_time, config.pm_velocity_window_hours
-                )
-
-                try:
-                    pm_extractor = PolymarketFeatureExtractor(
-                        velocity_window_hours=config.pm_velocity_window_hours
-                    )
-                    xsrc_extractor = CrossSourceFeatureExtractor()
-
-                    pm_feats = pm_extractor.extract(
-                        price_snapshot=price_snap,
-                        orderbook_snapshot=ob_snap,
-                        recent_prices=recent,
-                        home_outcome_index=ctx.home_idx,
-                    )
-
-                    # Try to align SB odds for cross-source features
-                    sb_feats = None
-                    try:
-                        sb_feats = tab_extractor.extract_features(
-                            event=feature_event,
-                            quoted=snapshot.quotes,
-                            outcome=outcome,
-                        )
-                    except Exception:
-                        pass
-
-                    xsrc_feats = xsrc_extractor.extract(
-                        pm_features=pm_feats,
-                        sb_features=sb_feats,
-                    )
-                    parts.append(np.concatenate([pm_feats.to_array(), xsrc_feats.to_array()]))
-                except Exception:
-                    logger.debug("pm_feature_extraction_failed", event_id=event.id)
-                    parts.append(nan_block)
 
     # --- Injury features (NaN-fill when unavailable to keep row) ---
     if "injuries" in config.feature_groups:
@@ -776,8 +610,8 @@ async def prepare_training_data(
       - config.target_type="raw"               → avg implied-prob delta
       - config.target_type="retail_ev"         → ADR-0012 rows (odds_analytics.retail_ev)
 
-    Polymarket features NaN-fill when PM data is unavailable, so events are
-    kept rather than dropped when PM is missing.
+    Injury and rest features NaN-fill when their data is unavailable, so events are kept
+    rather than dropped.
 
     Args:
         events: List of Event objects (filters to FINAL status internally)

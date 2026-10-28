@@ -41,7 +41,7 @@ class TestConvertMarket:
         )
 
         assert match is not None
-        assert match.raw_data == {
+        assert match.envelope == {
             "source": "oddsportal_live",
             "oddsportal_event_id": "abc12345",
             "bookmakers": [
@@ -79,7 +79,7 @@ class TestConvertMarket:
         match = convert_market(event, "over_under_2_5", [_bk("bet365", (2.0, 1.5))], SCRAPED_AT)
 
         assert match is not None
-        market = match.raw_data["bookmakers"][0]["markets"][0]
+        market = match.envelope["bookmakers"][0]["markets"][0]
         assert market["key"] == "totals"
         assert market["outcomes"] == [
             {"name": "Over", "price_decimal": 2.0, "point": 2.5},
@@ -90,7 +90,7 @@ class TestConvertMarket:
         match = convert_market(event, "home_away", [_bk("bet365", (2.5, 1.5))], SCRAPED_AT)
 
         assert match is not None
-        market = match.raw_data["bookmakers"][0]["markets"][0]
+        market = match.envelope["bookmakers"][0]["markets"][0]
         assert market["key"] == "h2h"
         assert market["outcomes"] == [
             {"name": "Arsenal", "price_decimal": 2.5},
@@ -109,7 +109,7 @@ class TestConvertMarket:
         )
 
         assert match is not None
-        exchange, retail = match.raw_data["bookmakers"]
+        exchange, retail = match.envelope["bookmakers"]
         assert exchange["key"] == "betfair_exchange"
         assert exchange["betfair_matched"] == {"home": 10, "draw": 20, "away": 30}
         assert "betfair_matched" not in retail
@@ -133,13 +133,13 @@ class TestConvertMarket:
         )
 
         assert match is not None
-        assert match.raw_data["bookmakers"][0]["betfair_matched"] == expected
+        assert match.envelope["bookmakers"][0]["betfair_matched"] == expected
 
     def test_last_update_falls_back_to_scrape_time(self, event: ListingEvent) -> None:
         match = convert_market(event, "1x2", [_bk("bet365", (2.0, 3.5, 1.5))], SCRAPED_AT)
 
         assert match is not None
-        assert match.raw_data["bookmakers"][0]["last_update"] == "2026-10-17T12:00:00Z"
+        assert match.envelope["bookmakers"][0]["last_update"] == "2026-10-17T12:00:00Z"
 
     def test_last_update_never_after_scrape_time(self, event: ListingEvent) -> None:
         future = SCRAPED_AT + timedelta(hours=1)
@@ -148,7 +148,7 @@ class TestConvertMarket:
         )
 
         assert match is not None
-        assert match.raw_data["bookmakers"][0]["last_update"] == "2026-10-17T12:00:00Z"
+        assert match.envelope["bookmakers"][0]["last_update"] == "2026-10-17T12:00:00Z"
 
     def test_no_bookmakers_returns_none(self, event: ListingEvent) -> None:
         assert convert_market(event, "1x2", [], SCRAPED_AT) is None

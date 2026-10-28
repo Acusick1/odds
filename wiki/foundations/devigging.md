@@ -5,7 +5,6 @@ description: What vig and proportional devigging are here, which consumers devig
 sources:
   - odds_core.odds_math.devig_probabilities
   - odds_core.odds_math.decimal_to_implied_probability
-  - odds_core.models.Odds.implied_probability
   - odds_analytics.utils.per_book_market_holds
   - odds_analytics.retail_ev
   - odds_analytics.feature_groups._compute_target
@@ -15,7 +14,7 @@ status: stable
 
 # Devigging and vig-inclusive prices
 
-Bookmaker prices sum to more than 1 once converted to implied probability (`odds_core.odds_math.decimal_to_implied_probability` on the stored decimal price, exposed as `odds_core.models.Odds.implied_probability`); the excess is the vig (hold). Devigging rescales one bookmaker's outcome probabilities for one market so they sum to 1, giving a "fair" estimate. The helper functions are on [Odds arithmetic helpers](odds-math.md).
+Bookmaker prices sum to more than 1 once converted to implied probability (`odds_core.odds_math.decimal_to_implied_probability` on the stored decimal price, `odds_core.models.Price.price`); the excess is the vig (hold). Devigging rescales one bookmaker's outcome probabilities for one market so they sum to 1, giving a "fair" estimate. The helper functions are on [Odds arithmetic helpers](odds-math.md).
 
 ## What exists
 

@@ -21,7 +21,6 @@ from odds_core.models import (
     EventExternalId,
     EventStatus,
     FetchLog,
-    Odds,
     OddsSnapshot,
     Price,
     SnapshotPayload,
@@ -36,7 +35,7 @@ from odds_lambda.odds_api_events import find_event_by_odds_api_id, odds_api_id_o
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.test_helpers import StubOddsClient, make_epl_event
+from tests.test_helpers import StubOddsClient, game_pk_of, make_epl_event
 
 KICKOFF = (datetime.now(UTC) + timedelta(days=2)).replace(minute=0, second=0, microsecond=0)
 MLB = "baseball_mlb"
@@ -161,6 +160,17 @@ def _mlb_game(pk: int, start: datetime, home: str, away: str) -> MlbGameResult:
     )
 
 
+async def _holding_api_id(session: AsyncSession, event: Event) -> Event:
+    """Store ``event`` holding its own key as its Odds API id."""
+    session.add(event)
+    await session.flush()
+    session.add(
+        EventExternalId(source=Source.ODDS_API, external_id=event.id, event_id=event.surrogate_id)
+    )
+    await session.flush()
+    return event
+
+
 @pytest.mark.asyncio
 class TestEventSync:
     async def test_new_game_creates_an_event_keyed_and_recorded_by_the_api_id(
@@ -188,11 +198,10 @@ class TestEventSync:
         assert event.id == "op_live_ARS_CHE_x"
         assert await _odds_api_ids(pglite_async_session) == {event.surrogate_id: "apihex1"}
 
-    async def test_event_keyed_by_the_api_id_is_found_after_the_api_moves_it(
+    async def test_event_holding_the_api_id_is_found_after_the_api_moves_it(
         self, pglite_async_session: AsyncSession
     ) -> None:
-        pglite_async_session.add(make_epl_event("apihex1", KICKOFF))
-        await pglite_async_session.flush()
+        await _holding_api_id(pglite_async_session, make_epl_event("apihex1", KICKOFF))
         moved = KICKOFF + timedelta(days=3)
 
         result = await _sync(pglite_async_session, [_listed("apihex1", moved)])
@@ -207,8 +216,7 @@ class TestEventSync:
         self, pglite_async_session: AsyncSession
     ) -> None:
         stored = make_epl_event("apihex1", KICKOFF, status=EventStatus.POSTPONED)
-        pglite_async_session.add(stored)
-        await pglite_async_session.flush()
+        await _holding_api_id(pglite_async_session, stored)
 
         await _sync(pglite_async_session, [_listed("apihex1", KICKOFF + timedelta(days=5))])
 
@@ -220,7 +228,8 @@ class TestEventSync:
         self, pglite_async_session: AsyncSession
     ) -> None:
         past = datetime.now(UTC) - timedelta(days=1)
-        pglite_async_session.add(
+        await _holding_api_id(
+            pglite_async_session,
             make_epl_event(
                 "apihex1",
                 past,
@@ -228,9 +237,8 @@ class TestEventSync:
                 home_score=2,
                 away_score=1,
                 completed_at=past + timedelta(hours=2),
-            )
+            ),
         )
-        await pglite_async_session.flush()
 
         await _sync(pglite_async_session, [_listed("apihex1", past, home="Arsenal FC")])
 
@@ -282,7 +290,12 @@ class TestEventSync:
         )
         pglite_async_session.add(held)
         await pglite_async_session.flush()
-        held.assign_game_pk(824101)
+        pglite_async_session.add(
+            EventExternalId(
+                source=Source.MLB_STATS_API, external_id="824101", event_id=held.surrogate_id
+            )
+        )
+        await pglite_async_session.flush()
         mlb_schedule.append(_mlb_game(824101, start, "New York Yankees", "Boston Red Sox"))
 
         result = await _sync(
@@ -303,7 +316,7 @@ class TestEventSync:
         assert (result.inserted, result.updated) == (0, 1)
         (event,) = await _events(pglite_async_session)
         assert event.id == "op_live_NYY_BOS_x"
-        assert event.mlb_game_pk == 824101
+        assert await game_pk_of(pglite_async_session, event) == 824101
         assert await _odds_api_ids(pglite_async_session) == {event.surrogate_id: "apimlb1"}
 
     async def test_mlb_game_the_schedule_lacks_creates_no_event(
@@ -372,19 +385,10 @@ class TestIngestion:
         assert [s.market for s in snapshots] == [Market.ONE_X_TWO, Market.TOTALS]
         assert {s.source for s in snapshots} == {Source.ODDS_API}
         assert {s.time_basis for s in snapshots} == {TimeBasis.OBSERVED}
-        assert {s.api_request_id for s in snapshots} == {None}
         assert len({s.payload_id for s in snapshots}) == 1
-        for snapshot in snapshots:
-            assert {m["key"] for b in snapshot.raw_data["bookmakers"] for m in b["markets"]} == {
-                "1x2" if snapshot.market is Market.ONE_X_TWO else "totals"
-            }
         first, second = snapshots
         prices = (await session.execute(select(Price))).scalars().all()
         assert sorted(p.snapshot_id for p in prices) == sorted([first.id] * 6 + [second.id] * 4)
-        odds = (await session.execute(select(Odds))).scalars().all()
-        assert sorted(o.snapshot_id for o in odds) == sorted([first.id] * 6 + [second.id] * 4)
-        for o in odds:
-            assert o.market_key == ("1x2" if o.snapshot_id == first.id else "totals")
         payload = await session.get(SnapshotPayload, first.payload_id)
         assert payload is not None and payload.payload[0]["id"] == "apihex1"
 
@@ -499,7 +503,7 @@ class TestIngestion:
 
         snapshots = (await session.execute(select(OddsSnapshot))).scalars().all()
         assert len(snapshots) == 2
-        assert len((await session.execute(select(Odds))).scalars().all()) == 5
+        assert len((await session.execute(select(Price))).scalars().all()) == 5
 
 
 @pytest.mark.asyncio
@@ -545,18 +549,15 @@ class TestScores:
         )
         assert [log.raw_data["old_external_id"] for log in replaced] == ["oldid"]
 
-    async def test_event_stored_before_ids_were_recorded_is_found_by_its_key(
+    async def test_an_event_keyed_by_an_api_id_without_it_recorded_is_not_found(
         self, pglite_async_session: AsyncSession
     ) -> None:
         session = pglite_async_session
         session.add(make_epl_event("apihex1"))
         await session.flush()
 
-        found = await find_event_by_odds_api_id(session, "apihex1")
-
-        assert found is not None and found.id == "apihex1"
-        assert await odds_api_id_of(session, "apihex1") == "apihex1"
-        assert await find_event_by_odds_api_id(session, "nothing") is None
+        assert await find_event_by_odds_api_id(session, "apihex1") is None
+        assert await odds_api_id_of(session, "apihex1") is None
 
     async def test_job_settles_the_event_the_api_id_names(
         self, pglite_async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch

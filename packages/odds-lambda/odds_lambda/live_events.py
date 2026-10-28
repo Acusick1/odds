@@ -98,7 +98,7 @@ class LiveListing:
 
     game: GameRow
     external_id: str | None
-    raw_data: dict[str, Any]
+    envelope: dict[str, Any]
     snapshot_time: datetime
     label: str
 
@@ -239,7 +239,6 @@ class LiveEventFinder:
         session: AsyncSession,
         listings: Sequence[LiveListing],
         shape: SnapshotShape,
-        api_request_id: str,
         *,
         now: datetime | None = None,
     ) -> ListingWrites:
@@ -266,10 +265,9 @@ class LiveEventFinder:
                         writes.events_matched += 1
                     stored = await writer.store_envelope(
                         event_id=found.event.id,
-                        raw_data=listing.raw_data,
+                        envelope=listing.envelope,
                         snapshot_time=listing.snapshot_time,
                         shape=shape,
-                        api_request_id=api_request_id,
                     )
                     writes.snapshots_stored += stored.snapshots_written
             except Exception as e:

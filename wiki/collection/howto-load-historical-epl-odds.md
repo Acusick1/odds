@@ -13,7 +13,7 @@ status: stable
 
 # Load historical EPL odds
 
-The scripts load `odds_core.models.Event` rows with `odds_core.models.OddsSnapshot` ([columns and constraints](../storage/odds-tables.md#odds_snapshots)), `odds_core.models.Price` and payload rows, and no normalized `odds` rows (#435); OddsPortal history is stored as `source_stamped` and FDUK as `upper_bound` and `close`. What each script reads, matches and writes is on [historical-ingest-scripts](historical-ingest-scripts.md). Run against the local database only: never set `DATABASE_URL` to production ([databases-and-environments](../foundations/databases-and-environments.md#environments)).
+The scripts load `odds_core.models.Event` rows with `odds_core.models.OddsSnapshot` ([columns and constraints](../storage/odds-tables.md#odds_snapshots)), `odds_core.models.Price` and payload rows (#435); OddsPortal history is stored as `source_stamped` and FDUK as `upper_bound` and `close`. What each script reads, matches and writes is on [historical-ingest-scripts](historical-ingest-scripts.md). Run against the local database only: never set `DATABASE_URL` to production ([databases-and-environments](../foundations/databases-and-environments.md#environments)).
 
 1. Scrape OddsPortal history.
    ```bash
@@ -40,7 +40,7 @@ The scripts load `odds_core.models.Event` rows with `odds_core.models.OddsSnapsh
    - Matches that already have an event of the same sport within 24 hours get no new event and keep its kick-off; their snapshots are still written.
    - Prices are stored as the CSV decimal (`price_decimal`). Snapshots loaded before the decimal price migration keep the old American `price` until this script is re-run ([Price encodings](../foundations/odds-math.md#price-encodings)).
 4. Rerun any step to fill gaps.
-   - OddsPortal snapshots are skipped if one with the same `api_request_id` already exists, and the latest history snapshot of a market is tiered `closing` even when stamped after kick-off (a lone stamp before kick-off keeps its own tier). FDUK snapshots are replaced from the CSV when it changed, except those of an event a candidate decision used as an input (logged as `fduk_replace_refused`), so reruns do not duplicate and pick up refreshed files; a rerun also fills the scores of matched events that have none. Each FDUK snapshot's `time_basis` is `upper_bound` (opening) or `close`, which with its sibling sets its `fetch_tier`, kept as stored when a rerun finds the content unchanged ([fetch tier](../storage/fetch-tier.md#where-tiers-are-written-and-read)), and its `raw_data.timing.basis` an `odds_core.snapshot_sources.FdukTimeBasis` value.
+   - OddsPortal events already holding a snapshot of the market (source `oddsportal`, time basis `source_stamped`) are skipped, and the latest history snapshot of a market is tiered `closing` even when stamped after kick-off (a lone stamp before kick-off keeps its own tier). FDUK snapshots are replaced from the CSV when it changed, except those of an event a candidate decision used as an input (logged as `fduk_replace_refused`), so reruns do not duplicate and pick up refreshed files; a rerun also fills the scores of matched events that have none. Each FDUK snapshot's `time_basis` is `upper_bound` (opening) or `close`, from which with its sibling its tier is derived ([fetch tier](../storage/fetch-tier.md)), and a rerun that finds the time basis, snapshot time and price rows unchanged leaves it alone.
 5. Check the load with the database, not the repo: event and snapshot counts per season are data facts.
 
 ## Related

@@ -1,4 +1,4 @@
-"""Adapt Betfair Exchange ``BetfairBook`` into pipeline ``raw_data`` shape.
+"""Adapt Betfair Exchange ``BetfairBook`` into the envelope shape the writers store.
 
 The pipeline's canonical bookmaker entry is::
 

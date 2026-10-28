@@ -32,7 +32,7 @@ from odds_lambda.storage.event_unmatched import clear_unmatched, mark_unmatched
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.test_helpers import TWIN_KICKOFF, make_epl_event
+from tests.test_helpers import TWIN_KICKOFF, game_pk_of, make_epl_event
 
 MLB = "baseball_mlb"
 YANKEES, RED_SOX = "New York Yankees", "Boston Red Sox"
@@ -431,7 +431,7 @@ class TestResolveMlbEvent:
         assert await external_ids(pglite_async_session, game_2.event) == {
             Source.MLB_STATS_API: "1002"
         }
-        assert game_2.event.mlb_game_pk == 1002
+        assert await game_pk_of(pglite_async_session, game_2.event) == 1002
 
     @pytest.mark.asyncio
     async def test_finds_a_doubleheader_game_by_its_game_pk(self, pglite_async_session) -> None:
@@ -465,7 +465,7 @@ class TestResolveMlbEvent:
 
         assert resolved.resolution is Resolution.MATCHED
         assert resolved.event.id == "unkeyed"
-        assert resolved.event.mlb_game_pk == 1001
+        assert await game_pk_of(pglite_async_session, resolved.event) == 1001
         assert resolved.event.commence_time == GAME_1_START
 
     @pytest.mark.asyncio
@@ -780,7 +780,6 @@ class TestUnmatched:
         session = pglite_async_session
         event = (await resolve_event(session, mlb_listing(1001, GAME_1_START))).event
         # An MLB event the schedule no longer lists holds no gamePk.
-        event.mlb_game_pk = None
         await session.execute(
             text("DELETE FROM event_external_ids WHERE event_id = :k"), {"k": event.surrogate_id}
         )

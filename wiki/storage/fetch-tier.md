@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Fetch tier
-description: The FetchTier enum and bounds, the one hours-to-tier rule, the tier a snapshot covers by its time basis, and where tiers are written and read.
+description: The FetchTier enum and bounds, the one hours-to-tier rule, the tier a snapshot covers by its time basis, and where tiers are read.
 sources:
   - odds_lambda.fetch_tier.FetchTier
   - odds_lambda.fetch_tier.FetchTier.max_hours
@@ -10,21 +10,17 @@ sources:
   - odds_lambda.tier_utils.snapshot_tier
   - odds_lambda.storage.tier_validator.covered_tiers
   - odds_lambda.tier_utils.snapshot_tiers
-  - odds_lambda.storage.event_merge.retime_snapshots
-  - odds_lambda.storage.writers.OddsWriter.store_odds_snapshot
-  - odds_lambda.storage.writers.OddsWriter.store_envelope
   - odds_lambda.storage.tier_validator.TierCoverageValidator
   - odds_lambda.storage.tier_validator.CRITICAL_TIERS
   - odds_analytics.feature_groups.TierSampler
   - odds_analytics.quality_metrics.QualityMetrics
   - odds_core.models.OddsSnapshot
-  - migrations/versions/9ff81f073e6b_recalculate_historical_fetch_tiers.py
 status: stable
 ---
 
 # Fetch tier
 
-A fetch tier labels an odds snapshot by how long before kickoff it was taken. `odds_lambda.fetch_tier.FetchTier` is the enum; the value is stored as a string in `odds_core.models.OddsSnapshot.fetch_tier` ([odds_snapshots columns](odds-tables.md#odds_snapshots)) (nullable, indexed, with `ix_event_tier` on event and tier) next to `hours_until_commence`. Tiers feed scheduling cadence, validation and ML sampling.
+A fetch tier labels an odds snapshot by how long before kickoff it was taken. `odds_lambda.fetch_tier.FetchTier` is the enum. No tier is stored: every reader derives a snapshot's tier from its time, source, time basis and market against the event's current kick-off ([odds_snapshots columns](odds-tables.md#odds_snapshots)), so a moved kick-off re-tiers every snapshot at once. Tiers feed scheduling cadence, validation and ML sampling.
 
 ## Tier table
 
@@ -37,7 +33,7 @@ A fetch tier labels an odds snapshot by how long before kickoff it was taken. `o
 | closing | 0-3 | 0.5 | critical line movement |
 | in_play | after kickoff | 0.5 | incidental collection |
 
-The boundaries in the table are `odds_lambda.fetch_tier.FetchTier.max_hours` and the intervals are `odds_lambda.fetch_tier.FetchTier.interval_hours`; the interval is read only by `odds_analytics.quality_metrics.QualityMetrics`, which counts snapshots as distinct snapshot times and gives each the tier `odds_lambda.tier_utils.snapshot_tiers` derives, not the stored one; schedulers use each job's `odds_lambda.scheduling.decision.CadenceConfig`, which keeps these boundaries but sets its own intervals and its own check-in for a sport with no fixture ([Decision engine](../scheduling/decision-engine.md#cadence)); a job's extra runs before kickoffs are [lead runs](../scheduling/decision-engine.md#lead-runs), outside the cadence.
+The boundaries in the table are `odds_lambda.fetch_tier.FetchTier.max_hours` and the intervals are `odds_lambda.fetch_tier.FetchTier.interval_hours`; the interval is read only by `odds_analytics.quality_metrics.QualityMetrics`, which counts snapshots as distinct snapshot times and gives each the tier `odds_lambda.tier_utils.snapshot_tiers` derives; schedulers use each job's `odds_lambda.scheduling.decision.CadenceConfig`, which keeps these boundaries but sets its own intervals and its own check-in for a sport with no fixture ([Decision engine](../scheduling/decision-engine.md#cadence)); a job's extra runs before kickoffs are [lead runs](../scheduling/decision-engine.md#lead-runs), outside the cadence.
 
 ## The one hours-to-tier rule
 
@@ -57,26 +53,24 @@ The boundaries in the table are `odds_lambda.fetch_tier.FetchTier.max_hours` and
 
 - **OddsPortal history closing.** A market's latest OddsPortal `source_stamped` time is its history closing price, so it is CLOSING however near or after kick-off the stamp (the latest change among the books) lies. A market with a single stamp before kick-off may hold only an opening whose closing was never scraped, so that stamp keeps its own tier; an opening is never stamped after kick-off.
 - **A source's `close` is its only closing.** When a source has a `close` snapshot for a market, none of the source's other snapshots of that market is CLOSING; one that would be covers PREGAME. An FDUK opening stamped under 3 h before kick-off therefore stays in the pregame pool the [tier sampler](../modelling/feature-pipeline.md) draws decision rows from.
- Every tier in the system comes from `odds_lambda.tier_utils.snapshot_tier` or `odds_lambda.tier_utils.snapshot_tiers`: the stored `fetch_tier`, the coverage check (`odds_lambda.storage.tier_validator.covered_tiers`), the coverage metrics (`odds_analytics.quality_metrics.QualityMetrics`), the training sampler and `raw` close (`odds_analytics.feature_groups.TierSampler`, `odds_analytics.feature_groups.raw_closes`) and the gap planner, which tiers each planned fetch as the `upper_bound` snapshot the backfill stores, so a filled game is not planned again.
 
-## Where tiers are written and read
+Every tier in the system comes from `odds_lambda.tier_utils.snapshot_tier` or `odds_lambda.tier_utils.snapshot_tiers`: the coverage check (`odds_lambda.storage.tier_validator.covered_tiers`), the coverage metrics (`odds_analytics.quality_metrics.QualityMetrics`), the training sampler and `raw` close (`odds_analytics.feature_groups.TierSampler`, `odds_analytics.feature_groups.raw_closes`) and the gap planner, which tiers each planned fetch as the `upper_bound` snapshot the backfill stores, so a filled game is not planned again.
 
-`fetch_tier` is a column of `odds_core.models.OddsSnapshot`; the redesigned snapshot columns beside it (source, market, time basis and market metadata) carry no tier ([odds_snapshots](odds-tables.md#odds_snapshots)). The stored tier is written but no reader uses it (the shape backfill only copies it onto split snapshots): every reader derives the tier it needs with `odds_lambda.tier_utils.snapshot_tier` or `odds_lambda.tier_utils.snapshot_tiers`.
+## Where tiers are read
 
-- **Written** through `odds_lambda.tier_utils.snapshot_tier` with the snapshot's own time basis: once per envelope by `odds_lambda.storage.writers.OddsWriter.store_envelope` (behind `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot`; its shape's time basis, none without a shape), on the snapshot only (odds rows carry no tier), against `event.commence_time`; by the Polymarket history backfill and the legacy Polymarket writer (`observed`); and by `scripts/ingest_football_data_uk.py`, which writes `odds_lambda.tier_utils.snapshot_tiers` of its `upper_bound` opening and `close` closing. `scripts/ingest_oddsportal.py` writes `odds_lambda.tier_utils.snapshot_tiers` of the run's snapshots, so each market's history closing is `closing` even when stamped after kick-off. The tier is NULL when the event row is missing, and a snapshot split from a multi-market envelope takes the envelope's tier; a snapshot already stored under its key keeps the tier it was stored with ([OddsWriter](odds-writer.md#store_odds_snapshot)). Rows stored before per-event tiering were recalculated by `migrations/versions/9ff81f073e6b_recalculate_historical_fetch_tiers.py`. When the kick-off moves or events merge, `odds_lambda.storage.event_merge.retime_snapshots` rewrites the event's tiers with `odds_lambda.tier_utils.snapshot_tiers`.
 - **Scheduling** uses the tier to pick a cadence; the per-job cadence table is on [Decision engine](../scheduling/decision-engine.md#cadence).
-- **Validation**: `odds_lambda.storage.tier_validator.TierCoverageValidator` does not read the stored tier. It takes each snapshot's tier from `odds_lambda.storage.tier_validator.covered_tiers` against the event's current kick-off, and treats pregame and closing (`odds_lambda.storage.tier_validator.CRITICAL_TIERS`) as required ([Coverage and completeness checks](coverage-checks.md)).
-- **ML sampling**: `odds_analytics.feature_groups.TierSampler` does not read the stored tier either. It takes each snapshot's tier from `odds_lambda.tier_utils.snapshot_tiers` over the event's snapshots of the market, picks the latest snapshot, only of the sources whose close has a sharp book, whose tier is the `decision_tier` or any tier farther from kickoff, excludes IN_PLAY, and so falls back to farther tiers. The `raw` target's close is the decision snapshot's own source's latest CLOSING snapshot by the same tiers ([closing snapshot](../modelling/clv-target-functions.md#closing-snapshot-of-a-raw-target), [Look-ahead bias](../modelling/look-ahead-bias.md), [Feature pipeline](../modelling/feature-pipeline.md)).
+- **Validation**: `odds_lambda.storage.tier_validator.TierCoverageValidator` takes each snapshot's tier from `odds_lambda.storage.tier_validator.covered_tiers` against the event's current kick-off, and treats pregame and closing (`odds_lambda.storage.tier_validator.CRITICAL_TIERS`) as required ([Coverage and completeness checks](coverage-checks.md)).
+- **ML sampling**: `odds_analytics.feature_groups.TierSampler` takes each snapshot's tier from `odds_lambda.tier_utils.snapshot_tiers` over the event's snapshots of the market, picks the latest snapshot, only of the sources whose close has a sharp book, whose tier is the `decision_tier` or any tier farther from kickoff, excludes IN_PLAY, and so falls back to farther tiers. The `raw` target's close is the decision snapshot's own source's latest CLOSING snapshot by the same tiers ([closing snapshot](../modelling/clv-target-functions.md#closing-snapshot-of-a-raw-target), [Look-ahead bias](../modelling/look-ahead-bias.md), [Feature pipeline](../modelling/feature-pipeline.md)).
 
 Missing-tier diagnosis steps are in [Debug the AWS self-scheduling jobs](../scheduling/howto-debug-aws-scheduler.md).
 
-## Field description and priority order
+## Priority order
 
-The `odds_core.models.OddsSnapshot.fetch_tier` field description lists five tiers and omits `in_play`. `odds_lambda.fetch_tier.FetchTier.get_priority_order` returns the tiers closest to kickoff first and appends `IN_PLAY` last, though its docstring lists only five.
+`odds_lambda.fetch_tier.FetchTier.get_priority_order` returns the tiers closest to kickoff first and appends `IN_PLAY` last, though its docstring lists only five.
 
 ## Related
 
 - [OddsWriter](odds-writer.md)
-- [Odds snapshot and odds tables](odds-tables.md)
+- [Odds snapshots table](odds-tables.md)
 - [Self-scheduling](../scheduling/self-scheduling.md)
 - [OddsPortal scraper](../collection/oddsportal-scraper.md)

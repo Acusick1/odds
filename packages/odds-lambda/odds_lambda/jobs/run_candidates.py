@@ -45,7 +45,6 @@ from odds_lambda.candidate_rules import (
 from odds_lambda.paper_trading import place_trade, settle_trades
 from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
-from odds_lambda.storage.event_merge import canonical_events
 
 logger = structlog.get_logger()
 
@@ -132,7 +131,7 @@ async def runnable_candidates(sport: SportKey, today: datetime) -> list[Runnable
 
 async def candidate_events(session: AsyncSession, sport: SportKey, now: datetime) -> list[Event]:
     """Events to decide: scheduled ones yet to kick off, and those kicked off within
-    ``MISSED_LOOKBACK``, with twins of one match collapsed to the canonical event.
+    ``MISSED_LOOKBACK``.
     """
     result = await session.execute(
         select(Event).where(
@@ -141,7 +140,7 @@ async def candidate_events(session: AsyncSession, sport: SportKey, now: datetime
             (Event.commence_time <= now) | (Event.status == EventStatus.SCHEDULED),
         )
     )
-    return await canonical_events(session, result.scalars().all())
+    return list(result.scalars().all())
 
 
 # An event id and the minutes before kick-off of one of the candidate's decision times.

@@ -27,11 +27,6 @@ class JobContext:
 
     sport: SportKey | None = None
 
-    # backfill-polymarket manual invocation params
-    include_spreads: bool = False
-    include_totals: bool = False
-    dry_run: bool = False
-
     @classmethod
     def from_payload(cls, payload: dict[str, object]) -> JobContext:
         """Construct a ``JobContext`` from a raw event/scheduler payload.
@@ -56,8 +51,6 @@ _JOB_MODULE_MAP: dict[str, tuple[str, str]] = {
     "fetch-scores": ("odds_lambda.jobs.fetch_scores", "main"),
     "update-status": ("odds_lambda.jobs.update_status", "main"),
     "check-health": ("odds_lambda.jobs.check_health", "main"),
-    "fetch-polymarket": ("odds_lambda.jobs.fetch_polymarket", "main"),
-    "backfill-polymarket": ("odds_lambda.jobs.backfill_polymarket", "main"),
     "fetch-oddsportal": ("odds_lambda.jobs.fetch_oddsportal", "main"),
     "fetch-oddsportal-results": ("odds_lambda.jobs.fetch_oddsportal_results", "main"),
     "fetch-mlb-results": ("odds_lambda.jobs.fetch_mlb_results", "main"),

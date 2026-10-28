@@ -8,7 +8,6 @@ sources:
   - odds_analytics.candidate_model.refit_blocks
   - odds_cli.commands.candidates.backtest
   - odds_lambda.candidate_rules.rules.run_rule
-  - odds_lambda.storage.event_merge.canonical_events
   - odds_core.betfair_close.close_quotes
 mentions:
   - odds_core.candidates.load_candidate_file
@@ -29,7 +28,7 @@ A file loaded by path may be an unregistered draft. `odds_core.candidates.load_c
 
 `odds_analytics.candidate_backtest.replay` runs these steps.
 
-1. **Events.** `odds_analytics.candidate_backtest.final_events` selects the candidate's sport's `FINAL` events with both scores and a kick-off within the days, ordered by kick-off and id. `odds_lambda.storage.event_merge.canonical_events` then keeps one event per match, the one `odds_lambda.storage.event_merge.find_match_id` names, which is the same helper the [run-candidates job](run-candidates-job.md#one-run) uses, so the replay decides the events the job decides. A match whose canonical event lacks scores or is not `FINAL` drops out.
+1. **Events.** `odds_analytics.candidate_backtest.final_events` selects the candidate's sport's `FINAL` events with both scores and a kick-off within the days, ordered by kick-off and id, with no collapsing of events that name one match: the replay decides every such event, as the [run-candidates job](run-candidates-job.md#decisions) does.
 2. **Decision times.** `odds_lambda.candidate_rules.rules.decision_times` of the event's kick-off: each entry of the params' `minutes_before_kickoff` with its time, decided earliest first. A completed event has only its final kick-off, so a rescheduled fixture is decided against its final time and not the one a live run saw ([parity check](candidate-parity.md) uses the recorded one).
 3. **State.** At each decision time, `odds_lambda.candidate_rules.rules.run_rule` loads the state, within the params' maximum input age, with `known_at=None`, so a snapshot counts when it is stamped at or before the decision time, whenever it was stored: backfilled rows were created long after their snapshot times ([as-of rules](candidate-rules.md#market-state)). The live runner and the parity check decide through the same function. The rule's sharp inputs decide what is an input ([market state](candidate-rules.md#market-state)): for a rule that needs the exchange, only a snapshot carrying UK retail prices and a Betfair Exchange price together (in practice live OddsPortal snapshots, and live Odds API ones that quote the exchange), and for a rule that needs Polymarket, also a Polymarket snapshot. A range before that collection, or one whose snapshots fall outside the params' maximum input age, has no inputs and no bets. A decision without inputs is what the live runner records as missed; the replay counts it in coverage.
 4. **Bets.** The rule's bets, less those on selections an earlier decision time of the event already bet, as the live runner drops them ([once per selection](candidate-rules.md#once-per-selection)). Each bet is placed at its decision time, and the bets are ordered by it, then by kick-off and rule order, as the report orders paper trades by placement. Each is settled from the final score by `odds_core.odds_math.selection_won`, as `odds_lambda.paper_trading.settle_trades` settles paper trades: a `1x2` or `h2h` bet by the result, and a totals bet over when the goals exceed its line and under when they fall short (a half line cannot push); the profit comes from `odds_core.odds_math.calculate_profit_from_decimal`.
@@ -41,7 +40,7 @@ Events are processed in batches of `odds_analytics.candidate_backtest.EVENT_BATC
 
 ## Model rules
 
-For a model rule, `odds_analytics.candidate_backtest.replay` takes the range's canonical events in kick-off order and leaves the first `training_matches` of them to training only, with any later match that kicks off at the same time as the last of them (`odds_analytics.candidate_model.training_prefix`): they are never decided. `odds_analytics.candidate_model.refit_blocks` splits the rest, the scored matches, into blocks of `refit_every_matches` in kick-off order; the last block may be partial. A range with no match after its training prefix scores nothing.
+For a model rule, `odds_analytics.candidate_backtest.replay` takes the range's events in kick-off order and leaves the first `training_matches` of them to training only, with any later match that kicks off at the same time as the last of them (`odds_analytics.candidate_model.training_prefix`): they are never decided. `odds_analytics.candidate_model.refit_blocks` splits the rest, the scored matches, into blocks of `refit_every_matches` in kick-off order; the last block may be partial. A range with no match after its training prefix scores nothing.
 
 `odds_analytics.candidate_model.ModelReplay` first tunes the model's hyperparameters on the training matches that kicked off before the first scored decision time, the matches the first refit trains on, so every tuning label exists before any scored decision ([hyperparameters](candidate-rules.md#the-retail-ev-model-rule)); no scored match reaches the tuning, and a training match kicking off later is left out of it. It then refits the model before each block, at the block's earliest decision time, with those hyperparameters, on the [training rows](candidate-rules.md#the-retail-ev-model-rule) of every range match that kicked off before that time: the prefix and the earlier scored matches. A prefix match that kicks off after a scored match's first decision waits for a later block. Each match's rows are built once, from its quotes in the decision window (read with the sharp inputs in the spec of `odds_lambda.candidate_rules.rules.retail_ev_model`) and its close quotes (loaded together for the matches a tuning or refit first needs), and only a match with a live Betfair close has rows. A tuning or a refit without any training row raises `ValueError`, which the command prints before exiting 1. The block's matches are then decided as in [replay](#replay), steps 2 to 5, with the rule bound to that fit, so the model never sees a match before it is scored.
 
@@ -63,7 +62,7 @@ The checkpoint is the verdict's: the first 100, 200, … 500 bets with a close, 
 
 | Field | Counts |
 |---|---|
-| `events` | Canonical events decided: those in range, or for a model rule its scored matches (`odds_analytics.candidate_backtest.BacktestResult.range_events` counts the range, before any `only_events` filter) |
+| `events` | Events decided: those in range, or for a model rule its scored matches (`odds_analytics.candidate_backtest.BacktestResult.range_events` counts the range, before any `only_events` filter) |
 | `decisions` | Decisions: each event once per decision time |
 | `with_input` | Decisions with every input the rule needs within the maximum input age at the decision time |
 | `with_exchange` | Decisions with an exchange price at the decision time |

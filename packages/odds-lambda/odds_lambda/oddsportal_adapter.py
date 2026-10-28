@@ -1,7 +1,7 @@
-"""Convert OddsPortal feed prices to pipeline raw_data format.
+"""Convert OddsPortal feed prices to the envelope shape the writers store.
 
 Pure conversion module: no database access, no network calls.
-Produces dicts matching the OddsWriter.store_odds_snapshot() contract.
+Produces envelopes for ``OddsWriter.store_envelope``.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ class MatchOdds:
     match_date: datetime
     match_link: str
     scraped_date: datetime
-    raw_data: dict[str, Any]
+    envelope: dict[str, Any]
     bookmaker_count: int
 
 
@@ -112,7 +112,7 @@ def convert_market(
         match_date=event.start_time,
         match_link=event.url,
         scraped_date=scraped_at,
-        raw_data={
+        envelope={
             "bookmakers": entries,
             "source": "oddsportal_live",
             "oddsportal_event_id": event.event_id,

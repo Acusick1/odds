@@ -71,8 +71,6 @@ CADENCE = CadenceConfig(
 # long before a decision time has stored its snapshots by then.
 SCRAPE_LEAD = timedelta(minutes=5)
 
-LIVE_REQUEST_ID_PREFIX = "oddsportal_live_"
-
 SOURCE = CollectionSource(
     key="oddsportal",
     job_name="fetch-oddsportal",
@@ -252,9 +250,6 @@ async def ingest_league(
     )
 
     # Ingest to database
-    scraped_date = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M")
-    api_request_id = f"{LIVE_REQUEST_ID_PREFIX}{scraped_date}"
-
     finder = await LiveEventFinder.for_run(
         spec.sport_key, spec.sport_title, (_game_row(m) for m in all_converted)
     )
@@ -262,21 +257,20 @@ async def ingest_league(
         stats.errors.append("MLB schedule unavailable: no new events created")
 
     async with async_session_maker() as session:
-        payload_id = await store_payload(session, [m.raw_data for m in all_converted])
+        payload_id = await store_payload(session, [m.envelope for m in all_converted])
         writes = await finder.store_listings(
             session,
             [
                 LiveListing(
                     game=_game_row(match),
-                    external_id=match.raw_data.get("oddsportal_event_id"),
-                    raw_data=match.raw_data,
+                    external_id=match.envelope.get("oddsportal_event_id"),
+                    envelope=match.envelope,
                     snapshot_time=match.scraped_date,
                     label=f"{match.home_team} vs {match.away_team} ({match.market})",
                 )
                 for match in all_converted
             ],
             SnapshotShape(Source.ODDSPORTAL, TimeBasis.OBSERVED, payload_id),
-            api_request_id,
         )
         await session.commit()
 

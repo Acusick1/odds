@@ -37,7 +37,7 @@ Workflows live in `.github/workflows/`. Secrets come from the `development` and 
 
 ## Dev deploy
 
-`deploy-dev.yml` builds the Lambda image (tag `dev-<sha>`), runs `terraform apply` with `terraform.tfvars.example` plus overrides (Betfair on), runs `alembic upgrade head` and all of `pytest tests/migration`, invokes `check-health` and `fetch-betfair-exchange-epl` (a smoke test) through `scripts/ci/test_lambda.py`, runs `scripts/ci/verify_database.py` and `verify-schedules.sh --jobs check-health`, then always `terraform destroy`s ([howto-database-migration](../foundations/howto-database-migration.md)).
+`deploy-dev.yml` builds the Lambda image (tag `dev-<sha>`), runs `terraform apply` with `terraform.tfvars.example` plus overrides (Betfair on), runs `alembic upgrade head` and all of `pytest tests/migration`, invokes `check-health` and `fetch-betfair-exchange-epl` (a smoke test) through `scripts/ci/test_lambda.py`, runs `scripts/ci/verify_database.py` (events, recent snapshots and fetch logs) and `verify-schedules.sh --jobs check-health`, then always `terraform destroy`s ([howto-database-migration](../foundations/howto-database-migration.md)).
 
 ## Prod deploy
 

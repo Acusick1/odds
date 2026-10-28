@@ -16,7 +16,6 @@ sources:
   - odds_cli.commands.quality
   - odds_cli.commands.pbpstats
   - odds_cli.commands.nba_stats
-  - odds_core.snapshot_utils
   - odds_lambda.espn_fixture_fetcher
   - odds_lambda.mlb_stats_fetcher
   - pyproject.toml
@@ -42,7 +41,7 @@ Helpers in `odds_core.time`:
 | `odds_core.time.to_eastern`, `odds_core.time.EASTERN` | America/New_York for NBA game days, injury reports and MLB schedule dates (`odds_lambda.mlb_game_resolver.mlb_date`) |
 | `odds_core.time.utc_isoformat` | ISO 8601 with a trailing `Z` |
 
-`Z`-suffix ISO parsing is inlined in `odds_core.snapshot_utils` (which parses each bookmaker's `last_update`, falling back to the snapshot time, while it builds the odds rows), `odds_lambda.espn_fixture_fetcher` (team-schedule and month-scoreboard events, whose status text is stored as ESPN gives it), `odds_lambda.mlb_stats_fetcher` (MLB game start times, for probables, results and single-game lookups; a game with `startTimeTBD` carries a placeholder time), and the MCP EPL tools instead of calling `odds_core.time.parse_api_datetime`. Time-window correctness for historical analysis is a separate rule: [Decision time and look-ahead bias](../modelling/look-ahead-bias.md).
+`Z`-suffix ISO parsing is inlined in `odds_lambda.espn_fixture_fetcher` (team-schedule and month-scoreboard events, whose status text is stored as ESPN gives it), `odds_lambda.mlb_stats_fetcher` (MLB game start times, for probables, results and single-game lookups; a game with `startTimeTBD` carries a placeholder time), and the MCP EPL tools instead of calling `odds_core.time.parse_api_datetime`. Time-window correctness for historical analysis is a separate rule: [Decision time and look-ahead bias](../modelling/look-ahead-bias.md).
 
 `odds_cli.commands.quality` reads its `--start` and `--end` dates (`YYYY-MM-DD`) as midnight UTC, with `strptime` and an explicit `tzinfo=UTC` rather than these helpers.
 
