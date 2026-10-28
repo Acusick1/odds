@@ -22,6 +22,7 @@ from tests.test_helpers import (
     betfair_exchange_bookmaker,
     make_epl_event,
     make_tagged_snapshot,
+    polymarket_bookmaker,
     store_tagged,
     three_way_bookmaker,
 )
@@ -55,6 +56,27 @@ def candidate(**overrides: Any) -> MechanicalCandidate:
         **overrides,
     }
     return MechanicalCandidate.model_validate(fields)
+
+
+POLYMARKET = (0.5, 0.25, 0.25)
+
+
+def polymarket_candidate() -> MechanicalCandidate:
+    return candidate(rule="polymarket_gap", rule_sha256=rule_sha256("polymarket_gap"))
+
+
+async def add_polymarket(session: Any, event_id: str, kickoff: datetime = KICKOFF) -> None:
+    """A Polymarket snapshot of the event's 1x2 mids 5 minutes before the decision."""
+    await store_tagged(
+        session,
+        make_tagged_snapshot(
+            event_id,
+            kickoff - timedelta(minutes=65),
+            [polymarket_bookmaker(POLYMARKET)],
+            "polymarket",
+        ),
+    )
+    await session.commit()
 
 
 def betfair(prices: tuple[float, float, float], **teams: str) -> dict[str, Any]:
@@ -241,6 +263,24 @@ class TestReplay:
             coverage.bets,
             coverage.bets_with_close,
         ) == (5, 5, 2, 2, 2, 1, 1, 1)
+
+    async def test_polymarket_coverage_counts_decisions_with_a_polymarket_input(
+        self, pglite_async_session
+    ) -> None:
+        day = timedelta(days=1)
+        await add_event(pglite_async_session, "priced", KICKOFF, exchange=None)
+        await add_polymarket(pglite_async_session, "priced")
+        await add_event(pglite_async_session, "unpriced", KICKOFF + day, exchange=None)
+
+        coverage = (await run(pglite_async_session, polymarket_candidate())).coverage
+
+        assert (
+            coverage.decisions,
+            coverage.with_input,
+            coverage.with_polymarket,
+            coverage.with_exchange,
+            coverage.with_bet,
+        ) == (2, 1, 1, 0, 1)
 
     async def test_totals_bets_are_settled_and_scored_on_their_line(
         self, pglite_async_session

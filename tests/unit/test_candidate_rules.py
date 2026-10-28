@@ -1,4 +1,4 @@
-"""Unit tests for the mechanical rule interface and the exchange-gap rule."""
+"""Unit tests for the mechanical rule interface and the rules."""
 
 from __future__ import annotations
 
@@ -17,11 +17,12 @@ from odds_core.vocabulary import Market, Side, Source, TimeBasis
 from odds_lambda.candidate_rules import (
     RULES,
     BetIntent,
-    ExchangeGapParams,
+    GapParams,
     MarketState,
     ModelRuleSpec,
     RetailEvModelParams,
     RuleSpec,
+    SharpInput,
     apply_rule,
     build_market_state,
     decision_leads,
@@ -29,17 +30,20 @@ from odds_lambda.candidate_rules import (
     exchange_gap,
     is_bettable_line,
     max_input_age,
+    polymarket_gap,
     resolve_rule,
     retail_ev_model,
     rule_sha256,
     validate_candidate_rules,
 )
+from odds_lambda.candidate_rules.market_state import PolymarketPrice
 from pydantic import ValidationError
 
 from tests.test_helpers import (
     betfair_exchange_bookmaker,
     make_epl_event,
     make_quotes,
+    polymarket_bookmaker,
     three_way_bookmaker,
 )
 
@@ -49,6 +53,9 @@ EVENT = make_epl_event("evt", KICKOFF)
 HOME, DRAW, AWAY = Outcome.HOME, Outcome.DRAW, Outcome.AWAY
 OVER, UNDER = Outcome.OVER, Outcome.UNDER
 MAX_AGE = timedelta(minutes=10)
+EXCHANGE = frozenset({SharpInput.EXCHANGE})
+POLYMARKET = frozenset({SharpInput.POLYMARKET})
+BOTH = EXCHANGE | POLYMARKET
 
 
 def _betfair(prices: tuple[float, float, float], inplay: bool = False) -> dict[str, Any]:
@@ -77,8 +84,25 @@ def _time(snapshot: list[Quote]) -> datetime:
     return snapshot[0].snapshot_time
 
 
-def _state(snapshots: list[list[Quote]], market: Market = Market.ONE_X_TWO) -> MarketState:
-    return build_market_state(EVENT, market, [q for s in snapshots for q in s], T, MAX_AGE)
+def _state(
+    snapshots: list[list[Quote]],
+    market: Market = Market.ONE_X_TWO,
+    sharp_inputs: frozenset[SharpInput] = EXCHANGE,
+) -> MarketState:
+    return build_market_state(
+        EVENT, market, [q for s in snapshots for q in s], T, MAX_AGE, sharp_inputs
+    )
+
+
+def _polymarket_snap(
+    minutes_before_t: float, probabilities: tuple[float, float, float], snapshot_id: int
+) -> list[Quote]:
+    return _snap(
+        minutes_before_t,
+        polymarket_bookmaker(probabilities),
+        source="polymarket",
+        snapshot_id=snapshot_id,
+    )
 
 
 BET365 = three_way_bookmaker("bet365", (2.0, 3.0, 4.0))
@@ -348,6 +372,70 @@ class TestTotalsMarketState:
         assert not _state([_snap(2, BET365, _betfair((2.0, 4.0, 4.0)))], Market.TOTALS).has_input
 
 
+class TestPolymarketInputs:
+    def test_fair_price_is_the_mids_normalised(self) -> None:
+        retail = _snap(2, BET365, snapshot_id=8000)
+        polymarket = _polymarket_snap(4, (0.5, 0.3, 0.25), snapshot_id=8001)
+        state = _state([retail, polymarket], sharp_inputs=POLYMARKET)
+        assert state.has_input and state.snapshot_id == 8000
+        price = state.polymarket[None]
+        assert (price.snapshot_id, price.time) == (8001, _time(polymarket))
+        assert price.fair[HOME] == pytest.approx(0.5 / 1.05)
+        assert sum(price.fair.values()) == pytest.approx(1.0)
+        assert state.input_snapshot_ids == [8000, 8001]
+
+    def test_retail_without_the_exchange_counts_when_the_rule_does_not_need_it(self) -> None:
+        retail = _snap(2, BET365)
+        polymarket = _polymarket_snap(4, (0.5, 0.3, 0.2), snapshot_id=8010)
+        assert _state([retail, polymarket], sharp_inputs=POLYMARKET).has_input
+        assert not _state([retail, polymarket], sharp_inputs=BOTH).has_input
+        assert not _state([retail, polymarket]).has_input
+
+    def test_the_exchange_rule_ignores_polymarket(self) -> None:
+        co_timed = _snap(2, BET365, _betfair((2.0, 4.0, 4.0)))
+        polymarket = _polymarket_snap(1, (0.5, 0.3, 0.2), snapshot_id=8020)
+        state = _state([co_timed, polymarket])
+        assert state.has_input and state.polymarket == {}
+        assert state.input_snapshot_ids == [co_timed[0].snapshot_id]
+
+    def test_both_inputs_need_a_co_timed_snapshot_and_polymarket(self) -> None:
+        co_timed = _snap(2, BET365, _betfair((2.0, 4.0, 4.0)))
+        polymarket = _polymarket_snap(3, (0.5, 0.3, 0.2), snapshot_id=8030)
+        state = _state([co_timed, polymarket], sharp_inputs=BOTH)
+        assert set(state.exchange) == set(state.polymarket) == {None}
+        assert not _state([co_timed], sharp_inputs=BOTH).has_input
+
+    def test_polymarket_older_than_the_max_age_is_no_input(self) -> None:
+        retail = _snap(2, BET365)
+        old = _polymarket_snap(11, (0.5, 0.3, 0.2), snapshot_id=8040)
+        assert not _state([retail, old], sharp_inputs=POLYMARKET).has_input
+
+    def test_polymarket_after_t_is_ignored(self) -> None:
+        retail = _snap(2, BET365)
+        later = _polymarket_snap(-1, (0.5, 0.3, 0.2), snapshot_id=8050)
+        assert not _state([retail, later], sharp_inputs=POLYMARKET).has_input
+
+    def test_latest_polymarket_snapshot_wins(self) -> None:
+        retail = _snap(2, BET365)
+        old = _polymarket_snap(6, (0.5, 0.3, 0.2), snapshot_id=8060)
+        new = _polymarket_snap(3, (0.4, 0.3, 0.3), snapshot_id=8061)
+        state = _state([retail, old, new], sharp_inputs=POLYMARKET)
+        assert state.polymarket[None].snapshot_id == 8061
+
+    def test_an_incomplete_polymarket_snapshot_is_skipped(self) -> None:
+        retail = _snap(2, BET365)
+        complete = _polymarket_snap(6, (0.5, 0.3, 0.2), snapshot_id=8070)
+        partial = [q for q in _polymarket_snap(3, (0.4, 0.3, 0.3), 8071) if q.outcome != AWAY]
+        state = _state([retail, complete, partial], sharp_inputs=POLYMARKET)
+        assert state.polymarket[None].snapshot_id == 8070
+
+    def test_only_mids_count(self) -> None:
+        retail = _snap(2, BET365)
+        polymarket = _polymarket_snap(3, (0.5, 0.3, 0.2), snapshot_id=8080)
+        backs = [q for q in polymarket if q.side is not Side.MID]
+        assert not _state([retail, backs], sharp_inputs=POLYMARKET).has_input
+
+
 def _exchange(home: float, draw: float, away: float) -> ExchangePrice:
     return ExchangePrice(
         time=T,
@@ -375,6 +463,10 @@ def _rule_state(
     )
 
 
+def _polymarket(home: float, draw: float, away: float) -> PolymarketPrice:
+    return PolymarketPrice(snapshot_id=2, time=T, fair={HOME: home, DRAW: draw, AWAY: away})
+
+
 def _totals_exchange(over: float) -> ExchangePrice:
     return replace(_exchange(0, 0, 0), fair={OVER: over, UNDER: 1 - over})
 
@@ -385,7 +477,7 @@ def _totals_state(
     return replace(_rule_state({}, None), market=Market.TOTALS, retail=retail, exchange=exchange)
 
 
-PARAMS = ExchangeGapParams(threshold=0.02, minutes_before_kickoff=(60,), max_input_age_minutes=10)
+PARAMS = GapParams(threshold=0.02, minutes_before_kickoff=(60,), max_input_age_minutes=10)
 
 
 class TestExchangeGap:
@@ -395,12 +487,8 @@ class TestExchangeGap:
     def test_threshold_is_strict(self) -> None:
         # 0.5 * 2.5 - 1 = 0.25, clearly above; edge exactly at threshold is not a bet.
         state = _rule_state({"bet365": {HOME: 2.5}}, _exchange(0.5, 0.25, 0.25))
-        at = ExchangeGapParams(
-            threshold=0.25, minutes_before_kickoff=(60,), max_input_age_minutes=10
-        )
-        below = ExchangeGapParams(
-            threshold=0.2499, minutes_before_kickoff=(60,), max_input_age_minutes=10
-        )
+        at = GapParams(threshold=0.25, minutes_before_kickoff=(60,), max_input_age_minutes=10)
+        below = GapParams(threshold=0.2499, minutes_before_kickoff=(60,), max_input_age_minutes=10)
         assert exchange_gap(state, at) == []
         assert exchange_gap(state, below) == [BetIntent(HOME, "bet365", 2.5, 1.0)]
 
@@ -465,28 +553,26 @@ class TestExchangeGap:
     def test_params_must_be_positive(self, field: str, value: float) -> None:
         raw: dict[str, Any] = {**PARAMS.model_dump(), field: value}
         with pytest.raises(ValidationError):
-            ExchangeGapParams(**raw)
+            GapParams(**raw)
 
     def test_max_input_age_is_required(self) -> None:
         with pytest.raises(ValidationError):
-            ExchangeGapParams(threshold=0.02, minutes_before_kickoff=(60,))  # type: ignore[call-arg]
+            GapParams(threshold=0.02, minutes_before_kickoff=(60,))  # type: ignore[call-arg]
 
     @pytest.mark.parametrize("minutes", [[], [0], [60, -1], [60, 60]])
     def test_decision_times_are_distinct_positive_and_at_least_one(
         self, minutes: list[int]
     ) -> None:
         with pytest.raises(ValidationError):
-            ExchangeGapParams(**{**PARAMS.model_dump(), "minutes_before_kickoff": minutes})
+            GapParams(**{**PARAMS.model_dump(), "minutes_before_kickoff": minutes})
 
     def test_decision_times_are_held_earliest_first(self) -> None:
-        params = ExchangeGapParams(
-            **{**PARAMS.model_dump(), "minutes_before_kickoff": [30, 180, 60]}
-        )
+        params = GapParams(**{**PARAMS.model_dump(), "minutes_before_kickoff": [30, 180, 60]})
         assert params.minutes_before_kickoff == (180, 60, 30)
 
     def test_params_reject_unknown_fields(self) -> None:
         with pytest.raises(ValidationError):
-            ExchangeGapParams(**PARAMS.model_dump(), surprise=1)
+            GapParams(**PARAMS.model_dump(), surprise=1)
 
 
 MODEL_PARAMS = RetailEvModelParams(
@@ -512,6 +598,19 @@ def _predicting(evs: dict[tuple[Outcome, str], float]) -> Any:
 
     predict.seen = seen  # type: ignore[attr-defined]
     return predict
+
+
+class TestPolymarketGap:
+    def test_bets_the_gap_to_the_polymarket_fair_price(self) -> None:
+        state = replace(
+            _rule_state({"bet365": {HOME: 2.5, DRAW: 3.0}}, None),
+            polymarket={None: _polymarket(0.5, 0.3, 0.2)},
+        )
+        assert polymarket_gap(state, PARAMS) == [BetIntent(HOME, "bet365", 2.5, 1.0)]
+
+    def test_ignores_the_exchange(self) -> None:
+        state = _rule_state({"bet365": {HOME: 2.5}}, _exchange(0.5, 0.25, 0.25))
+        assert polymarket_gap(state, PARAMS) == []
 
 
 class TestRetailEvModel:
@@ -589,7 +688,7 @@ class TestRetailEvModel:
 class TestApplyRule:
     def test_state_without_input_gives_no_bets_whatever_the_rule(self) -> None:
         always = RuleSpec(
-            lambda state, params: [BetIntent(HOME, "bet365", 2.0, 1.0)], ExchangeGapParams
+            lambda state, params: [BetIntent(HOME, "bet365", 2.0, 1.0)], GapParams, EXCHANGE
         )
         empty = MarketState("evt", "soccer_epl", "1x2", KICKOFF, T)
         assert apply_rule(always, PARAMS, empty)[1] == []
@@ -601,7 +700,8 @@ class TestApplyRule:
                 BetIntent(HOME, "bet365", 2.0, 1.0),
                 BetIntent(AWAY, "bet365", 4.0, 1.0),
             ],
-            ExchangeGapParams,
+            GapParams,
+            EXCHANGE,
         )
         state = _rule_state({}, None)
         assert apply_rule(both, PARAMS, state, bet_selections={(HOME, None)})[1] == [
@@ -615,7 +715,8 @@ class TestApplyRule:
                 BetIntent(OVER, "bet365", 2.0, 1.0, 2.5),
                 BetIntent(OVER, "bet365", 3.0, 1.0, 3.5),
             ],
-            ExchangeGapParams,
+            GapParams,
+            EXCHANGE,
         )
         state = _totals_state({}, {})
         assert apply_rule(overs, PARAMS, state, bet_selections={(OVER, 2.5)})[1] == [
@@ -625,7 +726,7 @@ class TestApplyRule:
 
 class TestDecisionTimes:
     def test_are_kickoff_minus_each_lead_earliest_first(self) -> None:
-        params = ExchangeGapParams(**{**PARAMS.model_dump(), "minutes_before_kickoff": [60, 1440]})
+        params = GapParams(**{**PARAMS.model_dump(), "minutes_before_kickoff": [60, 1440]})
         assert decision_times(KICKOFF, params) == [
             (1440, KICKOFF - timedelta(days=1)),
             (60, KICKOFF - timedelta(hours=1)),
@@ -748,9 +849,10 @@ class TestRuleSha256:
         "target",
         [
             "odds_lambda.candidate_rules.rules.exchange_gap",
-            "odds_lambda.candidate_rules.rules.ExchangeGapParams",
+            "odds_lambda.candidate_rules.rules.GapParams",
             "odds_lambda.candidate_rules.rules.RuleParams",
             "odds_lambda.candidate_rules.rules.longest_retail",
+            "odds_lambda.candidate_rules.rules.gap_bets",
             "odds_lambda.candidate_rules.rules.BetIntent",
             "odds_lambda.candidate_rules.rules.apply_rule",
             "odds_lambda.candidate_rules.inputs",
@@ -788,6 +890,15 @@ class TestRuleSha256:
         before = rule_sha256("exchange_gap")
         monkeypatch.setattr(inspect, "getsource", fake)
         assert rule_sha256("exchange_gap") == before
+
+    def test_covers_the_sharp_inputs(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from odds_lambda.candidate_rules import rules
+
+        before = rule_sha256("exchange_gap")
+        monkeypatch.setitem(
+            rules.RULES, "exchange_gap", replace(rules.RULES["exchange_gap"], sharp_inputs=BOTH)
+        )
+        assert rule_sha256("exchange_gap") != before
 
     def test_covers_the_uk_retail_roster(self, monkeypatch: pytest.MonkeyPatch) -> None:
         before = rule_sha256("exchange_gap")

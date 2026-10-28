@@ -29,6 +29,7 @@ from odds_core.quotes import Quote
 from odds_core.snapshot_sources import SnapshotKind
 from odds_core.vocabulary import Market, Source, TimeBasis
 from odds_lambda.candidate_rules import (
+    RULES,
     MarketState,
     ModelRuleSpec,
     RetailEvModelParams,
@@ -36,7 +37,7 @@ from odds_lambda.candidate_rules import (
     build_market_state,
     decision_times,
 )
-from odds_lambda.candidate_rules.inputs import RETAIL_SOURCES, rule_quotes
+from odds_lambda.candidate_rules.inputs import RETAIL_SOURCES, SharpInput, rule_quotes
 
 from odds_analytics.retail_ev import (
     DECISION_CUTOFF,
@@ -55,6 +56,9 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from odds_analytics.xgboost_line_movement import XGBoostLineMovementStrategy
+
+_MODEL_SPEC = RULES["retail_ev_model"]
+_SHARP_INPUTS: frozenset[SharpInput] = _MODEL_SPEC.sharp_inputs
 
 # The price-only retail-EV search space (experiments/configs/xgboost_epl_retail_ev_price_only.yaml),
 # whose min_child_weight range spans about 0.13 to 13 events at the fixed loss-weight scale.
@@ -123,7 +127,7 @@ def training_rows(event: Event, market: Market, quoted: Sequence[Quote]) -> list
         time = snapshot[0].snapshot_time
         if not first <= time <= last:
             continue
-        state = build_market_state(event, market, snapshot, time, timedelta(0))
+        state = build_market_state(event, market, snapshot, time, timedelta(0), _SHARP_INPUTS)
         rows.extend(RetailEvRow.with_close(inputs, close) for inputs in state_inputs(state))
     return rows
 
@@ -346,6 +350,7 @@ class ModelReplay:
                 self._session,
                 event.id,
                 market,
+                _SHARP_INPUTS,
                 since=event.commence_time - DECISION_WINDOW,
                 until=event.commence_time - DECISION_CUTOFF,
             )

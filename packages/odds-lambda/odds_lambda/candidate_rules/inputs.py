@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from collections.abc import Collection
 from datetime import datetime
+from enum import StrEnum
 from typing import Any
 
 from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS
@@ -12,7 +13,7 @@ from odds_core.exchange_price import EXCHANGE_BOOKMAKER
 from odds_core.models import OddsSnapshot, Price
 from odds_core.quotes import Quote
 from odds_core.vocabulary import Market, Side, Source
-from sqlalchemy import Float, cast, select
+from sqlalchemy import Float, and_, cast, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -20,6 +21,16 @@ from sqlmodel import col
 # upper bound on when they were taken, which a live run at t never sees.
 RETAIL_SOURCES: tuple[Source, ...] = (Source.ODDS_API, Source.ODDSPORTAL)
 RULE_BOOKMAKERS: frozenset[str] = UK_RETAIL_BOOKMAKERS | {EXCHANGE_BOOKMAKER}
+POLYMARKET_BOOKMAKER = "polymarket"
+
+
+class SharpInput(StrEnum):
+    """A sharp price a rule compares retail with: the Betfair Exchange backs in the retail
+    snapshot itself, or Polymarket's mids from its own latest snapshot."""
+
+    EXCHANGE = "exchange"
+    POLYMARKET = "polymarket"
+
 
 _COLUMNS: tuple[Any, ...] = (
     col(OddsSnapshot.id).label("snapshot_id"),
@@ -47,7 +58,8 @@ _COLUMNS: tuple[Any, ...] = (
 async def rule_quotes(
     session: AsyncSession,
     event_id: str,
-    market: str,
+    market: Market,
+    sharp_inputs: Collection[SharpInput],
     *,
     since: datetime | None = None,
     until: datetime | None = None,
@@ -55,17 +67,26 @@ async def rule_quotes(
     snapshot_ids: Collection[int] | None = None,
 ) -> list[Quote]:
     """The back prices of UK retail books and the Betfair Exchange in ``event_id``'s retail
-    snapshots of ``market``, in snapshot time, snapshot id and price id order.
+    snapshots of ``market``, and with ``SharpInput.POLYMARKET`` in ``sharp_inputs`` the mids of
+    its Polymarket snapshots, in snapshot time, snapshot id and price id order.
 
     Narrowed when given to snapshots stamped from ``since`` to ``until`` inclusive, or stored
     (``created_at``) by ``known_at``. With ``snapshot_ids``, those snapshots in place of the
     event's, whatever event they now belong to.
     """
-    conditions: list[Any] = [
-        col(OddsSnapshot.market) == Market(market),
+    retail = and_(
         col(OddsSnapshot.source).in_(RETAIL_SOURCES),
         col(Price.side) == Side.BACK,
         col(Price.bookmaker).in_(sorted(RULE_BOOKMAKERS)),
+    )
+    polymarket = and_(
+        col(OddsSnapshot.source) == Source.POLYMARKET,
+        col(Price.side) == Side.MID,
+        col(Price.bookmaker) == POLYMARKET_BOOKMAKER,
+    )
+    conditions: list[Any] = [
+        col(OddsSnapshot.market) == Market(market),
+        or_(retail, polymarket) if SharpInput.POLYMARKET in sharp_inputs else retail,
     ]
     if since is not None:
         conditions.append(col(OddsSnapshot.snapshot_time) >= since)

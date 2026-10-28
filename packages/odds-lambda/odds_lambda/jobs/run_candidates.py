@@ -264,8 +264,7 @@ async def _decide(
             decision_id=decision.id,
         )
     decision.bets_placed = len(intents)
-    assert state.snapshot_id is not None  # noqa: S101
-    decision.input_snapshot_ids = [state.snapshot_id]
+    decision.input_snapshot_ids = state.input_snapshot_ids
     return decision, None
 
 

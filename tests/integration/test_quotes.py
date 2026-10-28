@@ -7,12 +7,13 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from odds_core.quotes import quotes
 from odds_core.vocabulary import Market, Side, Source, TimeBasis
-from odds_lambda.candidate_rules.inputs import rule_quotes
+from odds_lambda.candidate_rules.inputs import SharpInput, rule_quotes
 
 from tests.test_helpers import (
     betfair_exchange_bookmaker,
     make_epl_event,
     make_tagged_snapshot,
+    polymarket_bookmaker,
     store_tagged,
     three_way_bookmaker,
 )
@@ -21,6 +22,8 @@ pytestmark = pytest.mark.integration
 
 KICKOFF = datetime(2026, 11, 7, 15, 0, tzinfo=UTC)
 T = KICKOFF - timedelta(hours=1)
+EXCHANGE = frozenset({SharpInput.EXCHANGE})
+POLYMARKET = frozenset({SharpInput.POLYMARKET})
 
 
 @pytest.fixture
@@ -112,18 +115,42 @@ class TestRuleQuotes:
     async def test_reads_only_retail_sources_backs_and_rule_books(
         self, pglite_async_session, stored
     ) -> None:
-        rows = await rule_quotes(pglite_async_session, "e1", "1x2")
+        rows = await rule_quotes(pglite_async_session, "e1", "1x2", EXCHANGE)
         assert {q.snapshot_id for q in rows} == {stored["oddsportal"]}
         assert {q.bookmaker for q in rows} == {"bet365", "betfair_exchange"}
         assert {q.side for q in rows} == {Side.BACK}
 
+    async def test_polymarket_mids_are_read_only_when_requested(
+        self, pglite_async_session, stored
+    ) -> None:
+        polymarket = await store_tagged(
+            pglite_async_session,
+            make_tagged_snapshot(
+                "e1",
+                T - timedelta(minutes=3),
+                [polymarket_bookmaker((0.5, 0.3, 0.2))],
+                "polymarket",
+            ),
+        )
+        await pglite_async_session.commit()
+
+        without = await rule_quotes(pglite_async_session, "e1", "1x2", EXCHANGE)
+        with_polymarket = await rule_quotes(pglite_async_session, "e1", "1x2", POLYMARKET)
+
+        assert polymarket.id not in {q.snapshot_id for q in without}
+        mids = [q for q in with_polymarket if q.snapshot_id == polymarket.id]
+        assert mids and {q.side for q in mids} == {Side.MID}
+        assert {q.snapshot_id for q in with_polymarket} >= {stored["oddsportal"], polymarket.id}
+
     async def test_recorded_ids_are_read_whatever_their_event(
         self, pglite_async_session, stored
     ) -> None:
-        rows = await rule_quotes(pglite_async_session, "e1", "1x2", snapshot_ids=[stored["other"]])
+        rows = await rule_quotes(
+            pglite_async_session, "e1", "1x2", EXCHANGE, snapshot_ids=[stored["other"]]
+        )
         assert {q.event_id for q in rows} == {"e2"}
 
     async def test_known_at_drops_snapshots_stored_later(
         self, pglite_async_session, stored
     ) -> None:
-        assert await rule_quotes(pglite_async_session, "e1", "1x2", known_at=T) == []
+        assert await rule_quotes(pglite_async_session, "e1", "1x2", EXCHANGE, known_at=T) == []

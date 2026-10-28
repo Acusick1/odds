@@ -25,7 +25,7 @@ from odds_core.models import Event
 from odds_core.quotes import Quote
 from odds_core.snapshot_sources import FdukTimeBasis, SnapshotKind
 from odds_core.vocabulary import Source
-from odds_lambda.candidate_rules import RetailEvModelParams, build_market_state
+from odds_lambda.candidate_rules import RetailEvModelParams, SharpInput, build_market_state
 
 from tests.test_helpers import (
     betfair_exchange_bookmaker,
@@ -36,6 +36,7 @@ from tests.test_helpers import (
 
 KICKOFF = datetime(2026, 11, 7, 15, 0, tzinfo=UTC)
 EVENT = make_epl_event("evt", KICKOFF)
+EXCHANGE_INPUT = frozenset({SharpInput.EXCHANGE})
 EXCHANGE = (2.0, 4.0, 4.0)
 
 
@@ -131,7 +132,9 @@ class TestTrainingRows:
 class TestStateInputs:
     def test_a_decision_sees_the_inputs_its_snapshot_trains_on(self) -> None:
         t = _time(CO_TIMED) + timedelta(minutes=8)
-        state = build_market_state(EVENT, "1x2", CO_TIMED + CLOSE, t, timedelta(minutes=10))
+        state = build_market_state(
+            EVENT, "1x2", CO_TIMED + CLOSE, t, timedelta(minutes=10), EXCHANGE_INPUT
+        )
         rows = training_rows(EVENT, "1x2", CO_TIMED + CLOSE)
         assert state_inputs(state) == [
             RetailEvInput(**{f.name: getattr(r, f.name) for f in fields(RetailEvInput)})
@@ -145,7 +148,9 @@ class TestStateInputs:
             _betfair((1.5, 2.5, 3.0)),
             source="oddsportal_live",
         )
-        state = build_market_state(EVENT, "1x2", wide, _time(wide), timedelta(minutes=10))
+        state = build_market_state(
+            EVENT, "1x2", wide, _time(wide), timedelta(minutes=10), EXCHANGE_INPUT
+        )
         assert state.has_input and state.exchange == {}
         assert state_inputs(state) == []
 

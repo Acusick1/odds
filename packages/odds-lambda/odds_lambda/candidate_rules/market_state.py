@@ -1,4 +1,5 @@
-"""What was known about one event at a decision time, built from one co-timed stored snapshot."""
+"""What was known about one event at a decision time, built from one stored retail snapshot and
+the sharp prices its rule needs."""
 
 from __future__ import annotations
 
@@ -14,13 +15,18 @@ from odds_core.exchange_price import (
     ExchangePrice,
     exchange_price,
 )
-from odds_core.market_prices import Outcome
+from odds_core.market_prices import Outcome, market_outcomes
 from odds_core.models import Event
 from odds_core.quotes import Quote
-from odds_core.vocabulary import Market, Side
+from odds_core.vocabulary import Market, Side, Source
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_lambda.candidate_rules.inputs import RETAIL_SOURCES, rule_quotes
+from odds_lambda.candidate_rules.inputs import (
+    POLYMARKET_BOOKMAKER,
+    RETAIL_SOURCES,
+    SharpInput,
+    rule_quotes,
+)
 
 # A market's line, None in a market without lines.
 Line = float | None
@@ -29,13 +35,24 @@ LINE_MARKETS: frozenset[Market] = frozenset({Market.SPREADS, Market.TOTALS})
 
 
 @dataclass(frozen=True)
-class MarketState:
-    """One event's ``market`` at ``decision_time``, from the snapshot ``snapshot_id`` stamped at
-    or before it.
+class PolymarketPrice:
+    """Polymarket's mids on one line of one snapshot, as implied probabilities normalised to
+    sum to 1."""
 
-    ``retail`` holds each line's UK retail back prices per book, and ``exchange`` each line's
-    devigged exchange price; a market without lines has the one line None. A state without a
-    snapshot has no inputs: no retail prices and no exchange price.
+    snapshot_id: int
+    time: datetime
+    fair: dict[Outcome, float]
+
+
+@dataclass(frozen=True)
+class MarketState:
+    """One event's ``market`` at ``decision_time``, from the retail snapshot ``snapshot_id``
+    stamped at or before it.
+
+    ``retail`` holds each line's UK retail back prices per book, ``exchange`` each line's
+    devigged exchange price in that snapshot, and ``polymarket`` each line's Polymarket price;
+    a market without lines has the one line None. A state without a snapshot has no inputs: no
+    retail prices and no sharp prices.
     """
 
     event_id: str
@@ -47,10 +64,19 @@ class MarketState:
     snapshot_time: datetime | None = None
     retail: dict[Line, dict[str, dict[Outcome, float]]] = field(default_factory=dict)
     exchange: dict[Line, ExchangePrice] = field(default_factory=dict)
+    polymarket: dict[Line, PolymarketPrice] = field(default_factory=dict)
 
     @property
     def has_input(self) -> bool:
         return self.snapshot_time is not None
+
+    @property
+    def input_snapshot_ids(self) -> list[int]:
+        """The retail snapshot, then each Polymarket snapshot the state read."""
+        if self.snapshot_id is None:
+            return []
+        polymarket = sorted({p.snapshot_id for p in self.polymarket.values()})
+        return [self.snapshot_id, *polymarket]
 
 
 def is_bettable_line(market: Market, line: Line) -> bool:
@@ -83,9 +109,34 @@ def _exchange(snapshot: Sequence[Quote], market: Market) -> dict[Line, ExchangeP
     return prices
 
 
+def _polymarket(snapshot: Sequence[Quote], market: Market) -> dict[Line, PolymarketPrice]:
+    outcomes = market_outcomes(market)
+    mids: dict[Line, dict[Outcome, float]] = {}
+    for q in snapshot:
+        if is_bettable_line(market, q.line):
+            mids.setdefault(q.line, {})[q.outcome] = q.price
+    prices: dict[Line, PolymarketPrice] = {}
+    # A market's bettable lines are all None or all numbers, so they sort.
+    for line in sorted(mids):  # type: ignore[type-var]
+        if set(mids[line]) != set(outcomes):
+            continue
+        implied = {o: 1 / mids[line][o] for o in outcomes}
+        total = sum(implied.values())
+        prices[line] = PolymarketPrice(
+            snapshot_id=snapshot[0].snapshot_id,
+            time=snapshot[0].snapshot_time,
+            fair={o: p / total for o, p in implied.items()},
+        )
+    return prices
+
+
 def _co_timed(snapshot: Sequence[Quote]) -> bool:
     books = {q.bookmaker for q in snapshot}
     return EXCHANGE_BOOKMAKER in books and bool(books & UK_RETAIL_BOOKMAKERS)
+
+
+def _quotes_retail(snapshot: Sequence[Quote]) -> bool:
+    return any(q.bookmaker in UK_RETAIL_BOOKMAKERS for q in snapshot)
 
 
 def build_market_state(
@@ -94,17 +145,22 @@ def build_market_state(
     quoted: Sequence[Quote],
     decision_time: datetime,
     max_input_age: timedelta,
+    sharp_inputs: frozenset[SharpInput],
 ) -> MarketState:
-    """The event's state in ``market`` at ``decision_time`` from one snapshot's quotes; later
-    ones are ignored.
+    """The event's state in ``market`` at ``decision_time`` from the quotes stamped at or before
+    it; later ones are ignored. ``sharp_inputs`` are the sharp prices the rule needs.
 
-    The input is the latest snapshot of the market from a ``RETAIL_SOURCES`` source, stamped at
-    or before t, whose back prices quote a UK retail book and the Betfair Exchange, so both
-    prices were taken together, when it is at most ``max_input_age`` old; otherwise the state
-    has no inputs. Only bettable lines (``is_bettable_line``) count. Retail is its UK retail
-    books' back prices per line. A line's exchange price is its devigged Betfair Exchange backs
-    on that line, when they price every outcome with an overround of at most
-    ``MAX_EXCHANGE_OVERROUND``.
+    The retail input is the latest snapshot of the market from a ``RETAIL_SOURCES`` source,
+    stamped at or before t, whose back prices quote a UK retail book and, when the rule needs
+    ``SharpInput.EXCHANGE``, the Betfair Exchange too, so both prices were taken together. When
+    the rule needs ``SharpInput.POLYMARKET``, the Polymarket input is the latest Polymarket
+    snapshot of the market stamped at or before t whose mids price every outcome of a line.
+    The state has no inputs unless each needed input is at most ``max_input_age`` old. Only
+    bettable lines (``is_bettable_line``) count. Retail is its UK retail books' back prices per
+    line. A line's exchange price is the retail snapshot's devigged Betfair Exchange backs on
+    that line, when they price every outcome with an overround of at most
+    ``MAX_EXCHANGE_OVERROUND``. A line's Polymarket price is its mids' implied probabilities
+    normalised to sum to 1.
     """
     state = MarketState(
         event_id=event.id,
@@ -120,19 +176,37 @@ def build_market_state(
             if q.market == market and q.source in RETAIL_SOURCES and q.side is Side.BACK
         ),
         decision_time,
-        _co_timed,
+        _co_timed if SharpInput.EXCHANGE in sharp_inputs else _quotes_retail,
     )
-    if snapshot is None:
+    if snapshot is None or decision_time - snapshot[0].snapshot_time > max_input_age:
         return state
-    snapshot_time = snapshot[0].snapshot_time
-    if decision_time - snapshot_time > max_input_age:
-        return state
+    polymarket: dict[Line, PolymarketPrice] = {}
+    if SharpInput.POLYMARKET in sharp_inputs:
+        polymarket_snapshot = latest_snapshot(
+            (
+                q
+                for q in quoted
+                if q.market == market
+                and q.source is Source.POLYMARKET
+                and q.bookmaker == POLYMARKET_BOOKMAKER
+                and q.side is Side.MID
+            ),
+            decision_time,
+            lambda s: bool(_polymarket(s, market)),
+        )
+        if (
+            polymarket_snapshot is None
+            or decision_time - polymarket_snapshot[0].snapshot_time > max_input_age
+        ):
+            return state
+        polymarket = _polymarket(polymarket_snapshot, market)
     return replace(
         state,
         snapshot_id=snapshot[0].snapshot_id,
-        snapshot_time=snapshot_time,
+        snapshot_time=snapshot[0].snapshot_time,
         retail=_retail(snapshot, market),
         exchange=_exchange(snapshot, market),
+        polymarket=polymarket,
     )
 
 
@@ -142,6 +216,7 @@ async def load_market_state(
     market: Market,
     decision_time: datetime,
     max_input_age: timedelta,
+    sharp_inputs: frozenset[SharpInput],
     known_at: datetime | None = None,
     snapshot_ids: Collection[int] | None = None,
 ) -> MarketState:
@@ -158,9 +233,10 @@ async def load_market_state(
         session,
         event.id,
         market,
+        sharp_inputs,
         since=decision_time - max_input_age,
         until=decision_time,
         known_at=known_at,
         snapshot_ids=snapshot_ids,
     )
-    return build_market_state(event, market, quoted, decision_time, max_input_age)
+    return build_market_state(event, market, quoted, decision_time, max_input_age, sharp_inputs)
