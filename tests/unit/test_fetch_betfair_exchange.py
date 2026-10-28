@@ -33,6 +33,7 @@ def _book(
     ]
     return BetfairBook(
         market_id="1.x",
+        market_type="MATCH_ODDS",
         betfair_event_id="x",
         betfair_event_name="A v B",
         market_start_time=datetime(2026, 4, 25, 14, 0, tzinfo=UTC),
@@ -63,18 +64,20 @@ class TestBetfairCadence:
 
 class TestShouldSkipBook:
     def test_inplay_skipped(self) -> None:
-        assert _should_skip_book(_book(inplay=True), SPORT_CONFIG["soccer_epl"])
+        assert _should_skip_book(_book(inplay=True), SPORT_CONFIG["soccer_epl"].match_odds)
 
     @pytest.mark.parametrize("status", ["CLOSED", "INACTIVE", "closed"])
     def test_closed_skipped(self, status: str) -> None:
-        assert _should_skip_book(_book(status=status), SPORT_CONFIG["soccer_epl"])
+        assert _should_skip_book(_book(status=status), SPORT_CONFIG["soccer_epl"].match_odds)
 
     def test_open_3way_kept(self) -> None:
-        assert not _should_skip_book(_book(runners_count=3), SPORT_CONFIG["soccer_epl"])
+        assert not _should_skip_book(_book(runners_count=3), SPORT_CONFIG["soccer_epl"].match_odds)
 
     def test_2way_for_3way_market_skipped(self) -> None:
         # EPL is 3-way h2h, but only 2 runners → skip (corrupt)
-        assert _should_skip_book(_book(runners_count=2), SPORT_CONFIG["soccer_epl"])
+        assert _should_skip_book(_book(runners_count=2), SPORT_CONFIG["soccer_epl"].match_odds)
 
     def test_2way_for_2way_market_kept(self) -> None:
-        assert not _should_skip_book(_book(runners_count=2), SPORT_CONFIG["baseball_mlb"])
+        assert not _should_skip_book(
+            _book(runners_count=2), SPORT_CONFIG["baseball_mlb"].match_odds
+        )

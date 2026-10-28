@@ -8,6 +8,7 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
+from odds_core.betfair_close import close_quotes, event_close
 from odds_core.models import (
     DataQualityLog,
     Event,
@@ -17,7 +18,7 @@ from odds_core.models import (
     Price,
     SnapshotPayload,
 )
-from odds_core.vocabulary import Market, MarketStatus, Source, TimeBasis
+from odds_core.vocabulary import Market, MarketStatus, PriceOutcome, Source, TimeBasis
 from odds_lambda import live_events
 from odds_lambda.betfair.client import BetfairBook, BetfairRunner
 from odds_lambda.betfair.constants import SPORT_CONFIG
@@ -319,6 +320,7 @@ def _betfair_book(
 ) -> BetfairBook:
     return BetfairBook(
         market_id="1.234",
+        market_type="MATCH_ODDS",
         betfair_event_id=event_id,
         betfair_event_name=f"{HOME} v {AWAY}",
         market_start_time=start,
@@ -424,7 +426,7 @@ class TestBetfair:
     async def test_a_failing_book_rolls_back_alone(
         self, job_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        store = OddsWriter.store_odds_snapshot
+        store = OddsWriter.store_envelope
 
         async def failing(
             self: OddsWriter, event_id: str, raw_data: dict, *args: Any, **kwargs: Any
@@ -434,7 +436,7 @@ class TestBetfair:
                 raise RuntimeError("failed after writing")
             return result
 
-        monkeypatch.setattr(OddsWriter, "store_odds_snapshot", failing)
+        monkeypatch.setattr(OddsWriter, "store_envelope", failing)
         base = _betfair_book(KICKOFF, event_id="35002")
         second = replace(
             base,
@@ -455,3 +457,91 @@ class TestBetfair:
         assert [e.home_team for e in await _all(job_session, Event)] == [HOME]
         assert await _count(job_session, OddsSnapshot) == 1
         assert await _external_ids(job_session) == {("betfair", "35001")}
+
+
+def _totals_book(
+    start: datetime, *, over: float | None = 2.04, under: float = 1.9, inplay: bool = False
+) -> BetfairBook:
+    return BetfairBook(
+        market_id="1.235",
+        market_type="OVER_UNDER_25",
+        betfair_event_id="35001",
+        betfair_event_name=f"{HOME} v {AWAY}",
+        market_start_time=start,
+        market_status="OPEN",
+        inplay=inplay,
+        total_matched=120500.0,
+        runners=[
+            BetfairRunner(47972, "Under 2.5 Goals", under, 1.92, 500.0, 300.0, 1.91),
+            BetfairRunner(47973, "Over 2.5 Goals", over, 2.06, 450.0, 200.0, None),
+        ],
+    )
+
+
+class TestBetfairTotals:
+    async def test_over_under_2_5_is_a_totals_snapshot_on_line_2_5(
+        self, job_session: AsyncSession
+    ) -> None:
+        stats = await _ingest_betfair(
+            _betfair_book(KICKOFF), _totals_book(KICKOFF), snapshot_time=datetime.now(UTC)
+        )
+
+        assert (stats.events_created, stats.snapshots_stored) == (1, 2)
+        by_market = {s.market: s for s in await _all(job_session, OddsSnapshot)}
+        assert set(by_market) == {Market.ONE_X_TWO, Market.TOTALS}
+        totals = by_market[Market.TOTALS]
+        assert totals.total_matched == Decimal("120500.0")
+        assert totals.market_status is MarketStatus.OPEN
+        assert [b["betfair_meta"]["market_id"] for b in totals.raw_data["bookmakers"]] == ["1.235"]
+        rows = {
+            (p.outcome.value, p.line, p.side.value): (p.price, p.size)
+            for p in await _all(job_session, Price)
+            if p.snapshot_id == totals.id
+        }
+        assert rows == {
+            ("under", Decimal("2.5"), "back"): (Decimal("1.9"), Decimal("500.0")),
+            ("under", Decimal("2.5"), "lay"): (Decimal("1.92"), Decimal("300.0")),
+            ("under", Decimal("2.5"), "traded"): (Decimal("1.91"), None),
+            ("over", Decimal("2.5"), "back"): (Decimal("2.04"), Decimal("450.0")),
+            ("over", Decimal("2.5"), "lay"): (Decimal("2.06"), Decimal("200.0")),
+        }
+
+    async def test_the_stored_rows_give_a_totals_close_on_line_2_5(
+        self, job_session: AsyncSession
+    ) -> None:
+        kickoff = datetime.now(UTC) + timedelta(minutes=10)
+        await _ingest_betfair(
+            _betfair_book(kickoff),
+            _totals_book(kickoff, over=2.0, under=2.0),
+            snapshot_time=datetime.now(UTC),
+        )
+        [event] = await _all(job_session, Event)
+
+        quoted = (await close_quotes(job_session, [event], "totals"))[event.id]
+        close = event_close(quoted, event.commence_time, "totals", line=2.5)
+
+        assert close is not None
+        assert close.source is Source.BETFAIR
+        assert close.fair[PriceOutcome.OVER] == pytest.approx(0.5)
+        assert event_close(quoted, event.commence_time, "totals", line=3.5) is None
+
+    async def test_totals_ride_only_with_stored_match_odds(self, job_session: AsyncSession) -> None:
+        stats = await _ingest_betfair(
+            _betfair_book(KICKOFF, inplay=True),
+            _totals_book(KICKOFF),
+            snapshot_time=datetime.now(UTC),
+        )
+
+        assert stats.snapshots_stored == 0
+        assert await _count(job_session, OddsSnapshot) == 0
+
+    async def test_an_unpriced_totals_book_leaves_the_match_odds_alone(
+        self, job_session: AsyncSession
+    ) -> None:
+        await _ingest_betfair(
+            _betfair_book(KICKOFF),
+            _totals_book(KICKOFF, over=None),
+            snapshot_time=datetime.now(UTC),
+        )
+
+        assert [s.market for s in await _all(job_session, OddsSnapshot)] == [Market.ONE_X_TWO]

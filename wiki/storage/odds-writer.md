@@ -24,7 +24,7 @@ status: stable
 
 ## store_odds_snapshot
 
-`odds_lambda.storage.writers.OddsWriter.store_envelope` does the work and returns an `odds_lambda.storage.writers.StoredEnvelope` (the snapshot, its `odds` rows and whether it was inserted); `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` calls it and returns the snapshot and rows.
+`odds_lambda.storage.writers.OddsWriter.store_envelope` does the work and returns an `odds_lambda.storage.writers.StoredEnvelope` (the snapshot, its `odds` rows, whether it was inserted and `snapshots_written`, the number of snapshots inserted: one per market of a shaped envelope, none for a key already stored); `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` calls it and returns the snapshot and rows.
 
 `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot(event_id, raw_data, snapshot_time=None, validate=True, *, shape=None, api_request_id=None)` stores one event's envelope (`raw_data`). `shape` (`odds_lambda.storage.shaped_snapshots.SnapshotShape`) names the snapshot's source, its [time basis](odds-tables.md#odds_snapshots) and the payload it came in; the OddsPortal live, Betfair and live Polymarket jobs, Odds API ingestion and the Odds API backfill pass it, and the other writers pass none. Steps:
 

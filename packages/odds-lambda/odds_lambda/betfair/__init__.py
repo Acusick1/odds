@@ -1,6 +1,6 @@
 """Betfair Exchange API integration.
 
-Direct ingestion of Match Odds via the delayed application key, written into
+Direct ingestion of each sport's markets via the delayed application key, written into
 ``odds_snapshots.raw_data`` with ``key="betfair_exchange"`` so the existing
 agent / analytics / sharp-fallback consumers pick it up unchanged.
 """

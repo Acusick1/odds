@@ -1199,6 +1199,7 @@ class TestBetfairEplAccounting:
 
         book = BetfairBook(
             market_id="1.1",
+            market_type="MATCH_ODDS",
             betfair_event_id="1",
             betfair_event_name="Arsenal v Chelsea",
             market_start_time=kickoff,
@@ -1209,7 +1210,7 @@ class TestBetfairEplAccounting:
         )
         client = MagicMock()
         client.list_events.return_value = ["1"]
-        client.list_match_odds_books.return_value = [book]
+        client.list_books.return_value = [book]
         return await fetch_betfair_exchange.ingest_sport(
             SPORT_CONFIG["soccer_epl"], client=client, lookahead_hours=72, snapshot_time=NOW
         )

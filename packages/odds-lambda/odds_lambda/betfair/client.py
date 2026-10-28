@@ -3,7 +3,7 @@
 Read-only data access via the delayed application key. Provides:
   - ``BetfairExchangeClient.connect()`` — login (cert-based or interactive)
   - ``list_events(sport_cfg, lookahead_hours)``
-  - ``list_match_odds_books(sport_cfg, event_ids)``
+  - ``list_books(sport_cfg, events)``
 
 Returned dataclasses (``BetfairEvent``, ``BetfairBook``) are sport-agnostic
 and feed the adapter layer.
@@ -40,7 +40,7 @@ class BetfairEvent:
 
 @dataclass(frozen=True)
 class BetfairRunner:
-    """One side of a Match Odds market."""
+    """One selection of a market."""
 
     selection_id: int
     runner_name: str
@@ -53,9 +53,11 @@ class BetfairRunner:
 
 @dataclass(frozen=True)
 class BetfairBook:
-    """Full price snapshot for a single MATCH_ODDS market on one event."""
+    """Full price snapshot for one market on one event."""
 
     market_id: str
+    # Betfair's market type code, e.g. ``MATCH_ODDS`` or ``OVER_UNDER_25``.
+    market_type: str
     betfair_event_id: str
     betfair_event_name: str
     market_start_time: datetime | None
@@ -211,12 +213,13 @@ class BetfairExchangeClient:
 
     # --------------------------------------------------------------------- books
 
-    def list_match_odds_books(
+    def list_books(
         self,
         sport_cfg: SportBetfairConfig,
         events: list[BetfairEvent],
     ) -> list[BetfairBook]:
-        """Fetch best back/lay for the configured market type for given events."""
+        """Fetch best back/lay of every market type the sport collects for the given events,
+        in one catalogue request."""
         if not events:
             return []
 
@@ -224,11 +227,18 @@ class BetfairExchangeClient:
         cat_filter = filters.market_filter(
             event_type_ids=[sport_cfg.event_type_id],
             event_ids=event_ids,
-            market_type_codes=[sport_cfg.market_type_code],
+            market_type_codes=[m.market_type_code for m in sport_cfg.markets],
         )
+        # MARKET_DESCRIPTION (for the market type) weighs 1 point per market, the other
+        # projections 0, so 200 results stay within the 200-point request limit.
         catalogues = self._trading.betting.list_market_catalogue(
             filter=cat_filter,
-            market_projection=["RUNNER_DESCRIPTION", "EVENT", "MARKET_START_TIME"],
+            market_projection=[
+                "RUNNER_DESCRIPTION",
+                "EVENT",
+                "MARKET_START_TIME",
+                "MARKET_DESCRIPTION",
+            ],
             max_results=200,
         )
 
@@ -254,6 +264,9 @@ class BetfairExchangeClient:
         for cat in catalogues:
             book = book_by_id.get(cat.market_id)
             if book is None:
+                continue
+            if cat.description is None or not cat.description.market_type:
+                logger.warning("betfair_catalogue_without_market_type", market_id=cat.market_id)
                 continue
 
             runners: list[BetfairRunner] = []
@@ -291,6 +304,7 @@ class BetfairExchangeClient:
             results.append(
                 BetfairBook(
                     market_id=cat.market_id,
+                    market_type=cat.description.market_type,
                     betfair_event_id=event_id,
                     betfair_event_name=event_name,
                     market_start_time=start,

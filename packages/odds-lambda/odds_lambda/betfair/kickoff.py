@@ -8,12 +8,14 @@ from odds_core import database
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from sqlalchemy import func, select
 
-from odds_lambda.betfair.constants import LIVE_REQUEST_ID_PREFIX
+from odds_lambda.betfair.constants import LIVE_REQUEST_ID_PREFIX, SPORT_CONFIG
 
 # Betfair can turn a market in play at its own start, before the event's kickoff (an hour early
 # for the 2026-10-24 World Series game). A start further ahead of the kickoff than this is taken
 # as a mismatched listing, not the market's real start.
 MAX_BETFAIR_START_LEAD = timedelta(hours=3)
+# Only the match odds market dates a kick-off; the sport's other markets carry their own starts.
+_MATCH_ODDS_MARKETS = {sport: cfg.match_odds.market for sport, cfg in SPORT_CONFIG.items()}
 
 
 def parse_betfair_start(raw: object) -> datetime | None:
@@ -43,7 +45,7 @@ def next_close_target(
 
 async def next_betfair_kickoff(sport_key: str, *, now: datetime) -> datetime | None:
     """Earliest time after ``now`` that a run must precede: a scheduled event's ``commence_time``,
-    or an earlier Betfair start from the event's latest stored Betfair snapshot.
+    or an earlier Betfair start from the event's latest stored Betfair match odds snapshot.
 
     Only events starting within ``MAX_BETFAIR_START_LEAD`` of the first upcoming one can have a
     Betfair start before it, so only their snapshots are read.
@@ -76,6 +78,7 @@ async def next_betfair_kickoff(sport_key: str, *, now: datetime) -> datetime | N
                 .where(
                     OddsSnapshot.event_id.in_([event_id for event_id, _ in events]),  # type: ignore[attr-defined]
                     OddsSnapshot.api_request_id.like(f"{LIVE_REQUEST_ID_PREFIX}%"),  # type: ignore[union-attr]
+                    OddsSnapshot.market == _MATCH_ODDS_MARKETS[sport_key],
                 )
                 .distinct(OddsSnapshot.event_id)
                 .order_by(OddsSnapshot.event_id, OddsSnapshot.snapshot_time.desc())  # type: ignore[attr-defined]

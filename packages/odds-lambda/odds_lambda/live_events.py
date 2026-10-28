@@ -264,14 +264,14 @@ class LiveEventFinder:
                         writes.events_created += 1
                     else:
                         writes.events_matched += 1
-                    await writer.store_odds_snapshot(
+                    stored = await writer.store_envelope(
                         event_id=found.event.id,
                         raw_data=listing.raw_data,
                         snapshot_time=listing.snapshot_time,
                         shape=shape,
                         api_request_id=api_request_id,
                     )
-                    writes.snapshots_stored += 1
+                    writes.snapshots_stored += stored.snapshots_written
             except Exception as e:
                 msg = f"{listing.label}: {type(e).__name__}: {e}"
                 writes.errors.append(msg)

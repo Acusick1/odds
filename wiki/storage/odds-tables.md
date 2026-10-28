@@ -12,7 +12,6 @@ sources:
   - tests/integration/test_odds_snapshot_link.py
   - odds_lambda.storage.readers.OddsReader
   - odds_lambda.oddsportal_common.build_raw_data
-  - odds_lambda.betfair.adapter.build_raw_data
   - odds_lambda.oddsportal_adapter
   - scripts/ingest_football_data_uk.py
   - odds_lambda.polymarket_odds.build_raw_data
@@ -40,7 +39,7 @@ The columns of the redesigned snapshot are nullable. Snapshots the OddsPortal li
 
 ## raw_data format
 
-The Odds API per-event object: `bookmakers[]`, each with `key`, `title`, `last_update`, and `markets[]` of `{key, outcomes[{name, price | price_decimal, point?}]}`. The Odds API's outcomes carry an integer American `price`. Other sources adapt to this shape and carry the source decimal under `price_decimal` with no `price` key (`odds_lambda.oddsportal_common.build_raw_data`, `odds_lambda.betfair.adapter.build_raw_data`) and add a `source` key; non-API sources can also carry extra keys (`_snapshot_time` from `odds_lambda.oddsportal_common.build_raw_data`), which parsers must ignore. `odds_core.odds_math.outcome_price_decimal` reads either encoding ([Odds arithmetic helpers](../foundations/odds-math.md#price-encodings)). `odds_core.snapshot_utils.extract_odds_from_snapshot` turns it back into `odds_core.models.Odds` objects, optionally filtered by market or outcome; it returns `[]` when `bookmakers` is absent and matches market keys exactly. Football three-way markets are `1x2` from every source (the Odds API's `h2h` is relabelled at fetch) and other sports use `h2h`, so a query with the wrong key finds nothing ([Market-key dialects](../collection/sport-and-market-keys.md#market-key-dialects)).
+The Odds API per-event object: `bookmakers[]`, each with `key`, `title`, `last_update`, and `markets[]` of `{key, outcomes[{name, price | price_decimal, point?}]}`. The Odds API's outcomes carry an integer American `price`. Other sources adapt to this shape and carry the source decimal under `price_decimal` with no `price` key (`odds_lambda.oddsportal_common.build_raw_data`, `odds_lambda.betfair.adapter.betfair_book_to_bookmaker_entry`) and add a `source` key; non-API sources can also carry extra keys (`_snapshot_time` from `odds_lambda.oddsportal_common.build_raw_data`), which parsers must ignore. `odds_core.odds_math.outcome_price_decimal` reads either encoding ([Odds arithmetic helpers](../foundations/odds-math.md#price-encodings)). `odds_core.snapshot_utils.extract_odds_from_snapshot` turns it back into `odds_core.models.Odds` objects, optionally filtered by market or outcome; it returns `[]` when `bookmakers` is absent and matches market keys exactly. Football three-way markets are `1x2` from every source (the Odds API's `h2h` is relabelled at fetch) and other sports use `h2h`, so a query with the wrong key finds nothing ([Market-key dialects](../collection/sport-and-market-keys.md#market-key-dialects)).
 
 ## Provenance
 

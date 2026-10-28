@@ -1,10 +1,10 @@
-"""Fetch Match Odds from Betfair Exchange directly.
+"""Fetch the configured markets from Betfair Exchange directly.
 
 Polls the Betfair Exchange API for upcoming events in a sport, fetches the
-best back/lay for the configured Match Odds market, converts to canonical
-``raw_data`` format, and writes a ``betfair_exchange`` snapshot row via
-``OddsWriter.store_odds_snapshot``. Self-schedules with proximity-based
-intervals matching ``fetch_oddsportal``.
+best back/lay of each market the sport collects (Match Odds, and Over/Under
+2.5 Goals for EPL), converts them to one canonical ``raw_data`` envelope per
+event, and writes it via ``OddsWriter.store_odds_snapshot``, one snapshot per
+market. Self-schedules with proximity-based intervals matching ``fetch_oddsportal``.
 
 Replaces the previous BFE-via-OddsPortal data path that broke 2026-04-21
 when OP moved exchanges into a separate (encrypted) AJAX endpoint.
@@ -36,7 +36,7 @@ from odds_lambda.betfair import (
     resolve_teams,
 )
 from odds_lambda.betfair.cert_loader import resolve_cert_paths
-from odds_lambda.betfair.constants import LIVE_REQUEST_ID_PREFIX
+from odds_lambda.betfair.constants import LIVE_REQUEST_ID_PREFIX, BetfairMarketSpec
 from odds_lambda.betfair.kickoff import next_betfair_kickoff
 from odds_lambda.collection_calendar import (
     CollectionSource,
@@ -122,16 +122,35 @@ class IngestionStats:
         return count_dropped(self.dropped_games, SkipReason.SCHEDULE_UNAVAILABLE)
 
 
-def _should_skip_book(book: BetfairBook, sport_cfg: SportBetfairConfig) -> bool:
+def _should_skip_book(book: BetfairBook, spec: BetfairMarketSpec) -> bool:
     """Skip in-play and clearly-closed markets; we ingest pre-play only, whatever the Betfair start."""
     if book.inplay:
         return True
     status = (book.market_status or "").upper()
     if status in {"CLOSED", "INACTIVE"}:
         return True
-    if len(book.runners) < (3 if sport_cfg.has_draw else 2):
+    if len(book.runners) < spec.runner_count:
         return True
     return False
+
+
+def _other_market_entries(
+    books: list[BetfairBook],
+    sport_cfg: SportBetfairConfig,
+    home: str,
+    away: str,
+    snapshot_time: datetime,
+) -> list[dict[str, Any]]:
+    """Bookmaker entries of an event's priced books outside its match odds."""
+    entries: list[dict[str, Any]] = []
+    for book in books:
+        spec = sport_cfg.market_spec(book.market_type)
+        if spec is None or _should_skip_book(book, spec):
+            continue
+        entry = betfair_book_to_bookmaker_entry(book, spec, home, away, snapshot_time)
+        if entry is not None:
+            entries.append(entry)
+    return entries
 
 
 def _account_for(
@@ -150,9 +169,9 @@ def _account_for(
     )
 
 
-def _envelope(book: BetfairBook, entry: dict[str, Any]) -> dict[str, Any]:
+def _envelope(book: BetfairBook, entries: list[dict[str, Any]]) -> dict[str, Any]:
     return {
-        "bookmakers": [entry],
+        "bookmakers": entries,
         "source": SnapshotSource.BETFAIR_API.value,
         "betfair_event_id": book.betfair_event_id,
     }
@@ -165,7 +184,11 @@ async def ingest_sport(
     lookahead_hours: int,
     snapshot_time: datetime,
 ) -> IngestionStats:
-    """Discover events, fetch books, write snapshots for one sport."""
+    """Discover events, fetch books, write snapshots for one sport.
+
+    An event's match odds book decides whether it is stored and names its teams; its other
+    markets' books ride in the same envelope when priced, one bookmaker entry per market.
+    """
     stats = IngestionStats(sport=sport_cfg.sport_key)
 
     # API calls are blocking; run in worker thread to avoid stalling the loop.
@@ -177,7 +200,7 @@ async def ingest_sport(
         logger.warning("betfair_no_events_found", sport=sport_cfg.sport_key)
         return stats
 
-    books = await asyncio.to_thread(client.list_match_odds_books, sport_cfg, events)
+    books = await asyncio.to_thread(client.list_books, sport_cfg, events)
     stats.books_fetched = len(books)
     if not books:
         logger.warning(
@@ -185,13 +208,21 @@ async def ingest_sport(
         )
         return stats
 
-    priced: list[tuple[BetfairBook, GameRow, dict[str, Any]]] = []
+    match_type = sport_cfg.match_odds.market_type_code
+    other_books: dict[str, list[BetfairBook]] = {}
+    for book in books:
+        if book.market_type != match_type:
+            other_books.setdefault(book.betfair_event_id, []).append(book)
+
+    priced: list[tuple[BetfairBook, GameRow, list[dict[str, Any]]]] = []
     accounted: list[GameRow] = []
     for book in books:
+        if book.market_type != match_type:
+            continue
         started = book.market_start_time is not None and book.market_start_time <= snapshot_time
         if book.inplay:
             stats.books_in_play += 1
-        if _should_skip_book(book, sport_cfg):
+        if _should_skip_book(book, sport_cfg.match_odds):
             if book.inplay or started:
                 _account_for(accounted, book, sport_cfg)
             continue
@@ -211,7 +242,7 @@ async def ingest_sport(
 
         entry = betfair_book_to_bookmaker_entry(
             book,
-            sport_cfg,
+            sport_cfg.match_odds,
             home_team=home,
             away_team=away,
             snapshot_time=snapshot_time,
@@ -226,7 +257,10 @@ async def ingest_sport(
         game = GameRow(
             home, away, book.market_start_time, doubleheader_game_number(book.betfair_event_name)
         )
-        priced.append((book, game, entry))
+        others = _other_market_entries(
+            other_books.get(book.betfair_event_id, []), sport_cfg, home, away, snapshot_time
+        )
+        priced.append((book, game, [entry, *others]))
 
     finder = await LiveEventFinder.for_run(
         sport_cfg.sport_key,
@@ -237,7 +271,7 @@ async def ingest_sport(
         stats.errors.append("MLB schedule unavailable: no new events created")
 
     async with async_session_maker() as session:
-        envelopes = [(book, game, _envelope(book, entry)) for book, game, entry in priced]
+        envelopes = [(book, game, _envelope(book, entries)) for book, game, entries in priced]
         payload_id = (
             await store_payload(session, [raw for _, _, raw in envelopes]) if envelopes else None
         )

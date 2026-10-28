@@ -328,5 +328,5 @@ class FakeBetfairClient:
         self.lookback_hours = lookback_hours
         return [book.betfair_event_id for book in self.books]
 
-    def list_match_odds_books(self, sport_cfg: Any, events: list[str]) -> list[Any]:
+    def list_books(self, sport_cfg: Any, events: list[str]) -> list[Any]:
         return self.books
