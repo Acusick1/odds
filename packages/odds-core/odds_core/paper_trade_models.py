@@ -14,6 +14,7 @@ from sqlalchemy import (
     Float,
     Index,
     Integer,
+    Numeric,
     UniqueConstraint,
     text,
 )
@@ -101,8 +102,13 @@ class PaperTrade(SQLModel, table=True):
     event_id: str = Field(foreign_key="events.id", index=True)
 
     # Bet details
-    market: str = Field(description="Market type: h2h")
-    selection: str = Field(description="Selection: home, draw, or away")
+    market: str = Field(description="Market type: 1x2, h2h or totals")
+    selection: str = Field(description="Selection: home, draw, away, over or under")
+    line: float | None = Field(
+        default=None,
+        sa_column=Column(Numeric(asdecimal=False)),
+        description="The selection's line, such as 2.5 goals; null in a market without lines",
+    )
     bookmaker: str = Field(index=True, description="Bookmaker key")
     price_decimal: float = Field(
         sa_column=Column(Float, nullable=False),
@@ -161,8 +167,10 @@ class PaperTrade(SQLModel, table=True):
             "candidate_version",
             "event_id",
             "selection",
+            "line",
             unique=True,
             postgresql_where=text("decision_id IS NOT NULL"),
+            postgresql_nulls_not_distinct=True,
         ),
         CheckConstraint("price_decimal > 1.0", name="ck_paper_trades_price_decimal_gt_one"),
         CheckConstraint(

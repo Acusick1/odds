@@ -23,7 +23,7 @@ from odds_core.alerts import job_outage_alerted_at, send_recorded_alert
 from odds_core.betfair_close import LIVE_CLOSE_WINDOW, event_close, live_close_quotes
 from odds_core.config import Settings, get_settings
 from odds_core.database import async_session_maker
-from odds_core.market_prices import THREE_WAY_MARKET
+from odds_core.market_prices import THREE_WAY_MARKET, TOTALS_MARKET
 from odds_core.models import (
     AlertHistory,
     Event,
@@ -32,6 +32,7 @@ from odds_core.models import (
     HealthCheckAcknowledgement,
     OddsSnapshot,
 )
+from odds_core.paper_trade_models import PaperTrade
 from odds_core.vocabulary import HealthCheck, Source
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -126,17 +127,23 @@ class StaleSource:
 
 @dataclass(frozen=True, slots=True)
 class MissingBetfairClose:
-    """A played EPL event with no live Betfair snapshot in the window before kick-off."""
+    """A played EPL event with no live Betfair close in the window before kick-off: on the
+    three-way market, or on the line of a totals paper trade."""
 
     event_id: str
     home_team: str
     away_team: str
     commence_time: datetime
+    totals_lines: tuple[float, ...] = ()
+    three_way: bool = True
 
     def describe(self) -> str:
+        missing = ["1x2"] if self.three_way else []
+        missing += [f"totals {line:g}" for line in self.totals_lines]
         return (
             f"{self.home_team} v {self.away_team} "
-            f"({self.commence_time:%Y-%m-%d %H:%M} UTC, {self.event_id})"
+            f"({self.commence_time:%Y-%m-%d %H:%M} UTC, {self.event_id}; no close on "
+            f"{', '.join(missing)})"
         )
 
 
@@ -362,6 +369,21 @@ class HealthMonitor:
             .all()
         )
         already_alerted = await self._event_ids_alerted(BETFAIR_CLOSE_ALERT_TYPE, moment - lookback)
+        traded_lines = (
+            await self.session.execute(
+                select(PaperTrade.event_id, PaperTrade.line)
+                .where(
+                    PaperTrade.event_id.in_([e.id for e in events]),  # type: ignore[attr-defined]
+                    PaperTrade.market == TOTALS_MARKET,
+                    PaperTrade.line.is_not(None),  # type: ignore[union-attr]
+                )
+                .distinct()
+                .order_by(PaperTrade.event_id, PaperTrade.line)
+            )
+        ).all()
+        totals_lines: dict[str, list[float]] = {}
+        for event_id, line in traded_lines:
+            totals_lines.setdefault(event_id, []).append(line)
         missing: list[MissingBetfairClose] = []
         for event in events:
             if event.id in already_alerted:
@@ -382,7 +404,14 @@ class HealthMonitor:
             if betfair_before is None:
                 continue
             closes = await live_close_quotes(self.session, [event.id], THREE_WAY_MARKET)
-            if event_close(closes, kickoff, THREE_WAY_MARKET) is not None:
+            three_way_missing = event_close(closes, kickoff, THREE_WAY_MARKET) is None
+            totals_closes = await live_close_quotes(self.session, [event.id], TOTALS_MARKET)
+            totals_missing = tuple(
+                line
+                for line in totals_lines.get(event.id, [])
+                if event_close(totals_closes, kickoff, TOTALS_MARKET, line=line) is None
+            )
+            if not three_way_missing and not totals_missing:
                 continue
             missing.append(
                 MissingBetfairClose(
@@ -390,6 +419,8 @@ class HealthMonitor:
                     home_team=event.home_team,
                     away_team=event.away_team,
                     commence_time=kickoff,
+                    totals_lines=totals_missing,
+                    three_way=three_way_missing,
                 )
             )
         return missing

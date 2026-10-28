@@ -28,7 +28,6 @@ from odds_core.market_prices import Outcome
 from odds_core.models import Event, EventStatus
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from odds_core.sports import SportKey
-from odds_core.vocabulary import Market
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -54,8 +53,6 @@ logger = structlog.get_logger()
 # been placed in, so it is recorded as missed instead.
 MAX_LATENESS = timedelta(minutes=10)
 MAX_WAIT = timedelta(minutes=30)
-# A paper trade records no line, so the runner bets only markets without lines.
-LIVE_MARKETS: frozenset[Market] = frozenset({Market.ONE_X_TWO, Market.H2H})
 # Events that kicked off without a decision are recorded as missed for this long.
 MISSED_LOOKBACK = timedelta(days=7)
 # A run with a failed decision is repeated this soon, to retry within MAX_LATENESS.
@@ -95,9 +92,9 @@ async def _alert_invalid(name: str, error: ValueError) -> None:
 async def runnable_candidates(sport: SportKey, today: datetime) -> list[RunnableCandidate]:
     """Active mechanical candidates of ``sport`` that have started and validate.
 
-    An invalid candidate, one whose rule needs a fitted model (which only a replay fits), or one
-    whose market is not in ``LIVE_MARKETS``, is skipped with one alert per
-    ``stale_reminder_interval``; an unreadable registry skips them all.
+    An invalid candidate, or one whose rule needs a fitted model (which only a replay fits), is
+    skipped with one alert per ``stale_reminder_interval``; an unreadable registry skips them
+    all.
     """
     try:
         loaded: Sequence[Candidate] = load_candidates(candidates_dir())
@@ -121,11 +118,6 @@ async def runnable_candidates(sport: SportKey, today: datetime) -> list[Runnable
                 raise ValueError(
                     f"candidate {candidate.name!r}: rule {candidate.rule!r} needs a fitted model, "
                     "which only the replay backtest fits; the live runner does not run it"
-                )
-            if candidate.market not in LIVE_MARKETS:
-                raise ValueError(
-                    f"candidate {candidate.name!r}: market {candidate.market.value!r} has lines, "
-                    "which a paper trade does not record; the live runner does not run it"
                 )
             validate_candidate_rules([candidate])
         except ValueError as exc:
@@ -204,14 +196,14 @@ async def _bet_selections(
 ) -> frozenset[Selection]:
     """Selections the candidate version has already bet on the event at a decision."""
     rows = await session.execute(
-        select(PaperTrade.selection).where(
+        select(PaperTrade.selection, PaperTrade.line).where(
             PaperTrade.candidate_name == candidate.name,
             PaperTrade.candidate_version == candidate.version,
             PaperTrade.event_id == event_id,
             PaperTrade.decision_id.is_not(None),  # type: ignore[union-attr]
         )
     )
-    return frozenset((Outcome(selection), None) for selection in rows.scalars())
+    return frozenset((Outcome(selection), line) for selection, line in rows.tuples())
 
 
 async def _decide(
@@ -255,6 +247,7 @@ async def _decide(
             event_id=event.id,
             market=state.market,
             selection=intent.outcome.value,
+            line=intent.line,
             bookmaker=intent.bookmaker,
             price_decimal=intent.price_decimal,
             stake=intent.stake,

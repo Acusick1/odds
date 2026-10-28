@@ -153,8 +153,8 @@ class TestCheckParity:
         report = await check_parity(pglite_async_session, candidate())
 
         [mismatch] = report.of(ParityStatus.MISMATCH)
-        assert mismatch.live == (("home", "bet365", 2.3, 1.0),)
-        assert mismatch.replayed == (("home", "bet365", 2.2, 1.0),)
+        assert mismatch.live == (("home", None, "bet365", 2.3, 1.0),)
+        assert mismatch.replayed == (("home", None, "bet365", 2.2, 1.0),)
         assert not report.ok
 
     async def test_a_recorded_snapshot_missing_from_the_database_is_a_mismatch(
@@ -204,7 +204,7 @@ class TestCheckParity:
         assert [d.status for d in report.decisions] == [ParityStatus.MATCH]
         [difference] = report.data_differences
         assert difference.replayed == () and difference.db_replayed == (
-            ("home", "bet365", 2.2, 1.0),
+            ("home", None, "bet365", 2.2, 1.0),
         )
         assert report.ok
 

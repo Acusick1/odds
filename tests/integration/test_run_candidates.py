@@ -48,6 +48,7 @@ from tests.test_helpers import (
     polymarket_bookmaker,
     store_tagged,
     three_way_bookmaker,
+    totals_book,
 )
 
 pytestmark = pytest.mark.integration
@@ -524,6 +525,113 @@ class TestSeveralDecisionTimes:
         assert [(d.missed, d.bets_placed) for d in decisions] == [(True, 0), (False, 1)]
 
 
+class TestTotals:
+    """An exchange-gap candidate on totals, deciding at 90 and 60 minutes before a kick-off
+    59 minutes away."""
+
+    PARAMS = {"threshold": 0.01, "minutes_before_kickoff": [90, 60], "max_input_age_minutes": 120}
+    EARLY_RUN = DUE - timedelta(minutes=89)
+    # Over 2.5 at 2.3 against a fair 0.5, and under 3.5 at 1.6 against a fair 0.69, clear the
+    # threshold; over 3.5 at 3.0 and under 2.5 at 1.6 do not.
+    RETAIL = {2.5: (2.3, 1.6), 3.5: (3.0, 1.6)}
+    EXCHANGE = {2.5: (2.0, 2.0), 3.5: (3.2, 1.45)}
+
+    @staticmethod
+    async def add_snapshot(
+        session: Any, retail: dict[float, tuple[float, float]], minutes_ago: int
+    ) -> None:
+        snapshot = make_tagged_snapshot(
+            "e1",
+            NOW - timedelta(minutes=minutes_ago),
+            [totals_book("bet365", retail), totals_book("betfair_exchange", TestTotals.EXCHANGE)],
+            "oddsportal_live",
+        )
+        snapshot.created_at = NOW - timedelta(minutes=minutes_ago)
+        await store_tagged(session, snapshot)
+        await session.commit()
+
+    @staticmethod
+    def candidate() -> MechanicalCandidate:
+        return MechanicalCandidate.model_validate(
+            {
+                "name": "cand",
+                "description": "d",
+                "kind": "mechanical",
+                "market": "totals",
+                "sport": EPL,
+                "version": 1,
+                "issue": 1,
+                "start_date": "2026-01-01",
+                "status": "active",
+                "rule": "exchange_gap",
+                "rule_sha256": rule_sha256("exchange_gap"),
+                "params": TestTotals.PARAMS,
+            }
+        )
+
+    async def test_bets_each_selection_on_its_line_once_and_replays_in_parity(
+        self, pglite_async_session, registry
+    ) -> None:
+        session = pglite_async_session
+        write_candidate(registry, market="totals", rule="exchange_gap", params=self.PARAMS)
+        session.add(make_epl_event("e1", DUE))
+        await self.add_snapshot(session, self.RETAIL, 60)
+
+        early = await run(session, self.EARLY_RUN)
+        # Over 3.5 lengthens to 3.5 before the later time: a new selection on the same outcome.
+        await self.add_snapshot(session, {**self.RETAIL, 3.5: (3.5, 1.6)}, 5)
+        late = await run(session)
+
+        assert (early.placed, late.placed) == (2, 1)
+        decisions = sorted(await all_of(session, CandidateDecision), key=lambda d: d.decision_time)
+        trades = await all_of(session, PaperTrade)
+        assert sorted((t.selection, t.line, t.decision_id) for t in trades) == [
+            ("over", 2.5, decisions[0].id),
+            ("over", 3.5, decisions[1].id),
+            ("under", 3.5, decisions[0].id),
+        ]
+        assert {(t.market, t.bookmaker) for t in trades} == {("totals", "bet365")}
+
+        report = await check_parity(session, self.candidate())
+        assert [d.status for d in report.decisions] == [ParityStatus.MATCH, ParityStatus.MATCH]
+        assert report.decisions[1].live == (("over", 3.5, "bet365", 3.5, 1.0),)
+
+    async def test_a_live_bet_on_another_line_is_a_parity_mismatch(
+        self, pglite_async_session, registry
+    ) -> None:
+        session = pglite_async_session
+        write_candidate(registry, market="totals", rule="exchange_gap", params=self.PARAMS)
+        session.add(make_epl_event("e1", DUE))
+        await self.add_snapshot(session, self.RETAIL, 60)
+        await run(session, self.EARLY_RUN)
+        trade = next(t for t in await all_of(session, PaperTrade) if t.selection == "over")
+        trade.line = 4.5
+        await session.commit()
+
+        report = await check_parity(session, self.candidate())
+
+        assert [d.status for d in report.decisions] == [ParityStatus.MISMATCH]
+
+    async def test_trades_settle_on_the_total_score(self, pglite_async_session, registry) -> None:
+        session = pglite_async_session
+        write_candidate(registry, market="totals", rule="exchange_gap", params=self.PARAMS)
+        session.add(make_epl_event("e1", DUE))
+        await self.add_snapshot(session, self.RETAIL, 60)
+        await run(session, self.EARLY_RUN)
+        event = await session.get(Event, "e1")
+        assert event is not None
+        event.status, event.home_score, event.away_score = EventStatus.FINAL, 4, 0
+        await session.commit()
+
+        settled = await settle_trades(session)
+
+        # Four goals: over 2.5 wins, under 3.5 loses.
+        assert sorted((t.selection, t.result.value, t.pnl) for t in settled) == [
+            ("over", "win", pytest.approx(1.3)),
+            ("under", "loss", -1.0),
+        ]
+
+
 class TestCandidateSelection:
     async def test_inactive_unstarted_and_other_sport_candidates_are_ignored(
         self, registry
@@ -588,21 +696,6 @@ class TestCandidateSelection:
         [call] = alert.await_args_list
         assert call.args[0] == "candidate_invalid:model"
         assert "needs a fitted model" in call.args[2]
-
-    async def test_a_candidate_of_a_market_with_lines_is_skipped_with_an_alert(
-        self, registry, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        alert = AsyncMock()
-        monkeypatch.setattr(run_candidates, "send_recorded_alert", alert)
-        write_candidate(registry, "good")
-        write_candidate(registry, "totals", market="totals")
-
-        runnable = await runnable_candidates(EPL, NOW)
-
-        assert [r.candidate.name for r in runnable] == ["good"]
-        [call] = alert.await_args_list
-        assert call.args[0] == "candidate_invalid:totals"
-        assert "has lines" in call.args[2]
 
     async def test_unreadable_registry_alerts_and_runs_nothing(
         self, registry, monkeypatch: pytest.MonkeyPatch
@@ -834,5 +927,41 @@ class TestFlatStakeTrades:
         await session.commit()
 
         session.add(trade(decision.id, bookmaker="betway"))
+        with pytest.raises(IntegrityError):
+            await session.commit()
+
+    async def test_unique_index_takes_the_line_into_a_selection(self, pglite_async_session) -> None:
+        session = pglite_async_session
+        await add_event(session, "e1", DUE)
+        decision = CandidateDecision(
+            candidate_name="cand",
+            candidate_version=1,
+            event_id="e1",
+            minutes_before_kickoff=60,
+            decision_time=NOW,
+            kickoff_at_decision=DUE,
+            known_at=NOW,
+        )
+        session.add(decision)
+        await session.flush()
+
+        def trade(line: float) -> PaperTrade:
+            return PaperTrade(
+                event_id="e1",
+                market="totals",
+                selection="over",
+                line=line,
+                bookmaker="bet365",
+                price_decimal=2.0,
+                stake=1.0,
+                candidate_name="cand",
+                candidate_version=1,
+                decision_id=decision.id,
+            )
+
+        session.add_all([trade(2.5), trade(3.5)])
+        await session.commit()
+
+        session.add(trade(2.5))
         with pytest.raises(IntegrityError):
             await session.commit()

@@ -25,6 +25,7 @@ from tests.test_helpers import (
     polymarket_bookmaker,
     store_tagged,
     three_way_bookmaker,
+    totals_book,
 )
 
 pytestmark = pytest.mark.integration
@@ -127,19 +128,6 @@ async def add_event(
             ),
         )
     await session.commit()
-
-
-def totals_book(key: str, lines: dict[float, tuple[float, float]]) -> dict[str, Any]:
-    """A ``raw_data`` bookmaker entry with totals (over, under) prices per line."""
-    outcomes = [
-        outcome
-        for line, (over, under) in lines.items()
-        for outcome in (
-            {"name": "Over", "price_decimal": over, "point": line},
-            {"name": "Under", "price_decimal": under, "point": line},
-        )
-    ]
-    return {"key": key, "markets": [{"key": "totals", "outcomes": outcomes}]}
 
 
 async def run(session: Any, cand: MechanicalCandidate | None = None, **kwargs: Any):

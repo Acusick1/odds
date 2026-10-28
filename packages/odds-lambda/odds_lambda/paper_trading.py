@@ -8,17 +8,25 @@ from datetime import UTC, datetime
 import structlog
 from odds_core.candidates import CandidateStatus, candidates_dir, load_candidates
 from odds_core.git_info import current_git_sha
-from odds_core.market_prices import THREE_WAY_MARKET, TWO_WAY_MARKET
+from odds_core.market_prices import (
+    THREE_WAY_MARKET,
+    TOTALS_MARKET,
+    TWO_WAY_MARKET,
+    market_outcomes,
+)
 from odds_core.models import Event, EventStatus
-from odds_core.odds_math import calculate_profit_from_decimal, determine_h2h_winner
+from odds_core.odds_math import calculate_profit_from_decimal, selection_won
 from odds_core.paper_trade_models import PaperTrade, TradeResult
 from odds_core.utils import is_three_way_sport
+from odds_core.vocabulary import Market
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from odds_lambda.candidate_rules import is_bettable_line
+
 logger = structlog.get_logger()
 
-SETTLEABLE_MARKETS = frozenset({TWO_WAY_MARKET, THREE_WAY_MARKET})
+SETTLEABLE_MARKETS = frozenset({TWO_WAY_MARKET, THREE_WAY_MARKET, TOTALS_MARKET})
 VOIDING_STATUSES = (EventStatus.CANCELLED,)
 
 
@@ -69,6 +77,7 @@ async def place_trade(
     market: str,
     selection: str,
     bookmaker: str,
+    line: float | None = None,
     price_decimal: float,
     stake: float,
     bankroll: float | None,
@@ -80,7 +89,8 @@ async def place_trade(
 ) -> PaperTrade:
     """Place a new paper trade. Validates stake against bankroll and the candidate.
 
-    ``bankroll=None`` places a flat-stake candidate trade, which records no bankroll.
+    ``bankroll=None`` places a flat-stake candidate trade, which records no bankroll. ``line``
+    is the selection's line, a half line in a market with lines and None otherwise.
     """
     if price_decimal <= 1.0:
         raise ValueError(f"Decimal price must exceed 1.0, got {price_decimal}")
@@ -95,8 +105,20 @@ async def place_trade(
         raise ValueError(
             f"Unsupported market '{market}', must be one of {sorted(SETTLEABLE_MARKETS)}"
         )
-    if selection not in ("home", "draw", "away"):
-        raise ValueError(f"Invalid selection '{selection}', must be home/draw/away")
+    # An h2h market of a three-way sport also takes a draw, checked below.
+    outcomes = {o.value for o in market_outcomes(market)} | (
+        {"draw"} if market == TWO_WAY_MARKET else set()
+    )
+    if selection not in outcomes:
+        raise ValueError(
+            f"Invalid selection '{selection}' for market '{market}', must be one of "
+            f"{sorted(outcomes)}"
+        )
+    if not is_bettable_line(Market(market), line):
+        raise ValueError(
+            f"Invalid line {line} for market '{market}': a half line in a market with lines, "
+            "else none"
+        )
     if selection == "draw" and market == TWO_WAY_MARKET:
         event = await session.get(Event, event_id)
         if event is None:
@@ -116,6 +138,7 @@ async def place_trade(
         event_id=event_id,
         market=market,
         selection=selection,
+        line=line,
         bookmaker=bookmaker,
         price_decimal=price_decimal,
         stake=stake,
@@ -135,7 +158,8 @@ async def place_trade(
 async def settle_trades(session: AsyncSession) -> list[PaperTrade]:
     """Settle unsettled trades on FINAL events and void those on cancelled ones.
 
-    A FINAL event settles only with both scores. Idempotent.
+    A FINAL event settles only with both scores, and a totals trade only on a half line.
+    Idempotent.
     """
     played = (Event.status == EventStatus.FINAL) & (
         Event.home_score.is_not(None) & Event.away_score.is_not(None)  # type: ignore[union-attr]
@@ -157,8 +181,18 @@ async def settle_trades(session: AsyncSession) -> list[PaperTrade]:
         elif trade.market in SETTLEABLE_MARKETS:
             assert event.home_score is not None
             assert event.away_score is not None
-            winner = determine_h2h_winner(event.home_score, event.away_score)
-            result = TradeResult.WIN if trade.selection == winner else TradeResult.LOSS
+            try:
+                won = selection_won(trade.selection, trade.line, event.home_score, event.away_score)
+            except ValueError:
+                logger.error(
+                    "paper_trade_unsettleable_line",
+                    trade_id=trade.id,
+                    market=trade.market,
+                    selection=trade.selection,
+                    line=trade.line,
+                )
+                continue
+            result = TradeResult.WIN if won else TradeResult.LOSS
         else:
             logger.error("paper_trade_unsupported_market", trade_id=trade.id, market=trade.market)
             continue

@@ -43,7 +43,7 @@ status: stable
 | `odds_mcp.server.get_upcoming_fixtures`, `odds_mcp.server.get_current_odds`, `odds_mcp.server.get_odds_history` | [market tools](mcp-market-tools.md) (`odds_mcp.server.get_odds_history` returns only snapshots of the requested market) |
 | `odds_mcp.server.find_retail_edges` (sharp price matched on outcome and line) | [market tools](mcp-market-tools.md#retail-edges) |
 | `odds_mcp.server.save_match_brief`, `odds_mcp.server.get_match_brief`, `odds_mcp.server.get_slate_briefs` | [briefs](match-briefs.md) |
-| `odds_mcp.server.paper_bet` (decimal price, optional candidate), `odds_mcp.server.get_portfolio` (bankroll-sized portfolio and open trades, with candidate summaries, each with its family size k and promote interval, or the registry's error), `odds_mcp.server.settle_bets` | [paper trading](paper-trading.md) |
+| `odds_mcp.server.paper_bet` (decimal price, optional candidate), `odds_mcp.server.get_portfolio` (bankroll-sized portfolio and open trades, each trade with its selection and line, with candidate summaries, each with its family size k and promote interval, or the registry's error), `odds_mcp.server.settle_bets` | [paper trading](paper-trading.md) |
 | `odds_mcp.server.refresh_scrape`, `odds_mcp.server.get_scrape_status`, `odds_mcp.server.get_scheduled_jobs`, `odds_mcp.server.schedule_next_wakeup` | [below](#scrape-and-scheduling-tools) |
 | `odds_mcp.tools.epl.get_team_context` (EPL), `odds_mcp.tools.mlb.get_probable_pitchers` (MLB) | [sport context tools](mcp-sport-context-tools.md) |
 

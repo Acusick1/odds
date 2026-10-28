@@ -232,6 +232,33 @@ def three_way_bookmaker(
     }
 
 
+def totals_book(
+    key: str, lines: dict[float, tuple[float, float]], betfair_runners: bool = False
+) -> dict[str, Any]:
+    """A ``raw_data`` bookmaker entry with totals (over, under) prices per line. With
+    ``betfair_runners`` it has the Betfair job's shape: back prices as ``betfair_meta`` runners."""
+    if betfair_runners:
+        runners = [
+            {"runner_name": f"{side} {line:g} Goals", "best_back": price}
+            for line, prices in lines.items()
+            for side, price in zip(("Over", "Under"), prices, strict=True)
+        ]
+        return {
+            "key": key,
+            "markets": [{"key": "totals", "outcomes": []}],
+            "betfair_meta": {"inplay": False, "market_status": "OPEN", "runners": runners},
+        }
+    outcomes = [
+        outcome
+        for line, (over, under) in lines.items()
+        for outcome in (
+            {"name": "Over", "price_decimal": over, "point": line},
+            {"name": "Under", "price_decimal": under, "point": line},
+        )
+    ]
+    return {"key": key, "markets": [{"key": "totals", "outcomes": outcomes}]}
+
+
 def make_tagged_snapshot(
     event_id: str,
     snapshot_time: datetime,

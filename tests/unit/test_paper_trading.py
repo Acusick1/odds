@@ -283,8 +283,55 @@ class TestPlaceTradeMarkets:
             await place_trade(
                 test_session,
                 event_id="evt-001",
-                market="totals",
+                market="spreads",
                 selection="home",
+                bookmaker="bet365",
+                price_decimal=1.9,
+                stake=50.0,
+                bankroll=1000.0,
+            )
+
+    @pytest.mark.asyncio
+    async def test_totals_trade_records_its_half_line(self, test_session) -> None:
+        test_session.add(_event("evt-ou", EventStatus.SCHEDULED))
+        await test_session.flush()
+
+        trade = await place_trade(
+            test_session,
+            event_id="evt-ou",
+            market="totals",
+            selection="over",
+            line=2.5,
+            bookmaker="bet365",
+            price_decimal=1.9,
+            stake=50.0,
+            bankroll=1000.0,
+        )
+
+        assert (trade.market, trade.selection, trade.line) == ("totals", "over", 2.5)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("market", "selection", "line", "message"),
+        [
+            ("totals", "over", None, "Invalid line"),
+            ("totals", "under", 2.0, "Invalid line"),
+            ("totals", "under", 2.25, "Invalid line"),
+            ("totals", "home", 2.5, "Invalid selection"),
+            ("1x2", "home", 2.5, "Invalid line"),
+            ("1x2", "over", None, "Invalid selection"),
+        ],
+    )
+    async def test_a_selection_must_fit_its_market_and_line(
+        self, test_session, market: str, selection: str, line: float | None, message: str
+    ) -> None:
+        with pytest.raises(ValueError, match=message):
+            await place_trade(
+                test_session,
+                event_id="evt-001",
+                market=market,
+                selection=selection,
+                line=line,
                 bookmaker="bet365",
                 price_decimal=1.9,
                 stake=50.0,
@@ -306,11 +353,12 @@ def _event(event_id: str, status: EventStatus, scores: tuple[int, int] | None = 
     )
 
 
-def _trade(event_id: str, market: str, selection: str) -> PaperTrade:
+def _trade(event_id: str, market: str, selection: str, line: float | None = None) -> PaperTrade:
     return PaperTrade(
         event_id=event_id,
         market=market,
         selection=selection,
+        line=line,
         bookmaker="bet365",
         price_decimal=3.0,
         stake=100.0,
@@ -366,8 +414,46 @@ class TestSettleMarkets:
 
     @pytest.mark.asyncio
     async def test_unsupported_market_on_a_final_event_stays_open(self, test_session) -> None:
-        test_session.add(_event("evt-totals", EventStatus.FINAL, (2, 0)))
-        test_session.add(_trade("evt-totals", "totals", "home"))
+        test_session.add(_event("evt-spreads", EventStatus.FINAL, (2, 0)))
+        test_session.add(_trade("evt-spreads", "spreads", "home"))
+        await test_session.flush()
+
+        assert await settle_trades(test_session) == []
+        assert len(await get_open_trades(test_session)) == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("scores", "selection", "result", "pnl"),
+        [
+            ((2, 1), "over", TradeResult.WIN, 200.0),
+            ((2, 1), "under", TradeResult.LOSS, -100.0),
+            ((2, 0), "over", TradeResult.LOSS, -100.0),
+            ((2, 0), "under", TradeResult.WIN, 200.0),
+        ],
+    )
+    async def test_totals_settle_on_the_total_score_against_the_line(
+        self,
+        test_session,
+        scores: tuple[int, int],
+        selection: str,
+        result: TradeResult,
+        pnl: float,
+    ) -> None:
+        test_session.add(_event("evt-ou", EventStatus.FINAL, scores))
+        test_session.add(_trade("evt-ou", "totals", selection, line=2.5))
+        await test_session.flush()
+
+        [settled] = await settle_trades(test_session)
+
+        assert (settled.result, settled.pnl) == (result, pytest.approx(pnl))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("line", [None, 3.0])
+    async def test_totals_trade_without_a_half_line_stays_open(
+        self, test_session, line: float | None
+    ) -> None:
+        test_session.add(_event("evt-ou", EventStatus.FINAL, (2, 1)))
+        test_session.add(_trade("evt-ou", "totals", "over", line=line))
         await test_session.flush()
 
         assert await settle_trades(test_session) == []
