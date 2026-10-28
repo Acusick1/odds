@@ -117,7 +117,13 @@ async def _recorded_inputs(
         found = {snapshot_id for snapshot_id in rows.scalars() if snapshot_id is not None}
     missing = tuple(sorted(set(ids) - found))
     state = await load_market_state(
-        session, event, market, decision.decision_time, max_input_age(params), snapshot_ids=ids
+        session,
+        event,
+        market,
+        decision.decision_time,
+        max_input_age(params),
+        spec.sharp_inputs,
+        snapshot_ids=ids,
     )
     _, intents = apply_rule(spec, params, state, decision.kickoff_at_decision, bet_selections)
     return intents, missing

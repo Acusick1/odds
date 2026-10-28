@@ -70,6 +70,7 @@ class Coverage:
     decisions: int
     with_input: int
     with_exchange: int
+    with_polymarket: int
     with_retail: int
     with_bet: int
     bets: int
@@ -150,6 +151,7 @@ class _Counts:
     decisions: int = 0
     with_input: int = 0
     with_exchange: int = 0
+    with_polymarket: int = 0
     with_retail: int = 0
     with_bet: int = 0
 
@@ -178,6 +180,7 @@ async def _decide(
                 counts.decisions += 1
                 counts.with_input += state.has_input
                 counts.with_exchange += bool(state.exchange)
+                counts.with_polymarket += bool(state.polymarket)
                 counts.with_retail += bool(state.retail)
                 counts.with_bet += bool(intents)
                 decided.append((event, t, intents))
@@ -272,6 +275,7 @@ async def replay(
         decisions=counts.decisions,
         with_input=counts.with_input,
         with_exchange=counts.with_exchange,
+        with_polymarket=counts.with_polymarket,
         with_retail=counts.with_retail,
         with_bet=counts.with_bet,
         bets=len(bets),

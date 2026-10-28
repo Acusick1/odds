@@ -228,6 +228,7 @@ def _backtest_tables(result: BacktestResult) -> list[Table]:
     coverage.add_column("Decisions", justify="right")
     coverage.add_column("With input", justify="right")
     coverage.add_column("With exchange", justify="right")
+    coverage.add_column("With Polymarket", justify="right")
     coverage.add_column("With UK retail", justify="right")
     coverage.add_column("With a bet", justify="right")
     coverage.add_column("Bets", justify="right")
@@ -239,6 +240,7 @@ def _backtest_tables(result: BacktestResult) -> list[Table]:
         str(cov.decisions),
         str(cov.with_input),
         str(cov.with_exchange),
+        str(cov.with_polymarket),
         str(cov.with_retail),
         str(cov.with_bet),
         str(cov.bets),

@@ -13,10 +13,19 @@ from unittest.mock import AsyncMock
 import pytest
 import structlog
 import yaml
+from odds_analytics.candidate_parity import ParityStatus, check_parity
+from odds_core.candidates import MechanicalCandidate
 from odds_core.market_prices import Outcome
 from odds_core.models import Event, EventStatus
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
-from odds_lambda.candidate_rules import RULES, BetIntent, MarketState, RuleParams, RuleSpec
+from odds_lambda.candidate_rules import (
+    RULES,
+    BetIntent,
+    MarketState,
+    RuleParams,
+    RuleSpec,
+    SharpInput,
+)
 from odds_lambda.candidate_rules import rules as rules_module
 from odds_lambda.candidate_rules.rules import rule_sha256
 from odds_lambda.jobs import run_candidates
@@ -36,6 +45,7 @@ from sqlalchemy.exc import IntegrityError
 from tests.test_helpers import (
     make_epl_event,
     make_tagged_snapshot,
+    polymarket_bookmaker,
     store_tagged,
     three_way_bookmaker,
 )
@@ -77,7 +87,9 @@ def rules(monkeypatch: pytest.MonkeyPatch) -> None:
         ("twice", _twice),
         ("bet_longest", _bet_longest),
     ):
-        monkeypatch.setitem(RULES, name, RuleSpec(function, _Params))
+        monkeypatch.setitem(
+            RULES, name, RuleSpec(function, _Params, frozenset({SharpInput.EXCHANGE}))
+        )
 
 
 @pytest.fixture
@@ -166,6 +178,57 @@ class TestDecisions:
         assert (trade.selection, trade.bookmaker, trade.price_decimal) == ("home", "bet365", 2.0)
         assert trade.market == "1x2"
         assert trade.bankroll_before is None and trade.stake == 1.0
+
+    async def test_polymarket_decision_records_both_inputs_and_replays_in_parity(
+        self, pglite_async_session, registry
+    ) -> None:
+        params = {"threshold": 0.02, "minutes_before_kickoff": [60], "max_input_age_minutes": 120}
+        write_candidate(registry, rule="polymarket_gap", params=params)
+        pglite_async_session.add(make_epl_event("e1", DUE))
+        retail = make_tagged_snapshot(
+            "e1",
+            NOW - timedelta(hours=1),
+            [three_way_bookmaker("bet365", (2.2, 3.4, 4.0))],
+            "oddsportal_live",
+        )
+        polymarket = make_tagged_snapshot(
+            "e1",
+            NOW - timedelta(minutes=30),
+            [polymarket_bookmaker((0.5, 0.25, 0.25))],
+            "polymarket",
+        )
+        retail.created_at = NOW - timedelta(hours=1)
+        polymarket.created_at = NOW - timedelta(minutes=30)
+        await store_tagged(pglite_async_session, retail)
+        await store_tagged(pglite_async_session, polymarket)
+        await pglite_async_session.commit()
+
+        summary = await run(pglite_async_session)
+
+        assert summary.placed == 1
+        [decision] = await all_of(pglite_async_session, CandidateDecision)
+        assert decision.input_snapshot_ids == [retail.id, polymarket.id]
+        [trade] = await all_of(pglite_async_session, PaperTrade)
+        assert (trade.selection, trade.bookmaker) == ("home", "bet365")
+        cand = MechanicalCandidate.model_validate(
+            {
+                "name": "cand",
+                "description": "d",
+                "kind": "mechanical",
+                "market": "1x2",
+                "sport": EPL,
+                "version": 1,
+                "issue": 1,
+                "start_date": "2026-01-01",
+                "status": "active",
+                "rule": "polymarket_gap",
+                "rule_sha256": rule_sha256("polymarket_gap"),
+                "params": params,
+            }
+        )
+        report = await check_parity(pglite_async_session, cand)
+        assert [d.status for d in report.decisions] == [ParityStatus.MATCH]
+        assert report.ok
 
     async def test_late_decision_is_recorded_as_missed_and_logged(
         self, pglite_async_session, registry, monkeypatch: pytest.MonkeyPatch
@@ -340,7 +403,7 @@ class TestDecisions:
         assert spy.await_args.args[2] == "1x2"
         assert spy.await_args.args[3] == DUE - timedelta(minutes=60)
         assert spy.await_args.args[4] == timedelta(minutes=120)
-        assert spy.await_args.args[5] == NOW
+        assert spy.await_args.args[6] == NOW
 
     async def test_failed_decision_is_not_recorded_and_others_run(
         self, pglite_async_session, registry

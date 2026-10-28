@@ -12,15 +12,18 @@ from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from tests.integration.test_candidate_backtest import (
     EXCHANGE,
     KICKOFF,
+    POLYMARKET,
     RETAIL,
     T,
     betfair,
     candidate,
     model_candidate,
+    polymarket_candidate,
 )
 from tests.test_helpers import (
     make_epl_event,
     make_tagged_snapshot,
+    polymarket_bookmaker,
     store_tagged,
     three_way_bookmaker,
 )
@@ -63,6 +66,22 @@ async def add_event(
     await session.commit()
     assert snapshot.id is not None
     return [snapshot.id]
+
+
+async def add_polymarket_snapshot(session: Any) -> int:
+    """A Polymarket snapshot stamped 5 minutes before the decision and stored before the run,
+    and its id."""
+    snapshot = make_tagged_snapshot(
+        "e1",
+        T - timedelta(minutes=5),
+        [polymarket_bookmaker(POLYMARKET)],
+        "polymarket",
+    )
+    snapshot.created_at = KNOWN_AT - timedelta(hours=1)
+    await store_tagged(session, snapshot)
+    await session.commit()
+    assert snapshot.id is not None
+    return snapshot.id
 
 
 async def add_decision(
@@ -145,6 +164,30 @@ class TestCheckParity:
         await add_decision(pglite_async_session, [*ids, 99999], [("home", "bet365", 2.2)])
 
         [d] = (await check_parity(pglite_async_session, candidate())).decisions
+
+        assert d.status is ParityStatus.MISMATCH and d.missing_snapshot_ids == (99999,)
+
+    async def test_a_polymarket_decision_replays_to_the_same_bets(
+        self, pglite_async_session
+    ) -> None:
+        [retail_id] = await add_event(pglite_async_session)
+        polymarket_id = await add_polymarket_snapshot(pglite_async_session)
+        await add_decision(
+            pglite_async_session, [retail_id, polymarket_id], [("home", "bet365", 2.2)]
+        )
+
+        report = await check_parity(pglite_async_session, polymarket_candidate())
+
+        assert (report.checked, len(report.of(ParityStatus.MATCH)), report.ok) == (1, 1, True)
+        assert report.data_differences == []
+
+    async def test_a_recorded_polymarket_snapshot_missing_from_the_database_is_a_mismatch(
+        self, pglite_async_session
+    ) -> None:
+        [retail_id] = await add_event(pglite_async_session)
+        await add_decision(pglite_async_session, [retail_id, 99999], [("home", "bet365", 2.2)])
+
+        [d] = (await check_parity(pglite_async_session, polymarket_candidate())).decisions
 
         assert d.status is ParityStatus.MISMATCH and d.missing_snapshot_ids == (99999,)
 

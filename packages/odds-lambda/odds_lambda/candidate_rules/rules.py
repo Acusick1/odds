@@ -30,6 +30,7 @@ from pydantic import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.candidate_rules import inputs, market_state
+from odds_lambda.candidate_rules.inputs import SharpInput
 from odds_lambda.candidate_rules.market_state import Line, MarketState, load_market_state
 
 # What a bet is on: an outcome on a line, the line None in a market without lines.
@@ -89,7 +90,7 @@ def max_input_age(params: RuleParams) -> timedelta:
     return timedelta(minutes=params.max_input_age_minutes)
 
 
-class ExchangeGapParams(RuleParams):
+class GapParams(RuleParams):
     threshold: PositiveFloat
     stake: PositiveFloat = 1.0
 
@@ -106,19 +107,33 @@ def longest_retail(
     return min(quotes, key=lambda q: (-q[0], q[1])) if quotes else None
 
 
-def exchange_gap(state: MarketState, params: ExchangeGapParams) -> list[BetIntent]:
-    """On each line with an exchange price, back the longest UK retail price of each outcome on
-    that line whose EV against the exchange fair price exceeds the threshold."""
+def gap_bets(
+    state: MarketState,
+    fairs: Mapping[Line, Mapping[Outcome, float]],
+    params: GapParams,
+) -> list[BetIntent]:
+    """On each line of ``fairs``, back the longest UK retail price of each outcome on that line
+    whose EV against the line's fair price exceeds the threshold."""
     bets: list[BetIntent] = []
-    for line, exchange in state.exchange.items():
+    for line, fair in fairs.items():
         for outcome in market_outcomes(state.market):
             longest = longest_retail(state.retail.get(line, {}), outcome)
             if longest is None:
                 continue
             price, book = longest
-            if exchange.fair[outcome] * price - 1 > params.threshold:
+            if fair[outcome] * price - 1 > params.threshold:
                 bets.append(BetIntent(outcome, book, price, params.stake, line))
     return bets
+
+
+def exchange_gap(state: MarketState, params: GapParams) -> list[BetIntent]:
+    """Bet the gap to the exchange fair price on each line with one."""
+    return gap_bets(state, {line: p.fair for line, p in state.exchange.items()}, params)
+
+
+def polymarket_gap(state: MarketState, params: GapParams) -> list[BetIntent]:
+    """Bet the gap to Polymarket's fair price on each line with one."""
+    return gap_bets(state, {line: p.fair for line, p in state.polymarket.items()}, params)
 
 
 # The modules that load a market state's quotes, pick them as of t and price the exchange.
@@ -148,9 +163,13 @@ def rule_input_constants() -> list[tuple[str, str]]:
 
 @dataclass(frozen=True)
 class RuleSpec:
+    """``sharp_inputs`` are the sharp prices the rule needs: a decision without each of them
+    has no inputs, and the exchange makes the retail snapshot one that also quotes it."""
+
     # Each rule takes its own params model, which a shared Callable cannot express.
     function: Callable[[MarketState, Any], list[BetIntent]]
     params_model: type[RuleParams]
+    sharp_inputs: frozenset[SharpInput]
 
 
 # Predicted EV of each (outcome, UK retail book) quote in a state of a market without lines.
@@ -169,11 +188,14 @@ class ModelRuleSpec:
 
     function: Callable[[MarketState, Any, EvPredictor], list[BetIntent]]
     params_model: type[RuleParams]
+    sharp_inputs: frozenset[SharpInput]
     model_modules: tuple[str, ...]
     markets: frozenset[Market]
 
     def bind(self, predict: EvPredictor) -> RuleSpec:
-        return RuleSpec(partial(self.function, predict=predict), self.params_model)
+        return RuleSpec(
+            partial(self.function, predict=predict), self.params_model, self.sharp_inputs
+        )
 
 
 class RetailEvModelParams(RuleParams):
@@ -226,10 +248,12 @@ def retail_ev_model(
 
 
 RULES: dict[str, RuleSpec | ModelRuleSpec] = {
-    "exchange_gap": RuleSpec(exchange_gap, ExchangeGapParams),
+    "exchange_gap": RuleSpec(exchange_gap, GapParams, frozenset({SharpInput.EXCHANGE})),
+    "polymarket_gap": RuleSpec(polymarket_gap, GapParams, frozenset({SharpInput.POLYMARKET})),
     "retail_ev_model": ModelRuleSpec(
         retail_ev_model,
         RetailEvModelParams,
+        frozenset({SharpInput.EXCHANGE}),
         (
             "odds_analytics.candidate_model",
             "odds_analytics.retail_ev",
@@ -264,7 +288,9 @@ async def run_rule(
     ``kickoff`` overrides the event's current kick-off with the one a recorded decision saw.
     The returned state's ``snapshot_id`` is the decision's input.
     """
-    state = await load_market_state(session, event, market, at, max_input_age(params), known_at)
+    state = await load_market_state(
+        session, event, market, at, max_input_age(params), spec.sharp_inputs, known_at
+    )
     return apply_rule(spec, params, state, kickoff, bet_selections)
 
 
@@ -292,9 +318,9 @@ def rule_sha256(rule_name: str) -> str:
     """Hash of the code and values a rule's bets depend on, in a fixed order.
 
     The source of the rule function, its params model, the params every rule takes,
-    ``longest_retail``, ``BetIntent``, ``apply_rule`` (which drops selections already bet) and
-    the ``RULE_INPUT_MODULES``, then the values of ``rule_input_constants``. A model rule adds
-    the source of its ``model_modules``.
+    ``longest_retail``, ``gap_bets``, ``BetIntent``, ``apply_rule`` (which drops selections
+    already bet) and the ``RULE_INPUT_MODULES``, then the rule's sharp inputs and the values of
+    ``rule_input_constants``. A model rule adds the source of its ``model_modules``.
     ``odds_core.quotes``, which other readers share, is not hashed.
     """
     spec = RULES[rule_name]
@@ -304,9 +330,11 @@ def rule_sha256(rule_name: str) -> str:
         inspect.getsource(spec.params_model),
         inspect.getsource(RuleParams),
         inspect.getsource(longest_retail),
+        inspect.getsource(gap_bets),
         inspect.getsource(BetIntent),
         inspect.getsource(apply_rule),
         *(inspect.getsource(module) for module in RULE_INPUT_MODULES),
+        f"sharp_inputs={sorted(i.value for i in spec.sharp_inputs)}",
         *(f"{name}={value}" for name, value in rule_input_constants()),
     ]
     if isinstance(spec, ModelRuleSpec):

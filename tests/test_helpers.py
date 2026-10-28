@@ -158,6 +158,28 @@ def make_epl_event(
     )
 
 
+def polymarket_bookmaker(
+    probabilities: tuple[float, float, float], spread: float = 0.02
+) -> dict[str, Any]:
+    """A Polymarket ``raw_data`` entry whose 1x2 yes mids are ``probabilities`` (home, draw,
+    away), with best ask and bid ``spread / 2`` either side."""
+    labels = ("home", "draw", "away")
+
+    def by_label(shift: float) -> dict[str, float]:
+        return {label: p + shift for label, p in zip(labels, probabilities, strict=True)}
+
+    return {
+        "key": "polymarket",
+        "title": "Polymarket",
+        "markets": [{"key": "1x2", "outcomes": []}],
+        "polymarket_meta": {
+            "yes_probabilities": by_label(0),
+            "best_ask": by_label(spread / 2),
+            "best_bid": by_label(-spread / 2),
+        },
+    }
+
+
 def three_way_bookmaker(
     key: str,
     prices: tuple[float, float, float],
