@@ -34,7 +34,7 @@ status: stable
 | `in_play`, `market_status`, `total_matched`, `market_start_time` | the exchange market's state (Betfair only, `odds_core.vocabulary.MarketStatus` a closed set) |
 | `payload_id` | FK `snapshot_payloads.id`, the archived envelope ([snapshot_payloads](price-tables.md#snapshot_payloads)) |
 
-`source`, `market`, `time_basis` and `market_status` are CHECKed closed sets ([closed sets](price-tables.md#closed-sets)). `source` and `time_basis` are nullable in the schema, but every writer sets them, and `migrations/versions/b8e2d5f7a1c3_drop_old_odds_representations.py` refuses to run while a stored snapshot lacks either.
+`source`, `market`, `time_basis` and `market_status` are CHECKed closed sets ([closed sets](price-tables.md#closed-sets)). `source` and `time_basis` are nullable in the schema, but every writer sets them, and `migrations/versions/b8e2d5f7a1c3_drop_old_odds_representations.py` refuses to run while a stored snapshot lacks either, or while an `odds` row's price has no matching price row.
 
 - `uq_odds_snapshots_event_source_market_time` makes (`event_id`, `source`, `market`, `snapshot_time`) unique. PostgreSQL treats NULLs as distinct here, so snapshots with no market never conflict. How a writer handles a stored key is on [storing a snapshot under its key](price-tables.md#storing-a-snapshot-under-its-key).
 - Indexes: single-column `event_id`, `snapshot_time` and `payload_id`; composite `ix_event_snapshot_time` (`event_id`, `snapshot_time`).
@@ -57,7 +57,7 @@ Every writer builds one envelope per event in the Odds API's per-event shape: `b
 
 ## Rebuilt payloads
 
-Some EPL OddsPortal live snapshots from March to August 2026 hold the market of a scrape whose snapshot was lost while its prices survived as per-outcome rows in the `odds` table. `migrations/versions/a6f3c1e9d2b4_shape_orphan_odds_rows.py` stored them as `oddsportal` / `observed` snapshots with payloads built from those rows, which carry the key `rebuilt_from` (value `odds`) and no `oddsportal_event_id`. A copy of production taken 2026-10-25 holds 5,909 such snapshots with 192,369 prices (#677).
+Some EPL OddsPortal live snapshots from March to August 2026 hold the market of a scrape whose snapshot was lost while its prices survived as per-outcome rows in the `odds` table. `migrations/versions/a6f3c1e9d2b4_shape_orphan_odds_rows.py` stored them as `oddsportal` / `observed` snapshots with payloads built from those rows, which carry the key `rebuilt_from` (value `odds`) and no `oddsportal_event_id`. A copy of production taken 2026-10-25 holds 5,909 such snapshots with 192,369 prices (#677). Downgrading that migration removes only the rebuilt snapshots whose `odds` rows still exist, so once `odds` is dropped they are kept.
 
 ## Related
 

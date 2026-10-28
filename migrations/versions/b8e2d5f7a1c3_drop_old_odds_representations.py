@@ -15,8 +15,8 @@ health-check acknowledgement (#658). This drops what they replace:
 - the ``polymarket_*`` tables and their ``polymarketmarkettype`` enum.
 
 The upgrade first refuses, dropping nothing, while any of them holds data found nowhere else
-(``_GUARDS``): odds rows, raw_data, gamePks, no-gamePk reasons, legacy Polymarket moneyline prices
-of linked events and order books. It drops knowingly the legacy Polymarket rows the history
+(``_GUARDS`` and ``_UNHELD_ODDS_PRICES``): odds rows and their prices, raw_data, gamePks,
+no-gamePk reasons, legacy Polymarket moneyline prices of linked events and order books. It drops knowingly the legacy Polymarket rows the history
 migration left out (games linked to no event, spread and total markets, probabilities outside
 0 to 1) and ``polymarket_fetch_logs``. The downgrade recreates the structures empty; the dropped
 data does not come back.
@@ -91,6 +91,68 @@ _POLYMARKET_TABLES = (
 )
 
 
+# Distinct odds-row prices that no price row of their snapshot holds. A row's price row has the
+# book's canonical key for the snapshot's source (``book_aliases``), side ``lay`` for the Odds
+# API's ``h2h_lay`` market, ``mid`` for Polymarket and ``back`` otherwise, the line on spreads
+# and totals only, and the outcome Draw, Over or Under by name; a team name is home or away,
+# which the writer decided. Prices compare within 1e-9: an American price converted to decimal
+# twice can differ in the last binary digit.
+_UNHELD_ODDS_PRICES = """
+    SELECT count(*) FROM (
+        SELECT DISTINCT snapshot_id, bookmaker_key, market_key, outcome_name, point, price_decimal
+        FROM odds WHERE snapshot_id IS NOT NULL
+    ) o
+    JOIN odds_snapshots s ON s.id = o.snapshot_id
+    LEFT JOIN book_aliases a ON a.source = s.source AND a.raw_key = o.bookmaker_key
+    WHERE NOT EXISTS (
+        SELECT 1 FROM prices p
+        WHERE p.snapshot_id = o.snapshot_id
+          AND p.bookmaker = coalesce(a.canonical_key, o.bookmaker_key)
+          AND p.side = CASE
+                WHEN o.market_key = 'h2h_lay' THEN 'lay'
+                WHEN s.source = 'polymarket' THEN 'mid'
+                ELSE 'back'
+              END
+          AND abs(p.price::float8 - o.price_decimal) < 1e-9
+          AND p.line::float8 IS NOT DISTINCT FROM
+              CASE WHEN s.market IN ('spreads', 'totals') THEN o.point END
+          AND CASE o.outcome_name
+                WHEN 'Draw' THEN p.outcome = 'draw'
+                WHEN 'Over' THEN p.outcome = 'over'
+                WHEN 'Under' THEN p.outcome = 'under'
+                ELSE p.outcome IN ('home', 'away')
+              END
+    )
+"""
+
+
+def _unheld_odds_prices(bind: sa.engine.Connection) -> int:
+    if bind.execute(sa.text("SELECT NOT EXISTS (SELECT 1 FROM odds)")).scalar_one():
+        return 0
+    # The writers' alias maps; imported only when there are odds rows to check.
+    from odds_core.bookmakers import BOOKMAKER_ALIASES_BY_SOURCE
+
+    bind.execute(
+        sa.text(
+            "CREATE TEMP TABLE book_aliases (source text, raw_key text, canonical_key text)"
+            " ON COMMIT DROP"
+        )
+    )
+    aliases = [
+        {"source": source.value, "raw_key": raw, "canonical_key": canonical}
+        for source, mapping in BOOKMAKER_ALIASES_BY_SOURCE.items()
+        for raw, canonical in mapping.items()
+    ]
+    if aliases:
+        bind.execute(
+            sa.text("INSERT INTO book_aliases VALUES (:source, :raw_key, :canonical_key)"),
+            aliases,
+        )
+    count = bind.execute(sa.text(_UNHELD_ODDS_PRICES)).scalar_one()
+    bind.execute(sa.text("DROP TABLE book_aliases"))
+    return count
+
+
 def upgrade() -> None:
     op.execute(sa.text("SET lock_timeout = '10s'"))
     bind = op.get_bind()
@@ -99,6 +161,8 @@ def upgrade() -> None:
         for what, query in _GUARDS
         if (count := bind.execute(sa.text(query)).scalar_one())
     ]
+    if unheld := _unheld_odds_prices(bind):
+        held.append(f"{unheld} odds-row prices no price row of their snapshot holds")
     if held:
         raise RuntimeError(
             "refusing to drop the old odds representations while they hold data found nowhere "

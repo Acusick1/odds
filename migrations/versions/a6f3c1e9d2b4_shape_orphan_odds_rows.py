@@ -19,8 +19,10 @@ The upgrade raises when an envelope does not read back as exactly its rows, one 
 or when the snapshot key is already held. The reader is imported only when a group is found, so
 a database without such rows migrates whatever the reader's later shape.
 
-The downgrade removes the snapshots whose payload carries ``REBUILT_MARKER``, with their prices
-and payloads, and unlinks their rows.
+The downgrade removes the snapshots whose payload carries ``REBUILT_MARKER`` and whose ``odds``
+rows still exist, with their prices and payloads, and unlinks those rows. Once the next
+migration has dropped ``odds``, the rebuilt snapshots are the only copy of those prices, so a
+downgrade past it keeps them, and a later upgrade finds no unlinked row to shape again.
 """
 
 import json
@@ -163,10 +165,26 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute(sa.text("SET lock_timeout = '10s'"))
-    rebuilt = (
-        "SELECT s.id FROM odds_snapshots s JOIN snapshot_payloads p ON p.id = s.payload_id"
-        f" WHERE p.payload ? '{REBUILT_MARKER}'"
+    op.execute(
+        sa.text(
+            "CREATE TEMP TABLE rebuilt_with_odds ON COMMIT DROP AS"
+            " SELECT s.id, s.payload_id FROM odds_snapshots s"
+            " JOIN snapshot_payloads p ON p.id = s.payload_id"
+            f" WHERE p.payload ? '{REBUILT_MARKER}'"
+            " AND EXISTS (SELECT 1 FROM odds o WHERE o.snapshot_id = s.id)"
+        )
     )
-    op.execute(sa.text(f"UPDATE odds SET snapshot_id = NULL WHERE snapshot_id IN ({rebuilt})"))
-    op.execute(sa.text(f"DELETE FROM odds_snapshots WHERE id IN ({rebuilt})"))
-    op.execute(sa.text(f"DELETE FROM snapshot_payloads WHERE payload ? '{REBUILT_MARKER}'"))
+    op.execute(
+        sa.text(
+            "UPDATE odds SET snapshot_id = NULL"
+            " WHERE snapshot_id IN (SELECT id FROM rebuilt_with_odds)"
+        )
+    )
+    op.execute(sa.text("DELETE FROM odds_snapshots WHERE id IN (SELECT id FROM rebuilt_with_odds)"))
+    op.execute(
+        sa.text(
+            "DELETE FROM snapshot_payloads WHERE id IN (SELECT payload_id FROM rebuilt_with_odds)"
+            " AND NOT EXISTS (SELECT 1 FROM odds_snapshots s WHERE s.payload_id = snapshot_payloads.id)"
+        )
+    )
+    op.execute(sa.text("DROP TABLE rebuilt_with_odds"))

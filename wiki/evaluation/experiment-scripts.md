@@ -51,5 +51,5 @@ A results directory holds CSV tables, a `summary.json` and, for the retail-EV ev
 | `retail_ev_nested_tuning` | Residual-arm retail-EV models for price-only, Polymarket at t and all four as-of-t groups, re-tuned for every scoring fold by nested walk-forward inside 2025-26, against the baseline, price-only and the frozen 2024-25 settings | [Nested tuning on the as-of-t columns](exp-epl-retail-ev-nested-tuning.md) |
 | `betfair_historical_analysis` | Parses Betfair historical NBA files | none |
 | `betfair_nba_explore` | Live Betfair NBA market survey | none |
-| `polymarket_mlb_discover`, `polymarket_mlb_orderbooks`, `polymarket_mlb_sentiment`, `polymarket_mlb_volume` | MLB Polymarket survey | [Polymarket market research](../collection/polymarket-market-research.md) |
+| `polymarket_mlb_discover`, `polymarket_mlb_orderbooks`, `polymarket_mlb_volume` | MLB Polymarket survey | [Polymarket market research](../collection/polymarket-market-research.md) |
 | `show_agent_summaries` | Prints agent run summaries from `logs/agent_runs/` | [Reporting surfaces](../operations/reporting-surfaces.md) |

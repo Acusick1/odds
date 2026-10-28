@@ -7,7 +7,6 @@ sources:
   - experiments/scripts/polymarket_mlb_discover.py
   - experiments/scripts/polymarket_mlb_orderbooks.py
   - experiments/scripts/polymarket_mlb_volume.py
-  - experiments/scripts/polymarket_mlb_sentiment.py
 status: stable
 ---
 
@@ -17,7 +16,7 @@ Polymarket is not a trading venue for us ([ADR-0013](../../docs/adr/0013-collect
 
 ## Market character by sport
 
-Figures were observed from live markets, not computed by code in this repo. The MLB figures come from the probe scripts `experiments/scripts/polymarket_mlb_discover.py`, `experiments/scripts/polymarket_mlb_orderbooks.py`, `experiments/scripts/polymarket_mlb_volume.py` and `experiments/scripts/polymarket_mlb_sentiment.py` (recorded in dff040d; no results file exists under `experiments/results/`). The EPL and NBA figures have no probe script and are (inferred).
+Figures were observed from live markets, not computed by code in this repo. The MLB figures come from the probe scripts `experiments/scripts/polymarket_mlb_discover.py`, `experiments/scripts/polymarket_mlb_orderbooks.py`, and `experiments/scripts/polymarket_mlb_volume.py`, and a sentiment probe kept only in history (all recorded in dff040d; no results file exists under `experiments/results/`). The EPL and NBA figures have no probe script and are (inferred).
 
 | Sport | Observed character |
 |---|---|
