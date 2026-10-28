@@ -116,7 +116,7 @@ def _optional_utc(value: datetime | None) -> datetime | None:
     return None if value is None else ensure_utc(value)
 
 
-def _price_row(price: Price) -> PriceRow:
+def price_row(price: Price) -> PriceRow:
     amount = _decimal(price.price)
     assert amount is not None
     return PriceRow(
@@ -147,7 +147,7 @@ async def _same_content(
     if _market_state(held) != _market_state(snapshot):
         return False
     stored = (await session.execute(select(Price).where(Price.snapshot_id == held.id))).scalars()
-    return {_price_row(p) for p in stored} == {_price_row(p) for p in prices}
+    return {price_row(p) for p in stored} == {price_row(p) for p in prices}
 
 
 def _log_conflict(session: AsyncSession, held: OddsSnapshot, snapshot: OddsSnapshot) -> None:

@@ -4,11 +4,12 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from odds_core.api_models import create_scheduled_event
-from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds
-from odds_core.vocabulary import Source, TimeBasis
+from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, OddsSnapshot, Price
+from odds_core.vocabulary import Market, Source, TimeBasis
 from odds_lambda.storage.readers import OddsReader
 from odds_lambda.storage.shaped_snapshots import SnapshotShape
 from odds_lambda.storage.writers import OddsWriter
+from sqlalchemy import select
 
 from tests.test_helpers import add_event
 
@@ -36,8 +37,8 @@ class TestDatabaseIntegration:
         assert result.status == EventStatus.SCHEDULED
 
     @pytest.mark.asyncio
-    async def test_store_odds_snapshot(self, test_session, sample_odds_data):
-        """Test storing odds snapshot with hybrid storage."""
+    async def test_store_envelope(self, test_session, sample_odds_data):
+        """An envelope is stored as one snapshot per market, each with its price rows."""
         writer = OddsWriter(test_session)
 
         # Create event
@@ -51,25 +52,38 @@ class TestDatabaseIntegration:
         )
         await add_event(test_session, event)
 
-        # Store snapshot
-        snapshot, odds_records = await writer.store_odds_snapshot(
+        stored = await writer.store_envelope(
             event_id=sample_odds_data["id"],
-            raw_data=sample_odds_data,
+            envelope=sample_odds_data,
             validate=False,
+            shape=SnapshotShape(Source.ODDS_API, TimeBasis.OBSERVED, None),
         )
 
         await test_session.commit()
 
-        assert snapshot.event_id == sample_odds_data["id"]
-        assert snapshot.bookmaker_count == 2
-        assert len(odds_records) > 0  # Should have multiple odds records
-
-        # Verify normalized odds were created
-        assert all(isinstance(odds, Odds) for odds in odds_records)
-        assert any(odds.market_key == "h2h" for odds in odds_records)
-        assert any(odds.market_key == "spreads" for odds in odds_records)
-        assert any(odds.market_key == "totals" for odds in odds_records)
-        assert {odds.snapshot_id for odds in odds_records} == {snapshot.id}
+        assert stored.inserted
+        assert stored.snapshot.event_id == sample_odds_data["id"]
+        assert stored.snapshots_written == 3
+        snapshots = (
+            (
+                await test_session.execute(
+                    select(OddsSnapshot).where(OddsSnapshot.event_id == sample_odds_data["id"])
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert {s.market for s in snapshots} == {Market.H2H, Market.SPREADS, Market.TOTALS}
+        prices = (
+            (
+                await test_session.execute(
+                    select(Price).where(Price.snapshot_id.in_([s.id for s in snapshots]))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert {p.snapshot_id for p in prices} == {s.id for s in snapshots}
 
     @pytest.mark.asyncio
     async def test_update_event_status(self, test_session):
@@ -229,9 +243,9 @@ class TestDatabaseIntegration:
         )
         await add_event(test_session, event)
 
-        await writer.store_odds_snapshot(
+        await writer.store_envelope(
             event_id=sample_odds_data["id"],
-            raw_data=sample_odds_data,
+            envelope=sample_odds_data,
             validate=False,
             shape=SnapshotShape(Source.ODDS_API, TimeBasis.OBSERVED, None),
         )

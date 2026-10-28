@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from odds_core.api_models import OddsResponse, api_dict_to_event
-from odds_core.models import Event, FetchLog, Odds, OddsSnapshot
+from odds_core.models import Event, FetchLog, OddsSnapshot, Price
 from odds_lambda.ingestion import (
     EventIngestionFailure,
     OddsIngestionCallbacks,
@@ -109,20 +109,14 @@ class TestOddsIngestionService:
                 select(OddsSnapshot).where(OddsSnapshot.event_id == "ingest_event_success")
             )
         ).scalar_one()
-        assert snapshot.bookmaker_count == 1
-        assert snapshot.fetch_tier == "closing"  # 2h before game = CLOSING tier
-        assert snapshot.hours_until_commence is not None
+        assert snapshot.payload_id is not None
 
-        odds_records = (
-            (
-                await test_session.execute(
-                    select(Odds).where(Odds.event_id == "ingest_event_success")
-                )
-            )
+        prices = (
+            (await test_session.execute(select(Price).where(Price.snapshot_id == snapshot.id)))
             .scalars()
             .all()
         )
-        assert len(odds_records) == 2
+        assert len(prices) == 2
 
         fetch_log = (
             await test_session.execute(
@@ -166,7 +160,7 @@ class TestOddsIngestionService:
         async def _failing_store(*args, **kwargs):
             raise RuntimeError("snapshot_failure")
 
-        monkeypatch.setattr("odds_lambda.ingestion.OddsWriter.store_odds_snapshot", _failing_store)
+        monkeypatch.setattr("odds_lambda.ingestion.OddsWriter.store_envelope", _failing_store)
 
         callbacks_record: dict[str, list] = {"failed": []}
         callbacks = OddsIngestionCallbacks(

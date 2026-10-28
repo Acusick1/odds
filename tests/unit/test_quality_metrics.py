@@ -223,20 +223,14 @@ class TestQualityMetricsGamesWithOdds:
             OddsSnapshot(
                 event_id="event1",
                 snapshot_time=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
-                raw_data={"bookmakers": []},
-                bookmaker_count=0,
             ),
             OddsSnapshot(
                 event_id="event1",
                 snapshot_time=datetime(2024, 10, 15, 18, 30, tzinfo=UTC),
-                raw_data={"bookmakers": []},
-                bookmaker_count=0,
             ),
             OddsSnapshot(
                 event_id="event2",
                 snapshot_time=datetime(2024, 10, 20, 19, 0, tzinfo=UTC),
-                raw_data={"bookmakers": []},
-                bookmaker_count=0,
             ),
         ]
 
@@ -295,14 +289,10 @@ class TestQualityMetricsGamesWithOdds:
             OddsSnapshot(
                 event_id="event1",
                 snapshot_time=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
-                raw_data={"bookmakers": []},
-                bookmaker_count=0,
             ),
             OddsSnapshot(
                 event_id="event2",
                 snapshot_time=datetime(2024, 10, 20, 17, 0, tzinfo=UTC),
-                raw_data={"bookmakers": []},
-                bookmaker_count=0,
             ),
         ]
 
@@ -789,40 +779,28 @@ class TestQualityMetricsTierCoverage:
             OddsSnapshot(
                 event_id="event1",
                 snapshot_time=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
-                raw_data={"bookmakers": []},
-                bookmaker_count=0,
             ),
             OddsSnapshot(
                 event_id="event1",
                 snapshot_time=datetime(2024, 10, 15, 18, 30, tzinfo=UTC),
-                raw_data={"bookmakers": []},
-                bookmaker_count=0,
             ),
             OddsSnapshot(
                 event_id="event1",
                 snapshot_time=datetime(2024, 10, 15, 15, 0, tzinfo=UTC),
-                raw_data={"bookmakers": []},
-                bookmaker_count=0,
             ),
             # Event 2: Has only sharp tier snapshots
             OddsSnapshot(
                 event_id="event2",
                 snapshot_time=datetime(2024, 10, 20, 7, 0, tzinfo=UTC),
-                raw_data={"bookmakers": []},
-                bookmaker_count=0,
             ),
             # Event 3: Has opening and early tier snapshots
             OddsSnapshot(
                 event_id="event3",
                 snapshot_time=datetime(2024, 10, 22, 20, 0, tzinfo=UTC),
-                raw_data={"bookmakers": []},
-                bookmaker_count=0,
             ),
             OddsSnapshot(
                 event_id="event3",
                 snapshot_time=datetime(2024, 10, 24, 20, 0, tzinfo=UTC),
-                raw_data={"bookmakers": []},
-                bookmaker_count=0,
             ),
         ]
 
@@ -924,14 +902,10 @@ class TestQualityMetricsTierCoverage:
             OddsSnapshot(
                 event_id="event1",
                 snapshot_time=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
-                raw_data={"bookmakers": []},
-                bookmaker_count=0,
             ),
             OddsSnapshot(
                 event_id="event2",
                 snapshot_time=datetime(2024, 10, 20, 17, 0, tzinfo=UTC),
-                raw_data={"bookmakers": []},
-                bookmaker_count=0,
             ),
         ]
 
@@ -1051,32 +1025,22 @@ class TestQualityMetricsTierCoverage:
             OddsSnapshot(
                 event_id="event1",
                 snapshot_time=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
-                raw_data={"bookmakers": []},
-                bookmaker_count=0,
             ),
             OddsSnapshot(
                 event_id="event1",
                 snapshot_time=datetime(2024, 10, 15, 18, 30, tzinfo=UTC),
-                raw_data={"bookmakers": []},
-                bookmaker_count=0,
             ),
             OddsSnapshot(
                 event_id="event1",
                 snapshot_time=datetime(2024, 10, 15, 17, 30, tzinfo=UTC),
-                raw_data={"bookmakers": []},
-                bookmaker_count=0,
             ),
             OddsSnapshot(
                 event_id="event1",
                 snapshot_time=datetime(2024, 10, 15, 17, 0, tzinfo=UTC),
-                raw_data={"bookmakers": []},
-                bookmaker_count=0,
             ),
             OddsSnapshot(
                 event_id="event1",
                 snapshot_time=datetime(2024, 10, 15, 16, 30, tzinfo=UTC),
-                raw_data={"bookmakers": []},
-                bookmaker_count=0,
             ),
         ]
 
@@ -1138,20 +1102,14 @@ class TestQualityMetricsTierCoverage:
             OddsSnapshot(
                 event_id="event1",
                 snapshot_time=datetime(2024, 9, 30, 18, 0, tzinfo=UTC),
-                raw_data={"bookmakers": []},
-                bookmaker_count=0,
             ),
             OddsSnapshot(
                 event_id="event2",
                 snapshot_time=datetime(2024, 10, 15, 19, 0, tzinfo=UTC),
-                raw_data={"bookmakers": []},
-                bookmaker_count=0,
             ),
             OddsSnapshot(
                 event_id="event3",
                 snapshot_time=datetime(2024, 11, 1, 20, 0, tzinfo=UTC),
-                raw_data={"bookmakers": []},
-                bookmaker_count=0,
             ),
         ]
 
@@ -1175,20 +1133,17 @@ class TestQualityMetricsTierCoverage:
 
 @pytest.mark.asyncio
 class TestQualityMetricsTierCoverageDerivation:
-    """The tier of a snapshot is its time's distance to kick-off, not a stored label."""
+    """The tier of a snapshot is its time's distance to kick-off."""
 
-    async def test_stored_fetch_tier_is_ignored(self, test_session: AsyncSession) -> None:
-        """A snapshot stored as 'opening' one hour before kick-off counts as closing."""
+    async def test_a_snapshot_an_hour_before_kickoff_is_closing(
+        self, test_session: AsyncSession
+    ) -> None:
         test_session.add(_event("event1", datetime(2024, 10, 15, 19, 0, tzinfo=UTC)))
         await test_session.commit()
         test_session.add(
             OddsSnapshot(
                 event_id="event1",
                 snapshot_time=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
-                raw_data={"bookmakers": []},
-                bookmaker_count=0,
-                fetch_tier="opening",
-                hours_until_commence=72.0,
             )
         )
         await test_session.commit()
@@ -1215,8 +1170,6 @@ class TestQualityMetricsTierCoverageDerivation:
                 OddsSnapshot(
                     event_id="event1",
                     snapshot_time=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
-                    raw_data={"bookmakers": []},
-                    bookmaker_count=0,
                     source=Source.ODDS_API,
                     market=market,
                     time_basis=TimeBasis.OBSERVED,
@@ -1251,8 +1204,6 @@ async def _add_priced_snapshot(
     snapshot = OddsSnapshot(
         event_id=event_id,
         snapshot_time=snapshot_time,
-        raw_data={"bookmakers": []},
-        bookmaker_count=len(bookmakers),
         source=Source.ODDS_API,
         market=Market.H2H,
         time_basis=TimeBasis.OBSERVED,

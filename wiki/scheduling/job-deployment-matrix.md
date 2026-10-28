@@ -41,17 +41,16 @@ Three lists in code decide what the production scheduler runs:
 | `fetch-espn-fixtures` | yes | EPL | cron `0 6 * * *` |
 | `fetch-mlb-probables` | yes | MLB | cron `0 6 * * *` |
 | `agent-run` | no | every configured sport | fixture proximity |
-| `fetch-polymarket`, `backfill-polymarket` | no | global | self-scheduling / AWS `rate(3 days)` |
 
 The betting agent is not scheduled: it is run by hand on the production host with `odds agent run` as the restricted `odds_agent` role ([Agent runtime](../agent/agent-run-job.md)). A collection job goes dormant for a sport with no fixture in the next 28 days, and wakes by itself ([dormancy](decision-engine.md#dormancy)).
 
-Per-job pages: [fetch-odds](../collection/fetch-odds-job.md), [fetch-scores, update-status and the results jobs](../collection/results-jobs.md), [status lifecycle](../collection/event-status-lifecycle.md), [OddsPortal](../collection/fetch-oddsportal-job.md), [Betfair](../collection/betfair-exchange.md), [health](../operations/health-monitor.md), [agent](../agent/agent-run-job.md), [ESPN fixtures](../collection/epl-context-data.md), [MLB probables](../collection/mlb-probable-pitchers.md), [Polymarket](../collection/polymarket.md), [Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md), [run-candidates](../evaluation/run-candidates-job.md).
+Per-job pages: [fetch-odds](../collection/fetch-odds-job.md), [fetch-scores, update-status and the results jobs](../collection/results-jobs.md), [status lifecycle](../collection/event-status-lifecycle.md), [OddsPortal](../collection/fetch-oddsportal-job.md), [Betfair](../collection/betfair-exchange.md), [health](../operations/health-monitor.md), [agent](../agent/agent-run-job.md), [ESPN fixtures](../collection/epl-context-data.md), [MLB probables](../collection/mlb-probable-pitchers.md), [Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md), [run-candidates](../evaluation/run-candidates-job.md).
 
 Known defects on the production host: OddsPortal scrapes return 0 matches (#484) and one hung OddsPortal run ends the local chains (#485).
 
 ## Dormant AWS rules
 
-Terraform still declares the AWS jobs: in `deployment/aws/terraform/eventbridge.tf`, `local.sport_configs` (EPL only; MLB commented out) plus the always-created `update-status` and `check-health`, and in `deployment/aws/terraform/variables.tf` the `enable_polymarket` and `betfair_enabled` gates. No Terraform rule exists for `fetch-oddsportal`, `fetch-oddsportal-results` or `fetch-mlb-results`. The rules are disabled in the account, and the Lambdas, ECR images and Terraform state are left in place so the move can be reversed ([AWS infrastructure](../operations/aws-infrastructure.md)).
+Terraform still declares the AWS jobs: in `deployment/aws/terraform/eventbridge.tf`, `local.sport_configs` (EPL only; MLB commented out) plus the always-created `update-status` and `check-health`, and in `deployment/aws/terraform/variables.tf` the `betfair_enabled` gate. No Terraform rule exists for `fetch-oddsportal`, `fetch-oddsportal-results` or `fetch-mlb-results`. The rules are disabled in the account, and the Lambdas, ECR images and Terraform state are left in place so the move can be reversed ([AWS infrastructure](../operations/aws-infrastructure.md)).
 
 > [!WARNING]
 > The Deploy to Production workflow (`deploy-prod.yml`) is disabled in GitHub; keep it disabled while AWS is dormant (`gh workflow list --all` shows the state). Its post-deploy invocations make every job reschedule itself, which re-enables every rule, so both hosts would collect and the Lambdas would write to the Neon archive ([CI/CD workflows](../operations/ci-cd-workflows.md#prod-deploy)).
@@ -60,7 +59,7 @@ No code checks for a job enabled on both hosts, so a re-enabled rule double-fetc
 
 ## Heartbeats
 
-Which jobs write a heartbeat is a property of [`odds_core.alerts.job_alert_context`](../operations/alerts.md#delivery), not of the registry, and a run that raises writes none. `backfill-polymarket` writes none, and `fetch-polymarket` is wrapped but not bootstrapped. `update-status` writes one only on runs that execute (`odds_lambda.jobs.update_status.main`); skipped runs write none, and a failed booking alerts through `odds_core.alerts.send_scheduling_failure`. Producing a heartbeat is separate from the health check expecting one. The jobs the health check expects a heartbeat from, and how often, are in [Health monitor](../operations/health-monitor.md#heartbeats). All heartbeats land in the production database, which `check-health` reads; nothing outside the production host notices if the host itself stops (#489). Every local run is bounded by `odds_lambda.scheduling.runner.JOB_TIMEOUT` ([Local scheduler](local-scheduler.md#scheduling-primitives)).
+Which jobs write a heartbeat is a property of [`odds_core.alerts.job_alert_context`](../operations/alerts.md#delivery), not of the registry, and a run that raises writes none. `update-status` writes one only on runs that execute (`odds_lambda.jobs.update_status.main`); skipped runs write none, and a failed booking alerts through `odds_core.alerts.send_scheduling_failure`. Producing a heartbeat is separate from the health check expecting one. The jobs the health check expects a heartbeat from, and how often, are in [Health monitor](../operations/health-monitor.md#heartbeats). All heartbeats land in the production database, which `check-health` reads; nothing outside the production host notices if the host itself stops (#489). Every local run is bounded by `odds_lambda.scheduling.runner.JOB_TIMEOUT` ([Local scheduler](local-scheduler.md#scheduling-primitives)).
 
 ## Deployed state
 

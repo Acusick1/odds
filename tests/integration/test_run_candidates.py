@@ -337,30 +337,6 @@ class TestDecisions:
 
         assert await all_of(pglite_async_session, CandidateDecision) == []
 
-    async def test_twins_are_decided_once_on_the_canonical_event(
-        self, pglite_async_session, registry
-    ) -> None:
-        write_candidate(registry)
-        await add_event(pglite_async_session, "op_live_e1", DUE)
-        await add_event(pglite_async_session, "api1", DUE - timedelta(minutes=5))
-        for event_id in ("op_live_e1", "api1"):
-            await store_tagged(
-                pglite_async_session,
-                make_tagged_snapshot(
-                    event_id,
-                    NOW - timedelta(minutes=30),
-                    [three_way_bookmaker("bet365", (2.0, 3.4, 4.0)), EXCHANGE_ROW],
-                    "oddsportal_live",
-                ),
-            )
-        await pglite_async_session.commit()
-
-        summary = await run(pglite_async_session)
-
-        assert summary.placed == 1
-        [decision] = await all_of(pglite_async_session, CandidateDecision)
-        assert decision.event_id == "api1"
-
     async def test_a_decision_committed_by_a_concurrent_run_is_not_a_failure(
         self, pglite_async_session, registry, monkeypatch: pytest.MonkeyPatch
     ) -> None:

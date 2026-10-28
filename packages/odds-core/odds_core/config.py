@@ -256,25 +256,6 @@ class PolymarketConfig(BaseSettings):
     )
     enabled: bool = Field(default=True, description="Enable Polymarket data collection")
 
-    # Polling intervals (seconds)
-    price_poll_interval: int = Field(
-        default=300, description="Price snapshot poll interval (seconds)"
-    )
-    orderbook_poll_interval: int = Field(
-        default=1800, description="Order book poll interval (seconds)"
-    )
-
-    # Market type collection toggles
-    collect_moneyline: bool = Field(default=True, description="Collect moneyline markets")
-    collect_spreads: bool = Field(default=True, description="Collect spread markets")
-    collect_totals: bool = Field(default=True, description="Collect totals markets")
-    collect_player_props: bool = Field(default=False, description="Collect player prop markets")
-
-    # Order book collection tiers
-    orderbook_tiers: list[str] = Field(
-        default=["closing", "pregame"], description="Tiers for order book collection"
-    )
-
 
 class BetfairConfig(BaseSettings):
     """Betfair Exchange API configuration.

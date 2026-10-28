@@ -184,8 +184,6 @@ class TestTierCoverageValidator:
             snapshot = OddsSnapshot(
                 event_id=sample_event.id,
                 snapshot_time=game_time + timedelta(hours=hours_offset),
-                raw_data={"test": "data"},
-                bookmaker_count=8,
             )
             test_session.add(snapshot)
 
@@ -215,8 +213,6 @@ class TestTierCoverageValidator:
             snapshot = OddsSnapshot(
                 event_id=sample_event.id,
                 snapshot_time=game_time + timedelta(hours=hours_offset),
-                raw_data={"test": "data"},
-                bookmaker_count=8,
             )
             test_session.add(snapshot)
 
@@ -246,8 +242,6 @@ class TestTierCoverageValidator:
             snapshot = OddsSnapshot(
                 event_id=sample_event.id,
                 snapshot_time=game_time + timedelta(hours=hours_offset),
-                raw_data={"test": "data"},
-                bookmaker_count=8,
             )
             test_session.add(snapshot)
 
@@ -263,16 +257,11 @@ class TestTierCoverageValidator:
         assert len(report.tiers_missing) == 0
 
     @pytest.mark.asyncio
-    async def test_tiers_come_from_the_time_to_kickoff_not_the_stored_tier(
-        self, test_session, sample_event
-    ):
+    async def test_tiers_come_from_the_time_to_kickoff(self, test_session, sample_event):
         test_session.add(
             OddsSnapshot(
                 event_id=sample_event.id,
                 snapshot_time=sample_event.commence_time - timedelta(hours=2),
-                raw_data={},
-                bookmaker_count=1,
-                fetch_tier=FetchTier.OPENING.value,
             )
         )
         await test_session.commit()
@@ -293,8 +282,6 @@ class TestTierCoverageValidator:
                 OddsSnapshot(
                     event_id=sample_event.id,
                     snapshot_time=taken,
-                    raw_data={},
-                    bookmaker_count=1,
                     source=source,
                     time_basis=basis,
                 )
@@ -327,8 +314,6 @@ class TestTierCoverageValidator:
             snapshot = OddsSnapshot(
                 event_id=sample_event.id,
                 snapshot_time=game_time + timedelta(hours=-1, minutes=-i * 10),
-                raw_data={"test": f"data_{i}"},
-                bookmaker_count=8,
             )
             test_session.add(snapshot)
 
@@ -371,8 +356,6 @@ class TestTierCoverageValidatorDailyValidation:
                 snapshot = OddsSnapshot(
                     event_id=event.id,
                     snapshot_time=event.commence_time - timedelta(hours=TIER_HOURS_BEFORE[tier]),
-                    raw_data={"test": "data"},
-                    bookmaker_count=8,
                 )
                 test_session.add(snapshot)
 
@@ -417,8 +400,6 @@ class TestTierCoverageValidatorDailyValidation:
                 snapshot = OddsSnapshot(
                     event_id=event.id,
                     snapshot_time=event.commence_time - timedelta(hours=TIER_HOURS_BEFORE[tier]),
-                    raw_data={"test": "data"},
-                    bookmaker_count=8,
                 )
                 test_session.add(snapshot)
 
@@ -471,8 +452,6 @@ class TestTierCoverageValidatorDailyValidation:
                 snapshot = OddsSnapshot(
                     event_id=event.id,
                     snapshot_time=event.commence_time - timedelta(hours=TIER_HOURS_BEFORE[tier]),
-                    raw_data={"test": "data"},
-                    bookmaker_count=8,
                 )
                 test_session.add(snapshot)
 
@@ -515,8 +494,6 @@ class TestTierCoverageValidatorDailyValidation:
                 snapshot = OddsSnapshot(
                     event_id=event.id,
                     snapshot_time=event.commence_time - timedelta(hours=TIER_HOURS_BEFORE[tier]),
-                    raw_data={"test": "data"},
-                    bookmaker_count=8,
                 )
                 test_session.add(snapshot)
 

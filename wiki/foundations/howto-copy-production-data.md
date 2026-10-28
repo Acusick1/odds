@@ -23,7 +23,7 @@ status: stable
    odds copy from-prod 2025-08-01 2026-04-10 --sport soccer_epl --dry-run
    ```
 
-3. **Run without `--dry-run`.** Events already present locally, found by their external ids (else by event id with the same teams, else by sport, teams and kick-off when the local event holds no different id from the same source), are skipped; add `--overwrite` to replace them, which deletes each replaced event's local snapshots and odds, including any that exist only locally, and copies production's. An event whose ids several local events hold fails until they are merged. Other local events for the same match are left untouched, and the summary counts them; merge them with `odds events merge-twins` ([Event merge](../storage/event-merge.md)).
+3. **Run without `--dry-run`.** Events already present locally, found by their external ids (else by event id with the same teams, else by sport, teams and kick-off when the local event holds no different id from the same source), are skipped; add `--overwrite` to replace them, which deletes each replaced event's local snapshots and price rows, including any that exist only locally, and copies production's. An event whose ids several local events hold fails until they are merged. Other local events for the same match are left untouched, and the summary counts them; merge them with `odds events merge-twins` ([Event merge](../storage/event-merge.md)).
 4. **Check the summary.** A failed event is rolled back, listed by id and counted in `events_failed`, and the run continues; the command exits 1 if any event failed, so rerun after fixing the cause.
 
 ## Related

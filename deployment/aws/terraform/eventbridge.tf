@@ -1,41 +1,3 @@
-# Bootstrap rule for Polymarket price history backfill
-# Runs on fixed schedule (not self-scheduling) to stay ahead of 30-day CLOB retention window
-resource "aws_cloudwatch_event_rule" "bootstrap_backfill_polymarket" {
-  count = var.enable_polymarket ? 1 : 0
-
-  name                = format("%s-backfill-polymarket-bootstrap", var.rule_prefix)
-  description         = "Recurring Polymarket price history backfill (30-day CLOB retention)"
-  schedule_expression = "rate(3 days)"
-  state               = "ENABLED"
-}
-
-resource "aws_cloudwatch_event_target" "bootstrap_backfill_polymarket_target" {
-  count = var.enable_polymarket ? 1 : 0
-
-  rule      = aws_cloudwatch_event_rule.bootstrap_backfill_polymarket[0].name
-  target_id = "1"
-  arn       = aws_lambda_function.odds_scheduler.arn
-
-  input = jsonencode({
-    job = "backfill-polymarket"
-  })
-}
-
-resource "aws_lambda_permission" "allow_eventbridge_backfill_polymarket" {
-  count = var.enable_polymarket ? 1 : 0
-
-  statement_id  = format("AllowExecutionFromEventBridgeBackfillPolymarket-%s", var.rule_prefix)
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.odds_scheduler.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.bootstrap_backfill_polymarket[0].arn
-
-  depends_on = [
-    aws_cloudwatch_event_rule.bootstrap_backfill_polymarket,
-    aws_cloudwatch_event_target.bootstrap_backfill_polymarket_target
-  ]
-}
-
 # Per-sport fixed-schedule rules. Currently empty — fetch-espn-fixtures
 # runs on the local scheduler
 # (see `fixed_schedule_expressions` below). The resources are retained so
@@ -102,8 +64,6 @@ locals {
   # Jobs that run once globally (no sport param)
   global_jobs = ["update-status", "check-health"]
 
-  polymarket_jobs = var.enable_polymarket ? ["fetch-polymarket"] : []
-
   # Generate per-sport scheduler job names: "fetch-odds-epl", "fetch-scores-epl", etc.
   sport_scheduler_rules = flatten([
     for sport_suffix, cfg in local.sport_configs : [
@@ -119,7 +79,6 @@ locals {
   scheduler_rules_map = merge(
     { for r in local.sport_scheduler_rules : r.key => r },
     { for j in local.global_jobs : j => { key = j, job = j, sport_key = null } },
-    { for j in local.polymarket_jobs : j => { key = j, job = j, sport_key = null } },
   )
 
   # Flat lists for outputs
@@ -183,12 +142,7 @@ resource "aws_lambda_permission" "allow_dynamic" {
 # Outputs
 output "bootstrap_rules" {
   description = "Bootstrap EventBridge rules (fixed-schedule, not self-scheduling)"
-  value = merge(
-    { for k, v in aws_cloudwatch_event_rule.fixed_scheduler : k => v.name },
-    var.enable_polymarket ? {
-      backfill_polymarket = aws_cloudwatch_event_rule.bootstrap_backfill_polymarket[0].name
-    } : {}
-  )
+  value       = { for k, v in aws_cloudwatch_event_rule.fixed_scheduler : k => v.name }
 }
 
 output "dynamic_rules" {

@@ -15,7 +15,7 @@ from odds_lambda.mlb_stats_fetcher import MlbGameResult, MlbGameState
 from odds_lambda.scheduling.jobs import JobContext
 from sqlalchemy import select
 
-from tests.test_helpers import hold_game_pks
+from tests.test_helpers import hold_game_pks, with_game_pk
 
 HOME, AWAY = "Pittsburgh Pirates", "Milwaukee Brewers"
 START = datetime.now(UTC).replace(hour=16, minute=5, second=0, microsecond=0) - timedelta(days=3)
@@ -27,15 +27,17 @@ def _event(
     start: datetime = START,
     status: EventStatus = EventStatus.SCHEDULED,
 ) -> Event:
-    return Event(
-        id=event_id,
-        sport_key="baseball_mlb",
-        sport_title="MLB",
-        commence_time=start,
-        home_team=HOME,
-        away_team=AWAY,
-        status=status,
-        mlb_game_pk=game_pk,
+    return with_game_pk(
+        Event(
+            id=event_id,
+            sport_key="baseball_mlb",
+            sport_title="MLB",
+            commence_time=start,
+            home_team=HOME,
+            away_team=AWAY,
+            status=status,
+        ),
+        game_pk,
     )
 
 

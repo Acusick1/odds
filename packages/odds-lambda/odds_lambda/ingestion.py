@@ -155,9 +155,9 @@ class OddsIngestionService:
                     if payload_id is None:
                         payload_id = await store_payload(session, response.raw_events_data)
                         payload_written = True
-                    await writer.store_odds_snapshot(
+                    await writer.store_envelope(
                         event_id=found.event.id,
-                        raw_data=event_data,
+                        envelope=event_data,
                         snapshot_time=response.timestamp,
                         validate=validation_enabled,
                         shape=SnapshotShape(Source.ODDS_API, TimeBasis.OBSERVED, payload_id),

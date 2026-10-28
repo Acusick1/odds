@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -11,6 +12,7 @@ from odds_core.quotes import Quote
 from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.price_rows import expand_envelope
+from odds_lambda.storage.game_pks import game_pks_of
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_shaped_snapshot
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,17 +37,38 @@ async def add_event(session: AsyncSession, event: Event) -> Event:
     return event
 
 
+# Events given a gamePk by ``with_game_pk`` that ``hold_game_pks`` has not recorded yet.
+_PENDING_GAME_PKS: dict[int, tuple[Event, int]] = {}
+
+
+def with_game_pk(event: Event, game_pk: int | None) -> Event:
+    """``event``, to hold ``game_pk`` as its ``mlb_stats_api`` external id once
+    ``hold_game_pks`` runs after it is added to a session."""
+    if game_pk is not None:
+        _PENDING_GAME_PKS[id(event)] = (event, game_pk)
+    return event
+
+
 async def hold_game_pks(session: AsyncSession) -> None:
-    """Give each stored event with an ``mlb_game_pk`` its ``mlb_stats_api`` external id, which
-    is where readers find the ``gamePk``. Flushes the session first."""
+    """Record the gamePk ``with_game_pk`` gave each event in ``session`` as its
+    ``mlb_stats_api`` external id, where readers find it. Flushes the session first."""
     await session.flush()
-    await session.execute(
-        text(
-            "INSERT INTO event_external_ids (source, external_id, event_id, created_at) "
-            "SELECT 'mlb_stats_api', mlb_game_pk::text, surrogate_id, now() FROM events "
-            "WHERE mlb_game_pk IS NOT NULL ON CONFLICT DO NOTHING"
+    for key, (event, game_pk) in list(_PENDING_GAME_PKS.items()):
+        if event not in session:
+            continue
+        del _PENDING_GAME_PKS[key]
+        await session.execute(
+            text(
+                "INSERT INTO event_external_ids (source, external_id, event_id, created_at) "
+                "VALUES ('mlb_stats_api', :game_pk, :event_id, now()) ON CONFLICT DO NOTHING"
+            ),
+            {"game_pk": str(game_pk), "event_id": event.surrogate_id},
         )
-    )
+
+
+async def game_pk_of(session: AsyncSession, event: Event) -> int | None:
+    """The gamePk ``event`` holds, read from its ``mlb_stats_api`` external id."""
+    return (await game_pks_of(session, [event])).get(event.id)
 
 
 class StubOddsClient:
@@ -188,7 +211,7 @@ def make_epl_event(
 def polymarket_bookmaker(
     probabilities: tuple[float, float, float], spread: float = 0.02
 ) -> dict[str, Any]:
-    """A Polymarket ``raw_data`` entry whose 1x2 yes mids are ``probabilities`` (home, draw,
+    """A Polymarket envelope entry whose 1x2 yes mids are ``probabilities`` (home, draw,
     away), with best ask and bid ``spread / 2`` either side."""
     labels = ("home", "draw", "away")
 
@@ -214,7 +237,7 @@ def three_way_bookmaker(
     away_team: str = "Chelsea",
     **extra: Any,
 ) -> dict[str, Any]:
-    """A ``raw_data`` bookmaker entry with 1x2 decimal prices (home, draw, away)."""
+    """An envelope bookmaker entry with 1x2 decimal prices (home, draw, away)."""
     names = (home_team, "Draw", away_team)
     return {
         "key": key,
@@ -235,7 +258,7 @@ def three_way_bookmaker(
 def totals_book(
     key: str, lines: dict[float, tuple[float, float]], betfair_runners: bool = False
 ) -> dict[str, Any]:
-    """A ``raw_data`` bookmaker entry with totals (over, under) prices per line. With
+    """An envelope bookmaker entry with totals (over, under) prices per line. With
     ``betfair_runners`` it has the Betfair job's shape: back prices as ``betfair_meta`` runners."""
     if betfair_runners:
         runners = [
@@ -259,25 +282,38 @@ def totals_book(
     return {"key": key, "markets": [{"key": "totals", "outcomes": outcomes}]}
 
 
+@dataclass
+class TaggedSnapshot:
+    """An envelope of ``bookmakers`` for one event and time, with the source tag and, for FDUK,
+    the timing basis that pick the source and time basis it is stored under
+    (``snapshot_shape``)."""
+
+    event_id: str
+    snapshot_time: datetime
+    bookmakers: list[dict[str, Any]]
+    source: str | None
+    fduk_basis: str | None = None
+    created_at: datetime | None = None
+    # The stored snapshot of the envelope's first market, once ``store_tagged`` stored it.
+    id: int | None = None
+
+    @property
+    def envelope(self) -> dict[str, Any]:
+        return {"bookmakers": self.bookmakers}
+
+
 def make_tagged_snapshot(
     event_id: str,
     snapshot_time: datetime,
     bookmakers: list[dict[str, Any]],
     source: str | None,
     fduk_basis: str | None = None,
-) -> OddsSnapshot:
-    """A snapshot whose ``raw_data`` carries a source tag and, for FDUK, a timing basis."""
-    raw_data: dict[str, Any] = {"bookmakers": bookmakers}
-    if source is not None:
-        raw_data["source"] = source
-    if fduk_basis is not None:
-        raw_data["timing"] = {"basis": fduk_basis, "kickoff_time_assumed": False}
-    return OddsSnapshot(
-        event_id=event_id,
-        snapshot_time=snapshot_time,
-        raw_data=raw_data,
-        bookmaker_count=len(bookmakers),
-    )
+) -> TaggedSnapshot:
+    """A snapshot to store with ``store_tagged``: ``source`` is a tag (``None`` is the Odds API,
+    ``"oddsportal"`` OddsPortal history, ``"oddsportal_live"``, ``"betfair_api"``,
+    ``"polymarket"``, ``"football_data_uk"``), and ``fduk_basis`` FDUK's ``"kickoff"`` (the
+    close) or ``"fduk_collection_deadline"``."""
+    return TaggedSnapshot(event_id, snapshot_time, bookmakers, source, fduk_basis)
 
 
 def betfair_exchange_bookmaker(
@@ -303,7 +339,7 @@ def betfair_exchange_bookmaker(
 
 
 def snapshot_shape(source: str | None, fduk_basis: str | None = None) -> tuple[Source, TimeBasis]:
-    """The source and time basis the writers store a ``make_tagged_snapshot`` tag under."""
+    """The source and time basis a ``make_tagged_snapshot`` tag is stored under."""
     if source == "football_data_uk":
         return Source.FOOTBALL_DATA_UK, (
             TimeBasis.CLOSE if fduk_basis == "kickoff" else TimeBasis.UPPER_BOUND
@@ -359,16 +395,23 @@ def make_quotes(
     ]
 
 
-async def store_tagged(session: AsyncSession, snapshot: OddsSnapshot) -> OddsSnapshot:
-    """Store a ``make_tagged_snapshot`` with its price rows, as the writers do; its event must
-    be in the session."""
+async def store_tagged(session: AsyncSession, snapshot: TaggedSnapshot) -> OddsSnapshot:
+    """Store a ``make_tagged_snapshot`` with its price rows, as the writers do, and return the
+    stored snapshot of its first market; its event must be in the session."""
     await session.flush()
     event = await session.get(Event, snapshot.event_id)
     assert event is not None
-    timing = snapshot.raw_data.get("timing") or {}
-    source, time_basis = snapshot_shape(snapshot.raw_data.get("source"), timing.get("basis"))
-    await store_shaped_snapshot(session, snapshot, event, SnapshotShape(source, time_basis, None))
-    return snapshot
+    source, time_basis = snapshot_shape(snapshot.source, snapshot.fduk_basis)
+    written = await store_shaped_snapshot(
+        session,
+        event,
+        snapshot.envelope,
+        snapshot.snapshot_time,
+        SnapshotShape(source, time_basis, None),
+        created_at=snapshot.created_at,
+    )
+    snapshot.id = written.snapshot.id
+    return written.snapshot
 
 
 class FakeBetfairClient:

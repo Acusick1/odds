@@ -18,8 +18,6 @@ def snapshot_at(event_id: str, source: Source = Source.ODDSPORTAL) -> OddsSnapsh
     return OddsSnapshot(
         event_id=event_id,
         snapshot_time=TWIN_KICKOFF,
-        raw_data={"bookmakers": []},
-        bookmaker_count=1,
         source=source,
         market=Market.ONE_X_TWO,
         time_basis=TimeBasis.OBSERVED,

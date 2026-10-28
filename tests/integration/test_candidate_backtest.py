@@ -9,16 +9,11 @@ import pytest
 from odds_analytics.candidate_backtest import HashStatus, replay
 from odds_analytics.candidate_report import candidate_report, load_decision_starts
 from odds_core.candidates import MechanicalCandidate
-from odds_core.event_source import canonical_event_id
 from odds_core.models import EventStatus
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade, TradeResult
-from odds_core.snapshot_sources import FdukTimeBasis
 from odds_lambda.candidate_rules import rule_sha256
 
 from tests.test_helpers import (
-    API_EVENT_ID,
-    TWIN_EVENT_ID,
-    TWIN_KICKOFF,
     betfair_exchange_bookmaker,
     make_epl_event,
     make_tagged_snapshot,
@@ -204,18 +199,6 @@ class TestReplay:
         assert (coverage.events, coverage.decisions, coverage.with_input) == (1, 2, 2)
         assert (coverage.with_bet, coverage.bets) == (1, 1)
 
-    async def test_twins_of_one_match_count_once(self, pglite_async_session) -> None:
-        kickoff = TWIN_KICKOFF
-        await add_event(pglite_async_session, TWIN_EVENT_ID, kickoff)
-        await add_event(pglite_async_session, API_EVENT_ID, kickoff + timedelta(minutes=30))
-        canonical = canonical_event_id([TWIN_EVENT_ID, API_EVENT_ID])
-        other = API_EVENT_ID if canonical == TWIN_EVENT_ID else TWIN_EVENT_ID
-
-        result = await run(pglite_async_session)
-
-        assert result.coverage.events == 1
-        assert canonical != other
-
     async def test_events_outside_the_range_or_not_final_are_excluded(
         self, pglite_async_session
     ) -> None:
@@ -289,7 +272,7 @@ class TestReplay:
         close = totals_book("betfair_exchange", {2.5: (2.1, 1.9)})
         await store_tagged(
             session,
-            make_tagged_snapshot("e1", KICKOFF, [close], "football_data_uk", FdukTimeBasis.KICKOFF),
+            make_tagged_snapshot("e1", KICKOFF, [close], "football_data_uk", "kickoff"),
         )
         await session.commit()
 
@@ -569,7 +552,7 @@ class TestModelReplay:
                     kickoff,
                     [betfair(EXCHANGE, home_team="Arsenal", away_team=f"T{i}")],
                     "football_data_uk",
-                    FdukTimeBasis.KICKOFF,
+                    "kickoff",
                 ),
             )
         await pglite_async_session.commit()

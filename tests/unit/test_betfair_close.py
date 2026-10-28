@@ -12,7 +12,6 @@ from odds_core.exchange_price import MAX_EXCHANGE_OVERROUND, ExchangePrice, exch
 from odds_core.market_prices import market_outcomes
 from odds_core.odds_math import devig_probabilities
 from odds_core.quotes import Quote
-from odds_core.snapshot_sources import FdukTimeBasis
 from odds_core.vocabulary import Market, PriceOutcome, Source, TimeBasis
 
 from tests.test_helpers import (
@@ -52,7 +51,7 @@ def _fduk_close(prices: tuple[float, float, float]) -> list[Quote]:
         KICKOFF,
         [three_way_bookmaker("betfair_exchange", prices)],
         "football_data_uk",
-        FdukTimeBasis.KICKOFF,
+        "kickoff",
     )
 
 

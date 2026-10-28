@@ -1,7 +1,7 @@
-"""A snapshot envelope (``raw_data``) read as one snapshot per market, with its price rows.
+"""A snapshot envelope read as one snapshot per market, with its price rows.
 
-Every writer stores the envelope it built as ``raw_data`` and the rows read from it here, so
-the backfill can expand stored envelopes with the same reading.
+Every writer stores the price rows read from the envelope it built here, and archives the
+envelope as the snapshot's payload, so a payload can be read again the same way.
 """
 
 from __future__ import annotations
@@ -226,7 +226,7 @@ class _Reader:
 
 
 def expand_envelope(
-    raw_data: Mapping[str, Any], source: Source, home_team: str, away_team: str
+    envelope: Mapping[str, Any], source: Source, home_team: str, away_team: str
 ) -> ExpandedEnvelope:
     """Read an envelope ``source`` wrote for the event ``home_team`` v ``away_team``.
 
@@ -237,7 +237,7 @@ def expand_envelope(
     become ``issues`` rather than rows.
     """
     reader = _Reader(source, home_team, away_team)
-    for entry in raw_data.get("bookmakers") or []:
+    for entry in envelope.get("bookmakers") or []:
         raw_key = str(entry.get("key") or "").strip()
         if not raw_key:
             reader.log_issue(
@@ -449,18 +449,3 @@ def _finite(value: object) -> float | None:
 
 def _decimal(value: float | None) -> Decimal | None:
     return None if value is None else Decimal(str(value))
-
-
-def market_envelope(raw_data: Mapping[str, Any], market: Market) -> dict[str, Any]:
-    """``raw_data`` with each book's markets cut to those stored under ``market``
-    (``stored_market``), dropping books left without one."""
-    books = []
-    for entry in raw_data.get("bookmakers") or []:
-        kept = [
-            m
-            for m in entry.get("markets") or []
-            if (read := stored_market(m)) is not None and read[0] is market
-        ]
-        if kept:
-            books.append({**entry, "markets": kept})
-    return {**raw_data, "bookmakers": books}

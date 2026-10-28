@@ -11,10 +11,8 @@ from odds_core.models import Event, EventExternalId, EventStatus, OddsSnapshot
 from odds_core.sports import SportKey
 from odds_core.time import ensure_utc
 from odds_core.vocabulary import Source
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from odds_lambda.storage.event_merge import retime_snapshots
 
 logger = structlog.get_logger()
 
@@ -47,21 +45,10 @@ async def _outranked(session: AsyncSession, event: Event, above: tuple[Source, .
 
 
 async def _observed_by_another(session: AsyncSession, event: Event, source: Source) -> bool:
-    """Whether a snapshot of the event came from a source other than ``source``: one with a
-    different ``source``, or a stored one with none whose ``raw_data`` tag is not ``source``
-    (no tag is the Odds API)."""
+    """Whether a snapshot of the event came from a source other than ``source``."""
     result = await session.execute(
         select(OddsSnapshot.id)
-        .where(
-            OddsSnapshot.event_id == event.id,
-            or_(
-                OddsSnapshot.source != source,
-                and_(
-                    OddsSnapshot.source.is_(None),  # type: ignore[union-attr]
-                    func.coalesce(OddsSnapshot.raw_data["source"].as_string(), "") != source.value,
-                ),
-            ),
-        )
+        .where(OddsSnapshot.event_id == event.id, OddsSnapshot.source != source)
         .limit(1)
     )
     return result.first() is not None
@@ -71,8 +58,8 @@ async def move_kickoff(
     session: AsyncSession, event: Event, source: Source, start: datetime | None, *, now: datetime
 ) -> bool:
     """Move ``event`` to ``start`` as reported by ``source`` when that source is the event's
-    schedule authority, re-timing its stored snapshots. A postponed event becomes scheduled, and
-    so does a live one moved to a start after ``now``.
+    schedule authority. A postponed event becomes scheduled, and so does a live one moved to a
+    start after ``now``.
 
     Returns whether the event moved: never for a source outside its sport's authority order, a
     ``None`` start or an unchanged one. Before the stored kick-off (``now`` earlier) a source
@@ -103,28 +90,6 @@ async def move_kickoff(
     return await _move(session, event, source, start, now)
 
 
-async def settle_merged_kickoff(
-    session: AsyncSession,
-    event: Event,
-    starts: Mapping[Source, datetime],
-    *,
-    now: datetime,
-) -> Source | None:
-    """Give an event that twins were merged into the kick-off of the highest-ranked source in
-    its sport's order among ``starts`` (each source that observed one of the twins, with that
-    twin's stored kick-off). Twins' kick-offs are stored, not listings, so neither the
-    after-kick-off rule nor the outranking rule of ``move_kickoff`` applies. Returns the source
-    followed, ``None`` when no source in ``starts`` is in the order; re-times the snapshots and
-    returns a postponed event to scheduled as ``move_kickoff`` does when the start changes."""
-    order = KICKOFF_AUTHORITY.get(event.sport_key, ())  # type: ignore[call-overload]
-    source = next((s for s in order if s in starts), None)
-    if source is None:
-        return None
-    if ensure_utc(event.commence_time) != ensure_utc(starts[source]):
-        await _move(session, event, source, starts[source], now)
-    return source
-
-
 async def _move(
     session: AsyncSession, event: Event, source: Source, start: datetime, now: datetime
 ) -> bool:
@@ -136,13 +101,11 @@ async def _move(
         event.status == EventStatus.LIVE and ensure_utc(start) > ensure_utc(now)
     ):
         event.status = EventStatus.SCHEDULED
-    retimed = await retime_snapshots(session, event_id, start)
     logger.info(
         "event_rescheduled",
         event_id=event_id,
         source=source.value,
         commence_time=moved_from.isoformat(),
         scheduled_start=ensure_utc(start).isoformat(),
-        snapshots_retimed=retimed,
     )
     return True

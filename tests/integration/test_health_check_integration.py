@@ -12,10 +12,26 @@ from odds_core.models import (
     Event,
     EventStatus,
     FetchLog,
-    OddsSnapshot,
 )
-from odds_core.vocabulary import Source, TimeBasis
 from sqlalchemy import select
+
+from tests.test_helpers import make_tagged_snapshot, store_tagged
+
+
+def _h2h_book() -> dict:
+    return {
+        "key": "fanduel",
+        "title": "FanDuel",
+        "markets": [
+            {
+                "key": "h2h",
+                "outcomes": [
+                    {"name": "Team A", "price_decimal": 1.8},
+                    {"name": "Team B", "price_decimal": 2.1},
+                ],
+            }
+        ],
+    }
 
 
 @pytest.fixture(autouse=True)
@@ -61,13 +77,15 @@ async def _create_recent_snapshot(session, *, minutes_ago: int = 30) -> None:
     )
     session.add(event)
     await session.flush()
-    snapshot = OddsSnapshot(
-        event_id=event.id,
-        snapshot_time=datetime.now(UTC) - timedelta(minutes=minutes_ago),
-        raw_data={},
-        bookmaker_count=1,
+    await store_tagged(
+        session,
+        make_tagged_snapshot(
+            event.id,
+            datetime.now(UTC) - timedelta(minutes=minutes_ago),
+            [_h2h_book()],
+            None,
+        ),
     )
-    session.add(snapshot)
 
 
 async def _create_stale_oddsportal_source(session, *, hours_ago: float = 40) -> None:
@@ -84,15 +102,11 @@ async def _create_stale_oddsportal_source(session, *, hours_ago: float = 40) -> 
     )
     session.add(event)
     await session.flush()
-    session.add(
-        OddsSnapshot(
-            event_id=event.id,
-            snapshot_time=now - timedelta(hours=hours_ago),
-            raw_data={"source": "oddsportal_live"},
-            bookmaker_count=1,
-            source=Source.ODDSPORTAL,
-            time_basis=TimeBasis.OBSERVED,
-        )
+    await store_tagged(
+        session,
+        make_tagged_snapshot(
+            event.id, now - timedelta(hours=hours_ago), [_h2h_book()], "oddsportal_live"
+        ),
     )
     await session.commit()
 

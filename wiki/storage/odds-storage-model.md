@@ -1,38 +1,42 @@
 ---
 type: explanation
 title: How odds are stored
-description: Why odds are stored as raw snapshots plus normalized rows, which sources lack the normalized half, and which readers use which.
+description: Why odds are stored as per-market snapshots with one row per price and the source's envelope archived apart, and how every writer and reader shares that one shape.
 sources:
   - odds_core.models.OddsSnapshot
-  - odds_core.models.Odds
-  - odds_core.snapshot_utils.extract_odds_from_snapshot
-  - odds_lambda.storage.writers.OddsWriter._parse_and_store_odds
-  - odds_lambda.storage.readers.OddsReader
-  - scripts/ingest_oddsportal.py
-  - scripts/ingest_football_data_uk.py
+  - odds_core.models.Price
+  - odds_core.models.SnapshotPayload
+  - odds_lambda.price_rows
+  - odds_lambda.storage.shaped_snapshots.store_shaped_snapshot
+  - odds_core.quotes.quotes
 mentions:
-  - odds_core.models.Event
+  - odds_lambda.storage.readers.OddsReader
 status: stable
 ---
 
 # How odds are stored
 
-Odds are stored twice (the normalized rows keep `price_decimal`, constrained above 1.0). Each fetch becomes one `odds_core.models.OddsSnapshot` row per market (a multi-market Odds API envelope is split) holding the complete payload as JSON in `raw_data`, plus one `odds_core.models.Odds` row per bookmaker, market and outcome, which names its snapshot in `snapshot_id`. `odds_lambda.storage.writers.OddsWriter.store_envelope` writes both for each envelope, tiering the snapshot by its shape's time basis: raw for debugging, auditing and exact preservation, normalized for SQL filtering and time series `(inferred)`. Columns and indexes are on [Odds snapshot and odds tables](odds-tables.md). A third shape, one `prices` row per price with the payload archived apart, is written alongside by the OddsPortal live and Betfair jobs ([Writing price rows](price-tables.md#writing-price-rows)).
+A fetch of one event from one source becomes one `odds_core.models.OddsSnapshot` per market it quotes, each with one `odds_core.models.Price` row per bookmaker, outcome, line and side. The envelope the writer built from the source's response is archived as an `odds_core.models.SnapshotPayload` that the snapshots point at. Columns are on [Odds snapshots table](odds-tables.md) and [Prices and snapshot payloads tables](price-tables.md).
 
-## The normalized half is not universal
+## One shape for every source
 
-`raw_data` is the one complete record and its football three-way market key is `1x2` for every source ([sport-and-market-keys](../collection/sport-and-market-keys.md#market-key-dialects)). The historical ingest scripts (`scripts/ingest_oddsportal.py`, `scripts/ingest_football_data_uk.py`, tiering with `odds_lambda.tier_utils.snapshot_tier` and `odds_lambda.tier_utils.snapshot_tiers`, [where tiers are written](fetch-tier.md#where-tiers-are-written-and-read)) write `odds_core.models.Event` and `odds_core.models.OddsSnapshot` ([columns and indexes](odds-tables.md#odds_snapshots)) rows with their price rows, and no `odds` rows (FDUK snapshot times are approximations, with `time_basis` `upper_bound` or `close`; both scripts attach to an existing event of the same sport when one matches, and the FDUK one gives it the full-time score when it has none and replaces its own snapshots on a rerun only when their content changed) (#435; [Historical ingest scripts](../collection/historical-ingest-scripts.md)). Anything that queries the normalized table therefore returns nothing for those events; the price readers read the `prices` table through `odds_core.quotes.quotes` instead ([Reading quotes](price-tables.md#reading-quotes)). Live fetches write both halves, so recent events work either way.
+Every writer, live or historical, builds an envelope in one shape ([envelope format](odds-tables.md#envelope-format)) and hands it to `odds_lambda.storage.shaped_snapshots.store_shaped_snapshot`, which reads it with `odds_lambda.price_rows.expand_envelope` ([Writing price rows](price-tables.md#writing-price-rows)). The source-specific parsing (team names to home and away, bookmaker aliases, Betfair runners, Polymarket probabilities, lay and traded sides) happens there, once, at write time, so no reader parses JSON (#663). What a snapshot's time means is a column, `time_basis`, not something a reader infers from the source (#662).
 
-## Which readers use which
+## Why prices are rows
 
-`odds_lambda.storage.readers.OddsReader` reads events (by date range, sport, status and minimum snapshot count), snapshots and logs and counts snapshots as distinct snapshot times per event ([OddsReader](odds-reader.md#methods)); no price reader reads the normalized rows or rebuilds them from `raw_data`. Prices are read from the `prices` table through `odds_core.quotes.quotes`, which every source fills, historical ones included ([Reading quotes](price-tables.md#reading-quotes)).
+A price row carries its side (back, lay, mid or traded), size and matched volume next to the price, so exchange depth and Polymarket bid and ask are queryable like any bookmaker quote (#663). Readers filter in SQL by source, time basis, bookmaker, side and time through one query, `odds_core.quotes.quotes` ([Reading quotes](price-tables.md#reading-quotes)), and select as of a moment with the snapshot's `created_at`. Every source fills the same rows, historical loads included, so a reader that works for one source works for all.
 
-## Two parsers, one price rule
+## Why the envelope is kept
 
-Two code paths turn `raw_data` into `odds_core.models.Odds`, the writer's `odds_lambda.storage.writers.OddsWriter._parse_and_store_odds` and `odds_core.snapshot_utils.extract_odds_from_snapshot`. Both read each outcome's price with `odds_core.odds_math.outcome_price_decimal`, which raises `KeyError` when an outcome has neither `price_decimal` nor `price` ([Odds arithmetic helpers](../foundations/odds-math.md#price-encodings)). The same snapshot therefore yields the same prices from the normalized table and from the raw-based readers, and both kinds of row carry the snapshot's id, so a normalized row can be checked against the `raw_data` it came from. Without it the only join is event, time and key, which two snapshots at one time can share ([same-time pairs](odds-tables.md#same-time-pairs), #535). Provenance tags and indexes are on [Odds snapshot and odds tables](odds-tables.md).
+The payload is a cold archive: it is read again only to re-parse snapshots after an adapter bug, since the price rows are what the writer understood of it (#662). Live jobs archive one payload per run, holding every event's envelope; the readers that need a field no row holds, such as the Betfair runner names that team-name repair compares against, find the event's envelope in it.
+
+## Snapshots are per market
+
+One snapshot per market lets a source's 1x2 and totals prices at one time be keyed, deduplicated and closed independently: (event, source, market, time) is unique ([storing a snapshot under its key](price-tables.md#storing-a-snapshot-under-its-key)). An Odds API fetch quoting 1x2, spreads and totals stores three snapshots at one time, so readers that count fetches count distinct snapshot times (`odds_lambda.storage.readers.OddsReader`, [OddsReader](odds-reader.md)).
 
 ## Related
 
-- [Odds snapshot and odds tables](odds-tables.md)
+- [Odds snapshots table](odds-tables.md)
+- [Prices and snapshot payloads tables](price-tables.md)
 - [OddsWriter](odds-writer.md)
-- [OddsReader](odds-reader.md)
+- [Fetch tier](fetch-tier.md)

@@ -7,10 +7,8 @@ from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
-from odds_core.models import OddsSnapshot
-from odds_core.odds_math import devig_probabilities
-from odds_core.snapshot_utils import extract_odds_from_snapshot
-from odds_core.vocabulary import Source
+from odds_core.vocabulary import PriceOutcome, Source
+from odds_core.vocabulary import Side as PriceSide
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.polymarket_fetcher import MAX_HISTORY_WINDOW, PolymarketClient
 from odds_lambda.polymarket_odds import (
@@ -20,7 +18,7 @@ from odds_lambda.polymarket_odds import (
     Observation,
     Prices,
     Side,
-    build_raw_data,
+    build_envelope,
     canonical_team,
     grid_offsets,
     listed_game,
@@ -28,6 +26,7 @@ from odds_lambda.polymarket_odds import (
     resample,
 )
 from odds_lambda.polymarket_sports import MATCH_ODDS_SPORTS, POLYMARKET_SPORTS
+from odds_lambda.price_rows import expand_envelope
 from odds_lambda.tier_utils import calculate_tier
 
 EPL = POLYMARKET_SPORTS["soccer_epl"]
@@ -242,31 +241,24 @@ class TestListedGame:
         )
 
 
-class TestBuildRawData:
-    def test_pipeline_extracts_devigged_polymarket_probs(self, gamma_event) -> None:
+class TestBuildEnvelope:
+    def test_price_rows_hold_the_yes_probabilities(self, gamma_event) -> None:
         match = parse_match_event(gamma_event(), EPL)
         assert match is not None
-        prices = Prices(0.53, 0.25, 0.22)
-        raw_data = build_raw_data(match, EPL, prices, KICKOFF - timedelta(hours=1))
-        snapshot = OddsSnapshot(
-            event_id="e1",
-            snapshot_time=KICKOFF - timedelta(hours=1),
-            raw_data=raw_data,
-            bookmaker_count=1,
+        envelope = build_envelope(match, EPL, Prices(0.53, 0.25, 0.22), KICKOFF)
+
+        [market] = expand_envelope(envelope, Source.POLYMARKET, "Bournemouth", "Chelsea").markets
+        mids = {p.outcome: 1 / float(p.price) for p in market.prices if p.side is PriceSide.MID}
+
+        assert mids == pytest.approx(
+            {PriceOutcome.HOME: 0.53, PriceOutcome.DRAW: 0.25, PriceOutcome.AWAY: 0.22}
         )
-
-        odds = extract_odds_from_snapshot(snapshot, "e1", market="1x2")
-        implied = {o.outcome_name: o.implied_probability for o in odds}
-        probs = devig_probabilities(implied["Bournemouth"], implied["Draw"], implied["Chelsea"])
-
-        assert raw_data["source"] == "polymarket"
-        assert probs == pytest.approx((0.53, 0.25, 0.22), abs=2e-3)
 
     def test_outcomes_carry_the_reciprocal_decimal_price(self, gamma_event) -> None:
         match = parse_match_event(gamma_event(), EPL)
         assert match is not None
 
-        outcomes = build_raw_data(match, EPL, Prices(0.53, 0.25, 0.22), KICKOFF)["bookmakers"][0][
+        outcomes = build_envelope(match, EPL, Prices(0.53, 0.25, 0.22), KICKOFF)["bookmakers"][0][
             "markets"
         ][0]["outcomes"]
 
@@ -279,7 +271,7 @@ class TestBuildRawData:
         match = parse_match_event(gamma_event(), EPL)
         assert match is not None
 
-        meta = build_raw_data(match, EPL, Prices(0.53, 0.25, 0.22), KICKOFF)["bookmakers"][0][
+        meta = build_envelope(match, EPL, Prices(0.53, 0.25, 0.22), KICKOFF)["bookmakers"][0][
             "polymarket_meta"
         ]
 
@@ -291,7 +283,7 @@ class TestBuildRawData:
         match = parse_match_event(gamma_event(), EPL)
         assert match is not None
 
-        meta = build_raw_data(match, EPL, Prices(0.53, 0.25, 0.22), KICKOFF, include_quotes=True)[
+        meta = build_envelope(match, EPL, Prices(0.53, 0.25, 0.22), KICKOFF, include_quotes=True)[
             "bookmakers"
         ][0]["polymarket_meta"]
 

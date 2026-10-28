@@ -13,7 +13,6 @@ from odds_core.models import (
     DataQualityLog,
     Event,
     EventExternalId,
-    Odds,
     OddsSnapshot,
     Price,
     SnapshotPayload,
@@ -65,7 +64,7 @@ def _op_match(
         match_date=start,
         match_link="https://www.oddsportal.com/football/england/premier-league/x-Kl1AOZN9/",
         scraped_date=scraped,
-        raw_data={
+        envelope={
             "bookmakers": books,
             "source": "oddsportal_live",
             "oddsportal_event_id": "Kl1AOZN9",
@@ -117,11 +116,11 @@ async def _external_ids(session: AsyncSession) -> set[tuple[str, str]]:
 def _fixture(home: str, away: str, scraped: datetime) -> MatchOdds:
     match = _op_match("1x2", [_book_entry("bet365", (2.0, 3.3, 3.5))], scraped)
     raw = {
-        **match.raw_data,
+        **match.envelope,
         "oddsportal_event_id": f"{home[:3]}{away[:3]}",
         "bookmakers": [
             {
-                **match.raw_data["bookmakers"][0],
+                **match.envelope["bookmakers"][0],
                 "markets": [
                     {
                         "key": "1x2",
@@ -142,7 +141,7 @@ def _fixture(home: str, away: str, scraped: datetime) -> MatchOdds:
         match_date=KICKOFF,
         match_link="",
         scraped_date=scraped,
-        raw_data=raw,
+        envelope=raw,
         bookmaker_count=1,
     )
 
@@ -228,8 +227,7 @@ class TestOddsPortalLive:
         [payload] = await _all(job_session, SnapshotPayload)
         assert {s.payload_id for s in snapshots} == {payload.id}
         assert [m["source"] for m in payload.payload] == ["oddsportal_live"] * 2
-        assert all(s.api_request_id.startswith("oddsportal_live_") for s in snapshots)
-        assert snapshots[0].raw_data["oddsportal_event_id"] == "Kl1AOZN9"
+        assert [m["oddsportal_event_id"] for m in payload.payload] == ["Kl1AOZN9"] * 2
 
         prices = await _all(job_session, Price)
         rows = {
@@ -249,7 +247,6 @@ class TestOddsPortalLive:
             Decimal("1.9"),
             None,
         )
-        assert await _count(job_session, Odds) == 8
 
     async def test_records_the_oddsportal_event_id(self, job_session: AsyncSession) -> None:
         await ingest_league(
@@ -272,7 +269,6 @@ class TestOddsPortalLive:
         assert stats.errors == []
         assert await _count(job_session, OddsSnapshot) == 2
         assert await _count(job_session, Price) == 8
-        assert await _count(job_session, Odds) == 8
 
     async def test_a_moved_future_start_moves_the_event(self, job_session: AsyncSession) -> None:
         spec = LEAGUE_SPEC_BY_NAME["england-premier-league"]
@@ -311,8 +307,6 @@ class TestOddsPortalLive:
             if row.issue_type == "bookmaker_alias_collision"
         ]
         assert log.raw_data["dropped_key"] == "7betuk"
-        # The old shape is written as before: both entries reach the odds table.
-        assert await _count(job_session, Odds) == 6
 
 
 def _betfair_book(
@@ -363,9 +357,10 @@ class TestBetfair:
         assert snapshot.market_status is MarketStatus.OPEN
         assert snapshot.total_matched == Decimal("385702.5")
         assert snapshot.market_start_time == KICKOFF
-        assert snapshot.raw_data["bookmakers"][0]["betfair_meta"]["market_status"] == "OPEN"
         [payload] = await _all(job_session, SnapshotPayload)
         assert snapshot.payload_id == payload.id
+        [envelope] = payload.payload
+        assert envelope["bookmakers"][0]["betfair_meta"]["market_status"] == "OPEN"
 
         rows = {
             (p.outcome.value, p.side.value): (p.price, p.size)
@@ -381,7 +376,6 @@ class TestBetfair:
             ("draw", "lay"): (Decimal("3.45"), Decimal("70.0")),
             ("draw", "traded"): (Decimal("3.4"), None),
         }
-        assert await _count(job_session, Odds) == 3
         assert await _external_ids(job_session) == {("betfair", "35001")}
 
     async def test_betfair_and_oddsportal_land_on_one_event_with_both_ids(
@@ -429,10 +423,10 @@ class TestBetfair:
         store = OddsWriter.store_envelope
 
         async def failing(
-            self: OddsWriter, event_id: str, raw_data: dict, *args: Any, **kwargs: Any
+            self: OddsWriter, event_id: str, envelope: dict, *args: Any, **kwargs: Any
         ) -> Any:
-            result = await store(self, event_id, raw_data, *args, **kwargs)
-            if raw_data["betfair_event_id"] == "35002":
+            result = await store(self, event_id, envelope, *args, **kwargs)
+            if envelope["betfair_event_id"] == "35002":
                 raise RuntimeError("failed after writing")
             return result
 
@@ -492,7 +486,10 @@ class TestBetfairTotals:
         totals = by_market[Market.TOTALS]
         assert totals.total_matched == Decimal("120500.0")
         assert totals.market_status is MarketStatus.OPEN
-        assert [b["betfair_meta"]["market_id"] for b in totals.raw_data["bookmakers"]] == ["1.235"]
+        [payload] = await _all(job_session, SnapshotPayload)
+        assert totals.payload_id == payload.id
+        [envelope] = payload.payload
+        assert "1.235" in {b["betfair_meta"]["market_id"] for b in envelope["bookmakers"]}
         rows = {
             (p.outcome.value, p.line, p.side.value): (p.price, p.size)
             for p in await _all(job_session, Price)

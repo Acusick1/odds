@@ -29,7 +29,7 @@ Prerequisites: Python 3.12+, [uv](https://github.com/astral-sh/uv), Docker, and 
    - Leave `ALERT_ENABLED` false locally; alerts post to Discord only when it is true ([Alerts](../operations/alerts.md#delivery)).
    - Export `LOCAL_DATABASE_URL`, `PROD_DATABASE_URL` and `AGENT_DATABASE_URL` in the shell if you use them: they are read with `os.getenv`, and `.env` is never exported to the process environment ([variables read outside Settings](configuration.md#variables-read-outside-settings)).
 3. **Start Postgres.** `docker compose up -d postgres` runs `postgres:15` (database `odds`, `postgres`/`postgres`) on host port 5433, chosen to avoid a system Postgres on 5432, with a 1 GB `/dev/shm` (`docker-compose.yml`).
-4. **Migrate.** `uv run alembic upgrade head` (Alembic is a dependency of the root project, so `uv sync` installs it). `migrations/env.py` overwrites the `alembic.ini` URL with `DATABASE_URL`, so the 5432 URL in the ini is never used. Details: [Create and apply a database migration](howto-database-migration.md).
+4. **Migrate.** `uv run alembic upgrade head` (Alembic is a dependency of the root project, so `uv sync` installs it). `migrations/env.py` overwrites the `alembic.ini` URL with `DATABASE_URL`, so the 5432 URL in the ini is never used, and imports each model module so Alembic sees every table. Details: [Create and apply a database migration](howto-database-migration.md).
 5. **Check.** `uv run odds status show`, then `uv run odds status quota`. The free tier is 500 units per month per key, and each `fetch current` costs 1 unit per region per market (3 by default) ([Odds API client](../collection/odds-api-client.md)).
 6. **First fetch.** `uv run odds fetch current --sport soccer_epl`. Pass `--sport`: the default is `basketball_nba` ([Sport defaults](odds-cli.md#sport-defaults)). Each fetch costs units.
 7. **Enable the hooks** (before committing). `uv run pre-commit install` runs the lint hooks on every commit, including the candidate version check; `uv run pre-commit run --all-files` runs them everywhere ([Code conventions](code-conventions.md#mechanical-gates)).
@@ -51,7 +51,7 @@ uv run pytest tests/unit tests/integration
 uv run pytest tests/unit/test_paper_trading.py -v
 ```
 
-Run unit and integration tests together; leave `tests/migration` to the deploy workflows ([AGENTS.md](../../AGENTS.md#tests)). What the suites run against, the shared fixtures in `tests/conftest.py`, the markers and the layout are in [Test suite](test-suite.md). A webhook exported in your shell or `.env` is safe: tests never post to it.
+Run unit and integration tests together; leave `tests/migration` to the deploy workflows ([AGENTS.md](../../AGENTS.md#tests)). What the suites run against, the shared fixtures in `tests/conftest.py` (the `pglite_async_session` database session among them), the markers and the layout are in [Test suite](test-suite.md). A webhook exported in your shell or `.env` is safe: tests never post to it.
 
 ## Related
 

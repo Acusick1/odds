@@ -8,7 +8,7 @@ import typer
 from odds_core.database import async_session_maker
 from odds_core.models import Event
 from odds_lambda.mlb_stats_fetcher import MlbStatsFetcher
-from odds_lambda.storage.event_merge import EventMerger, source_pair
+from odds_lambda.storage.event_merge import EventMerger
 from odds_lambda.storage.event_name_repair import repair_team_names
 from odds_lambda.storage.game_pk_backfill import (
     AssignmentOutcome,
@@ -23,13 +23,6 @@ from odds_lambda.storage.game_pk_backfill import (
     run_assignments,
 )
 from odds_lambda.storage.mlb_score_repair import ScoreOutcome, repair_scores
-from odds_lambda.storage.same_time_pairs import (
-    GroupAction,
-    GroupResult,
-    delete_same_time_pairs,
-    find_same_time_groups,
-    unlinked_odds,
-)
 from rich.console import Console
 from rich.table import Table
 
@@ -41,13 +34,13 @@ async def _twins(sport: str | None, apply: bool) -> None:
     async with async_session_maker() as session:
         merger = EventMerger(session)
         groups = await merger.find_twin_groups(sport)
-        counts = Counter(" + ".join(s.name for s in source_pair(group)) for group in groups)
+        counts = Counter(group[0].sport_key for group in groups)
 
         table = Table(title="Matches with more than one event")
-        table.add_column("Sources")
+        table.add_column("Sport")
         table.add_column("Matches", justify="right")
-        for sources, count in sorted(counts.items()):
-            table.add_row(sources, str(count))
+        for sport_key, count in sorted(counts.items()):
+            table.add_row(sport_key, str(count))
         console.print(table)
         console.print(f"Matches with twins: {len(groups)}")
 
@@ -67,7 +60,8 @@ def merge_twins(
     sport: str | None = typer.Option(None, "--sport", "-s", help="Sport key; default all sports"),
     apply: bool = typer.Option(False, "--apply", help="Merge; without it only counts twins"),
 ) -> None:
-    """Count, and with --apply merge, events that are twins of one match.
+    """Count, and with --apply merge, events that are twins of one match; each match keeps
+    its first-stored event.
 
     Examples:
         odds events merge-twins --sport soccer_epl
@@ -226,10 +220,7 @@ def _outcome_line(tag: str, outcome: AssignmentOutcome) -> str:
     line += f" settled={outcome.settled.value if outcome.settled else 'no'}"
     if outcome.settled_detail:
         line += f":{outcome.settled_detail}"
-    return (
-        f"{line} same_time_pairs_identical={outcome.pairs.identical}"
-        f" same_time_pairs_conflicting={outcome.pairs.conflicting}"
-    )
+    return line
 
 
 def _print_outcomes(outcomes: list[AssignmentOutcome]) -> None:
@@ -387,75 +378,3 @@ def mark_unassignable(
         odds events mark-unassignable op_live_ATLBRA_SANGIA_2026-06-17T1605 --reason "no such game" --apply
     """
     asyncio.run(_mark_unassignable(event_id, reason, apply))
-
-
-def _ids(ids: tuple[int, ...]) -> str:
-    return ",".join(map(str, ids)) or "none"
-
-
-def _pair_line(result: GroupResult) -> str:
-    group = result.group
-    line = (
-        f"{group.action.value.upper()} event={group.event_id} sport={group.sport_key}"
-        f" time={_utc(group.snapshot_time)}"
-        f" sources={','.join(s or 'odds_api' for s in group.sources)}"
-        f" identical={group.pairs.identical} conflicting={group.pairs.conflicting}"
-        f" snapshots={_ids(group.snapshot_ids)}"
-    )
-    if group.action is GroupAction.REFUSED:
-        return f"{line} used_by_decision={_ids(group.referenced_ids)}"
-    return (
-        f"{line} deleted={_ids(group.deleted_ids)}"
-        f" odds_deleted={result.odds_deleted} odds_linked={result.odds_linked}"
-    )
-
-
-async def _delete_same_time_pairs(apply: bool) -> None:
-    async with async_session_maker() as session:
-        groups = await find_same_time_groups(session)
-        results = await delete_same_time_pairs(session, groups)
-        unlinked = await unlinked_odds(session)
-        if apply:
-            await session.commit()
-        else:
-            await session.rollback()
-
-        by_action = Counter(r.group.action for r in results)
-        deleted = {i for r in results for i in r.group.deleted_ids}
-        conflicting = deleted.intersection(i for r in results for i in r.group.conflicting_ids)
-        typer.echo(
-            f"event-times with same-time pairs: {len(results)}\n"
-            + "".join(f"{action.value}: {by_action[action]}\n" for action in GroupAction)
-            + f"snapshots deleted: {len(deleted)} (conflicting: {len(conflicting)},"
-            f" duplicates: {len(deleted - conflicting)})\n"
-            f"odds rows deleted: {sum(r.odds_deleted for r in results)}\n"
-            f"odds rows linked to their snapshot: {sum(r.odds_linked for r in results)}\n"
-            f"odds rows without a snapshot: {unlinked.total}"
-            f" (orphans no snapshot quotes: {unlinked.orphans};"
-            f" quoted by several snapshots: {unlinked.total - unlinked.orphans})"
-        )
-        for result in results:
-            typer.echo(_pair_line(result))
-        if not apply:
-            typer.echo("Dry run: nothing written. Re-run with --apply.")
-
-
-@app.command("delete-same-time-pairs")
-def delete_same_time_pairs_command(
-    apply: bool = typer.Option(False, "--apply", help="Write; without it the plan is rolled back"),
-) -> None:
-    """Delete snapshots of one event taken at one time by one source that cannot both stand.
-
-    A pair is two such snapshots quoting a bookmaker, market, outcome and point in common.
-    CONFLICTING (OddsPortal live, MLB): a shared key has two prices, i.e. two games on one
-    event; both snapshots go. CONFLICTING_LEFT: any other conflict; left. DUPLICATE:
-    identical prices; the lowest id stays. REFUSED: a candidate decision used a snapshot that
-    would go; left. Deleted snapshots take their odds rows; the copies of a kept snapshot's
-    rows collapse to one, linked to it. One transaction. Safe to re-run.
-
-    Examples:
-        odds events delete-same-time-pairs
-
-        odds events delete-same-time-pairs --apply
-    """
-    asyncio.run(_delete_same_time_pairs(apply))

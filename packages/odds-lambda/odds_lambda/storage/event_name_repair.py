@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import structlog
-from odds_core.event_source import EventSource, canonical_event_id
+from odds_core.event_ids import LIVE_EVENT_ID_PREFIX
 from odds_core.models import (
     DataQualityLog,
     Event,
@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.betfair.adapter import canonical_teams
 from odds_lambda.betfair.constants import SPORT_CONFIG
-from odds_lambda.storage.event_merge import EventMerger, MergeReport
+from odds_lambda.storage.event_merge import EventMerger, MergeReport, kept_event
 
 logger = structlog.get_logger()
 
@@ -155,7 +155,7 @@ async def find_misnamed_events(
     runner_names = await _betfair_runner_names(session, sport_key)
     misnamed: list[tuple[Event, tuple[str, str]]] = []
     for event in events:
-        if EventSource.of(event.id) is not EventSource.ODDSPORTAL_LIVE:
+        if not event.id.startswith(LIVE_EVENT_ID_PREFIX):
             continue
         teams = canonical_teams(event.home_team, event.away_team, runner_names.get(event.id, []))
         if teams != (event.home_team, event.away_team):
@@ -166,8 +166,8 @@ async def find_misnamed_events(
 async def repair_team_names(session: AsyncSession, sport_key: str) -> NameRepairReport:
     """Give Betfair-created events their canonical team names and merge the twins that creates.
 
-    A merged group keeps its best-sourced event that was never renamed, so the
-    kept event has the real kick-off and a clean id; only a group made solely of
+    A merged group keeps an event that was never renamed, so the kept event has a
+    clean id, the best-sourced of them by ``kept_event``; only a group made solely of
     renamed events keeps one of those. Doubleheader games stay apart: groups
     are events of the same teams within ``EVENT_MATCH_WINDOW``. Runs in the
     caller's transaction and is a no-op once every name is canonical.
@@ -185,11 +185,10 @@ async def repair_team_names(session: AsyncSession, sport_key: str) -> NameRepair
         if not renamed_ids.intersection(event.id for event in group):
             continue
         status_by_id.update({event.id: event.status for event in group})
-        by_id = {event.id: event for event in group}
-        originals = [event_id for event_id in by_id if event_id not in renamed_ids]
-        keep_id = canonical_event_id(originals or list(by_id))
-        duplicates = [event for event in group if event.id != keep_id]
-        merges.append(await merger.merge(by_id[keep_id], duplicates))
+        originals = [event for event in group if event.id not in renamed_ids]
+        keep = await kept_event(session, originals or group)
+        duplicates = [event for event in group if event is not keep]
+        merges.append(await merger.merge(keep, duplicates))
 
     report = NameRepairReport(tuple(sorted(renamed_ids)), tuple(merges), status_by_id)
     logger.info(

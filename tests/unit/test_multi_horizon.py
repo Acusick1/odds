@@ -330,7 +330,6 @@ class TestTierSampler:
             event=event,
             snapshots=snapshots,
             closes={},
-            pm_context=None,
         )
 
     def test_returns_latest_snapshot_in_decision_tier(self, event):
@@ -520,7 +519,6 @@ class TestTimeRangeSampler:
             event=event,
             snapshots=snapshots,
             closes={},
-            pm_context=None,
         )
 
     def test_returns_snapshots_in_range(self, event):
@@ -595,9 +593,6 @@ class TestPrepareTrainingData:
             event=event,
             snapshots=all_snaps,
             closes={closing_snap.source: closing_snap},
-            pm_context=None,
-            pm_prices=[],
-            pm_orderbooks=[],
         )
 
     @pytest.mark.asyncio
@@ -887,9 +882,6 @@ class TestPrepareTrainingDataRows:
             event=event,
             snapshots=[closing_snap],
             closes={closing_snap.source: closing_snap},
-            pm_context=None,
-            pm_prices=[],
-            pm_orderbooks=[],
         )
 
     @pytest.mark.asyncio
@@ -903,9 +895,6 @@ class TestPrepareTrainingDataRows:
             event=event,
             snapshots=all_snaps,
             closes={closing_snap.source: closing_snap},
-            pm_context=None,
-            pm_prices=[],
-            pm_orderbooks=[],
         )
 
         config = FeatureConfig(

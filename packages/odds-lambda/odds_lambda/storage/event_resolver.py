@@ -296,8 +296,6 @@ async def _find(
             return ResolvedEvent(held, Resolution.BY_GAME_PK)
     if game.external_id is not None:
         held = await _by_external_id(session, game.source, game.external_id)
-        if held is None and game.source is Source.ODDS_API:
-            held = await event_keyed_by_odds_api_id(session, game.external_id)
         if held is not None and (game.mlb_game is None or not await holds_game_pk(session, held)):
             return ResolvedEvent(held, Resolution.BY_EXTERNAL_ID)
     matched = await _match(session, game, home_team, away_team)
@@ -311,11 +309,6 @@ async def _by_external_id(session: AsyncSession, source: Source, external_id: st
         .where(EventExternalId.source == source, EventExternalId.external_id == external_id)
     )
     return result.scalar_one_or_none()
-
-
-async def event_keyed_by_odds_api_id(session: AsyncSession, odds_api_id: str) -> Event | None:
-    # Events stored before the external-id table existed are keyed by the API's own id.
-    return await session.get(Event, odds_api_id)
 
 
 async def _match(
@@ -441,8 +434,6 @@ async def record_game_pk(
         session, event, Source.MLB_STATS_API, str(game_pk), log_repeats=log_repeats
     ):
         return False
-    if event.mlb_game_pk is None:
-        event.assign_game_pk(game_pk)
     await clear_unmatched(session, event)
     await session.flush()
     return True

@@ -229,8 +229,6 @@ class TestSnapshotKey:
         twin = OddsSnapshot(
             event_id=epl_snapshot.event_id,
             snapshot_time=epl_snapshot.snapshot_time,
-            raw_data={},
-            bookmaker_count=0,
             source=epl_snapshot.source,
             market=epl_snapshot.market,
         )
@@ -245,8 +243,6 @@ class TestSnapshotKey:
             OddsSnapshot(
                 event_id=stored_epl_event.id,
                 snapshot_time=TWIN_KICKOFF,
-                raw_data={},
-                bookmaker_count=0,
             )
             for _ in range(2)
         ]

@@ -9,7 +9,6 @@ from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
 
 import structlog
-from odds_core.event_source import canonical_event_id
 from odds_core.models import Event, EventStatus
 from odds_core.team import normalize_team_name
 from odds_core.time import ensure_utc
@@ -35,7 +34,7 @@ from odds_lambda.mlb_game_resolver import (
 )
 from odds_lambda.mlb_stats_fetcher import MlbStatsFetcher
 from odds_lambda.storage.event_kickoff import move_kickoff
-from odds_lambda.storage.event_merge import EventMerger
+from odds_lambda.storage.event_merge import EventMerger, first_stored
 from odds_lambda.storage.event_resolver import record_game_pk
 from odds_lambda.storage.event_unmatched import mark_unmatched, unmatched_reasons
 from odds_lambda.storage.game_pks import (
@@ -43,7 +42,6 @@ from odds_lambda.storage.game_pks import (
     events_holding_game_pks_by_pk,
     game_pks_of,
 )
-from odds_lambda.storage.same_time_pairs import SnapshotPairs, event_same_time_pairs
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
@@ -151,7 +149,6 @@ class AssignmentOutcome:
     detail: str = ""
     rows_moved: dict[str, int] = field(default_factory=dict)
     rows_deleted: dict[str, int] = field(default_factory=dict)
-    pairs: SnapshotPairs = SnapshotPairs()
     moved_from: datetime | None = None
     moved_to: datetime | None = None
     start_tbd: bool = False
@@ -213,7 +210,7 @@ def _choose_kept(
     """The event holding the gamePk; else, among the events on the played slot's MLB date when
     there are any (so a postponed slot's event never wins over one on the played date), the one
     nearest the played slot's start (MLB's placeholder when TBD), ties going to the latest and
-    then to ``canonical_event_id``; with no played slot, ``canonical_event_id``."""
+    then to the first stored (``first_stored``); with no played slot, the first stored."""
     if holder is not None:
         return holder, tuple(sorted(events, key=lambda e: e.id))
     candidates = list(events)
@@ -225,9 +222,8 @@ def _choose_kept(
         candidates = [e for e in candidates if gaps[e.id] == nearest]
         latest = max(ensure_utc(e.commence_time) for e in candidates)
         candidates = [e for e in candidates if ensure_utc(e.commence_time) == latest]
-    kept_id = canonical_event_id([e.id for e in candidates])
-    kept = next(e for e in events if e.id == kept_id)
-    return kept, tuple(sorted((e for e in events if e.id != kept_id), key=lambda e: e.id))
+    kept = first_stored(candidates)
+    return kept, tuple(sorted((e for e in events if e is not kept), key=lambda e: e.id))
 
 
 async def plan_game_pks(
@@ -391,7 +387,6 @@ async def apply_assignment(
         tuple(e.id for e in assignment.merged),
         assignment.rule,
         rows_moved=rows_moved,
-        pairs=await event_same_time_pairs(session, kept_id),
         moved_from=moved_from if moved_to != moved_from else None,
         moved_to=moved_to if moved_to != moved_from else None,
         start_tbd=assignment.played is not None and assignment.played.tbd,

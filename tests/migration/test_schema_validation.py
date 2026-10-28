@@ -15,7 +15,16 @@ import os
 import pytest
 
 # Import all models to ensure they're registered with SQLModel.metadata
-from odds_core.models import DataQualityLog, Event, FetchLog, Odds, OddsSnapshot  # noqa: F401
+from odds_core.models import (  # noqa: F401
+    DataQualityLog,
+    Event,
+    EventExternalId,
+    FetchLog,
+    HealthCheckAcknowledgement,
+    OddsSnapshot,
+    Price,
+    SnapshotPayload,
+)
 from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import SQLModel

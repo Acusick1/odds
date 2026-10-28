@@ -87,7 +87,7 @@ A lead (`odds_lambda.scheduling.decision.Lead`) is a time before kickoff at whic
 
 Two jobs pass leads:
 
-- `fetch-betfair-exchange` passes `odds_lambda.jobs.fetch_betfair_exchange.CLOSE_LEAD` (5 min before kickoff, late until kickoff), so the Betfair close does not depend on where the 15-minute cadence happens to fall. Its kickoffs come from `odds_lambda.betfair.kickoff.next_betfair_kickoff`, which adds an earlier Betfair start of the event's match odds market as a target while it is ahead, so an event can get a close run before it as well as before its `commence_time` ([Betfair job](../collection/betfair-exchange.md#flow)).
+- `fetch-betfair-exchange` passes `odds_lambda.jobs.fetch_betfair_exchange.CLOSE_LEAD` (5 min before kickoff, late until kickoff), so the Betfair close does not depend on where the 15-minute cadence happens to fall. Its kickoffs come from `odds_lambda.betfair.kickoff.next_betfair_kickoff`, which adds an earlier market start (`odds_snapshots.market_start_time` of the event's latest `betfair` match-odds snapshot) as a target while it is ahead, so an event can get a close run before it as well as before its `commence_time` ([Betfair job](../collection/betfair-exchange.md#flow)).
 - `fetch-oddsportal` passes `odds_lambda.jobs.fetch_oddsportal.candidate_scrape_leads`: 5 min before each active mechanical candidate's decision time, late until that decision time, so every candidate decision reads a snapshot taken just before it ([fetch-oddsportal job](../collection/fetch-oddsportal-job.md#flow)).
 
 ## Overnight windows

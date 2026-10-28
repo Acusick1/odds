@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
-from odds_core.models import DataQualityLog, Event, Odds, OddsSnapshot, Price, SnapshotPayload
+from odds_core.models import DataQualityLog, Event, OddsSnapshot, Price, SnapshotPayload
 from odds_core.vocabulary import Market, Source, TimeBasis
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload
 from odds_lambda.storage.writers import OddsWriter
@@ -68,15 +68,14 @@ async def event(pglite_async_session: AsyncSession) -> Event:
 
 async def _store(session: AsyncSession, raw_data: dict[str, Any]) -> OddsSnapshot:
     payload_id = await store_payload(session, [raw_data])
-    snapshot, _ = await OddsWriter(session).store_odds_snapshot(
+    stored = await OddsWriter(session).store_envelope(
         "e9a1",
         raw_data,
         TAKEN,
         shape=SnapshotShape(Source.ODDS_API, TimeBasis.OBSERVED, payload_id),
-        api_request_id="req",
     )
     await session.flush()
-    return snapshot
+    return stored.snapshot
 
 
 async def _snapshots(session: AsyncSession) -> list[OddsSnapshot]:
@@ -84,31 +83,24 @@ async def _snapshots(session: AsyncSession) -> list[OddsSnapshot]:
 
 
 class TestMultiMarketEnvelope:
-    async def test_each_market_is_a_snapshot_cut_to_its_own_market(
+    async def test_each_market_is_a_snapshot_sharing_the_payload(
         self, pglite_async_session: AsyncSession, event: Event
     ) -> None:
         session = pglite_async_session
-        raw = _odds_api_envelope()
 
-        stored = await _store(session, raw)
+        stored = await _store(session, _odds_api_envelope())
 
         first, spreads, totals = await _snapshots(session)
         assert stored.id == first.id
-        assert [
-            [m["key"] for m in s.raw_data["bookmakers"][0]["markets"]]
-            for s in (first, spreads, totals)
-        ] == [["1x2"], ["spreads"], ["totals"]]
-        assert first.raw_data["id"] == raw["id"]
         assert [s.market for s in (first, spreads, totals)] == [
             Market.ONE_X_TWO,
             Market.SPREADS,
             Market.TOTALS,
         ]
         assert {s.payload_id for s in (first, spreads, totals)} == {first.payload_id}
-        assert {s.api_request_id for s in (first, spreads, totals)} == {"req"}
-        assert {s.fetch_tier for s in (first, spreads, totals)} == {first.fetch_tier}
+        assert {s.snapshot_time for s in (first, spreads, totals)} == {TAKEN}
 
-    async def test_odds_rows_and_prices_go_to_the_snapshot_of_their_market(
+    async def test_prices_go_to_the_snapshot_of_their_market(
         self, pglite_async_session: AsyncSession, event: Event
     ) -> None:
         session = pglite_async_session
@@ -116,12 +108,6 @@ class TestMultiMarketEnvelope:
         await _store(session, _odds_api_envelope())
 
         first, spreads, totals = await _snapshots(session)
-        odds = (await session.execute(select(Odds.snapshot_id, Odds.market_key))).all()
-        assert {(snapshot_id, market) for snapshot_id, market in odds} == {
-            (first.id, "1x2"),
-            (spreads.id, "spreads"),
-            (totals.id, "totals"),
-        }
         per_snapshot = dict(
             (
                 await session.execute(
@@ -143,7 +129,7 @@ class TestKeyConflicts:
 
         assert again.id == first.id
         assert len(await _snapshots(session)) == 3
-        assert (await session.execute(select(func.count()).select_from(Odds))).scalar_one() == 7
+        assert (await session.execute(select(func.count()).select_from(Price))).scalar_one() == 7
 
     async def test_a_conflicting_envelope_keeps_the_stored_one_and_is_logged(
         self, pglite_async_session: AsyncSession, event: Event
@@ -161,7 +147,7 @@ class TestKeyConflicts:
             )
         ).scalars()
         assert [c.raw_data["kept_snapshot_id"] for c in conflicts] == [first.id]
-        assert (await session.execute(select(func.count()).select_from(Odds))).scalar_one() == 7
+        assert (await session.execute(select(func.count()).select_from(Price))).scalar_one() == 7
         assert (
             await session.execute(select(func.count()).select_from(SnapshotPayload))
         ).scalar_one() == 2

@@ -24,7 +24,7 @@ status: stable
 
 # The odds CLI
 
-`odds_cli.main.app` is a Typer app installed as the `odds` script. Each group is a module in `packages/odds-cli/odds_cli/commands/` registered with `add_typer`. Each command's `--help` is authoritative for flags and defaults. Commands are documented on the page that owns their domain (the `polymarket` group's Polymarket EPL commands included); none is repeated here. `odds_cli.main.callback` configures human-readable logging ([Code conventions](code-conventions.md#logging)). The root help text and banner describe the tool as NBA (#448).
+`odds_cli.main.app` is a Typer app installed as the `odds` script. Each group is a module in `packages/odds-cli/odds_cli/commands/` registered with `add_typer`. Each command's `--help` is authoritative for flags and defaults. Commands are documented on the page that owns their domain (the `polymarket` group's `backfill-odds` included); none is repeated here. `odds_cli.main.callback` configures human-readable logging ([Code conventions](code-conventions.md#logging)). The root help text and banner describe the tool as NBA (#448).
 
 ## Command groups
 
@@ -40,9 +40,8 @@ status: stable
 | `odds status` | [odds status](../operations/health-monitor.md#odds-status), [Odds API quota](../collection/odds-api-quota.md) |
 | `validate`, `quality` | [Coverage and completeness checks](../storage/coverage-checks.md) (`quality coverage` lists each book by its canonical key, from price rows) |
 | `copy` | [Copy production data locally](howto-copy-production-data.md) |
-| `data` | [Shape backfill and verify](../storage/shape-backfill.md), [Backfill and verify the new shape](../storage/howto-backfill-the-new-shape.md) (`verify-shape` exits 1 on any mismatch, `backfill-shape` exits 2, before writing, when a candidate decision's input would be split or deleted or a twin merge would delete decisions or trades without `--allow-merge-drops`) |
 | `scheduler` | [Local scheduler](../scheduling/local-scheduler.md) |
-| `polymarket` | [Polymarket pipeline and tables](../collection/polymarket.md) (`odds_cli.commands.polymarket.link` matches an event from its ticker), [Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md#backfill-command) (`odds_cli.commands.polymarket.backfill_odds` attaches matches to events before storing history, and reports the matches that failed) |
+| `polymarket` | [Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md#backfill-command) (`odds_cli.commands.polymarket.backfill_odds` attaches matches to events before storing history, and reports the matches that failed) |
 | `injuries`, `nba-stats`, `pbpstats` | [NBA feeds](../collection/nba-injuries-and-stats.md) |
 | `paper` | [Paper trading](../agent/paper-trading.md) |
 | `candidates` | [Candidate registry](../evaluation/candidate-registry.md#odds-candidates-list), [Replay backtest](../evaluation/candidate-backtest.md), [Parity check](../evaluation/candidate-parity.md) |

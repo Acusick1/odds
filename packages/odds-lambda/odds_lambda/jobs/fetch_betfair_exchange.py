@@ -2,8 +2,8 @@
 
 Polls the Betfair Exchange API for upcoming events in a sport, fetches the
 best back/lay of each market the sport collects (Match Odds, and Over/Under
-2.5 Goals for EPL), converts them to one canonical ``raw_data`` envelope per
-event, and writes it via ``OddsWriter.store_odds_snapshot``, one snapshot per
+2.5 Goals for EPL), converts them to one canonical envelope per
+event, and writes it via ``OddsWriter.store_envelope``, one snapshot per
 market. Self-schedules with proximity-based intervals matching ``fetch_oddsportal``.
 
 Replaces the previous BFE-via-OddsPortal data path that broke 2026-04-21
@@ -22,7 +22,6 @@ from odds_core.alerts import job_alert_context
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_core.models import FetchLog
-from odds_core.snapshot_sources import SnapshotSource
 from odds_core.sports import SportKey
 from odds_core.vocabulary import Source, TimeBasis
 
@@ -36,7 +35,7 @@ from odds_lambda.betfair import (
     resolve_teams,
 )
 from odds_lambda.betfair.cert_loader import resolve_cert_paths
-from odds_lambda.betfair.constants import LIVE_REQUEST_ID_PREFIX, BetfairMarketSpec
+from odds_lambda.betfair.constants import BetfairMarketSpec
 from odds_lambda.betfair.kickoff import next_betfair_kickoff
 from odds_lambda.collection_calendar import (
     CollectionSource,
@@ -170,11 +169,7 @@ def _account_for(
 
 
 def _envelope(book: BetfairBook, entries: list[dict[str, Any]]) -> dict[str, Any]:
-    return {
-        "bookmakers": entries,
-        "source": SnapshotSource.BETFAIR_API.value,
-        "betfair_event_id": book.betfair_event_id,
-    }
+    return {"bookmakers": entries, "betfair_event_id": book.betfair_event_id}
 
 
 async def ingest_sport(
@@ -281,14 +276,13 @@ async def ingest_sport(
                 LiveListing(
                     game=game,
                     external_id=book.betfair_event_id,
-                    raw_data=raw_data,
+                    envelope=envelope,
                     snapshot_time=snapshot_time,
                     label=book.betfair_event_name,
                 )
-                for book, game, raw_data in envelopes
+                for book, game, envelope in envelopes
             ],
             SnapshotShape(Source.BETFAIR, TimeBasis.OBSERVED, payload_id),
-            f"{LIVE_REQUEST_ID_PREFIX}{snapshot_time.isoformat()}",
             now=snapshot_time,
         )
         stats.events_created += writes.events_created

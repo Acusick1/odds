@@ -8,7 +8,6 @@ sources:
   - odds_lambda.jobs.fetch_odds.SOURCE
   - odds_lambda.event_sync.EventSyncService
   - odds_lambda.scheduling.helpers.get_next_kickoff
-  - odds_lambda.storage.writers.OddsWriter.store_odds_snapshot
   - odds_lambda.storage.writers.OddsWriter.store_envelope
   - odds_lambda.scheduling.backends.aws.AWSEventBridgeBackend
   - odds_core.config.SchedulerConfig
@@ -41,7 +40,7 @@ It requires `ctx.sport` (a missing sport raises `ValueError` before any work) an
 
 ## Log events
 
-`fetch_odds_job_started`, `fetch_odds_executing`, `fetch_odds_next_scheduled`, `fetch_odds_scheduling_failed` (`odds_lambda.jobs.fetch_odds.main`), `odds_snapshot_stored` (`odds_lambda.storage.writers.OddsWriter.store_envelope`, one per envelope stored, with its odds-row count and fetch tier, from `odds_lambda.tier_utils.snapshot_tier` with the `observed` time basis of the snapshot shape `odds_lambda.ingestion.OddsIngestionService` passes, which also writes its price rows) and `eventbridge_rule_updated` (`odds_lambda.scheduling.backends.aws.AWSEventBridgeBackend._schedule_with_retry`).
+`fetch_odds_job_started`, `fetch_odds_executing`, `fetch_odds_next_scheduled`, `fetch_odds_scheduling_failed` (`odds_lambda.jobs.fetch_odds.main`), `odds_snapshot_stored` (`odds_lambda.storage.writers.OddsWriter.store_envelope`, one per envelope stored, with its bookmaker count and the number of snapshots written) and `eventbridge_rule_updated` (`odds_lambda.scheduling.backends.aws.AWSEventBridgeBackend._schedule_with_retry`).
 
 ## Related
 

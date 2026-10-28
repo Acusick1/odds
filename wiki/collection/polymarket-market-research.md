@@ -7,17 +7,16 @@ sources:
   - experiments/scripts/polymarket_mlb_discover.py
   - experiments/scripts/polymarket_mlb_orderbooks.py
   - experiments/scripts/polymarket_mlb_volume.py
-  - experiments/scripts/polymarket_mlb_sentiment.py
 status: stable
 ---
 
 # Polymarket market character and data availability
 
-Polymarket was collected for NBA and is not a trading venue for us ([ADR-0013](../../docs/adr/0013-collect-polymarket-epl-as-sharp-reference.md)). UK trading is blocked for all sports (an external fact recorded on 2026-03-09 and 2026-04-17, which the repo cannot verify). In a February 2026 NBA cross-source check over 228 events, Polymarket correlated 0.9978 with sportsbook probabilities (#134), and at 230 events the Polymarket features (a 16-column, NBA-only group) showed no measurable effect (#136). The pipeline that exists is described on [polymarket](polymarket.md).
+Polymarket is not a trading venue for us ([ADR-0013](../../docs/adr/0013-collect-polymarket-epl-as-sharp-reference.md)). UK trading is blocked for all sports (an external fact recorded on 2026-03-09 and 2026-04-17, which the repo cannot verify). In a February 2026 NBA cross-source check over 228 events, Polymarket correlated 0.9978 with sportsbook probabilities (#134), and at 230 events a 16-column NBA-only Polymarket feature group showed no measurable effect (#136). What is collected, EPL match prices, is described on [Polymarket match prices as odds snapshots](polymarket-odds-snapshots.md).
 
 ## Market character by sport
 
-Figures were observed from live markets, not computed by code in this repo. The MLB figures come from the probe scripts `experiments/scripts/polymarket_mlb_discover.py`, `experiments/scripts/polymarket_mlb_orderbooks.py`, `experiments/scripts/polymarket_mlb_volume.py` and `experiments/scripts/polymarket_mlb_sentiment.py` (recorded in dff040d; no results file exists under `experiments/results/`). The EPL and NBA figures have no probe script and are (inferred).
+Figures were observed from live markets, not computed by code in this repo. The MLB figures come from the probe scripts `experiments/scripts/polymarket_mlb_discover.py`, `experiments/scripts/polymarket_mlb_orderbooks.py`, and `experiments/scripts/polymarket_mlb_volume.py`, and a sentiment probe kept only in history (all recorded in dff040d; no results file exists under `experiments/results/`). The EPL and NBA figures have no probe script and are (inferred).
 
 | Sport | Observed character |
 |---|---|
@@ -53,10 +52,10 @@ Observed from the API, not verifiable from the repo:
 | Order book (CLOB) | live only | no (404 after close) |
 | Current price and midpoint (CLOB) | yes | no |
 
-A full game lifecycle of about 7 days from market creation to resolution yields about 940-960 moneyline price points. Order-book history cannot be backfilled, so only the live path stores books.
+A full game lifecycle of about 7 days from market creation to resolution yields about 940-960 moneyline price points. Order-book history cannot be backfilled, and no job stores books.
 
 ## Related
 
-- [Polymarket pipeline and tables](polymarket.md)
+- [Polymarket match prices as odds snapshots](polymarket-odds-snapshots.md)
 - [Data sources](data-sources.md)
 - [Agent data sources](../agent/agent-data-sources.md)

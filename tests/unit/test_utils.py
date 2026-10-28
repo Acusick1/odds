@@ -1,7 +1,5 @@
 """Unit tests for analytics utility functions."""
 
-from datetime import UTC, datetime
-
 import pytest
 from odds_analytics.utils import (
     calculate_ev,
@@ -14,7 +12,6 @@ from odds_analytics.utils import (
     detect_arbitrage,
     per_book_market_holds,
 )
-from odds_core.models import Odds
 from odds_core.odds_math import (
     american_to_decimal,
     calculate_implied_probability,
@@ -79,22 +76,6 @@ class TestOutcomePriceDecimal:
     def test_missing_price_raises(self):
         with pytest.raises(KeyError):
             outcome_price_decimal({"name": "A"})
-
-
-class TestOddsModelPrices:
-    def test_implied_probability_and_american_price_derive_from_decimal(self):
-        odds = Odds(
-            event_id="e",
-            bookmaker_key="b",
-            bookmaker_title="B",
-            market_key="1x2",
-            outcome_name="Home",
-            price_decimal=1.64,
-            odds_timestamp=datetime(2026, 1, 1, tzinfo=UTC),
-            last_update=datetime(2026, 1, 1, tzinfo=UTC),
-        )
-        assert odds.implied_probability == pytest.approx(1 / 1.64)
-        assert odds.american_price == -156
 
 
 class TestProbabilityCalculations:

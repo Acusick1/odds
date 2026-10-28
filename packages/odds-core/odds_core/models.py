@@ -12,7 +12,6 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
-    Float,
     ForeignKey,
     Identity,
     Index,
@@ -20,12 +19,10 @@ from sqlalchemy import (
     Numeric,
     Text,
     UniqueConstraint,
-    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
-from odds_core.odds_math import decimal_to_american, decimal_to_implied_probability
 from odds_core.team import normalize_team_name
 from odds_core.vocabulary import (
     EXTERNAL_ID_SOURCES,
@@ -118,22 +115,10 @@ class Event(SQLModel, table=True):
     home_team: str = Field(index=True, description="Home team name")
     away_team: str = Field(index=True, description="Away team name")
     status: EventStatus = Field(default=EventStatus.SCHEDULED, description="Event status")
-    mlb_game_pk: int | None = Field(
-        default=None, sa_column=Column(BigInteger), description="MLB Stats API gamePk"
-    )
-    no_game_pk_reason: str | None = Field(
-        default=None,
-        sa_column=Column(Text),
-        description="Why an MLB event was marked as having no gamePk",
-    )
 
     def model_post_init(self, __context: Any) -> None:
         self.home_team = normalize_team_name(self.home_team)
         self.away_team = normalize_team_name(self.away_team)
-
-    def assign_game_pk(self, game_pk: int) -> None:
-        self.mlb_game_pk = game_pk
-        self.no_game_pk_reason = None
 
     # Results (populated after game completion)
     home_score: int | None = Field(default=None, description="Final home team score")
@@ -154,23 +139,12 @@ class Event(SQLModel, table=True):
         description="Record last update time",
     )
 
-    __table_args__ = (
-        Index(
-            "uq_events_mlb_game_pk",
-            "mlb_game_pk",
-            unique=True,
-            postgresql_where=text("mlb_game_pk IS NOT NULL"),
-        ),
-        CheckConstraint(
-            "mlb_game_pk IS NULL OR no_game_pk_reason IS NULL",
-            name="ck_events_game_pk_or_no_game_pk_reason",
-        ),
-        UniqueConstraint("surrogate_id", name="uq_events_surrogate_id"),
-    )
+    __table_args__ = (UniqueConstraint("surrogate_id", name="uq_events_surrogate_id"),)
 
 
 class OddsSnapshot(SQLModel, table=True):
-    """Raw odds snapshot preserving complete API response."""
+    """One source's prices for one market of an event at one time; the prices are ``Price``
+    rows and the envelope they were read from is its ``SnapshotPayload``."""
 
     __tablename__ = "odds_snapshots"
 
@@ -181,24 +155,6 @@ class OddsSnapshot(SQLModel, table=True):
         description="Time of snapshot capture",
     )
 
-    # Full API response stored as JSON
-    raw_data: dict = Field(sa_column=Column(JSON), description="Complete API response")
-
-    # Quick statistics
-    bookmaker_count: int = Field(description="Number of bookmakers in snapshot")
-    api_request_id: str | None = Field(default=None, description="API request ID for debugging")
-
-    # Fetch tier tracking (for adaptive sampling validation and ML features)
-    fetch_tier: str | None = Field(
-        default=None,
-        index=True,
-        description="Fetch tier: opening, early, sharp, pregame, closing",
-    )
-    hours_until_commence: float | None = Field(
-        default=None, description="Hours between snapshot and game start"
-    )
-
-    # Nullable until the backfill fills every stored snapshot.
     source: Source | None = Field(default=None, sa_column=Column(StrEnumText(Source)))
     market: Market | None = Field(default=None, sa_column=Column(StrEnumText(Market)))
     time_basis: TimeBasis | None = Field(default=None, sa_column=Column(StrEnumText(TimeBasis)))
@@ -223,7 +179,6 @@ class OddsSnapshot(SQLModel, table=True):
 
     __table_args__ = (
         Index("ix_event_snapshot_time", "event_id", "snapshot_time"),
-        Index("ix_event_tier", "event_id", "fetch_tier"),
         UniqueConstraint(
             "event_id",
             "source",
@@ -328,66 +283,6 @@ class HealthCheckAcknowledgement(SQLModel, table=True):
         ),
         closed_set_check("check_name", HealthCheck, "ck_health_check_acknowledgements_check"),
     )
-
-
-class Odds(SQLModel, table=True):
-    """Normalized odds record for efficient querying."""
-
-    __tablename__ = "odds"
-
-    id: int | None = Field(default=None, primary_key=True)
-    event_id: str = Field(foreign_key="events.id", index=True, description="Event reference")
-    snapshot_id: int | None = Field(
-        default=None,
-        foreign_key="odds_snapshots.id",
-        index=True,
-        description="Snapshot the row was parsed from; null only for legacy rows whose snapshot "
-        "was ambiguous",
-    )
-
-    # Bookmaker information
-    bookmaker_key: str = Field(index=True, description="Bookmaker identifier")
-    bookmaker_title: str = Field(description="Bookmaker display name")
-    market_key: str = Field(index=True, description="Market type: h2h, spreads, totals")
-
-    # Outcome data
-    outcome_name: str = Field(description="Team name or Over/Under")
-    price_decimal: float = Field(
-        sa_column=Column(Float, nullable=False),
-        description="Decimal odds as quoted by the source (e.g., 1.91, 2.5)",
-    )
-    point: float | None = Field(default=None, description="Spread/total line (e.g., -2.5, 218.5)")
-
-    # Timestamps
-    odds_timestamp: datetime = Field(
-        sa_column=Column(DateTime(timezone=True), index=True), description="When odds were valid"
-    )
-    last_update: datetime = Field(
-        sa_column=Column(DateTime(timezone=True)), description="Bookmaker's last update time"
-    )
-    created_at: datetime = Field(
-        sa_column=Column(DateTime(timezone=True)),
-        default_factory=utc_now,
-        description="Record creation time",
-    )
-
-    # Data quality
-    is_valid: bool = Field(default=True, description="Validation flag")
-    validation_notes: str | None = Field(default=None, description="Validation issues")
-
-    __table_args__ = (
-        Index("ix_event_bookmaker_market", "event_id", "bookmaker_key", "market_key"),
-        Index("ix_bookmaker_time", "bookmaker_key", "odds_timestamp"),
-        CheckConstraint("price_decimal > 1.0", name="ck_odds_price_decimal_gt_one"),
-    )
-
-    @property
-    def implied_probability(self) -> float:
-        return decimal_to_implied_probability(self.price_decimal)
-
-    @property
-    def american_price(self) -> int:
-        return decimal_to_american(self.price_decimal)
 
 
 class DataQualityLog(SQLModel, table=True):

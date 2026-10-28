@@ -2,20 +2,15 @@
 
 import importlib.util
 import json
-from datetime import UTC, datetime
 from pathlib import Path
 from types import ModuleType
 from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
-from odds_core.models import Event, EventStatus, Odds, OddsSnapshot
-from odds_core.odds_math import american_to_decimal
 from odds_core.team import normalize_team_name
 from odds_core.utils import relabel_three_way_markets
 from odds_lambda.data_fetcher import TheOddsAPIClient
-from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 MIGRATION_PATH = (
     Path(__file__).parents[2]
@@ -122,120 +117,7 @@ def load_migration() -> ModuleType:
     return module
 
 
-class TestRelabelMigration:
-    async def seed(self, session: AsyncSession) -> None:
-        when = datetime(2026, 10, 18, 10, tzinfo=UTC)
-        for event_id, sport_key, three_way, market_key in [
-            ("epl", "soccer_epl", True, "h2h"),
-            ("epl_1x2_long", "soccer_epl", True, "1x2"),
-            ("epl_1x2_canonical", "soccer_epl", True, "1x2"),
-            ("mlb", "baseball_mlb", False, "h2h"),
-        ]:
-            session.add(
-                Event(
-                    id=event_id,
-                    sport_key=sport_key,
-                    sport_title=sport_key,
-                    commence_time=when,
-                    home_team="H",
-                    away_team="A",
-                    status=EventStatus.SCHEDULED,
-                )
-            )
-            raw = three_way_event(sport_key)
-            raw["bookmakers"][0]["markets"][0]["key"] = market_key
-            if event_id == "epl_1x2_canonical":
-                for outcome in raw["bookmakers"][0]["markets"][0]["outcomes"]:
-                    outcome["name"] = normalize_team_name(outcome["name"])
-            if not three_way:
-                raw["bookmakers"][0]["markets"][0]["outcomes"].pop()
-            raw["bookmakers"].append({"key": "empty", "title": "Empty", "markets": []})
-            raw["bookmakers"].append({"key": "nomarkets", "title": "No markets"})
-            session.add(
-                OddsSnapshot(event_id=event_id, snapshot_time=when, raw_data=raw, bookmaker_count=1)
-            )
-            names = (
-                ["Newcastle", "Tottenham", "Draw"]
-                if event_id == "epl_1x2_canonical"
-                else ["Newcastle United", "Tottenham Hotspur", "Draw"]
-                if three_way
-                else ["Newcastle United", "Tottenham Hotspur"]
-            )
-            for name in names:
-                session.add(
-                    Odds(
-                        event_id=event_id,
-                        bookmaker_key="pinnacle",
-                        bookmaker_title="Pinnacle",
-                        market_key=market_key,
-                        outcome_name=name,
-                        price_decimal=american_to_decimal(100),
-                        odds_timestamp=when,
-                        last_update=when,
-                    )
-                )
-        await session.commit()
-
-    async def keys(
-        self, session: AsyncSession
-    ) -> tuple[dict[str, set[tuple[str, str]]], dict[str, dict[str, Any]]]:
-        odds: dict[str, set[tuple[str, str]]] = {}
-        rows = (
-            await session.execute(select(Odds.event_id, Odds.market_key, Odds.outcome_name))
-        ).all()
-        for event_id, market_key, outcome_name in rows:
-            odds.setdefault(event_id, set()).add((market_key, outcome_name))
-        snapshots = {
-            s.event_id: s.raw_data for s in (await session.execute(select(OddsSnapshot))).scalars()
-        }
-        return odds, snapshots
-
-    @pytest.mark.asyncio
-    async def test_relabels_only_soccer_three_way_and_is_idempotent(
-        self, test_session: AsyncSession
-    ) -> None:
-        migration = load_migration()
-        await self.seed(test_session)
-
-        for _ in range(2):
-            await test_session.execute(text(migration.RELABEL_ODDS_SQL))
-            await test_session.execute(text(migration.RELABEL_SNAPSHOTS_SQL))
-            await test_session.commit()
-            test_session.expire_all()
-
-            odds, snapshots = await self.keys(test_session)
-            assert odds["epl"] == {("1x2", "Newcastle"), ("1x2", "Tottenham"), ("1x2", "Draw")}
-            for event_id in ("epl_1x2_long", "epl_1x2_canonical"):
-                assert odds[event_id] == {
-                    ("1x2", "Newcastle"),
-                    ("1x2", "Tottenham"),
-                    ("1x2", "Draw"),
-                }
-                names = [
-                    o["name"]
-                    for o in snapshots[event_id]["bookmakers"][0]["markets"][0]["outcomes"]
-                ]
-                assert names == ["Newcastle", "Tottenham", "Draw"]
-                assert market_keys(snapshots[event_id]) == ["1x2", "totals"]
-            assert odds["mlb"] == {
-                ("h2h", "Newcastle United"),
-                ("h2h", "Tottenham Hotspur"),
-            }
-            epl = snapshots["epl"]
-            assert market_keys(epl) == ["1x2", "totals"]
-            assert [o["name"] for o in epl["bookmakers"][0]["markets"][0]["outcomes"]] == [
-                "Newcastle",
-                "Tottenham",
-                "Draw",
-            ]
-            assert epl["bookmakers"][1:] == [
-                {"key": "empty", "title": "Empty", "markets": []},
-                {"key": "nomarkets", "title": "No markets"},
-            ]
-            mlb = snapshots["mlb"]
-            assert market_keys(mlb) == ["h2h", "totals"]
-            assert mlb["bookmakers"][0]["markets"][0]["outcomes"][0]["name"] == "Newcastle United"
-
+class TestRelabelMigrationNames:
     def test_name_map_matches_normalize_team_name(self) -> None:
         for raw, canonical in json.loads(load_migration().TEAM_NAMES).items():
             assert normalize_team_name(raw) == canonical

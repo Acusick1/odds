@@ -1,16 +1,6 @@
-"""Polymarket event matching to internal sportsbook Event records."""
+"""NBA team names: the aliases sources use for each canonical name, and NBA abbreviations."""
 
 from __future__ import annotations
-
-import re
-from datetime import UTC, date, datetime, timedelta
-
-import structlog
-from odds_core.models import Event
-from sqlalchemy import and_, select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-logger = structlog.get_logger(__name__)
 
 # Canonical team name → set of known aliases
 TEAM_ALIASES: dict[str, set[str]] = {
@@ -88,8 +78,6 @@ _ALIAS_TO_CANONICAL: dict[str, str] = {
 # Canonical team name → standard NBA abbreviation (used by PBPStats, nba_api)
 CANONICAL_TO_ABBREV: dict[str, str] = {v: k.upper() for k, v in NBA_ABBREV_MAP.items()}
 
-_TICKER_RE = re.compile(r"^nba-([a-z]+)-([a-z]+)-(\d{4})-(\d{2})-(\d{2})$")
-
 
 def normalize_team(name: str) -> str | None:
     """Normalize a team name to its canonical form.
@@ -97,104 +85,3 @@ def normalize_team(name: str) -> str | None:
     Returns the canonical name (e.g. "Dallas Mavericks") or None if unrecognized.
     """
     return _ALIAS_TO_CANONICAL.get(name.strip().lower())
-
-
-def parse_ticker(ticker: str) -> tuple[str, str, date] | None:
-    """Parse a Polymarket NBA ticker into (away_abbrev, home_abbrev, game_date).
-
-    Format: nba-{away}-{home}-{year}-{month}-{day}
-    Returns None if the ticker does not match the expected pattern.
-    """
-    match = _TICKER_RE.match(ticker.lower())
-    if not match:
-        return None
-    away_abbrev, home_abbrev, year, month, day = match.groups()
-    try:
-        game_date = date(int(year), int(month), int(day))
-    except ValueError:
-        return None
-    return away_abbrev, home_abbrev, game_date
-
-
-async def match_polymarket_event(
-    session: AsyncSession,
-    ticker: str,
-) -> str | None:
-    """Find the matching internal Event record for a Polymarket event.
-
-    Uses the ticker to derive team abbreviations and game date, then queries
-    the Event table within a ±24-hour window of the ticker's game date.
-
-    Args:
-        session: Async database session
-        ticker: Polymarket ticker (e.g. "nba-dal-mil-2026-01-25")
-
-    Returns event_id if a confident single match is found, None otherwise.
-    Never produces false positives — returns None when uncertain.
-    """
-    parsed = parse_ticker(ticker)
-    if not parsed:
-        logger.warning("polymarket_ticker_parse_failed", ticker=ticker)
-        return None
-
-    away_abbrev, home_abbrev, game_date = parsed
-
-    away_canonical = NBA_ABBREV_MAP.get(away_abbrev)
-    home_canonical = NBA_ABBREV_MAP.get(home_abbrev)
-
-    if not away_canonical or not home_canonical:
-        logger.warning(
-            "polymarket_unknown_team_abbrev",
-            ticker=ticker,
-            away=away_abbrev,
-            home=home_abbrev,
-        )
-        return None
-
-    # Ticker dates use US local dates but sportsbook stores UTC timestamps.
-    # Evening ET games on "Nov 22" have UTC commence times on Nov 23 (00:00-05:00 UTC).
-    # Center the window on noon UTC to safely capture all US timezone games.
-    game_noon_utc = datetime(game_date.year, game_date.month, game_date.day, 12, tzinfo=UTC)
-    window_start = game_noon_utc - timedelta(hours=24)
-    window_end = game_noon_utc + timedelta(hours=24)
-
-    query = select(Event).where(
-        and_(
-            Event.commence_time >= window_start,
-            Event.commence_time <= window_end,
-            Event.away_team == away_canonical,
-            Event.home_team == home_canonical,
-        )
-    )
-
-    result = await session.execute(query)
-    candidates = list(result.scalars().all())
-
-    if len(candidates) == 1:
-        event_id = candidates[0].id
-        logger.info(
-            "polymarket_event_matched",
-            ticker=ticker,
-            event_id=event_id,
-            away=away_canonical,
-            home=home_canonical,
-        )
-        return event_id
-
-    if len(candidates) > 1:
-        logger.warning(
-            "polymarket_event_ambiguous_match",
-            ticker=ticker,
-            candidate_count=len(candidates),
-        )
-        return None
-
-    logger.warning(
-        "polymarket_event_no_match",
-        ticker=ticker,
-        away=away_canonical,
-        home=home_canonical,
-        window_start=window_start,
-        window_end=window_end,
-    )
-    return None

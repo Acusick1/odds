@@ -115,25 +115,3 @@ def snapshot_tiers(
         return covered
 
     return [tier(*snapshot) for snapshot in snapshots]
-
-
-def calculate_hours_until_commence(snapshot_time: datetime, commence_time: datetime) -> float:
-    """
-    Calculate hours between snapshot and game commence time.
-
-    Args:
-        snapshot_time: When the odds snapshot was captured (timezone-aware)
-        commence_time: When the game starts (timezone-aware)
-
-    Returns:
-        Hours until game commence (negative if game already started).
-
-    Example:
-        >>> from datetime import datetime, timedelta, UTC
-        >>> now = datetime.now(UTC)
-        >>> game_time = now + timedelta(hours=2.5)
-        >>> calculate_hours_until_commence(now, game_time)
-        2.5
-    """
-    time_delta = commence_time - snapshot_time
-    return time_delta.total_seconds() / 3600

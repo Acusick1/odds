@@ -124,7 +124,7 @@ class BackfillExecutor:
         # Process each game
         for game in games:
             event_id = game["event_id"]
-            odds_api_id = game.get("odds_api_id", event_id)
+            odds_api_id = game.get("odds_api_id")
             home_team = game["home_team"]
             away_team = game["away_team"]
             snapshots = game["snapshots"]
@@ -292,7 +292,7 @@ class BackfillExecutor:
                 message="Event not found in API response",
             )
 
-        # Store to database - keep timezone-aware for tier calculation
+        # Store to database
         snapshot_dt = parse_api_datetime(snapshot_time)
 
         async with self._session_factory() as session:
@@ -312,9 +312,9 @@ class BackfillExecutor:
                     message=f"Game dropped: {found.describe()}",
                 )
             payload_id = await store_payload(session, [event_data])
-            await writer.store_odds_snapshot(
+            await writer.store_envelope(
                 event_id=found.event.id,
-                raw_data=event_data,
+                envelope=event_data,
                 snapshot_time=snapshot_dt,
                 shape=SnapshotShape(Source.ODDS_API, TimeBasis.UPPER_BOUND, payload_id),
             )

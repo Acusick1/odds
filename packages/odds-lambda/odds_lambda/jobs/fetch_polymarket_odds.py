@@ -2,7 +2,7 @@
 
 Reads the open match events of a sport from Gamma, attaches each to its existing
 event through the resolver (Polymarket creates none), and stores the three Yes
-midpoints and quotes through ``OddsWriter.store_odds_snapshot``. Self-schedules
+midpoints and quotes through ``OddsWriter.store_envelope``. Self-schedules
 with the cadence that mirrors the backfill grid spacing.
 """
 
@@ -26,12 +26,11 @@ from odds_lambda.collection_calendar import CollectionSource, decide_collection_
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.polymarket_fetcher import PolymarketClient
 from odds_lambda.polymarket_odds import (
-    LIVE_REQUEST_ID_PREFIX,
     MAX_HORIZON,
     MAX_QUOTE_SPREAD,
     TIER_STEPS,
     PolymarketMatch,
-    build_raw_data,
+    build_envelope,
     listed_game,
     parse_match_event,
     sum_is_valid,
@@ -159,7 +158,7 @@ async def ingest_sport(sport_key: SportKey, snapshot_time: datetime) -> Ingestio
             if not sum_is_valid(prices):
                 stats.sum_rejected += 1
                 continue
-            envelope = build_raw_data(match, sport, prices, snapshot_time, include_quotes=True)
+            envelope = build_envelope(match, sport, prices, snapshot_time, include_quotes=True)
             quoted.append((match, event, envelope))
 
         if quoted:
@@ -171,10 +170,9 @@ async def ingest_sport(sport_key: SportKey, snapshot_time: datetime) -> Ingestio
                     async with session.begin_nested():
                         stored = await writer.store_envelope(
                             event_id=event.id,
-                            raw_data=envelope,
+                            envelope=envelope,
                             snapshot_time=snapshot_time,
                             shape=shape,
-                            api_request_id=f"{LIVE_REQUEST_ID_PREFIX}{snapshot_time.isoformat()}",
                         )
                     stats.snapshots_stored += int(stored.inserted)
                 except Exception as e:

@@ -18,7 +18,7 @@ from odds_lambda.jobs import fetch_betfair_exchange
 from odds_lambda.jobs.fetch_oddsportal import CADENCE
 from odds_lambda.scheduling.decision import DORMANCY_HORIZON_DAYS
 
-from tests.test_helpers import make_tagged_snapshot
+from tests.test_helpers import make_tagged_snapshot, store_tagged
 
 NOW = datetime(2026, 7, 1, 12, 0, tzinfo=UTC)
 HORIZON = timedelta(days=DORMANCY_HORIZON_DAYS)
@@ -218,17 +218,31 @@ class TestBetfairKickoff:
         if totals_start is not None:
             snapshots.append((len(starts), totals_start, Market.TOTALS))
         for minutes, start, market in snapshots:
-            meta = {"inplay": False, "market_start_time": start}
+            if market is Market.TOTALS:
+                names = ("Over 2.5 Goals", "Under 2.5 Goals")
+            elif market is Market.H2H:
+                names = ("Home", "Away")
+            else:
+                names = ("Home", "The Draw", "Away")
+            meta = {
+                "inplay": False,
+                "market_start_time": start,
+                "runners": [{"runner_name": name, "best_back": 2.5} for name in names],
+            }
             snapshot_time = self.LAST_RUN - timedelta(minutes=30 - minutes)
             snapshot = make_tagged_snapshot(
                 event.id,
                 snapshot_time,
-                [{"key": "betfair_exchange", "markets": [], "betfair_meta": meta}],
+                [
+                    {
+                        "key": "betfair_exchange",
+                        "markets": [{"key": market.value, "outcomes": []}],
+                        "betfair_meta": meta,
+                    }
+                ],
                 "betfair_api",
             )
-            snapshot.api_request_id = f"betfair_api_{snapshot_time.isoformat()}"
-            snapshot.market = market
-            session.add(snapshot)
+            await store_tagged(session, snapshot)
         await session.commit()
 
     @staticmethod

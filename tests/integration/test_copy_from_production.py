@@ -14,12 +14,10 @@ from odds_core.models import (
     EventExternalId,
     EventStatus,
     HealthCheckAcknowledgement,
-    Odds,
     OddsSnapshot,
     Price,
 )
-from odds_core.odds_math import american_to_decimal
-from odds_core.vocabulary import HealthCheck, PriceOutcome, Side, Source
+from odds_core.vocabulary import HealthCheck, Market, PriceOutcome, Side, Source, TimeBasis
 from odds_lambda.copy_from_production import CopyStats, ProductionDataCopier
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -32,27 +30,6 @@ PROD_SCHEMA = "prod_source"
 KICKOFF = datetime(2026, 8, 22, 15, 0, tzinfo=UTC)
 WINDOW = (KICKOFF - timedelta(days=1), KICKOFF + timedelta(days=1))
 SPORT = "soccer_epl"
-
-
-def _raw_data() -> dict:
-    return {
-        "bookmakers": [
-            {
-                "key": "bet365",
-                "title": "Bet365",
-                "markets": [
-                    {
-                        "key": "1x2",
-                        "outcomes": [
-                            {"name": "Home", "price": 150},
-                            {"name": "Away", "price": 200},
-                            {"name": "Draw", "price": 230},
-                        ],
-                    }
-                ],
-            }
-        ]
-    }
 
 
 @pytest.fixture
@@ -99,44 +76,21 @@ async def _seed_prod_event(
             )
         )
         await session.flush()
-        for offset, (tag, tier) in enumerate([("football_data_uk", "early"), (None, "closing")]):
+        for offset, (source, time_basis, hours_before) in enumerate(
+            [
+                (Source.FOOTBALL_DATA_UK, TimeBasis.UPPER_BOUND, 25),
+                (Source.ODDS_API, TimeBasis.OBSERVED, 1),
+                (Source.BETFAIR, TimeBasis.OBSERVED, 1),
+            ]
+        ):
             session.add(
                 OddsSnapshot(
                     id=first_snapshot_id + offset,
                     event_id=event_id,
-                    snapshot_time=kickoff - timedelta(hours=24 * (1 - offset) + 1),
-                    raw_data=_raw_data(),
-                    bookmaker_count=1,
-                    api_request_id=tag,
-                    fetch_tier=tier,
-                    hours_until_commence=24.0 if offset == 0 else 1.0,
-                )
-            )
-        session.add(
-            OddsSnapshot(
-                id=first_snapshot_id + 2,
-                event_id=event_id,
-                snapshot_time=kickoff - timedelta(hours=1),
-                raw_data=_raw_data(),
-                bookmaker_count=1,
-                api_request_id=None,
-                fetch_tier="closing",
-                hours_until_commence=1.0,
-            )
-        )
-        await session.flush()
-        for outcome, price in (("Home", 150), ("Away", 200), ("Draw", 230)):
-            session.add(
-                Odds(
-                    event_id=event_id,
-                    snapshot_id=first_snapshot_id + 2,
-                    bookmaker_key="bet365",
-                    bookmaker_title="Bet365",
-                    market_key="1x2",
-                    outcome_name=outcome,
-                    price_decimal=american_to_decimal(price),
-                    odds_timestamp=kickoff - timedelta(hours=1),
-                    last_update=kickoff - timedelta(hours=1),
+                    snapshot_time=kickoff - timedelta(hours=hours_before),
+                    source=source,
+                    market=Market.ONE_X_TWO,
+                    time_basis=time_basis,
                 )
             )
         await session.commit()
@@ -152,7 +106,7 @@ def _copier(
 
 class TestCopyEvents:
     @pytest.mark.asyncio
-    async def test_copies_the_events_snapshots_but_not_their_odds_rows(
+    async def test_copies_the_events_snapshots(
         self,
         prod_session_maker: async_sessionmaker[AsyncSession],
         local_session_maker: async_sessionmaker[AsyncSession],
@@ -162,8 +116,6 @@ class TestCopyEvents:
         stats = await _copier(prod_session_maker, local_session_maker).copy_events(*WINDOW, SPORT)
 
         assert (stats.events_copied, stats.events_failed, stats.snapshots_copied) == (1, 0, 3)
-        async with local_session_maker() as session:
-            assert (await session.execute(select(Odds))).scalars().all() == []
 
     @pytest.mark.asyncio
     async def test_recopy_with_overwrite_replaces_without_duplicating(
@@ -186,7 +138,7 @@ class TestCopyEvents:
 
 class TestCopyPreservesColumns:
     @pytest.mark.asyncio
-    async def test_snapshot_keeps_source_tag_tier_and_creation_time(
+    async def test_snapshot_keeps_its_shape_and_creation_time(
         self,
         prod_session_maker: async_sessionmaker[AsyncSession],
         local_session_maker: async_sessionmaker[AsyncSession],
@@ -200,18 +152,13 @@ class TestCopyPreservesColumns:
         async with local_session_maker() as session:
             local_snapshots = (await session.execute(select(OddsSnapshot))).scalars().all()
 
-        def keyed(rows: Sequence[OddsSnapshot]) -> dict[tuple[datetime, str], Any]:
+        def keyed(rows: Sequence[OddsSnapshot]) -> dict[tuple[datetime, Any], Any]:
             return {
-                (r.snapshot_time, r.fetch_tier or ""): (
-                    r.api_request_id,
-                    r.hours_until_commence,
-                    r.created_at,
-                )
-                for r in rows
+                (r.snapshot_time, r.source): (r.market, r.time_basis, r.created_at) for r in rows
             }
 
         assert keyed(local_snapshots) == keyed(prod_snapshots)
-        assert "football_data_uk" in {s.api_request_id for s in local_snapshots}
+        assert Source.FOOTBALL_DATA_UK in {s.source for s in local_snapshots}
 
     @pytest.mark.asyncio
     async def test_event_keeps_result_and_overwrite_refreshes_it(
@@ -293,7 +240,7 @@ class TestCopyFailures:
 
 class TestOverwriteReplacesLocalRows:
     @pytest.mark.asyncio
-    async def test_snapshots_sharing_time_and_tag_stay_distinct(
+    async def test_snapshots_sharing_a_time_stay_distinct(
         self,
         prod_session_maker: async_sessionmaker[AsyncSession],
         local_session_maker: async_sessionmaker[AsyncSession],
@@ -306,9 +253,9 @@ class TestOverwriteReplacesLocalRows:
 
         async with local_session_maker() as session:
             snapshots = (await session.execute(select(OddsSnapshot))).scalars().all()
-        closing = [s for s in snapshots if s.fetch_tier == "closing"]
+        last_hour = [s for s in snapshots if s.snapshot_time == KICKOFF - timedelta(hours=1)]
         assert len(snapshots) == 3
-        assert len({(s.snapshot_time, s.api_request_id) for s in closing}) == 1
+        assert {s.source for s in last_hour} == {Source.ODDS_API, Source.BETFAIR}
 
     @pytest.mark.asyncio
     async def test_price_rows_equal_production_and_link_to_the_local_snapshot_copy(
@@ -333,7 +280,7 @@ class TestOverwriteReplacesLocalRows:
         assert price.snapshot_id == snapshot_ids[2]
 
     @pytest.mark.asyncio
-    async def test_old_untagged_local_snapshot_is_replaced(
+    async def test_a_local_snapshot_production_lacks_is_replaced(
         self,
         prod_session_maker: async_sessionmaker[AsyncSession],
         local_session_maker: async_sessionmaker[AsyncSession],
@@ -345,8 +292,9 @@ class TestOverwriteReplacesLocalRows:
                 OddsSnapshot(
                     event_id="evt_a",
                     snapshot_time=KICKOFF - timedelta(hours=30),
-                    raw_data=_raw_data(),
-                    bookmaker_count=1,
+                    source=Source.ODDS_API,
+                    market=Market.ONE_X_TWO,
+                    time_basis=TimeBasis.OBSERVED,
                 )
             )
             await session.commit()
@@ -401,9 +349,9 @@ class TestCopyLeavesLocalTwins:
                 OddsSnapshot(
                     event_id=twin_id,
                     snapshot_time=KICKOFF,
-                    raw_data=_raw_data(),
-                    bookmaker_count=1,
-                    api_request_id="football_data_uk",
+                    source=Source.FOOTBALL_DATA_UK,
+                    market=Market.ONE_X_TWO,
+                    time_basis=TimeBasis.CLOSE,
                 )
             )
             await session.commit()

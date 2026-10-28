@@ -17,7 +17,6 @@ from odds_core.models import (
     Event,
     EventExternalId,
     HealthCheckAcknowledgement,
-    Odds,
     OddsSnapshot,
     Price,
 )
@@ -208,8 +207,6 @@ class ProductionDataCopier:
             if local_event is not None:
                 copied.id = local_event.id
                 copied.surrogate_id = local_event.surrogate_id
-                # The odds table references the snapshots without a cascade.
-                await local_session.execute(delete(Odds).where(Odds.event_id == local_event.id))
                 await local_session.execute(
                     delete(OddsSnapshot).where(OddsSnapshot.event_id == local_event.id)
                 )

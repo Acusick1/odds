@@ -30,7 +30,6 @@ from odds_lambda.candidate_rules import (
     rule_sha256,
     run_rule,
 )
-from odds_lambda.storage.event_merge import canonical_events
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -78,8 +77,8 @@ class Coverage:
 @dataclass(frozen=True)
 class BacktestResult:
     """``overall`` is the estimate over every bet with a close in the scoreable prefix,
-    beyond the checkpoint cap of the verdict. ``range_events`` counts the canonical events in
-    the range, a model rule's training prefix included; ``tuning`` and ``refits`` record a model
+    beyond the checkpoint cap of the verdict. ``range_events`` counts the events in the
+    range, a model rule's training prefix included; ``tuning`` and ``refits`` record a model
     rule's hyperparameters chosen on that prefix and its fits, and ``library_versions`` the
     versions of the libraries that fitted and tuned it. ``comparison`` is another candidate replayed on the same decided events."""
 
@@ -116,7 +115,7 @@ def hash_status(candidate: MechanicalCandidate) -> HashStatus:
 
 
 async def final_events(session: AsyncSession, sport: str, start: date, end: date) -> list[Event]:
-    """Canonical FINAL events of ``sport`` with scores, kicked off on ``start`` to ``end`` (UTC days)."""
+    """FINAL events of ``sport`` with scores, kicked off on ``start`` to ``end`` (UTC days)."""
     result = await session.execute(
         select(Event)
         .where(
@@ -129,7 +128,7 @@ async def final_events(session: AsyncSession, sport: str, start: date, end: date
         )
         .order_by(Event.commence_time, Event.id)  # type: ignore[arg-type]
     )
-    return await canonical_events(session, result.scalars().all())
+    return list(result.scalars().all())
 
 
 @dataclass

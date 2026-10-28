@@ -13,7 +13,6 @@ from odds_lambda.price_rows import (
     PriceSpec,
     RowIssueType,
     expand_envelope,
-    market_envelope,
 )
 
 HOME, AWAY = "Arsenal", "Chelsea"
@@ -465,26 +464,6 @@ class TestOddsApi:
             ("fanduel", Side.BACK),
             ("betfair_exchange", Side.LAY),
         }
-        assert [b["key"] for b in market_envelope(raw, Market.H2H)["bookmakers"]] == [
-            "fanduel",
-            "betfair_ex_uk",
-        ]
-        assert market_envelope(raw, Market.ONE_X_TWO)["bookmakers"] == []
-
-    def test_market_envelope_folds_a_three_way_lay_into_1x2(self) -> None:
-        cut = market_envelope(self._raw(), Market.ONE_X_TWO)
-
-        assert [(b["key"], [m["key"] for m in b["markets"]]) for b in cut["bookmakers"]] == [
-            ("betmgm", ["1x2"]),
-            ("betfair_exchange", ["h2h_lay"]),
-        ]
-
-    def test_market_envelope_keeps_only_that_markets_books(self) -> None:
-        cut = market_envelope(self._raw(), Market.TOTALS)
-
-        assert cut["id"] == "abc"
-        assert [b["key"] for b in cut["bookmakers"]] == ["betmgm"]
-        assert [m["key"] for m in cut["bookmakers"][0]["markets"]] == ["totals"]
 
     def test_unknown_market_is_logged(self) -> None:
         raw = {"bookmakers": [{"key": "fanduel", "markets": [{"key": "outrights"}]}]}

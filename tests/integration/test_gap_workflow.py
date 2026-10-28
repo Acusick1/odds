@@ -5,11 +5,45 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from odds_analytics.backfill_executor import BackfillExecutor
 from odds_analytics.gap_backfill_planner import GapBackfillPlanner
-from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.models import Event, EventExternalId, EventStatus
+from odds_core.vocabulary import Source
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.storage.readers import OddsReader
 
-from tests.test_helpers import TIER_HOURS_BEFORE, add_event
+from tests.test_helpers import (
+    TIER_HOURS_BEFORE,
+    add_event,
+    make_tagged_snapshot,
+    store_tagged,
+)
+
+
+def _odds_api_book(event: Event) -> dict:
+    return {
+        "key": "fanduel",
+        "title": "FanDuel",
+        "markets": [
+            {
+                "key": "h2h",
+                "outcomes": [
+                    {"name": event.home_team, "price_decimal": 1.7},
+                    {"name": event.away_team, "price_decimal": 2.2},
+                ],
+            }
+        ],
+    }
+
+
+async def _store_tier_snapshot(session, event: Event, tier: FetchTier) -> None:
+    await store_tagged(
+        session,
+        make_tagged_snapshot(
+            event.id,
+            event.commence_time - timedelta(hours=TIER_HOURS_BEFORE[tier]),
+            [_odds_api_book(event)],
+            None,
+        ),
+    )
 
 
 @pytest.fixture
@@ -57,38 +91,25 @@ async def events_with_gaps(test_session):
 
     for event in [event1, event2, event3]:
         await add_event(test_session, event)
+        test_session.add(
+            EventExternalId(
+                source=Source.ODDS_API, external_id=event.id, event_id=event.surrogate_id
+            )
+        )
 
     await test_session.commit()
 
     # Add partial snapshots for event1 (missing CLOSING)
     for tier in [FetchTier.OPENING, FetchTier.EARLY, FetchTier.SHARP, FetchTier.PREGAME]:
-        snapshot = OddsSnapshot(
-            event_id=event1.id,
-            snapshot_time=event1.commence_time - timedelta(hours=TIER_HOURS_BEFORE[tier]),
-            raw_data={"bookmakers": []},
-            bookmaker_count=0,
-        )
-        test_session.add(snapshot)
+        await _store_tier_snapshot(test_session, event1, tier)
 
     # Add partial snapshots for event2 (missing OPENING and EARLY)
     for tier in [FetchTier.SHARP, FetchTier.PREGAME, FetchTier.CLOSING]:
-        snapshot = OddsSnapshot(
-            event_id=event2.id,
-            snapshot_time=event2.commence_time - timedelta(hours=TIER_HOURS_BEFORE[tier]),
-            raw_data={"bookmakers": []},
-            bookmaker_count=0,
-        )
-        test_session.add(snapshot)
+        await _store_tier_snapshot(test_session, event2, tier)
 
     # Add complete snapshots for event3
     for tier in FetchTier.get_priority_order():
-        snapshot = OddsSnapshot(
-            event_id=event3.id,
-            snapshot_time=event3.commence_time - timedelta(hours=TIER_HOURS_BEFORE[tier]),
-            raw_data={"bookmakers": []},
-            bookmaker_count=0,
-        )
-        test_session.add(snapshot)
+        await _store_tier_snapshot(test_session, event3, tier)
 
     await test_session.commit()
 
@@ -320,13 +341,7 @@ class TestGapDetectionWorkflow:
 
         # Add all 5 tiers
         for tier in FetchTier.get_priority_order():
-            snapshot = OddsSnapshot(
-                event_id=event.id,
-                snapshot_time=event.commence_time - timedelta(hours=TIER_HOURS_BEFORE[tier]),
-                raw_data={"bookmakers": []},
-                bookmaker_count=0,
-            )
-            test_session.add(snapshot)
+            await _store_tier_snapshot(test_session, event, tier)
 
         await test_session.commit()
 

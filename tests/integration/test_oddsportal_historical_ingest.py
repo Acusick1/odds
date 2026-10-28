@@ -141,9 +141,10 @@ class TestNewEvent:
         assert [(s.source, s.market, s.time_basis) for s in snaps] == [
             (Source.ODDSPORTAL, Market.ONE_X_TWO, TimeBasis.SOURCE_STAMPED)
         ] * 2
-        assert {s.api_request_id for s in snaps} == {"oddsportal_1x2"}
-        assert snaps[0].raw_data["source"] == "oddsportal"
         assert snaps[0].payload_id == snaps[1].payload_id is not None
+        payload = await session.get(SnapshotPayload, snaps[0].payload_id)
+        assert payload is not None
+        assert [e["source"] for e in payload.payload] == ["oddsportal"] * 2
         closing = (
             (await session.execute(select(Price).where(Price.snapshot_id == snaps[1].id)))
             .scalars()

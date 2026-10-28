@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 from odds_core.match_brief_models import BriefDecision, MatchBrief
-from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.models import Event, EventStatus
 from odds_core.vocabulary import Market
 from odds_mcp.prices import (
     SharpLines,
@@ -102,15 +102,10 @@ async def epl_event_with_odds(pglite_async_session):
             },
         ]
     }
-    snapshot = OddsSnapshot(
-        event_id=event.id,
-        snapshot_time=snapshot_time,
-        raw_data=raw_data,
-        bookmaker_count=3,
-        fetch_tier="pregame",
-        hours_until_commence=6.0,
+    snapshot = await store_tagged(
+        pglite_async_session,
+        make_tagged_snapshot(event.id, snapshot_time, raw_data["bookmakers"], None),
     )
-    await store_tagged(pglite_async_session, snapshot)
     await pglite_async_session.commit()
     await pglite_async_session.refresh(event)
     await pglite_async_session.refresh(snapshot)
@@ -198,15 +193,10 @@ async def partial_sharp_event(pglite_async_session):
             },
         ]
     }
-    snapshot = OddsSnapshot(
-        event_id=event.id,
-        snapshot_time=snapshot_time,
-        raw_data=raw_data,
-        bookmaker_count=3,
-        fetch_tier="pregame",
-        hours_until_commence=4.0,
+    snapshot = await store_tagged(
+        pglite_async_session,
+        make_tagged_snapshot(event.id, snapshot_time, raw_data["bookmakers"], None),
     )
-    await store_tagged(pglite_async_session, snapshot)
     await pglite_async_session.commit()
     await pglite_async_session.refresh(event)
     await pglite_async_session.refresh(snapshot)
@@ -737,15 +727,10 @@ class TestFindRetailEdges:
                 },
             ]
         }
-        snapshot = OddsSnapshot(
-            event_id=event.id,
-            snapshot_time=snapshot_time,
-            raw_data=raw_data,
-            bookmaker_count=3,
-            fetch_tier="pregame",
-            hours_until_commence=3.0,
+        await store_tagged(
+            pglite_async_session,
+            make_tagged_snapshot(event.id, snapshot_time, raw_data["bookmakers"], None),
         )
-        await store_tagged(pglite_async_session, snapshot)
         await pglite_async_session.commit()
         await pglite_async_session.refresh(event)
 
@@ -874,15 +859,10 @@ class TestFindRetailEdges:
             }
         )
 
-        snapshot = OddsSnapshot(
-            event_id=event.id,
-            snapshot_time=snapshot_time,
-            raw_data={"bookmakers": bookmakers},
-            bookmaker_count=len(bookmakers),
-            fetch_tier="pregame",
-            hours_until_commence=6.0,
+        await store_tagged(
+            pglite_async_session,
+            make_tagged_snapshot(event.id, snapshot_time, bookmakers, None),
         )
-        await store_tagged(pglite_async_session, snapshot)
         await pglite_async_session.commit()
         await pglite_async_session.refresh(event)
 
@@ -969,15 +949,10 @@ async def sharp_lookback_event(pglite_async_session):
         ],
         old_time,
     )
-    snap_old = OddsSnapshot(
-        event_id=event.id,
-        snapshot_time=old_time,
-        raw_data=old_raw,
-        bookmaker_count=2,
-        fetch_tier="pregame",
-        hours_until_commence=3.0,
+    snap_old = await store_tagged(
+        pglite_async_session,
+        make_tagged_snapshot(event.id, old_time, old_raw["bookmakers"], None),
     )
-    await store_tagged(pglite_async_session, snap_old)
 
     # Newer snapshot WITHOUT sharp bookmaker
     new_time = commence_time - timedelta(hours=2)
@@ -994,15 +969,10 @@ async def sharp_lookback_event(pglite_async_session):
         ],
         new_time,
     )
-    snap_new = OddsSnapshot(
-        event_id=event.id,
-        snapshot_time=new_time,
-        raw_data=new_raw,
-        bookmaker_count=1,
-        fetch_tier="pregame",
-        hours_until_commence=2.0,
+    snap_new = await store_tagged(
+        pglite_async_session,
+        make_tagged_snapshot(event.id, new_time, new_raw["bookmakers"], None),
     )
-    await store_tagged(pglite_async_session, snap_new)
 
     await pglite_async_session.commit()
     await pglite_async_session.refresh(event)
@@ -1218,45 +1188,42 @@ async def bfe_newest_with_older_retail_event(pglite_async_session):
             }
         )
 
-    snap_op = OddsSnapshot(
-        event_id=event.id,
-        snapshot_time=op_time,
-        raw_data={"bookmakers": op_bookmakers, "source": "oddsportal_live"},
-        bookmaker_count=len(op_bookmakers),
-        fetch_tier="pregame",
-        hours_until_commence=1.5,
+    snap_op = await store_tagged(
+        pglite_async_session,
+        make_tagged_snapshot(event.id, op_time, op_bookmakers, "oddsportal_live"),
     )
-    await store_tagged(pglite_async_session, snap_op)
 
     # Newer BFE-only snapshot at T-30min — wins latest-snapshot race
     bfe_time = commence_time - timedelta(minutes=30)
-    snap_bfe = OddsSnapshot(
-        event_id=event.id,
-        snapshot_time=bfe_time,
-        raw_data={
-            "bookmakers": [
+    snap_bfe = await store_tagged(
+        pglite_async_session,
+        make_tagged_snapshot(
+            event.id,
+            bfe_time,
+            (
                 {
-                    "key": "betfair_exchange",
-                    "title": "Betfair Exchange",
-                    "last_update": bfe_time.isoformat(),
-                    "markets": [
+                    "bookmakers": [
                         {
-                            "key": "1x2",
-                            "outcomes": [
-                                {"name": "Brighton", "price": -135},
-                                {"name": "Draw", "price": 275},
-                                {"name": "Wolves", "price": 355},
+                            "key": "betfair_exchange",
+                            "title": "Betfair Exchange",
+                            "last_update": bfe_time.isoformat(),
+                            "markets": [
+                                {
+                                    "key": "1x2",
+                                    "outcomes": [
+                                        {"name": "Brighton", "price": -135},
+                                        {"name": "Draw", "price": 275},
+                                        {"name": "Wolves", "price": 355},
+                                    ],
+                                }
                             ],
                         }
-                    ],
+                    ]
                 }
-            ]
-        },
-        bookmaker_count=1,
-        fetch_tier="pregame",
-        hours_until_commence=0.5,
+            )["bookmakers"],
+            None,
+        ),
     )
-    await store_tagged(pglite_async_session, snap_bfe)
 
     await pglite_async_session.commit()
     await pglite_async_session.refresh(event)
@@ -1486,15 +1453,10 @@ class TestGetCurrentOddsPerBookmakerLookback:
                 },
             ]
         }
-        snapshot = OddsSnapshot(
-            event_id=event.id,
-            snapshot_time=snapshot_time,
-            raw_data=raw_data,
-            bookmaker_count=1,
-            fetch_tier="pregame",
-            hours_until_commence=3.0,
+        await store_tagged(
+            pglite_async_session,
+            make_tagged_snapshot(event.id, snapshot_time, raw_data["bookmakers"], None),
         )
-        await store_tagged(pglite_async_session, snapshot)
         await pglite_async_session.commit()
         await pglite_async_session.refresh(event)
 

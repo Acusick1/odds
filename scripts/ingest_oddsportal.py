@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Ingest OddsPortal historical odds into the existing database.
 
-Converts OddsPortal JSON → Event + OddsSnapshot records. Once ingested,
-the existing training pipeline works unchanged — just extend the date range
-in the config YAML.
+Converts OddsPortal JSON into events and ``oddsportal`` snapshots (time basis
+``source_stamped``) with their price rows. Once ingested, the training pipeline reads
+them like any other snapshot; extend the date range in the config YAML.
 
 Usage:
     # Ingest all NBA seasons (dry-run first)
@@ -42,13 +42,12 @@ from odds_core.team import team_abbrev
 from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.oddsportal_common import (
     IngestionStats,
-    build_raw_data,
+    build_envelope,
     event_id_from_match_link,
     parse_match_date,
 )
 from odds_lambda.storage.event_resolver import ListedGame, MatchWindow, Resolution, resolve_event
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload, store_shaped_snapshot
-from odds_lambda.tier_utils import snapshot_tiers
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -376,18 +375,16 @@ async def _ingest_one_game(
         stats.events_matched += 1
     event_id = event.id
 
-    # --- Build and insert OddsSnapshots ---
-    # Tag with market-specific source for deduplication
+    # --- Build and insert the snapshots ---
     db_market: str = market_config["db_market"]
-    source_tag = "oddsportal" if db_market == "h2h" else f"oddsportal_{db_market}"
 
-    # Check for existing snapshots to avoid duplicates
+    # An event whose history of this market is stored was ingested already
     existing_check = await session.execute(
         select(OddsSnapshot.id).where(
-            and_(
-                OddsSnapshot.event_id == event_id,
-                OddsSnapshot.api_request_id == source_tag,
-            )
+            OddsSnapshot.event_id == event_id,
+            OddsSnapshot.source == Source.ODDSPORTAL,
+            OddsSnapshot.time_basis == TimeBasis.SOURCE_STAMPED,
+            OddsSnapshot.market == db_market,
         )
     )
     if existing_check.scalars().first() is not None:
@@ -395,7 +392,7 @@ async def _ingest_one_game(
 
     envelopes: list[tuple[dict[str, Any], datetime]] = []
     for use_opening in (True, False):
-        raw_data = build_raw_data(
+        envelope = build_envelope(
             market_data,
             home_team,
             away_team,
@@ -406,14 +403,14 @@ async def _ingest_one_game(
             outcome_names=market_config["outcome_names"],
             line=market_config["line"],
         )
-        if not raw_data:
+        if not envelope:
             continue
 
-        snapshot_time_str = raw_data.pop("_snapshot_time", None)
+        snapshot_time_str = envelope.pop("_snapshot_time", None)
         if not snapshot_time_str:
             continue
         envelopes.append(
-            (raw_data, datetime.fromisoformat(snapshot_time_str.replace("Z", "+00:00")))
+            (envelope, datetime.fromisoformat(snapshot_time_str.replace("Z", "+00:00")))
         )
     if not envelopes:
         return
@@ -421,33 +418,10 @@ async def _ingest_one_game(
     shape = SnapshotShape(
         Source.ODDSPORTAL,
         TimeBasis.SOURCE_STAMPED,
-        await store_payload(session, [raw_data for raw_data, _ in envelopes]),
+        await store_payload(session, [envelope for envelope, _ in envelopes]),
     )
-    commence_time = event.commence_time
-    tiers = snapshot_tiers(
-        [
-            (
-                snapshot_time,
-                Source.ODDSPORTAL,
-                TimeBasis.SOURCE_STAMPED,
-                raw_data["bookmakers"][0]["markets"][0]["key"],
-            )
-            for raw_data, snapshot_time in envelopes
-        ],
-        commence_time,
-    )
-    for index, (raw_data, snapshot_time) in enumerate(envelopes):
-        hours_before = (commence_time - snapshot_time).total_seconds() / 3600
-        snapshot = OddsSnapshot(
-            event_id=event_id,
-            snapshot_time=snapshot_time,
-            raw_data=raw_data,
-            bookmaker_count=len(raw_data["bookmakers"]),
-            api_request_id=source_tag,
-            fetch_tier=tiers[index].value,
-            hours_until_commence=max(0.0, hours_before),
-        )
-        if (await store_shaped_snapshot(session, snapshot, event, shape)).inserted:
+    for envelope, snapshot_time in envelopes:
+        if (await store_shaped_snapshot(session, event, envelope, snapshot_time, shape)).inserted:
             stats.snapshots_inserted += 1
 
 

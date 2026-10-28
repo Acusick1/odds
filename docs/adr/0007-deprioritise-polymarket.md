@@ -6,7 +6,7 @@ status: superseded by ADR-0013
 
 ## Context
 
-The pipeline was built for NBA. It has a client, five `polymarket_*` tables, ingestion, fetch and backfill jobs, manual event linking and a 16-column NBA-only feature group ([polymarket](../../wiki/collection/polymarket.md)). The AWS rules for its jobs were put behind `enable_polymarket` on 2026-02-15 (9591f7b, "disable polymarket jobs", no reason given).
+The pipeline was built for NBA. It has a client, five `polymarket_*` tables, ingestion, fetch and backfill jobs, manual event linking and a 16-column NBA-only feature group ([polymarket odds snapshots](../../wiki/collection/polymarket-odds-snapshots.md)). The AWS rules for its jobs were put behind `enable_polymarket` on 2026-02-15 (9591f7b, "disable polymarket jobs", no reason given).
 
 The deprioritisation was first recorded on 2026-03-09 in `docs/POLYMARKET.md` (1ebb99b): "Deprioritized indefinitely. Not accessible from UK, data likely collinear with sportsbook odds, 30-day CLOB retention creates ongoing maintenance burden. Pipeline code exists but is inactive." The same day, the strategic goal in `CLAUDE.md` replaced Polymarket with Betfair Exchange as the alternative execution venue (19851af). The record behind each reason:
 
@@ -41,7 +41,7 @@ Using Polymarket as an MLB sharp reference is outside this decision and is still
 - The deployed model config uses only the tabular and match_stats feature groups (`experiments/configs/xgboost_epl_production_tabular_match_stats.yaml`).
 - The pipeline stays NBA-only. The tickers and the configured series and tag ids are NBA, and events are linked only by `odds polymarket link` (#456).
 - The live pipeline never populates `best_bid` and `best_ask` on price snapshots (#451). `PolymarketWriter.store_price_snapshot` computes `spread` and `midpoint` only when both are present, so those stay null too. Order-book snapshots compute all four from the book.
-- Extending the pipeline to another sport needs that sport's series and tag ids and a ticker parser. Apart from `get_nba_events`, the client is sport-agnostic ([polymarket](../../wiki/collection/polymarket.md#components)).
+- Extending the pipeline to another sport needs that sport's series and tag ids and a ticker parser. Apart from `get_nba_events`, the client is sport-agnostic ([polymarket](../../wiki/collection/polymarket-odds-snapshots.md#client-and-settings)).
 
 ## Evidence
 

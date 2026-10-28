@@ -135,13 +135,13 @@ class TestFeatureConfigExtraction:
             markets=["spreads"],
             sharp_bookmakers=["pinnacle", "circasports"],
             retail_bookmakers=["fanduel"],
-            feature_groups=["tabular", "polymarket"],
+            feature_groups=["tabular", "injuries"],
         )
 
         assert config.outcome == "away"
         assert config.markets == ["spreads"]
         assert config.sharp_bookmakers == ["pinnacle", "circasports"]
-        assert config.feature_groups == ("tabular", "polymarket")
+        assert config.feature_groups == ("tabular", "injuries")
 
 
 # =============================================================================

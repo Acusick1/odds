@@ -5,28 +5,26 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
 
 import structlog
 from odds_core.database import async_session_maker
-from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.models import Event, EventStatus, OddsSnapshot, SnapshotPayload
 from odds_core.sports import SportKey
 from odds_core.vocabulary import Source, TimeBasis
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from odds_lambda.polymarket_fetcher import MAX_CONCURRENT_REQUESTS, PolymarketClient
 from odds_lambda.polymarket_odds import (
-    HISTORY_REQUEST_ID,
     MAX_HORIZON,
     MAX_STALENESS,
     SIDES,
-    GridPoint,
     Observation,
     PolymarketMatch,
     Resampled,
     Side,
-    build_raw_data,
+    build_envelope,
     listed_game,
     parse_match_event,
     resample,
@@ -39,7 +37,6 @@ from odds_lambda.storage.shaped_snapshots import (
     store_payload,
     store_shaped_snapshot,
 )
-from odds_lambda.tier_utils import calculate_hours_until_commence, snapshot_tier
 
 logger = structlog.get_logger()
 
@@ -76,17 +73,22 @@ async def _fetch_series(
     return dict(zip(SIDES, await asyncio.gather(*(one(side) for side in SIDES)), strict=True))
 
 
-def _snapshot(event: Event, envelope: dict[str, Any], point: GridPoint) -> OddsSnapshot:
-    hours = calculate_hours_until_commence(point.time, event.commence_time)
-    return OddsSnapshot(
-        event_id=event.id,
-        snapshot_time=point.time,
-        raw_data=envelope,
-        bookmaker_count=1,
-        api_request_id=HISTORY_REQUEST_ID,
-        fetch_tier=snapshot_tier(point.time, event.commence_time, TimeBasis.OBSERVED).value,
-        hours_until_commence=hours,
+async def _history_event_ids(session: AsyncSession) -> set[str]:
+    """Events holding a Polymarket history snapshot: one whose payload is its own envelope with
+    no quotes, where a live run's envelopes, listed in its payload, always carry the bid and ask
+    keys (``build_envelope`` with ``include_quotes``)."""
+    meta = SnapshotPayload.payload[("bookmakers", 0, "polymarket_meta")]  # type: ignore[index]
+    rows = await session.execute(
+        select(OddsSnapshot.event_id)
+        .join(SnapshotPayload, col(SnapshotPayload.id) == col(OddsSnapshot.payload_id))
+        .where(
+            OddsSnapshot.source == Source.POLYMARKET,
+            func.jsonb_typeof(SnapshotPayload.payload) == "object",
+            ~meta.has_key("best_bid"),
+        )
+        .distinct()
     )
+    return set(rows.scalars())
 
 
 async def backfill_sport(
@@ -122,17 +124,7 @@ async def backfill_sport(
             .scalars()
             .all()
         )
-        existing = set(
-            (
-                await session.execute(
-                    select(OddsSnapshot.event_id)
-                    .where(OddsSnapshot.api_request_id == HISTORY_REQUEST_ID)
-                    .distinct()
-                )
-            )
-            .scalars()
-            .all()
-        )
+        existing = await _history_event_ids(session)
         report.matches_considered = len(matches)
 
         attached_ids: set[str] = set()
@@ -210,12 +202,10 @@ async def _store_history(
     stored are skipped. Returns the number inserted."""
     inserted = 0
     for point in resampled.points:
-        envelope = build_raw_data(match, sport, point.prices, point.time)
+        envelope = build_envelope(match, sport, point.prices, point.time)
         payload_id = await store_payload(session, envelope)
         shape = SnapshotShape(Source.POLYMARKET, TimeBasis.OBSERVED, payload_id)
-        written = await store_shaped_snapshot(
-            session, _snapshot(event, envelope, point), event, shape
-        )
+        written = await store_shaped_snapshot(session, event, envelope, point.time, shape)
         if written.inserted:
             inserted += 1
         else:

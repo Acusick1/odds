@@ -20,38 +20,21 @@ from odds_core.models import (
     Event,
     EventStatus,
     FetchLog,
-    Odds,
     OddsSnapshot,
 )
 from odds_core.paper_trade_models import PaperTrade, TradeResult
-from odds_core.polymarket_models import (
-    PolymarketEvent,
-    PolymarketFetchLog,
-    PolymarketMarket,
-    PolymarketMarketType,
-    PolymarketOrderBookSnapshot,
-    PolymarketPriceSnapshot,
-)
 from odds_core.team import normalize_team_name, team_abbrev
 
 __all__ = [
     # Models
     "Event",
     "EventStatus",
-    "Odds",
     "OddsSnapshot",
     "DataQualityLog",
     "FetchLog",
     # Paper Trading
     "PaperTrade",
     "TradeResult",
-    # Polymarket Models
-    "PolymarketMarketType",
-    "PolymarketEvent",
-    "PolymarketMarket",
-    "PolymarketPriceSnapshot",
-    "PolymarketOrderBookSnapshot",
-    "PolymarketFetchLog",
     # Database
     "engine",
     "async_session_maker",

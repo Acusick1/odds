@@ -13,7 +13,6 @@ from odds_core.models import (
     EventExternalId,
     EventStatus,
     HealthCheckAcknowledgement,
-    Odds,
     OddsSnapshot,
     SnapshotPayload,
     utc_now,
@@ -30,11 +29,13 @@ from tests.test_helpers import (
     API_EVENT_ID,
     TWIN_EVENT_ID,
     TWIN_KICKOFF,
+    game_pk_of,
     hold_game_pks,
     make_epl_event,
+    with_game_pk,
 )
 
-CHILD_MODELS = (OddsSnapshot, Odds, PaperTrade, MatchBrief)
+CHILD_MODELS = (OddsSnapshot, PaperTrade, MatchBrief)
 
 
 async def _event_ids(session, model) -> set[str]:
@@ -188,37 +189,49 @@ HISTORICAL_EVENT_ID = "op_2025-2026_ARS_CHE_2026-04-15"
 
 class TestMergeGroup:
     @pytest.mark.asyncio
-    async def test_keeps_api_event_over_every_other_source(self, pglite_async_session) -> None:
+    async def test_keeps_the_first_stored_event(self, pglite_async_session) -> None:
         session = pglite_async_session
-        session.add_all(
-            [
-                make_epl_event(i)
-                for i in (FDUK_EVENT_ID, TWIN_EVENT_ID, HISTORICAL_EVENT_ID, API_EVENT_ID)
-            ]
-        )
-        await session.flush()
+        for event_id in (FDUK_EVENT_ID, TWIN_EVENT_ID, HISTORICAL_EVENT_ID, API_EVENT_ID):
+            session.add(make_epl_event(event_id))
+            await session.flush()
 
         groups = await EventMerger(session).find_twin_groups("soccer_epl")
         report = await EventMerger(session).merge_group(groups[0])
         await session.flush()
 
-        assert report.kept_id == API_EVENT_ID
-        assert set(report.merged_ids) == {FDUK_EVENT_ID, TWIN_EVENT_ID, HISTORICAL_EVENT_ID}
-        assert await _stored_event_ids(session) == {API_EVENT_ID}
+        assert report.kept_id == FDUK_EVENT_ID
+        assert set(report.merged_ids) == {API_EVENT_ID, TWIN_EVENT_ID, HISTORICAL_EVENT_ID}
+        assert await _stored_event_ids(session) == {FDUK_EVENT_ID}
 
     @pytest.mark.asyncio
-    async def test_without_api_event_keeps_historical_then_live_then_fduk(
+    async def test_keeps_the_event_of_the_highest_ranked_kickoff_source(
         self, pglite_async_session
     ) -> None:
         session = pglite_async_session
-        session.add_all([make_epl_event(FDUK_EVENT_ID), make_epl_event(TWIN_EVENT_ID)])
+        fduk = make_epl_event(FDUK_EVENT_ID)
+        api = make_epl_event(API_EVENT_ID, TWIN_KICKOFF + timedelta(minutes=30))
+        live = make_epl_event(TWIN_EVENT_ID, TWIN_KICKOFF + timedelta(minutes=15))
+        for event in (fduk, api, live):
+            session.add(event)
+            await session.flush()
+        session.add_all(
+            [
+                EventExternalId(
+                    source=Source.ODDS_API, external_id="apihex", event_id=api.surrogate_id
+                ),
+                EventExternalId(
+                    source=Source.ODDSPORTAL, external_id="Kl1AOZN9", event_id=live.surrogate_id
+                ),
+            ]
+        )
         await session.flush()
 
-        report = await EventMerger(session).merge_group(
-            (await EventMerger(session).find_twin_groups())[0]
-        )
+        [group] = await EventMerger(session).find_twin_groups("soccer_epl")
+        report = await EventMerger(session).merge_group(group)
 
         assert report.kept_id == TWIN_EVENT_ID
+        kept = await session.get(Event, TWIN_EVENT_ID)
+        assert kept is not None and kept.commence_time == TWIN_KICKOFF + timedelta(minutes=15)
 
     @pytest.mark.asyncio
     async def test_moves_rows_from_every_duplicate(self, live_twin_with_rows) -> None:
@@ -229,16 +242,19 @@ class TestMergeGroup:
             OddsSnapshot(
                 event_id=FDUK_EVENT_ID,
                 snapshot_time=TWIN_KICKOFF,
-                raw_data={},
-                bookmaker_count=0,
+                source=Source.FOOTBALL_DATA_UK,
+                market=Market.ONE_X_TWO,
+                time_basis=TimeBasis.CLOSE,
             )
         )
         await session.flush()
 
-        await EventMerger(session).merge_all_twins("soccer_epl")
+        merger = EventMerger(session)
+        for group in await merger.find_twin_groups("soccer_epl"):
+            await merger.merge_group(group)
         await session.flush()
 
-        assert await _event_ids(session, OddsSnapshot) == {API_EVENT_ID}
+        assert await _event_ids(session, OddsSnapshot) == {TWIN_EVENT_ID}
         snapshots = (await session.execute(select(OddsSnapshot))).scalars().all()
         assert len(snapshots) == 2
 
@@ -296,7 +312,9 @@ class TestIdentityChecks:
             "1 soccer_epl matches stored as more than one event"
         ]
 
-        await EventMerger(session).merge_all_twins()
+        merger = EventMerger(session)
+        for group in await merger.find_twin_groups():
+            await merger.merge_group(group)
         await session.flush()
         assert await monitor.check_event_identity() == []
 
@@ -347,7 +365,7 @@ class TestMergeTwinsCommand:
         assert await session.get(Event, TWIN_EVENT_ID) is not None
 
         await events_cli._twins("soccer_epl", apply=True)
-        assert await session.get(Event, TWIN_EVENT_ID) is None
+        assert await session.get(Event, API_EVENT_ID) is None
         assert "Merged 1 events into 1; matches with twins now: 0" in capsys.readouterr().out
 
 
@@ -388,51 +406,7 @@ class TestMergeCommand:
             await events_cli._merge(TWIN_EVENT_ID, API_EVENT_ID, apply=True)
 
 
-class TestMergeRebasesSnapshotTiming:
-    @pytest.mark.asyncio
-    async def test_moved_snapshots_follow_the_kept_events_kickoff(
-        self, pglite_async_session
-    ) -> None:
-        session = pglite_async_session
-        later = TWIN_KICKOFF + timedelta(days=2)
-        session.add_all(
-            [make_epl_event(TWIN_EVENT_ID, TWIN_KICKOFF), make_epl_event(API_EVENT_ID, later)]
-        )
-        await session.flush()
-        snapshot = OddsSnapshot(
-            event_id=TWIN_EVENT_ID,
-            snapshot_time=later - timedelta(hours=1),
-            raw_data={},
-            bookmaker_count=0,
-            hours_until_commence=-47.0,
-            fetch_tier="closing",
-        )
-        session.add(snapshot)
-        await session.flush()
-
-        await EventMerger(session).merge(
-            await session.get(Event, API_EVENT_ID), [await session.get(Event, TWIN_EVENT_ID)]
-        )
-        await session.flush()
-        await session.refresh(snapshot)
-
-        assert snapshot.event_id == API_EVENT_ID
-        assert snapshot.hours_until_commence == pytest.approx(1.0)
-        assert snapshot.fetch_tier == "closing"
-
-    @pytest.mark.asyncio
-    async def test_same_kickoff_leaves_snapshots_untouched(self, live_twin_with_rows) -> None:
-        session = live_twin_with_rows
-        session.add(make_epl_event(API_EVENT_ID))
-        await session.flush()
-        before = (await session.execute(select(OddsSnapshot.hours_until_commence))).scalar_one()
-
-        await EventMerger(session).merge_all_twins()
-        await session.flush()
-
-        after = (await session.execute(select(OddsSnapshot.hours_until_commence))).scalar_one()
-        assert after == before
-
+class TestMergeCommandSameId:
     @pytest.mark.asyncio
     async def test_merge_command_refuses_the_same_id(
         self, pglite_async_session, monkeypatch
@@ -626,8 +600,6 @@ class TestBetfairRunnerNames:
             return OddsSnapshot(
                 event_id="e1",
                 snapshot_time=TWIN_KICKOFF,
-                raw_data={},
-                bookmaker_count=1,
                 source=Source.BETFAIR,
                 market=market,
                 time_basis=TimeBasis.OBSERVED,
@@ -690,8 +662,6 @@ class TestRepairGhostsFromRunnerNames:
         snapshot = OddsSnapshot(
             event_id=ghost.id,
             snapshot_time=TWIN_KICKOFF - timedelta(hours=1),
-            raw_data=ghost_envelope,
-            bookmaker_count=1,
             source=Source.BETFAIR,
             market=Market.H2H,
             time_basis=TimeBasis.OBSERVED,
@@ -699,22 +669,10 @@ class TestRepairGhostsFromRunnerNames:
         )
         session.add(snapshot)
         await session.flush()
-        session.add_all(
-            [
-                Odds(
-                    event_id=ghost.id,
-                    bookmaker_key="betfair_exchange",
-                    bookmaker_title="Betfair Exchange",
-                    market_key="h2h",
-                    outcome_name="St.Louis Cardinals",
-                    price_decimal=2.0,
-                    odds_timestamp=snapshot.snapshot_time,
-                    last_update=snapshot.snapshot_time,
-                ),
-                MatchBrief(
-                    event_id=ghost.id, decision=BriefDecision.WATCHING, summary="s", brief_text="b"
-                ),
-            ]
+        session.add(
+            MatchBrief(
+                event_id=ghost.id, decision=BriefDecision.WATCHING, summary="s", brief_text="b"
+            )
         )
         await session.commit()
 
@@ -723,7 +681,7 @@ class TestRepairGhostsFromRunnerNames:
 
         assert report.merged_count == 1
         assert await _stored_event_ids(session) == {"op_live_ARIDIA_ST.CAR"}
-        for model in (OddsSnapshot, Odds, MatchBrief):
+        for model in (OddsSnapshot, MatchBrief):
             assert await _event_ids(session, model) == {"op_live_ARIDIA_ST.CAR"}
         assert report.describe_merges() == [
             "op_live_ARIDIA_ST.CAR [scheduled] <- op_live_ST.CAR_ARIDIA [scheduled]"
@@ -780,15 +738,17 @@ class TestRepairGhostsFromRunnerNames:
 class TestMergeClearsUnmatched:
     @staticmethod
     def _mlb(event_id: str, game_pk: int | None = None) -> Event:
-        return Event(
-            id=event_id,
-            sport_key="baseball_mlb",
-            sport_title="MLB",
-            commence_time=TWIN_KICKOFF,
-            home_team="New York Yankees",
-            away_team="Boston Red Sox",
-            status=EventStatus.SCHEDULED,
-            mlb_game_pk=game_pk,
+        return with_game_pk(
+            Event(
+                id=event_id,
+                sport_key="baseball_mlb",
+                sport_title="MLB",
+                commence_time=TWIN_KICKOFF,
+                home_team="New York Yankees",
+                away_team="Boston Red Sox",
+                status=EventStatus.SCHEDULED,
+            ),
+            game_pk,
         )
 
     @staticmethod
@@ -829,7 +789,7 @@ class TestMergeClearsUnmatched:
         await EventMerger(session).merge(keep, [duplicate])
         await session.flush()
 
-        assert (keep.mlb_game_pk, keep.status) == (777, EventStatus.SCHEDULED)
+        assert (await game_pk_of(session, keep), keep.status) == (777, EventStatus.SCHEDULED)
         assert await self._acknowledgements(session, keep) == []
 
 
@@ -861,8 +821,6 @@ class TestBetfairEnvelopeLookup:
             OddsSnapshot(
                 event_id=event.id,
                 snapshot_time=TWIN_KICKOFF - timedelta(hours=1),
-                raw_data=envelope,
-                bookmaker_count=1,
                 source=Source.BETFAIR,
                 market=Market.H2H,
                 time_basis=TimeBasis.OBSERVED,

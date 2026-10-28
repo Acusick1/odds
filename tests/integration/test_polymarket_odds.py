@@ -16,7 +16,6 @@ from odds_core.models import (
     EventExternalId,
     EventStatus,
     FetchLog,
-    Odds,
     OddsSnapshot,
     Price,
     SnapshotPayload,
@@ -24,8 +23,6 @@ from odds_core.models import (
 from odds_core.vocabulary import Market, PriceOutcome, Side, Source, TimeBasis
 from odds_lambda.jobs import fetch_polymarket_odds
 from odds_lambda.polymarket_odds import (
-    HISTORY_REQUEST_ID,
-    LIVE_REQUEST_ID_PREFIX,
     MAX_HORIZON,
     MAX_STALENESS,
     Observation,
@@ -33,9 +30,19 @@ from odds_lambda.polymarket_odds import (
 )
 from odds_lambda.polymarket_odds_backfill import backfill_sport
 from odds_lambda.scheduling.jobs import JobContext
+from odds_lambda.storage.shaped_snapshots import (
+    SnapshotShape,
+    store_payload,
+    store_shaped_snapshot,
+)
 from sqlalchemy import select
 
-from tests.test_helpers import make_epl_event
+from tests.test_helpers import (
+    make_epl_event,
+    make_tagged_snapshot,
+    polymarket_bookmaker,
+    store_tagged,
+)
 
 KICKOFF = datetime(2025, 12, 6, 15, 0, tzinfo=UTC)
 SLUG = "epl-bou-che-2025-12-06"
@@ -128,20 +135,29 @@ class TestBackfill:
         assert report.matches_attached == 1
         assert report.events_written == 1
         assert len(snapshots) == len(grid_offsets()) == report.snapshots_written
-        assert {s.api_request_id for s in snapshots} == {HISTORY_REQUEST_ID}
+        assert {(s.source, s.market, s.time_basis) for s in snapshots} == {
+            (Source.POLYMARKET, Market.ONE_X_TWO, TimeBasis.OBSERVED)
+        }
         assert snapshots[-1].snapshot_time == KICKOFF
-        assert snapshots[-1].fetch_tier == "closing"
-        assert snapshots[-1].hours_until_commence == 0
-        assert snapshots[0].fetch_tier == "opening"
-        bookmakers = snapshots[-1].raw_data["bookmakers"]
+        payload = await pglite_async_session.get(SnapshotPayload, snapshots[-1].payload_id)
+        assert payload is not None
+        bookmakers = payload.payload["bookmakers"]
         assert [b["key"] for b in bookmakers] == ["polymarket"]
-        assert bookmakers[0]["markets"][0]["key"] == "1x2"
         assert [o["name"] for o in bookmakers[0]["markets"][0]["outcomes"]] == [
             "Bournemouth",
             "Draw",
             "Chelsea",
         ]
-        assert (await pglite_async_session.execute(select(Odds))).first() is None
+        prices = (
+            (
+                await pglite_async_session.execute(
+                    select(Price).where(Price.snapshot_id == snapshots[-1].id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert {(p.bookmaker, p.side) for p in prices} == {("polymarket", Side.MID)}
 
     async def test_rerun_skips_events_with_history(
         self, pglite_async_session: Any, finished_event: Any, patch_backfill: FakeClient
@@ -156,6 +172,44 @@ class TestBackfill:
         count = len((await pglite_async_session.execute(select(OddsSnapshot))).scalars().all())
         payloads = (await pglite_async_session.execute(select(SnapshotPayload))).scalars().all()
         assert count == len(payloads) == len(grid_offsets())
+
+    async def test_an_event_with_only_live_snapshots_is_backfilled(
+        self, pglite_async_session: Any, finished_event: Any, patch_backfill: FakeClient
+    ) -> None:
+        await store_tagged(
+            pglite_async_session,
+            make_tagged_snapshot(
+                finished_event.id,
+                KICKOFF - timedelta(hours=7, minutes=1),
+                [polymarket_bookmaker((0.5, 0.25, 0.25))],
+                "polymarket",
+            ),
+        )
+        await pglite_async_session.commit()
+
+        report = await backfill_sport("soccer_epl", since=KICKOFF - timedelta(days=1))
+
+        assert (report.events_skipped_existing, report.events_written) == (0, 1)
+
+    async def test_a_live_snapshot_without_quotes_is_not_history(
+        self, pglite_async_session: Any, finished_event: Any, patch_backfill: FakeClient
+    ) -> None:
+        bookmaker = polymarket_bookmaker((0.5, 0.25, 0.25))
+        bookmaker["polymarket_meta"] |= {"best_bid": {}, "best_ask": {}}
+        envelope = {"bookmakers": [bookmaker]}
+        payload_id = await store_payload(pglite_async_session, [envelope])
+        await store_shaped_snapshot(
+            pglite_async_session,
+            finished_event,
+            envelope,
+            KICKOFF - timedelta(hours=7, minutes=1),
+            SnapshotShape(Source.POLYMARKET, TimeBasis.OBSERVED, payload_id),
+        )
+        await pglite_async_session.commit()
+
+        report = await backfill_sport("soccer_epl", since=KICKOFF - timedelta(days=1))
+
+        assert (report.events_skipped_existing, report.events_written) == (0, 1)
 
     async def test_dry_run_writes_nothing(
         self, pglite_async_session: Any, finished_event: Any, patch_backfill: FakeClient
@@ -324,13 +378,12 @@ class TestLiveIngestion:
         stats = await fetch_polymarket_odds.ingest_sport("soccer_epl", now)
 
         snapshot = (await pglite_async_session.execute(select(OddsSnapshot))).scalar_one()
-        odds = (await pglite_async_session.execute(select(Odds))).scalars().all()
+        prices = (await pglite_async_session.execute(select(Price))).scalars().all()
         assert stats.snapshots_stored == 1
-        assert snapshot.api_request_id == f"{LIVE_REQUEST_ID_PREFIX}{now.isoformat()}"
-        assert snapshot.fetch_tier == "pregame"
-        assert {o.bookmaker_key for o in odds} == {"polymarket"}
-        assert {o.market_key for o in odds} == {"1x2"}
-        assert len(odds) == 3
+        assert (snapshot.source, snapshot.market) == (Source.POLYMARKET, Market.ONE_X_TWO)
+        assert {p.bookmaker for p in prices} == {"polymarket"}
+        assert {p.side for p in prices} == {Side.MID, Side.BACK, Side.LAY}
+        assert len(prices) == 9
 
     async def test_skips_matches_already_started(
         self, pglite_async_session: Any, patch_live: FakeClient
@@ -383,7 +436,10 @@ class TestLiveIngestion:
         await fetch_polymarket_odds.ingest_sport("soccer_epl", KICKOFF - timedelta(hours=5))
 
         snapshot = (await pglite_async_session.execute(select(OddsSnapshot))).scalar_one()
-        meta = snapshot.raw_data["bookmakers"][0]["polymarket_meta"]
+        payload = await pglite_async_session.get(SnapshotPayload, snapshot.payload_id)
+        assert payload is not None
+        [envelope] = payload.payload
+        meta = envelope["bookmakers"][0]["polymarket_meta"]
         assert meta["best_bid"]["home"] == 0.52
         assert meta["best_ask"]["home"] == 0.54
 
