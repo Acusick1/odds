@@ -11,7 +11,7 @@ import pytest
 from odds_core.config import get_settings
 from odds_core.mlb_data_models import MlbProbablePitchers
 from odds_core.models import Event, EventExternalId, EventStatus, OddsSnapshot
-from odds_core.vocabulary import Source
+from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda import live_events
 from odds_lambda.betfair.client import BetfairBook, BetfairRunner
 from odds_lambda.betfair.constants import SPORT_CONFIG
@@ -30,11 +30,11 @@ from odds_lambda.mlb_stats_fetcher import MlbGameResult, MlbGameState
 from odds_lambda.oddsportal_adapter import MatchOdds
 from odds_lambda.storage.event_merge import ConflictingGamePks, EventMerger
 from odds_lambda.storage.event_resolver import ListedGame, ResolvedEvent
-from odds_lambda.tier_utils import calculate_tier_from_timestamps
+from odds_lambda.tier_utils import snapshot_tier
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.test_helpers import FakeBetfairClient, make_epl_event
+from tests.test_helpers import FakeBetfairClient, hold_game_pks, make_epl_event
 
 MLB = "baseball_mlb"
 YANKEES, RED_SOX = "New York Yankees", "Boston Red Sox"
@@ -330,6 +330,7 @@ class TestMergeGuard:
         keep = _mlb_event("g1", AFTERNOON, 824101)
         other = _mlb_event("g2", AFTERNOON + timedelta(minutes=30), 824102)
         session.add_all([keep, other])
+        await hold_game_pks(session)
         await session.flush()
 
         with pytest.raises(ConflictingGamePks, match="824101, 824102"):
@@ -342,6 +343,7 @@ class TestMergeGuard:
         keep = _mlb_event("zz9hexapi", AFTERNOON, None)
         duplicate = _mlb_event("op_live_x", AFTERNOON, 824101)
         session.add_all([keep, duplicate])
+        await hold_game_pks(session)
         await session.flush()
 
         await EventMerger(session).merge(keep, [duplicate])
@@ -360,6 +362,7 @@ class TestMergeGuard:
             _mlb_event("op_live_b", AFTERNOON + timedelta(minutes=40), 824102),
         ]
         session.add_all([api_event, *twins])
+        await hold_game_pks(session)
         await session.flush()
 
         with pytest.raises(ConflictingGamePks):
@@ -377,6 +380,7 @@ class TestMergeGuard:
                 make_epl_event("zz9hexapi"),
             ]
         )
+        await hold_game_pks(session)
         await session.flush()
 
         groups = await EventMerger(session).find_twin_groups()
@@ -412,6 +416,7 @@ class TestMissingGamePkCheck:
                 ),
             ]
         )
+        await hold_game_pks(session)
         await session.flush()
 
         issues = await HealthMonitor(session, get_settings()).check_event_identity(now)
@@ -424,6 +429,7 @@ class TestMissingGamePkCheck:
         session = pglite_async_session
         old = datetime.now(UTC) - timedelta(days=3)
         session.add(_mlb_event("legacy", old, None, created_at=old))
+        await hold_game_pks(session)
         await session.flush()
 
         assert await HealthMonitor(session, get_settings()).check_event_identity() == []
@@ -506,6 +512,7 @@ class TestDoubleheaderClaims:
     ) -> None:
         taken_id = live_event_id(CUBS, CARDINALS, AFTERNOON)
         job_session.add(_null_event(taken_id, AFTERNOON + timedelta(hours=5), mlb_game_pk=999))
+        await hold_game_pks(job_session)
         await job_session.commit()
         mlb_schedule.schedule = [_game(901, AFTERNOON, CUBS, CARDINALS)]
 
@@ -560,6 +567,7 @@ class TestRescheduledGame:
                 status=EventStatus.POSTPONED,
             )
         )
+        await hold_game_pks(job_session)
         await job_session.commit()
         mlb_schedule.schedule = [
             _game(813001, postponed_slot, YANKEES, RED_SOX, state=MlbGameState.POSTPONED),
@@ -591,9 +599,10 @@ class TestRescheduledGame:
                 raw_data={"bookmakers": []},
                 bookmaker_count=0,
                 hours_until_commence=27.6,
-                fetch_tier=calculate_tier_from_timestamps(taken_at, listed).value,
+                fetch_tier=snapshot_tier(taken_at, listed, TimeBasis.OBSERVED).value,
             )
         )
+        await hold_game_pks(job_session)
         await job_session.commit()
         mlb_schedule.schedule = [_game(813001, EVENING, YANKEES, RED_SOX)]
 
@@ -605,7 +614,7 @@ class TestRescheduledGame:
             )
         ).scalar_one()
         assert stored.hours_until_commence == pytest.approx(31.6)
-        assert stored.fetch_tier == calculate_tier_from_timestamps(taken_at, EVENING).value
+        assert stored.fetch_tier == snapshot_tier(taken_at, EVENING, TimeBasis.OBSERVED).value
 
     async def test_postponed_slots_closing_snapshots_are_re_tiered(
         self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
@@ -633,6 +642,7 @@ class TestRescheduledGame:
                     fetch_tier=FetchTier.CLOSING.value,
                 )
             )
+        await hold_game_pks(job_session)
         await job_session.commit()
         mlb_schedule.schedule = [
             _game(813001, postponed_slot, YANKEES, RED_SOX, state=MlbGameState.POSTPONED),
@@ -685,6 +695,7 @@ class TestScheduleOutage:
                 _null_event("game_two", EVENING, mlb_game_pk=902),
             ]
         )
+        await hold_game_pks(job_session)
         await job_session.commit()
         mlb_schedule.down = True
         placeholder = AFTERNOON + timedelta(minutes=6)
@@ -708,6 +719,7 @@ class TestScheduleOutage:
         self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
     ) -> None:
         job_session.add(_null_event("game_one", AFTERNOON, mlb_game_pk=901))
+        await hold_game_pks(job_session)
         await job_session.commit()
         mlb_schedule.down = True
         match = _op_match(CUBS, CARDINALS, AFTERNOON)
@@ -717,7 +729,10 @@ class TestScheduleOutage:
 
         assert (stats.events_matched, stats.events_created) == (1, 0)
         ids = (await job_session.execute(select(EventExternalId))).scalars().all()
-        assert [(i.source, i.external_id) for i in ids] == [(Source.ODDSPORTAL, "Op12AbCd")]
+        assert {(i.source, i.external_id) for i in ids} == {
+            (Source.MLB_STATS_API, "901"),
+            (Source.ODDSPORTAL, "Op12AbCd"),
+        }
 
     async def test_two_events_in_the_window_attach_nothing(
         self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]

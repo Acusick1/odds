@@ -8,24 +8,29 @@ import pytest
 from odds_cli.commands import events as events_cli
 from odds_core.match_brief_models import MatchBrief
 from odds_core.models import (
+    DataQualityLog,
     Event,
+    EventExternalId,
     EventStatus,
     HealthCheckAcknowledgement,
     Odds,
     OddsSnapshot,
+    SnapshotPayload,
     utc_now,
 )
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
-from odds_core.vocabulary import Market
+from odds_core.vocabulary import Market, Source, TimeBasis
 from odds_lambda.storage.event_merge import EventMerger
 from odds_lambda.storage.event_name_repair import _betfair_runner_names, repair_team_names
 from odds_lambda.storage.event_unmatched import mark_unmatched
 from sqlalchemy import select
+from structlog.testing import capture_logs
 
 from tests.test_helpers import (
     API_EVENT_ID,
     TWIN_EVENT_ID,
     TWIN_KICKOFF,
+    hold_game_pks,
     make_epl_event,
 )
 
@@ -594,27 +599,42 @@ class TestBetfairRunnerNames:
         session = pglite_async_session
         session.add(make_epl_event("e1"))
         await session.flush()
+        envelope = {
+            "source": "betfair_api",
+            "bookmakers": [
+                {
+                    "markets": [{"key": "1x2"}],
+                    "betfair_meta": {
+                        "runners": [{"runner_name": n} for n in ["Arsenal", "Chelsea", "The Draw"]]
+                    },
+                },
+                {
+                    "markets": [{"key": "totals"}],
+                    "betfair_meta": {
+                        "runners": [
+                            {"runner_name": n} for n in ["Under 2.5 Goals", "Over 2.5 Goals"]
+                        ]
+                    },
+                },
+            ],
+        }
+        payload = SnapshotPayload(payload=envelope)
+        session.add(payload)
+        await session.flush()
 
-        def snapshot(market: Market, names: list[str]) -> OddsSnapshot:
+        def snapshot(market: Market) -> OddsSnapshot:
             return OddsSnapshot(
                 event_id="e1",
                 snapshot_time=TWIN_KICKOFF,
-                raw_data={
-                    "source": "betfair_api",
-                    "bookmakers": [
-                        {"betfair_meta": {"runners": [{"runner_name": n} for n in names]}}
-                    ],
-                },
+                raw_data={},
                 bookmaker_count=1,
+                source=Source.BETFAIR,
                 market=market,
+                time_basis=TimeBasis.OBSERVED,
+                payload_id=payload.id,
             )
 
-        session.add_all(
-            [
-                snapshot(Market.TOTALS, ["Under 2.5 Goals", "Over 2.5 Goals"]),
-                snapshot(Market.ONE_X_TWO, ["Arsenal", "Chelsea", "The Draw"]),
-            ]
-        )
+        session.add_all([snapshot(Market.TOTALS), snapshot(Market.ONE_X_TWO)])
         await session.flush()
 
         assert await _betfair_runner_names(session, "soccer_epl") == {
@@ -638,24 +658,44 @@ class TestRepairGhostsFromRunnerNames:
             ]
         )
         await session.flush()
+        assert ghost.surrogate_id is not None
+        session.add(
+            EventExternalId(source=Source.BETFAIR, external_id="35001", event_id=ghost.surrogate_id)
+        )
+
+        def envelope(betfair_event_id: str, runners: list[str]) -> dict:
+            return {
+                "source": "betfair_api",
+                "betfair_event_id": betfair_event_id,
+                "bookmakers": [
+                    {
+                        "markets": [{"key": "h2h"}],
+                        "betfair_meta": {"runners": [{"runner_name": name} for name in runners]},
+                    },
+                    # The event's other markets ride in the same envelope.
+                    {
+                        "markets": [{"key": "totals"}],
+                        "betfair_meta": {"runners": [{"runner_name": "Over 8.5"}]},
+                    },
+                ],
+            }
+
+        ghost_envelope = envelope("35001", ["Arizona Diamondbacks", "St. Louis Cardinals"])
+        # The run's payload holds every event's envelope; the ghost's is found by its Betfair id.
+        payload = SnapshotPayload(
+            payload=[envelope("35002", ["New York Yankees", "Boston Red Sox"]), ghost_envelope]
+        )
+        session.add(payload)
+        await session.flush()
         snapshot = OddsSnapshot(
             event_id=ghost.id,
             snapshot_time=TWIN_KICKOFF - timedelta(hours=1),
-            raw_data={
-                "source": "betfair_api",
-                "bookmakers": [
-                    {
-                        "betfair_meta": {
-                            "runners": [
-                                {"runner_name": "Arizona Diamondbacks"},
-                                {"runner_name": "St. Louis Cardinals"},
-                            ]
-                        }
-                    }
-                ],
-            },
+            raw_data=ghost_envelope,
             bookmaker_count=1,
+            source=Source.BETFAIR,
             market=Market.H2H,
+            time_basis=TimeBasis.OBSERVED,
+            payload_id=payload.id,
         )
         session.add(snapshot)
         await session.flush()
@@ -767,7 +807,7 @@ class TestMergeClearsUnmatched:
         session = pglite_async_session
         keep, duplicate = self._mlb("holder", 777), self._mlb("orphan")
         session.add_all([keep, duplicate])
-        await session.flush()
+        await hold_game_pks(session)
         await mark_unmatched(session, duplicate, "not in the schedule")
 
         await EventMerger(session).merge(keep, [duplicate])
@@ -783,7 +823,7 @@ class TestMergeClearsUnmatched:
         session = pglite_async_session
         keep, duplicate = self._mlb("orphan"), self._mlb("holder", 777)
         session.add_all([keep, duplicate])
-        await session.flush()
+        await hold_game_pks(session)
         await mark_unmatched(session, keep, "not in the schedule")
 
         await EventMerger(session).merge(keep, [duplicate])
@@ -791,3 +831,77 @@ class TestMergeClearsUnmatched:
 
         assert (keep.mlb_game_pk, keep.status) == (777, EventStatus.SCHEDULED)
         assert await self._acknowledgements(session, keep) == []
+
+
+class TestBetfairEnvelopeLookup:
+    @staticmethod
+    async def _event_with_run_payload(session, envelope_id: str) -> Event:
+        event = _mlb_event("op_live_ST.CAR_ARIDIA", "St. Louis Cardin", "Arizona Diamondbacks")
+        session.add(event)
+        await session.flush()
+        envelope = {
+            "source": "betfair_api",
+            "betfair_event_id": envelope_id,
+            "bookmakers": [
+                {
+                    "markets": [{"key": "h2h"}],
+                    "betfair_meta": {
+                        "runners": [
+                            {"runner_name": "Arizona Diamondbacks"},
+                            {"runner_name": "St. Louis Cardinals"},
+                        ]
+                    },
+                }
+            ],
+        }
+        payload = SnapshotPayload(payload=[{"betfair_event_id": "99999"}, envelope])
+        session.add(payload)
+        await session.flush()
+        session.add(
+            OddsSnapshot(
+                event_id=event.id,
+                snapshot_time=TWIN_KICKOFF - timedelta(hours=1),
+                raw_data=envelope,
+                bookmaker_count=1,
+                source=Source.BETFAIR,
+                market=Market.H2H,
+                time_basis=TimeBasis.OBSERVED,
+                payload_id=payload.id,
+            )
+        )
+        await session.flush()
+        return event
+
+    @pytest.mark.asyncio
+    async def test_an_id_the_event_was_refused_finds_its_envelope(
+        self, pglite_async_session
+    ) -> None:
+        session = pglite_async_session
+        event = await self._event_with_run_payload(session, "35001")
+        session.add(
+            DataQualityLog(
+                event_id=event.id,
+                severity="warning",
+                issue_type="external_id_refused",
+                description="betfair id 35001 refused",
+                raw_data={"source": "betfair", "external_id": "35001"},
+            )
+        )
+        await session.flush()
+
+        names = await _betfair_runner_names(session, "baseball_mlb")
+
+        assert names == {event.id: ["Arizona Diamondbacks", "St. Louis Cardinals"]}
+
+    @pytest.mark.asyncio
+    async def test_an_envelope_not_found_is_logged(self, pglite_async_session) -> None:
+        session = pglite_async_session
+        event = await self._event_with_run_payload(session, "35001")
+
+        with capture_logs() as logs:
+            names = await _betfair_runner_names(session, "baseball_mlb")
+
+        assert names == {}
+        assert [(log["event"], log["event_id"]) for log in logs] == [
+            ("betfair_envelope_not_found", event.id)
+        ]

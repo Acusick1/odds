@@ -102,7 +102,7 @@ async def _fetch_slots(
     for slot in schedule:
         by_pk[slot.game_pk].append(slot)
     played = played_slots(schedule)
-    for game_pk in {event.mlb_game_pk for event in events if event.mlb_game_pk is not None}:
+    for game_pk in {event.game_pk for event in events if event.game_pk is not None}:
         if game_pk not in played:
             by_pk[game_pk] = await fetcher.fetch_game(game_pk)
     return by_pk
@@ -148,8 +148,8 @@ async def process_results(
         logger.info("no_pending_events", sport_key=MLB_SPORT_KEY)
         return stats
 
-    keyed = [event for event in pending if event.mlb_game_pk is not None]
-    unresolved = [event for event in pending if event.mlb_game_pk is None]
+    keyed = [event for event in pending if event.game_pk is not None]
+    unresolved = [event for event in pending if event.game_pk is None]
     slots: dict[int, list[MlbGameResult]] = {}
     if keyed:
         if fetcher is None:
@@ -162,7 +162,7 @@ async def process_results(
     async with async_session_maker() as session:
         writer = OddsWriter(session)
         for pending_event in keyed:
-            game_pk = pending_event.mlb_game_pk
+            game_pk = pending_event.game_pk
             assert game_pk is not None
             outcome = game_outcome(pending_event.commence_time, game_pk, slots.get(game_pk, []))
             try:
@@ -201,7 +201,7 @@ async def process_results(
         events_postponed=stats.events_postponed,
         events_moved=stats.events_moved,
         events_unresolved=stats.events_unresolved,
-        events_without_game_pk=sum(1 for event in pending if event.mlb_game_pk is None),
+        events_without_game_pk=sum(1 for event in pending if event.game_pk is None),
         errors=len(stats.errors),
     )
     return stats

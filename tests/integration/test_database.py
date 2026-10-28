@@ -5,7 +5,9 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from odds_core.api_models import create_scheduled_event
 from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, Odds
+from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.storage.readers import OddsReader
+from odds_lambda.storage.shaped_snapshots import SnapshotShape
 from odds_lambda.storage.writers import OddsWriter
 
 from tests.test_helpers import add_event
@@ -211,44 +213,6 @@ class TestDatabaseIntegration:
         assert all("Lakers" in e.home_team or "Lakers" in e.away_team for e in events)
 
     @pytest.mark.asyncio
-    async def test_get_odds_at_time(self, test_session, sample_odds_data):
-        """Test getting odds at specific time (critical for backtesting)."""
-        writer = OddsWriter(test_session)
-        reader = OddsReader(test_session)
-
-        # Create event
-        event = Event(
-            id=sample_odds_data["id"],
-            sport_key=sample_odds_data["sport_key"],
-            sport_title=sample_odds_data["sport_title"],
-            commence_time=datetime.now(UTC),
-            home_team=sample_odds_data["home_team"],
-            away_team=sample_odds_data["away_team"],
-        )
-        await add_event(test_session, event)
-
-        # Store snapshot at specific time
-        snapshot_time = datetime.now(UTC)
-        await writer.store_odds_snapshot(
-            event_id=sample_odds_data["id"],
-            raw_data=sample_odds_data,
-            snapshot_time=snapshot_time,
-            validate=False,
-        )
-
-        await test_session.commit()
-
-        # Query odds at that time
-        odds = await reader.get_odds_at_time(
-            event_id=sample_odds_data["id"],
-            timestamp=snapshot_time,
-            tolerance_minutes=5,
-        )
-
-        assert len(odds) > 0
-        assert all(o.event_id == sample_odds_data["id"] for o in odds)
-
-    @pytest.mark.asyncio
     async def test_get_database_stats(self, test_session, sample_odds_data):
         """Test getting database statistics."""
         writer = OddsWriter(test_session)
@@ -269,6 +233,7 @@ class TestDatabaseIntegration:
             event_id=sample_odds_data["id"],
             raw_data=sample_odds_data,
             validate=False,
+            shape=SnapshotShape(Source.ODDS_API, TimeBasis.OBSERVED, None),
         )
 
         fetch_log = FetchLog(
@@ -286,8 +251,8 @@ class TestDatabaseIntegration:
         stats = await reader.get_database_stats()
 
         assert "total_events" in stats
-        assert "total_odds_records" in stats
+        assert "total_price_rows" in stats
         assert "total_snapshots" in stats
         assert stats["total_events"] >= 1
-        assert stats["total_odds_records"] > 0
+        assert stats["total_price_rows"] > 0
         assert stats["total_snapshots"] >= 1

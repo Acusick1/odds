@@ -20,7 +20,6 @@ from odds_core.models import (
 )
 from odds_core.odds_math import american_to_decimal
 from odds_core.vocabulary import HealthCheck, PriceOutcome, Side, Source
-from odds_lambda import copy_from_production
 from odds_lambda.copy_from_production import CopyStats, ProductionDataCopier
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -153,7 +152,7 @@ def _copier(
 
 class TestCopyEvents:
     @pytest.mark.asyncio
-    async def test_copies_the_events_snapshots_and_odds(
+    async def test_copies_the_events_snapshots_but_not_their_odds_rows(
         self,
         prod_session_maker: async_sessionmaker[AsyncSession],
         local_session_maker: async_sessionmaker[AsyncSession],
@@ -162,9 +161,9 @@ class TestCopyEvents:
 
         stats = await _copier(prod_session_maker, local_session_maker).copy_events(*WINDOW, SPORT)
 
-        assert stats.events_copied == 1
-        assert stats.events_failed == 0
-        assert (stats.snapshots_copied, stats.odds_copied) == (3, 3)
+        assert (stats.events_copied, stats.events_failed, stats.snapshots_copied) == (1, 0, 3)
+        async with local_session_maker() as session:
+            assert (await session.execute(select(Odds))).scalars().all() == []
 
     @pytest.mark.asyncio
     async def test_recopy_with_overwrite_replaces_without_duplicating(
@@ -257,19 +256,16 @@ class TestCopyFailures:
         await _seed_prod_event(
             prod_session_maker, "evt_b", first_snapshot_id=600, kickoff=KICKOFF + timedelta(hours=3)
         )
-        real_insert = copy_from_production.insert
+        real_copy_identity = ProductionDataCopier._copy_identity
 
-        odds_inserts = 0
+        async def failing_copy_identity(
+            self: ProductionDataCopier, session: AsyncSession, event: Event, *args: Any
+        ) -> None:
+            if event.id == "evt_b":
+                raise RuntimeError("identity copy failed")
+            await real_copy_identity(self, session, event, *args)
 
-        def failing_insert(model: Any) -> Any:
-            nonlocal odds_inserts
-            if model is Odds:
-                odds_inserts += 1
-                if odds_inserts == 2:
-                    raise RuntimeError("odds insert failed")
-            return real_insert(model)
-
-        monkeypatch.setattr(copy_from_production, "insert", failing_insert)
+        monkeypatch.setattr(ProductionDataCopier, "_copy_identity", failing_copy_identity)
         copier = _copier(prod_session_maker, local_session_maker)
 
         stats = await copier.copy_events(*WINDOW, SPORT)
@@ -315,31 +311,17 @@ class TestOverwriteReplacesLocalRows:
         assert len({(s.snapshot_time, s.api_request_id) for s in closing}) == 1
 
     @pytest.mark.asyncio
-    async def test_odds_rows_equal_production_and_are_stable_across_reruns(
+    async def test_price_rows_equal_production_and_link_to_the_local_snapshot_copy(
         self,
         prod_session_maker: async_sessionmaker[AsyncSession],
         local_session_maker: async_sessionmaker[AsyncSession],
     ) -> None:
         await _seed_prod_event(prod_session_maker, "evt_a", first_snapshot_id=500)
+        await _seed_new_shape(prod_session_maker, "evt_a", snapshot_id=502)
         for _ in range(2):
             await _copier(prod_session_maker, local_session_maker, skip_existing=False).copy_events(
                 *WINDOW, SPORT
             )
-
-        async with prod_session_maker() as session:
-            prod_count = len((await session.execute(select(Odds))).scalars().all())
-        async with local_session_maker() as session:
-            local_count = len((await session.execute(select(Odds))).scalars().all())
-        assert prod_count == local_count == 3
-
-    @pytest.mark.asyncio
-    async def test_odds_rows_link_to_the_local_copy_of_their_snapshot(
-        self,
-        prod_session_maker: async_sessionmaker[AsyncSession],
-        local_session_maker: async_sessionmaker[AsyncSession],
-    ) -> None:
-        await _seed_prod_event(prod_session_maker, "evt_a", first_snapshot_id=500)
-        await _copier(prod_session_maker, local_session_maker).copy_events(*WINDOW, SPORT)
 
         async with local_session_maker() as session:
             snapshot_ids = (
@@ -347,8 +329,8 @@ class TestOverwriteReplacesLocalRows:
                 .scalars()
                 .all()
             )
-            linked = set((await session.execute(select(Odds.snapshot_id))).scalars().all())
-        assert linked == {snapshot_ids[2]}
+            [price] = (await session.execute(select(Price))).scalars().all()
+        assert price.snapshot_id == snapshot_ids[2]
 
     @pytest.mark.asyncio
     async def test_old_untagged_local_snapshot_is_replaced(
@@ -408,7 +390,7 @@ class TestCopyLeavesLocalTwins:
                     id=twin_id,
                     sport_key=SPORT,
                     sport_title="EPL",
-                    commence_time=KICKOFF,
+                    commence_time=KICKOFF + timedelta(minutes=30),
                     home_team="Home evt_a",
                     away_team="Away evt_a",
                     status=EventStatus.SCHEDULED,
@@ -506,7 +488,136 @@ class TestCopyNewShape:
             assert (ack.event_id, ack.reason) == (event.surrogate_id, "exhibition")
 
     @pytest.mark.asyncio
-    async def test_an_id_held_by_another_local_event_stays_with_it(
+    async def test_the_local_event_holding_an_id_is_the_production_event(
+        self,
+        prod_session_maker: async_sessionmaker[AsyncSession],
+        local_session_maker: async_sessionmaker[AsyncSession],
+    ) -> None:
+        await _seed_prod_event(prod_session_maker, "evt_a", first_snapshot_id=500)
+        await _seed_new_shape(prod_session_maker, "evt_a", snapshot_id=502)
+        twin_key = await _hold_locally(local_session_maker, "local_twin", "Kl1AOZN9")
+
+        skipped = await _copier(prod_session_maker, local_session_maker).copy_events(*WINDOW, SPORT)
+        copied = await _copier(
+            prod_session_maker, local_session_maker, skip_existing=False
+        ).copy_events(*WINDOW, SPORT)
+
+        assert (skipped.events_skipped, copied.events_copied, copied.events_failed) == (1, 1, 0)
+        async with local_session_maker() as session:
+            assert [e.id for e in (await session.execute(select(Event))).scalars()] == [
+                "local_twin"
+            ]
+            event = await session.get(Event, "local_twin")
+            assert event is not None
+            assert (event.surrogate_id, event.home_team) == (twin_key, "Home evt_a")
+            snapshot_events = set((await session.execute(select(OddsSnapshot.event_id))).scalars())
+            assert snapshot_events == {"local_twin"}
+            [external] = (await session.execute(select(EventExternalId))).scalars().all()
+            assert external.event_id == twin_key
+
+    @pytest.mark.asyncio
+    async def test_ids_held_by_several_local_events_fail_the_event(
+        self,
+        prod_session_maker: async_sessionmaker[AsyncSession],
+        local_session_maker: async_sessionmaker[AsyncSession],
+    ) -> None:
+        await _seed_prod_event(prod_session_maker, "evt_a", first_snapshot_id=500)
+        await _seed_new_shape(prod_session_maker, "evt_a", snapshot_id=502)
+        async with prod_session_maker() as session:
+            event = await session.get(Event, "evt_a")
+            assert event is not None
+            session.add(
+                EventExternalId(
+                    source=Source.BETFAIR, external_id="35000001", event_id=event.surrogate_id
+                )
+            )
+            await session.commit()
+        await _hold_locally(local_session_maker, "local_one", "Kl1AOZN9")
+        await _hold_locally(local_session_maker, "local_two", "35000001", Source.BETFAIR)
+
+        stats = await _copier(prod_session_maker, local_session_maker).copy_events(*WINDOW, SPORT)
+
+        assert stats.failed_event_ids == ["evt_a"]
+
+    @pytest.mark.asyncio
+    async def test_an_event_without_local_ids_is_matched_by_its_fixture(
+        self,
+        prod_session_maker: async_sessionmaker[AsyncSession],
+        local_session_maker: async_sessionmaker[AsyncSession],
+    ) -> None:
+        await _seed_prod_event(prod_session_maker, "evt_a", first_snapshot_id=500)
+        async with local_session_maker() as session:
+            session.add(
+                Event(
+                    id="fduk_local",
+                    sport_key=SPORT,
+                    sport_title="EPL",
+                    commence_time=KICKOFF,
+                    home_team="Home evt_a",
+                    away_team="Away evt_a",
+                )
+            )
+            await session.commit()
+
+        stats = await _copier(
+            prod_session_maker, local_session_maker, skip_existing=False
+        ).copy_events(*WINDOW, SPORT)
+
+        assert (stats.events_copied, stats.events_failed) == (1, 0)
+        async with local_session_maker() as session:
+            assert [e.id for e in (await session.execute(select(Event))).scalars()] == [
+                "fduk_local"
+            ]
+            event = await session.get(Event, "fduk_local")
+            assert event is not None and event.status is EventStatus.FINAL
+
+
+async def _hold_locally(
+    local_session_maker: async_sessionmaker[AsyncSession],
+    event_id: str,
+    external_id: str,
+    source: Source = Source.ODDSPORTAL,
+) -> int:
+    async with local_session_maker() as session:
+        event = make_epl_event(event_id, KICKOFF + timedelta(days=3))
+        session.add(event)
+        await session.flush()
+        assert event.surrogate_id is not None
+        session.add(
+            EventExternalId(source=source, external_id=external_id, event_id=event.surrogate_id)
+        )
+        await session.commit()
+        return event.surrogate_id
+
+
+class TestCopyMatchesAnEarlierCopy:
+    @pytest.mark.asyncio
+    async def test_an_event_whose_kickoff_moved_is_matched_by_its_id(
+        self,
+        prod_session_maker: async_sessionmaker[AsyncSession],
+        local_session_maker: async_sessionmaker[AsyncSession],
+    ) -> None:
+        await _seed_prod_event(prod_session_maker, "evt_a", first_snapshot_id=500)
+        await _copier(prod_session_maker, local_session_maker).copy_events(*WINDOW, SPORT)
+        moved = KICKOFF + timedelta(hours=3)
+        async with prod_session_maker() as session:
+            event = await session.get(Event, "evt_a")
+            assert event is not None
+            event.commence_time = moved
+            await session.commit()
+
+        skipped = await _copier(prod_session_maker, local_session_maker).copy_events(*WINDOW, SPORT)
+        copied = await _copier(
+            prod_session_maker, local_session_maker, skip_existing=False
+        ).copy_events(*WINDOW, SPORT)
+
+        assert (skipped.events_skipped, copied.events_copied, copied.events_failed) == (1, 1, 0)
+        async with local_session_maker() as session:
+            event = await session.get(Event, "evt_a")
+        assert event is not None and event.commence_time == moved
+
+    @pytest.mark.asyncio
+    async def test_a_fixture_holding_another_id_of_the_same_source_is_not_matched(
         self,
         prod_session_maker: async_sessionmaker[AsyncSession],
         local_session_maker: async_sessionmaker[AsyncSession],
@@ -514,21 +625,34 @@ class TestCopyNewShape:
         await _seed_prod_event(prod_session_maker, "evt_a", first_snapshot_id=500)
         await _seed_new_shape(prod_session_maker, "evt_a", snapshot_id=502)
         async with local_session_maker() as session:
-            twin = make_epl_event("local_twin", KICKOFF)
+            twin = Event(
+                id="local_twin",
+                sport_key=SPORT,
+                sport_title="EPL",
+                commence_time=KICKOFF,
+                home_team="Home evt_a",
+                away_team="Away evt_a",
+            )
             session.add(twin)
             await session.flush()
             assert twin.surrogate_id is not None
+            twin_key = twin.surrogate_id
             session.add(
-                EventExternalId(
-                    source=Source.ODDSPORTAL, external_id="Kl1AOZN9", event_id=twin.surrogate_id
-                )
+                EventExternalId(source=Source.ODDSPORTAL, external_id="Other123", event_id=twin_key)
             )
             await session.commit()
-            twin_key = twin.surrogate_id
 
-        stats = await _copier(prod_session_maker, local_session_maker).copy_events(*WINDOW, SPORT)
+        for _ in range(2):
+            stats = await _copier(
+                prod_session_maker, local_session_maker, skip_existing=False
+            ).copy_events(*WINDOW, SPORT)
+            assert (stats.events_copied, stats.events_failed) == (1, 0)
 
-        assert (stats.events_failed, stats.external_ids_skipped) == (0, 1)
         async with local_session_maker() as session:
-            [external] = (await session.execute(select(EventExternalId))).scalars().all()
-            assert external.event_id == twin_key
+            held = {
+                (x.external_id, x.event_id == twin_key)
+                for x in (await session.execute(select(EventExternalId))).scalars()
+            }
+            ids = {e.id for e in (await session.execute(select(Event))).scalars()}
+        assert ids == {"local_twin", "evt_a"}
+        assert held == {("Other123", True), ("Kl1AOZN9", False)}

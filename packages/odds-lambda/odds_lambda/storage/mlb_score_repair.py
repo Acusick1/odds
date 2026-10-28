@@ -3,7 +3,7 @@ ones (#578, #612)."""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from enum import StrEnum
@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.mlb_game_resolver import MLB_SPORT_KEY, Score, final_scores, mlb_date
 from odds_lambda.mlb_stats_fetcher import MlbGameResult, MlbStatsFetcher
+from odds_lambda.storage.game_pks import game_pks_of
 
 logger = structlog.get_logger()
 
@@ -28,36 +29,46 @@ class ScoreOutcome(StrEnum):
 
 @dataclass(frozen=True)
 class ScoreCheck:
-    """``mlb_score`` is the (home, away) score of the event's game when it is Final."""
+    """``game_pk`` is the event's ``gamePk``; ``mlb_score`` is the (home, away) score of its game
+    when it is Final."""
 
     event: Event
     outcome: ScoreOutcome
+    game_pk: int | None = None
     mlb_score: Score | None = None
     reason: str = ""
 
 
-def check_scores(events: Sequence[Event], games: Sequence[MlbGameResult]) -> list[ScoreCheck]:
-    """Compare each event's score with the Final score of the game its ``gamePk`` names.
+def check_scores(
+    events: Sequence[Event], game_pks: Mapping[str, int], games: Sequence[MlbGameResult]
+) -> list[ScoreCheck]:
+    """Compare each event's score with the Final score of the game its ``gamePk`` (``game_pks``,
+    by event id) names.
 
     An event without a ``gamePk``, or whose game is not Final in ``games``, is unmatched.
     """
     finals = final_scores(games)
     checks: list[ScoreCheck] = []
     for event in events:
-        if event.mlb_game_pk is None:
+        game_pk = game_pks.get(event.id)
+        if game_pk is None:
             checks.append(ScoreCheck(event, ScoreOutcome.UNMATCHED, reason="no gamePk"))
             continue
-        final = finals.get(event.mlb_game_pk)
+        final = finals.get(game_pk)
         if final is None:
-            checks.append(ScoreCheck(event, ScoreOutcome.UNMATCHED, reason="game not final"))
+            checks.append(
+                ScoreCheck(event, ScoreOutcome.UNMATCHED, game_pk, reason="game not final")
+            )
             continue
         correct = (event.home_score, event.away_score) == final
         outcome = ScoreOutcome.CORRECT if correct else ScoreOutcome.MISMATCH
-        checks.append(ScoreCheck(event, outcome, final))
+        checks.append(ScoreCheck(event, outcome, game_pk, final))
     return checks
 
 
-async def _fetch_games(fetcher: MlbStatsFetcher, events: Sequence[Event]) -> list[MlbGameResult]:
+async def _fetch_games(
+    fetcher: MlbStatsFetcher, events: Sequence[Event], game_pks: Mapping[str, int]
+) -> list[MlbGameResult]:
     """The schedule over the events' MLB dates, plus each game not Final in it fetched by
     ``gamePk``, which finds a game played away from the event's date."""
     days = [mlb_date(ensure_utc(event.commence_time)) for event in events]
@@ -65,7 +76,7 @@ async def _fetch_games(fetcher: MlbStatsFetcher, events: Sequence[Event]) -> lis
         min(days) - timedelta(days=1), max(days) + timedelta(days=1)
     )
     finals = final_scores(games)
-    held = {event.mlb_game_pk for event in events if event.mlb_game_pk is not None}
+    held = {game_pks[event.id] for event in events if event.id in game_pks}
     for game_pk in sorted(held - finals.keys()):
         games.extend(await fetcher.fetch_game(game_pk))
     return games
@@ -89,16 +100,17 @@ async def repair_scores(
             )
         ).scalars()
     )
-    keyed = [event for event in events if event.mlb_game_pk is not None]
-    games = await _fetch_games(fetcher, keyed) if keyed else []
-    checks = check_scores(events, games)
+    game_pks = await game_pks_of(session, events)
+    keyed = [event for event in events if event.id in game_pks]
+    games = await _fetch_games(fetcher, keyed, game_pks) if keyed else []
+    checks = check_scores(events, game_pks, games)
     if apply:
         for check in checks:
             if check.outcome is ScoreOutcome.MISMATCH and check.mlb_score is not None:
                 logger.info(
                     "mlb_score_repaired",
                     event_id=check.event.id,
-                    game_pk=check.event.mlb_game_pk,
+                    game_pk=check.game_pk,
                     old=(check.event.home_score, check.event.away_score),
                     new=check.mlb_score,
                 )

@@ -11,7 +11,7 @@ status: stable
 
 # Assign MLB events their gamePk
 
-MLB events stored before the live jobs keyed events to the MLB Stats API `gamePk` hold a NULL `mlb_game_pk`, and some games are split across several events. This backfill gives each event its `gamePk` and merges the events of one game. What each command does is on [Event merge](event-merge.md#assigning-gamepks).
+MLB events stored before the live jobs keyed events to the MLB Stats API `gamePk` hold no `gamePk`, and some games are split across several events. This backfill gives each event its `gamePk` and merges the events of one game. What each command does is on [Event merge](event-merge.md#assigning-gamepks).
 
 > [!WARNING]
 > `--apply` merges and deletes events in the database `DATABASE_URL` names. On the production host that is the production database; elsewhere point it at a copy ([environments](../foundations/databases-and-environments.md#environments)).

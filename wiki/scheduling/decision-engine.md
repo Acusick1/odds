@@ -10,7 +10,7 @@ sources:
   - odds_lambda.scheduling.decision.CadenceConfig
   - odds_lambda.scheduling.decision.ScheduleDecision
   - odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS
-  - odds_lambda.scheduling.decision.classify_tier
+  - odds_lambda.tier_utils.calculate_tier
   - odds_lambda.scheduling.decision.DORMANCY_HORIZON_DAYS
   - odds_lambda.scheduling.decision.KickoffLookup
   - odds_lambda.scheduling.decision.LeadRun
@@ -48,7 +48,7 @@ status: stable
 
 Used by odds, scrapes, Betfair and the agent.
 
-- `decide_forward(sport_key, cadence, overnight=None, lookahead_days=7, ...)` takes the next SCHEDULED kickoff for the sport (`odds_lambda.scheduling.helpers.get_next_kickoff`). No kickoff within `lookahead_days` gives `should_execute=False` and a check-in at the earlier of `cadence.no_game` hours from now and the moment a known later kickoff enters `lookahead_days`; the check-in ignores the overnight window. Otherwise `odds_lambda.scheduling.decision.classify_tier(hours_until)` picks a [fetch tier](../storage/fetch-tier.md) and the cadence interval. `odds_lambda.scheduling.decision.classify_tier` uses strict `<` on `odds_lambda.fetch_tier.FetchTier.max_hours` where stored tiers use `<=`, so a kickoff exactly 3.0 h away is PREGAME here and CLOSING when stored (#446, [boundary encodings](../storage/fetch-tier.md#boundary-encodings)).
+- `decide_forward(sport_key, cadence, overnight=None, lookahead_days=7, ...)` takes the next SCHEDULED kickoff for the sport (`odds_lambda.scheduling.helpers.get_next_kickoff`). No kickoff within `lookahead_days` gives `should_execute=False` and a check-in at the earlier of `cadence.no_game` hours from now and the moment a known later kickoff enters `lookahead_days`; the check-in ignores the overnight window. Otherwise `odds_lambda.tier_utils.calculate_tier(hours_until)`, the one hours-to-tier rule, picks a [fetch tier](../storage/fetch-tier.md#the-one-hours-to-tier-rule) and the cadence interval: a kickoff exactly on a `odds_lambda.fetch_tier.FetchTier.max_hours` boundary (3.0 h away, say) is in the nearer tier, as it is wherever hours alone decide the tier; a stored snapshot's tier also depends on its time basis ([the tier a snapshot covers](../storage/fetch-tier.md#the-tier-a-snapshot-covers)).
 - `odds_lambda.scheduling.decision.decide_forward_resilient(sport_keys, cadence, ..., next_kickoff_lookup=None, leads=())` uses the soonest kickoff across sports, from `odds_lambda.scheduling.helpers.get_next_kickoff` unless a `odds_lambda.scheduling.decision.KickoffLookup` is given, and moves the next run earlier for any of `leads` ([lead runs](#lead-runs)); if the kickoff query raises it returns `should_execute=True` at `cadence.db_fallback` (default 1 h) so the chain survives a database outage.
 - `fetch-oddsportal`, `fetch-betfair-exchange` and `fetch-polymarket-odds` run only while `should_execute` holds and otherwise only book a check-in ([Dormancy](#dormancy)). `agent-run` uses `odds_lambda.scheduling.decision.decide_forward_resilient` for its cadence, ignores the gate and uses only `next_execution`; a requested wake-up overrides it ([wake-up requests](../agent/agent-run-job.md#wake-up-requests)).
 

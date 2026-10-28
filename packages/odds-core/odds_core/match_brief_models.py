@@ -1,6 +1,6 @@
 """Match brief model for cross-session agent memory."""
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import Any
@@ -35,18 +35,6 @@ class SharpPriceMeta:
     snapshot_id: int
     snapshot_time: datetime
     age_seconds: float
-
-
-@dataclass
-class SharpPriceResult:
-    """Sharp prices resolved across a time window of snapshots.
-
-    ``prices`` is a standard SharpPriceMap. ``meta`` carries per-outcome
-    provenance so callers can judge staleness.
-    """
-
-    prices: SharpPriceMap = field(default_factory=dict)
-    meta: dict[str, SharpPriceMeta] = field(default_factory=dict)
 
 
 class MatchBrief(SQLModel, table=True):

@@ -5,31 +5,13 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from odds_core.models import Event, EventExternalId, EventStatus, HealthCheckAcknowledgement
-from odds_core.vocabulary import HealthCheck, Source
+from odds_core.models import Event, EventStatus, HealthCheckAcknowledgement
+from odds_core.vocabulary import HealthCheck
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.mlb_game_resolver import MLB_SPORT_KEY
-
-
-async def holds_game_pk(session: AsyncSession, event: Event) -> bool:
-    """Whether the event holds a ``gamePk``, in ``mlb_game_pk`` or as an external id."""
-    return bool(await events_holding_game_pks(session, [event]))
-
-
-async def events_holding_game_pks(session: AsyncSession, events: Sequence[Event]) -> set[str]:
-    """The ids of ``events`` that hold a ``gamePk``, in ``mlb_game_pk`` or as an external id."""
-    holding = {e.id for e in events if e.mlb_game_pk is not None}
-    by_key = {e.surrogate_id: e.id for e in events}
-    result = await session.execute(
-        select(EventExternalId.event_id).where(
-            EventExternalId.source == Source.MLB_STATS_API,
-            EventExternalId.event_id.in_(list(by_key)),  # type: ignore[attr-defined]
-        )
-    )
-    holding.update(by_key[key] for key in result.scalars())
-    return holding
+from odds_lambda.storage.game_pks import holds_game_pk
 
 
 async def mark_unmatched(session: AsyncSession, event: Event, reason: str) -> None:
@@ -89,3 +71,19 @@ async def clear_unmatched(session: AsyncSession, event: Event) -> None:
     if event.status is EventStatus.UNMATCHED:
         event.status = EventStatus.SCHEDULED
         event.updated_at = datetime.now(UTC)
+
+
+async def unmatched_reasons(session: AsyncSession, events: Sequence[Event]) -> dict[str, str]:
+    """The ``mark_unmatched`` reason of each of ``events`` that has one, by event id. A final
+    event keeps its status when marked, so this, not the status, says which events have no game
+    in MLB's schedule."""
+    by_key = {e.surrogate_id: e.id for e in events if e.surrogate_id is not None}
+    if not by_key:
+        return {}
+    rows = await session.execute(
+        select(HealthCheckAcknowledgement.event_id, HealthCheckAcknowledgement.reason).where(
+            HealthCheckAcknowledgement.check_name == HealthCheck.MISSING_MLB_GAME_PK,
+            HealthCheckAcknowledgement.event_id.in_(list(by_key)),  # type: ignore[attr-defined]
+        )
+    )
+    return {by_key[key]: reason for key, reason in rows.all()}

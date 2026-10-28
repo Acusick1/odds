@@ -92,19 +92,6 @@ def parse_match_date(date_str: str) -> datetime:
     return datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S %Z").replace(tzinfo=UTC)
 
 
-def hours_to_tier(hours_before: float) -> str:
-    """Map hours before game start to fetch tier name."""
-    if hours_before < 3:
-        return "closing"
-    elif hours_before < 12:
-        return "pregame"
-    elif hours_before < 24:
-        return "sharp"
-    elif hours_before < 72:
-        return "early"
-    return "opening"
-
-
 def parse_odds_timestamp(ts_str: str) -> datetime:
     """Parse OddsPortal odds_history timestamp (naive, wrong year)."""
     return datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%S")

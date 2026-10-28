@@ -1,13 +1,14 @@
 ---
 type: reference
 title: Coverage and completeness checks
-description: TierCoverageValidator, odds validate, odds quality, QualityMetrics, the daily-validation workflow and the read-only scripts/check_*.py.
+description: TierCoverageValidator, odds validate, odds quality, QualityMetrics, the daily-validation workflow and the read-only scripts/check_games_in_database.py.
 sources:
   - odds_lambda.storage.tier_validator.TierCoverageValidator
   - odds_lambda.storage.tier_validator.TierCoverageReport
   - odds_lambda.storage.tier_validator.DailyValidationReport
   - odds_lambda.storage.tier_validator.CRITICAL_TIERS
   - odds_lambda.storage.tier_validator.WARNING_TIERS
+  - odds_lambda.storage.tier_validator.covered_tiers
   - odds_lambda.storage.tier_validator.TierCoverageValidator._check_missing_games
   - odds_analytics.quality_metrics.QualityMetrics
   - odds_analytics.quality_metrics.QualityMetrics.get_games_missing_scores
@@ -15,9 +16,7 @@ sources:
   - odds_lambda.fetch_tier.FetchTier.max_hours
   - odds_cli.commands.validate
   - odds_cli.commands.quality
-  - scripts/check_game_tier_coverage.py
   - scripts/check_games_in_database.py
-  - scripts/check_tier_distribution.py
   - .github/workflows/daily-validation.yml
 status: stable
 ---
@@ -28,9 +27,9 @@ These checks confirm that every game was collected across the [fetch tiers](fetc
 
 ## TierCoverageValidator
 
-`odds_lambda.storage.tier_validator.TierCoverageValidator` is driven by `odds_cli.commands.validate.validate_game` (`odds_lambda.storage.tier_validator.TierCoverageValidator.validate_game`), `odds_cli.commands.validate.validate_daily` (`odds_lambda.storage.tier_validator.TierCoverageValidator.validate_date`) and `odds_cli.commands.validate.validate_tier_coverage` (`odds_lambda.storage.tier_validator.TierCoverageValidator.validate_date_range`). Per game it reads tier counts, counted as distinct snapshot times, from [OddsReader](odds-reader.md) and builds a `odds_lambda.storage.tier_validator.TierCoverageReport`; per date a `odds_lambda.storage.tier_validator.DailyValidationReport`.
+`odds_lambda.storage.tier_validator.TierCoverageValidator` is driven by `odds_cli.commands.validate.validate_game` (`odds_lambda.storage.tier_validator.TierCoverageValidator.validate_game`), `odds_cli.commands.validate.validate_daily` (`odds_lambda.storage.tier_validator.TierCoverageValidator.validate_date`) and `odds_cli.commands.validate.validate_tier_coverage` (`odds_lambda.storage.tier_validator.TierCoverageValidator.validate_date_range`). Per game it puts each distinct snapshot time of the event in the tier it covers against the event's current kick-off (`odds_lambda.storage.tier_validator.covered_tiers`): a `close` snapshot and each market's latest OddsPortal history (`source_stamped`) time are CLOSING (the rows it reads carry the market), an `upper_bound` time on a boundary covers the farther tier, and the rest are bucketed by hours ([the tier a snapshot covers](fetch-tier.md#the-tier-a-snapshot-covers)). It builds a `odds_lambda.storage.tier_validator.TierCoverageReport`; per date a `odds_lambda.storage.tier_validator.DailyValidationReport`.
 
-- `odds_lambda.storage.tier_validator.CRITICAL_TIERS` = PREGAME, CLOSING: missing makes a game incomplete (`is_complete`). They depend on tiers stored with `<=` boundaries ([Boundary encodings](fetch-tier.md#boundary-encodings)). `odds_lambda.storage.tier_validator.WARNING_TIERS` = OPENING, EARLY, SHARP: counted in `games_with_warnings`. `odds_lambda.storage.tier_validator.TierCoverageValidator.DEFAULT_REQUIRED_TIERS` is all five.
+- `odds_lambda.storage.tier_validator.CRITICAL_TIERS` = PREGAME, CLOSING: missing makes a game incomplete (`is_complete`). Hours are bucketed by `odds_lambda.tier_utils.calculate_tier`, whose `odds_lambda.fetch_tier.FetchTier.max_hours` boundaries belong to the nearer tier ([the one hours-to-tier rule](fetch-tier.md#the-one-hours-to-tier-rule)), except for an `upper_bound` time, which covers the farther tier on a boundary, so an FDUK opening stamped exactly 3.0 h out is PREGAME, not closing coverage. `odds_lambda.storage.tier_validator.WARNING_TIERS` = OPENING, EARLY, SHARP: counted in `games_with_warnings`. `odds_lambda.storage.tier_validator.TierCoverageValidator.DEFAULT_REQUIRED_TIERS` is all five.
 - FINAL games without both scores get the issue `"Missing final scores for completed game"`.
 - `check_discovery=True` calls The Odds API `/scores` and flags `missing_games` (completed upstream, absent from `events` altogether, not games with zero snapshots; error) and `missing_scores` (in DB, not FINAL or no score; warning). Discovery calls it with `sport='basketball_nba'` only and only for dates 0 to 3 days back; `odds_lambda.storage.tier_validator.TierCoverageValidator.validate_date` reads `odds_lambda.storage.readers.OddsReader.get_games_by_date`, which has no sport filter and uses a noon-to-noon UTC day, so EPL and MLB days are validated against NBA discovery (#465).
 - `odds_lambda.storage.tier_validator.TierCoverageValidator.validate_date` logs and skips games whose validation raises, so `total_games` can exceed `complete_games + incomplete_games`. A discovery failure re-raises.
@@ -52,7 +51,7 @@ These checks confirm that every game was collected across the [fetch tiers](fetc
 
 ## Read-only diagnostics
 
-Safe against production: `scripts/check_games_in_database.py [N]` (next N scheduled events in the DB, not the league schedule), `scripts/check_game_tier_coverage.py --date|--event` and `scripts/check_tier_distribution.py [days]`. `check_game_tier_coverage.py --date` filters on the calendar date of `commence_time`, so counts differ from `validate daily` at day edges. Workflow for a failing validation: [Debug the AWS self-scheduling jobs](../scheduling/howto-debug-aws-scheduler.md).
+Safe against production: `scripts/check_games_in_database.py [N]` (next N scheduled events in the DB, not the league schedule). Workflow for a failing validation: [Debug the AWS self-scheduling jobs](../scheduling/howto-debug-aws-scheduler.md).
 
 ## Related
 

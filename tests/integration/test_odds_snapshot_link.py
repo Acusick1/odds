@@ -210,7 +210,6 @@ class TestEveryWriterLinksItsRows:
     KNOWN_WRITERS = {
         Path("packages/odds-core/odds_core/snapshot_utils.py"),
         Path("packages/odds-lambda/odds_lambda/storage/writers.py"),
-        Path("packages/odds-lambda/odds_lambda/copy_from_production.py"),
     }
 
     def test_no_other_code_builds_odds_rows(self) -> None:

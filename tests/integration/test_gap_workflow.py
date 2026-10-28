@@ -9,7 +9,7 @@ from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.storage.readers import OddsReader
 
-from tests.test_helpers import add_event
+from tests.test_helpers import TIER_HOURS_BEFORE, add_event
 
 
 @pytest.fixture
@@ -64,11 +64,9 @@ async def events_with_gaps(test_session):
     for tier in [FetchTier.OPENING, FetchTier.EARLY, FetchTier.SHARP, FetchTier.PREGAME]:
         snapshot = OddsSnapshot(
             event_id=event1.id,
-            snapshot_time=event1.commence_time - timedelta(hours=tier.interval_hours),
+            snapshot_time=event1.commence_time - timedelta(hours=TIER_HOURS_BEFORE[tier]),
             raw_data={"bookmakers": []},
             bookmaker_count=0,
-            fetch_tier=tier.value,
-            hours_until_commence=tier.interval_hours,
         )
         test_session.add(snapshot)
 
@@ -76,11 +74,9 @@ async def events_with_gaps(test_session):
     for tier in [FetchTier.SHARP, FetchTier.PREGAME, FetchTier.CLOSING]:
         snapshot = OddsSnapshot(
             event_id=event2.id,
-            snapshot_time=event2.commence_time - timedelta(hours=tier.interval_hours),
+            snapshot_time=event2.commence_time - timedelta(hours=TIER_HOURS_BEFORE[tier]),
             raw_data={"bookmakers": []},
             bookmaker_count=0,
-            fetch_tier=tier.value,
-            hours_until_commence=tier.interval_hours,
         )
         test_session.add(snapshot)
 
@@ -88,11 +84,9 @@ async def events_with_gaps(test_session):
     for tier in FetchTier.get_priority_order():
         snapshot = OddsSnapshot(
             event_id=event3.id,
-            snapshot_time=event3.commence_time - timedelta(hours=tier.interval_hours),
+            snapshot_time=event3.commence_time - timedelta(hours=TIER_HOURS_BEFORE[tier]),
             raw_data={"bookmakers": []},
             bookmaker_count=0,
-            fetch_tier=tier.value,
-            hours_until_commence=tier.interval_hours,
         )
         test_session.add(snapshot)
 
@@ -328,10 +322,9 @@ class TestGapDetectionWorkflow:
         for tier in FetchTier.get_priority_order():
             snapshot = OddsSnapshot(
                 event_id=event.id,
-                snapshot_time=event.commence_time - timedelta(hours=tier.interval_hours),
+                snapshot_time=event.commence_time - timedelta(hours=TIER_HOURS_BEFORE[tier]),
                 raw_data={"bookmakers": []},
                 bookmaker_count=0,
-                fetch_tier=tier.value,
             )
             test_session.add(snapshot)
 

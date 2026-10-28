@@ -94,13 +94,14 @@ class TestUnsettledEvents:
         assert send.await_args.kwargs["context"]["event_ids"] == ["mlb-april"]
 
     @pytest.mark.asyncio
-    async def test_ignores_unassignable_and_postponed_mlb_events(
-        self, pglite_async_session
-    ) -> None:
+    async def test_ignores_unmatched_and_postponed_mlb_events(self, pglite_async_session) -> None:
         session = pglite_async_session
-        unassignable = _event("op_live_BOSSOX_TAMRAY_2026-05-17T1735", NOW - timedelta(days=150))
+        unassignable = _event(
+            "op_live_BOSSOX_TAMRAY_2026-05-17T1735",
+            NOW - timedelta(days=150),
+            EventStatus.UNMATCHED,
+        )
         unassignable.sport_key = "baseball_mlb"
-        unassignable.no_game_pk_reason = "MLB has BOS at ATL that day"
         postponed = _event("mlb-postponed", NOW - timedelta(days=3), EventStatus.POSTPONED)
         postponed.sport_key = "baseball_mlb"
         session.add_all([unassignable, postponed])

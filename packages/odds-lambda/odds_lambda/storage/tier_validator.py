@@ -6,15 +6,20 @@ ensuring ML-ready data completeness across the adaptive sampling spectrum.
 
 from __future__ import annotations
 
+from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 
 import structlog
-from odds_core.models import EventStatus
+from odds_core.models import EventStatus, OddsSnapshot
+from odds_core.vocabulary import Source, TimeBasis
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.storage.readers import OddsReader
+from odds_lambda.tier_utils import snapshot_tiers
 
 logger = structlog.get_logger()
 
@@ -133,6 +138,17 @@ class DailyValidationReport:
         return (self.complete_games / self.total_games) * 100
 
 
+def covered_tiers(
+    rows: Sequence[tuple[datetime, Source | None, TimeBasis | None, str | None]],
+    commence_time: datetime,
+) -> set[tuple[datetime, FetchTier]]:
+    """The (snapshot time, tier) pairs an event's snapshots, given as (snapshot time, source,
+    time basis, market), cover (``snapshot_tiers``)."""
+    return {
+        (row[0], tier) for row, tier in zip(rows, snapshot_tiers(rows, commence_time), strict=True)
+    }
+
+
 class TierCoverageValidator:
     """Validates fetch tier coverage for data completeness."""
 
@@ -188,22 +204,21 @@ class TierCoverageValidator:
         if not event:
             raise ValueError(f"Event {event_id} not found")
 
-        # Get tier coverage
-        tier_coverage = await self.reader.get_tier_coverage_for_event(event_id)
-
-        # Get all snapshots to count total
-        all_snapshots = await self.reader.get_snapshots_by_tier(event_id)
-
-        # Convert string tier names to FetchTier enum
-        tiers_present = set()
-        snapshots_by_tier_dict = {}
-        for tier_str, count in tier_coverage.items():
-            try:
-                tier = FetchTier(tier_str)
-                tiers_present.add(tier)
-                snapshots_by_tier_dict[tier] = count
-            except ValueError:
-                logger.warning("invalid_tier_value", tier=tier_str, event_id=event_id)
+        rows = (
+            await self.session.execute(
+                select(
+                    OddsSnapshot.snapshot_time,
+                    OddsSnapshot.source,
+                    OddsSnapshot.time_basis,
+                    OddsSnapshot.market,
+                )
+                .where(OddsSnapshot.event_id == event_id)
+                .distinct()
+            )
+        ).all()
+        covered = covered_tiers(rows, event.commence_time)
+        snapshots_by_tier_dict = dict(Counter(tier for _, tier in covered))
+        tiers_present = set(snapshots_by_tier_dict)
 
         # Calculate missing tiers
         tiers_missing = required_tiers - tiers_present
@@ -232,7 +247,7 @@ class TierCoverageValidator:
             commence_time=event.commence_time,
             tiers_present=frozenset(tiers_present),
             tiers_missing=frozenset(tiers_missing),
-            total_snapshots=len({s.snapshot_time for s in all_snapshots}),
+            total_snapshots=len({snapshot_time for snapshot_time, _ in covered}),
             snapshots_by_tier=snapshots_by_tier_dict,
             has_final_scores=has_final_scores,
             home_score=event.home_score,

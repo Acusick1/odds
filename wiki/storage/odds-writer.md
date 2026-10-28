@@ -10,7 +10,6 @@ sources:
   - odds_lambda.storage.shaped_snapshots.store_shaped_snapshot
   - odds_lambda.storage.writers.OddsWriter.log_fetch
   - odds_lambda.storage.writers.OddsWriter.log_data_quality_issue
-  - odds_lambda.tier_utils.calculate_tier_from_timestamps
   - odds_lambda.ingestion.OddsIngestionService
   - odds_core.config.DataQualityConfig
   - odds_core.models.DataQualityLog
@@ -20,15 +19,15 @@ status: stable
 
 # OddsWriter
 
-`odds_lambda.storage.writers.OddsWriter` owns an `AsyncSession` and an `odds_lambda.storage.validators.OddsValidator` (its vig floor skips zero-margin books, `odds_core.bookmakers.ZERO_MARGIN_BOOKMAKERS`). It never commits. It flushes each snapshot it stores, to give the snapshot's odds and price rows its id; callers commit ([Commit contract](storage-layer.md#commit-contract)). The tables it writes are on [Odds snapshot and odds tables](odds-tables.md), [Prices and snapshot payloads tables](price-tables.md) and [Events table](events.md). Live jobs find the event a snapshot belongs to through the [event resolver](event-resolver.md) before storing it.
+`odds_lambda.storage.writers.OddsWriter` owns an `AsyncSession` and an `odds_lambda.storage.validators.OddsValidator` (its vig floor skips zero-margin books, `odds_core.bookmakers.ZERO_MARGIN_BOOKMAKERS`). It never commits. It tiers each snapshot against the event's `commence_time` ([fetch tier](fetch-tier.md#where-tiers-are-written-and-read)). It flushes each snapshot it stores, to give the snapshot's odds and price rows its id; callers commit ([Commit contract](storage-layer.md#commit-contract)). The tables it writes are on [Odds snapshot and odds tables](odds-tables.md), [Prices and snapshot payloads tables](price-tables.md) and [Events table](events.md). Live jobs find the event a snapshot belongs to through the [event resolver](event-resolver.md) before storing it.
 
 ## store_odds_snapshot
 
-`odds_lambda.storage.writers.OddsWriter.store_envelope` does the work and returns an `odds_lambda.storage.writers.StoredEnvelope` (the snapshot, its `odds` rows, whether it was inserted and `snapshots_written`, the number of snapshots inserted: one per market of a shaped envelope, none for a key already stored); `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` calls it and returns the snapshot and rows.
+`odds_lambda.storage.writers.OddsWriter.store_envelope` does the work, stamping the snapshot's `fetch_tier` with `odds_lambda.tier_utils.snapshot_tier` from the shape's time basis (none without a shape, [fetch tier](fetch-tier.md#where-tiers-are-written-and-read)), and returns an `odds_lambda.storage.writers.StoredEnvelope` (the snapshot, its `odds` rows, whether it was inserted and `snapshots_written`, the number of snapshots inserted: one per market of a shaped envelope, none for a key already stored); `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` calls it and returns the snapshot and rows.
 
 `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot(event_id, raw_data, snapshot_time=None, validate=True, *, shape=None, api_request_id=None)` stores one event's envelope (`raw_data`). `shape` (`odds_lambda.storage.shaped_snapshots.SnapshotShape`) names the snapshot's source, its [time basis](odds-tables.md#odds_snapshots) and the payload it came in; the OddsPortal live, Betfair and live Polymarket jobs, Odds API ingestion and the Odds API backfill pass it, and the other writers pass none. Steps:
 
-1. Loads the event and computes `hours_until_commence` and the fetch tier from `snapshot_time` and the event's own `commence_time` (`odds_lambda.tier_utils.calculate_tier_from_timestamps`). The tier is per event, not per job run. If the event row is missing, both `fetch_tier` and `hours_until_commence` are stored as NULL ([Fetch tier](fetch-tier.md)); with `shape`, a missing event raises `ValueError`, since outcomes are matched to its teams.
+1. Loads the event and computes `hours_until_commence` and the fetch tier from `snapshot_time` and the event's own `commence_time` (`odds_lambda.tier_utils.snapshot_tier`, with the shape's time basis). The tier is per event, not per job run. If the event row is missing, both `fetch_tier` and `hours_until_commence` are stored as NULL ([Fetch tier](fetch-tier.md)); with `shape`, a missing event raises `ValueError`, since outcomes are matched to its teams.
 2. If `validate`, runs the validator and writes one `odds_core.models.DataQualityLog` row for any warnings; storage proceeds regardless ([Odds validation](odds-validator.md)). `odds_lambda.ingestion.OddsIngestionService.ingest_sport` is the only caller that passes `validate`: the `validate` argument of that method or of `odds_lambda.ingestion.OddsIngestionService.ingest_sports` when given, else `odds_core.config.DataQualityConfig.enable_validation`. Every other caller of `odds_lambda.storage.writers.OddsWriter.store_odds_snapshot` uses the default `True`.
 3. Builds an `odds_core.models.OddsSnapshot` ([columns and indexes](odds-tables.md#odds_snapshots)) with the full `raw_data`, `bookmaker_count` and `api_request_id`.
    - Without `shape` it is added with the redesigned columns (`source`, `market`, `time_basis`, the market metadata and `payload_id`) NULL, and flushed to get its id.

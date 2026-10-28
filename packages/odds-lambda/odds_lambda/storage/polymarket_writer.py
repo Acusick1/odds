@@ -14,12 +14,13 @@ from odds_core.polymarket_models import (
     PolymarketPriceSnapshot,
 )
 from odds_core.time import ensure_utc, parse_api_datetime
+from odds_core.vocabulary import TimeBasis
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.polymarket_fetcher import classify_market, process_order_book
-from odds_lambda.tier_utils import calculate_hours_until_commence, calculate_tier_from_timestamps
+from odds_lambda.tier_utils import calculate_hours_until_commence, snapshot_tier
 
 logger = structlog.get_logger()
 
@@ -215,7 +216,7 @@ class PolymarketWriter:
         commence_time = ensure_utc(commence_time)
 
         # Calculate tier and hours_until
-        fetch_tier = calculate_tier_from_timestamps(snapshot_time, commence_time)
+        fetch_tier = snapshot_tier(snapshot_time, commence_time, TimeBasis.OBSERVED)
         hours_until = calculate_hours_until_commence(snapshot_time, commence_time)
 
         stmt = (
@@ -279,7 +280,7 @@ class PolymarketWriter:
             return None
 
         # Calculate tier and hours_until
-        fetch_tier = calculate_tier_from_timestamps(snapshot_time, commence_time)
+        fetch_tier = snapshot_tier(snapshot_time, commence_time, TimeBasis.OBSERVED)
         hours_until = calculate_hours_until_commence(snapshot_time, commence_time)
 
         # Get token_id from market (use first clob_token_id for now)
@@ -342,7 +343,7 @@ class PolymarketWriter:
             snapshot_time = ensure_utc(datetime.fromtimestamp(point["t"], tz=UTC))
 
             # Calculate tier for this historical point
-            fetch_tier = calculate_tier_from_timestamps(snapshot_time, commence_time)
+            fetch_tier = snapshot_tier(snapshot_time, commence_time, TimeBasis.OBSERVED)
             hours_until = calculate_hours_until_commence(snapshot_time, commence_time)
 
             # Parse price (complementary probabilities)

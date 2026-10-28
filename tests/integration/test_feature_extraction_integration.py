@@ -6,7 +6,7 @@ import pytest
 from odds_analytics.feature_extraction import FeatureEvent, TabularFeatureExtractor
 from odds_core.models import Event, EventStatus, Odds
 from odds_core.odds_math import american_to_decimal
-from odds_lambda.storage.readers import OddsReader
+from sqlalchemy import select
 
 from tests.test_helpers import add_event
 
@@ -87,8 +87,9 @@ class TestFeatureExtractionIntegration:
         await test_session.commit()
 
         # Query back and extract features
-        reader = OddsReader(test_session)
-        queried_odds = await reader.get_odds_at_time(event.id, odds_time, tolerance_minutes=5)
+        queried_odds = list(
+            (await test_session.execute(select(Odds).where(Odds.event_id == event.id))).scalars()
+        )
 
         # Extract features
         feature_event = FeatureEvent(

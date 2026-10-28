@@ -37,6 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.scheduling.helpers import apply_overnight_skip, get_next_kickoff
 from odds_lambda.storage.readers import OddsReader
+from odds_lambda.tier_utils import calculate_tier
 
 logger = structlog.get_logger()
 
@@ -207,7 +208,7 @@ def _decide_from_kickoff(
         )
 
     hours_until = (next_kickoff - now).total_seconds() / 3600
-    tier = classify_tier(hours_until)
+    tier = calculate_tier(hours_until)
     interval = cadence.interval_for(tier)
     next_execution = _next_time(now, interval, overnight)
     reason = f"Next {sport_key} game in {hours_until:.1f}h ({tier.value} tier)"
@@ -455,26 +456,3 @@ async def decide_backward_resilient(
             next_execution=_next_time(now, db_fallback, overnight),
             tier=None,
         )
-
-
-def classify_tier(hours_until: float) -> FetchTier:
-    """Classify hours-until-kickoff into a canonical ``FetchTier``.
-
-    Reads the boundaries straight off ``FetchTier.max_hours`` so the canonical
-    thresholds live in one place, and applies the strict ``<`` comparison its
-    contract documents (``hours_before < tier.max_hours``). A game exactly on a
-    boundary (e.g. 3.0h) therefore falls into the *next* tier up — not the tier
-    whose ``max_hours`` it equals. This differs from ``tier_utils.calculate_tier``,
-    which uses ``<=`` and so disagrees at exact boundaries.
-    """
-    if hours_until < 0:
-        return FetchTier.IN_PLAY
-    for tier in (
-        FetchTier.CLOSING,
-        FetchTier.PREGAME,
-        FetchTier.SHARP,
-        FetchTier.EARLY,
-    ):
-        if hours_until < tier.max_hours:
-            return tier
-    return FetchTier.OPENING

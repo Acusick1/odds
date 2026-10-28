@@ -21,7 +21,7 @@ A PR that replaces code deletes what it replaces, with its tests and wiki pages;
 - **AWS is dormant, and its deployed state is not in the repo.** Every scheduled job runs on the production host; the EventBridge rules and the Deploy to Production workflow are disabled; re-enabling the workflow and running it re-enables every rule. `odds scheduler list-jobs --backend aws` is the only record of the AWS state. See [jobs and deployment](wiki/scheduling/job-deployment-matrix.md#dormant-aws-rules) and [ADR-0008](docs/adr/0008-mini-pc-is-production.md).
 - **The Odds API costs quota units.** Check `odds status quota` before bulk or historical fetches. See [quota](wiki/collection/odds-api-quota.md).
 - **Pass `--sport` and the sport's market key.** Several CLI defaults are NBA. EPL odds use `1x2` and MLB uses `h2h`. See [sources and keys](wiki/collection/sport-and-market-keys.md).
-- **Historical analysis uses only data at or before decision time.** `get_odds_at_time` searches both sides of the target time. See [look-ahead](wiki/modelling/look-ahead-bias.md).
+- **Historical analysis uses only data at or before decision time.** Bound `odds_core.quotes.quotes` with `until` (and `known_at`). See [look-ahead](wiki/modelling/look-ahead-bias.md).
 - **The retail-EV model's target, EV against the Betfair Exchange close, is `target_type: retail_ev`.** See [target](wiki/modelling/clv-target.md).
 - **Use one `async with async_session_maker() as session` per task.** Lambda gets `NullPool` automatically. See [databases](wiki/foundations/databases-and-environments.md).
 

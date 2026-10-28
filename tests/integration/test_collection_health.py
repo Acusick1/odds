@@ -12,7 +12,7 @@ import pytest
 from odds_core.config import get_settings
 from odds_core.mlb_data_models import MlbProbablePitchers
 from odds_core.models import AlertHistory, Event, EventStatus, OddsSnapshot
-from odds_core.snapshot_sources import SnapshotSource
+from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda import collection_calendar, results_run
 from odds_lambda.betfair.client import BetfairBook, BetfairRunner
 from odds_lambda.betfair.constants import SPORT_CONFIG
@@ -37,9 +37,9 @@ from odds_lambda.scheduling.jobs import JobContext
 from tests.test_helpers import store_tagged
 
 NOW = datetime(2026, 10, 19, 12, 0, tzinfo=UTC)
-OP = SnapshotSource.ODDSPORTAL_LIVE
-BETFAIR = SnapshotSource.BETFAIR_API
-ODDS_API = None
+OP = Source.ODDSPORTAL
+BETFAIR = Source.BETFAIR
+ODDS_API = Source.ODDS_API
 
 
 class SessionMaker:
@@ -70,7 +70,8 @@ def seed(pglite_async_session: Any) -> Callable[..., Any]:
         *,
         sport_key: str = "soccer_epl",
         status: EventStatus = EventStatus.SCHEDULED,
-        snapshots: tuple[tuple[SnapshotSource | None, datetime], ...] = (),
+        snapshots: tuple[tuple[Source, datetime], ...] = (),
+        time_basis: TimeBasis = TimeBasis.OBSERVED,
     ) -> None:
         nonlocal counter
         counter += 1
@@ -91,8 +92,10 @@ def seed(pglite_async_session: Any) -> Callable[..., Any]:
                 OddsSnapshot(
                     event_id=f"event_{counter}",
                     snapshot_time=taken,
-                    raw_data={} if source is None else {"source": source.value},
+                    raw_data={},
                     bookmaker_count=1,
+                    source=source,
+                    time_basis=time_basis,
                 )
             )
         await pglite_async_session.commit()
@@ -173,6 +176,17 @@ class TestLatestSnapshotTime:
             NOW - timedelta(hours=9)
         )
         assert await latest_snapshot_time(pglite_async_session, "soccer_epl", ODDS_API) is None
+
+    async def test_leaves_out_backfilled_history(
+        self, pglite_async_session: Any, seed: Callable[..., Any]
+    ) -> None:
+        await seed(
+            NOW + timedelta(hours=5),
+            snapshots=((OP, NOW - timedelta(hours=1)),),
+            time_basis=TimeBasis.SOURCE_STAMPED,
+        )
+
+        assert await latest_snapshot_time(pglite_async_session, "soccer_epl", OP) is None
 
 
 @pytest.mark.usefixtures("guard_session")
@@ -304,7 +318,7 @@ class TestCheckStaleSources:
     async def test_flags_a_source_that_stopped_writing_before_a_fixture(
         self, pglite_async_session: Any, seed: Callable[..., Any]
     ) -> None:
-        await seed(NOW + timedelta(hours=3), snapshots=((OP, NOW - timedelta(hours=5)),))
+        await seed(NOW + timedelta(hours=4), snapshots=((OP, NOW - timedelta(hours=5)),))
 
         stale = await self._monitor(pglite_async_session).check_stale_sources(NOW)
 
@@ -593,7 +607,7 @@ class TestCheckMissingBetfairCloses:
             for name, price in zip(names, prices, strict=False)
         ]
         return {
-            "source": BETFAIR.value,
+            "source": "betfair_api",
             "bookmakers": [
                 {
                     "key": "betfair_exchange",
@@ -648,7 +662,7 @@ class TestCheckMissingBetfairCloses:
 
     @staticmethod
     def _op(kickoff: datetime, minutes_before: int = 20) -> tuple[datetime, dict[str, Any]]:
-        return kickoff - timedelta(minutes=minutes_before), {"source": OP.value}
+        return kickoff - timedelta(minutes=minutes_before), {"source": "oddsportal_live"}
 
     async def test_event_without_a_snapshot_in_the_window_is_missing(
         self, pglite_async_session: Any, seed_event: Callable[..., Any]
