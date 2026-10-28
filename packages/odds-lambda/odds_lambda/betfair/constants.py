@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Literal
 
 from odds_core.sports import SportKey
+from odds_core.vocabulary import Market
 
 # Betfair event-type IDs (stable; see developer.betfair.com).
 EVENT_TYPE_SOCCER = "1"
@@ -24,26 +26,46 @@ MLB_COMPETITION_NAME_HINTS: tuple[str, ...] = ("Major League Baseball", "MLB")
 
 
 @dataclass(frozen=True)
+class BetfairMarketSpec:
+    """A Betfair market type the job collects and the pipeline market it is stored under."""
+
+    market_type_code: str
+    market: Market
+    # The goal line of a totals market; None for match odds.
+    line: Decimal | None = None
+
+    @property
+    def runner_count(self) -> int:
+        return 3 if self.market is Market.ONE_X_TWO else 2
+
+
+@dataclass(frozen=True)
 class SportBetfairConfig:
     """Per-sport Betfair Exchange ingestion config."""
 
     sport_key: SportKey
     sport_title: str
     event_type_id: str
-    market_type_code: str
-    # Pipeline market_key written into raw_data.bookmakers[].markets[].key
-    market_key: str
+    # The match odds market names an event's teams and dates its kick-off.
+    match_odds: BetfairMarketSpec
     # Optional: pin a competition_id (preferred). If None, client uses
     # competition_name_hints to discover via list_competitions.
     competition_id: str | None
     competition_name_hints: tuple[str, ...] = ()
-    # If True, the market is a 3-way h2h with a "draw" outcome.
-    has_draw: bool = False
+    # Markets collected alongside the match odds, stored only for an event whose match odds are.
+    other_markets: tuple[BetfairMarketSpec, ...] = ()
     # Betfair event-name separator and ordering. Soccer: "Home v Away".
     # Baseball: "Away @ Home". ``name_separator`` splits the event name and
     # ``name_order`` says which side comes first in the resulting parts.
     name_separator: str = " v "
     name_order: Literal["home_first", "away_first"] = "home_first"
+
+    @property
+    def markets(self) -> tuple[BetfairMarketSpec, ...]:
+        return (self.match_odds, *self.other_markets)
+
+    def market_spec(self, market_type_code: str) -> BetfairMarketSpec | None:
+        return next((m for m in self.markets if m.market_type_code == market_type_code), None)
 
 
 SPORT_CONFIG: dict[SportKey, SportBetfairConfig] = {
@@ -51,21 +73,18 @@ SPORT_CONFIG: dict[SportKey, SportBetfairConfig] = {
         sport_key="soccer_epl",
         sport_title="EPL",
         event_type_id=EVENT_TYPE_SOCCER,
-        market_type_code="MATCH_ODDS",
-        market_key="1x2",
+        match_odds=BetfairMarketSpec("MATCH_ODDS", Market.ONE_X_TWO),
         competition_id=EPL_COMPETITION_ID,
         competition_name_hints=EPL_COMPETITION_NAME_HINTS,
-        has_draw=True,
+        other_markets=(BetfairMarketSpec("OVER_UNDER_25", Market.TOTALS, Decimal("2.5")),),
     ),
     "baseball_mlb": SportBetfairConfig(
         sport_key="baseball_mlb",
         sport_title="MLB",
         event_type_id=EVENT_TYPE_BASEBALL,
-        market_type_code="MATCH_ODDS",
-        market_key="h2h",
+        match_odds=BetfairMarketSpec("MATCH_ODDS", Market.H2H),
         competition_id=MLB_COMPETITION_ID,
         competition_name_hints=MLB_COMPETITION_NAME_HINTS,
-        has_draw=False,
         name_separator=" @ ",
         name_order="away_first",
     ),

@@ -148,6 +148,7 @@ def _book(
 
     return BetfairBook(
         market_id=f"1.{event_name}",
+        market_type="MATCH_ODDS",
         betfair_event_id=event_name,
         betfair_event_name=event_name,
         market_start_time=start,

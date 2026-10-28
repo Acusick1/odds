@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
+from odds_core.vocabulary import Market, PriceOutcome
 from odds_lambda.betfair.adapter import (
     _is_draw,
     _normalize_runner_name,
@@ -13,9 +15,10 @@ from odds_lambda.betfair.adapter import (
     doubleheader_game_number,
     resolve_teams,
     strip_pitcher_annotation,
+    totals_runner,
 )
 from odds_lambda.betfair.client import BetfairBook, BetfairRunner
-from odds_lambda.betfair.constants import SPORT_CONFIG
+from odds_lambda.betfair.constants import SPORT_CONFIG, BetfairMarketSpec
 
 
 def _runner(
@@ -49,9 +52,11 @@ def _book(
     inplay: bool = False,
     total_matched: float | None = 1234.5,
     market_start_time: datetime | None = None,
+    market_type: str = "MATCH_ODDS",
 ) -> BetfairBook:
     return BetfairBook(
         market_id=market_id,
+        market_type=market_type,
         betfair_event_id=event_id,
         betfair_event_name=event_name,
         market_start_time=market_start_time or datetime(2026, 4, 25, 14, 0, tzinfo=UTC),
@@ -208,7 +213,7 @@ class TestBookToBookmakerEntry:
         )
 
     def test_epl_entry_shape(self, epl_book: BetfairBook) -> None:
-        cfg = SPORT_CONFIG["soccer_epl"]
+        cfg = SPORT_CONFIG["soccer_epl"].match_odds
         snap = datetime(2026, 4, 25, 12, 0, tzinfo=UTC)
         entry = betfair_book_to_bookmaker_entry(
             epl_book, cfg, home_team="Liverpool", away_team="Crystal Palace", snapshot_time=snap
@@ -224,7 +229,7 @@ class TestBookToBookmakerEntry:
         assert sorted(outcome_names) == ["Crystal Palace", "Draw", "Liverpool"]
 
     def test_epl_prices_are_best_back_decimals(self, epl_book: BetfairBook) -> None:
-        cfg = SPORT_CONFIG["soccer_epl"]
+        cfg = SPORT_CONFIG["soccer_epl"].match_odds
         entry = betfair_book_to_bookmaker_entry(
             epl_book, cfg, home_team="Liverpool", away_team="Crystal Palace"
         )
@@ -235,7 +240,7 @@ class TestBookToBookmakerEntry:
         assert prices == {"Liverpool": 1.64, "Crystal Palace": 5.7, "Draw": 4.5}
 
     def test_epl_betfair_meta_preserved(self, epl_book: BetfairBook) -> None:
-        cfg = SPORT_CONFIG["soccer_epl"]
+        cfg = SPORT_CONFIG["soccer_epl"].match_odds
         entry = betfair_book_to_bookmaker_entry(
             epl_book, cfg, home_team="Liverpool", away_team="Crystal Palace"
         )
@@ -249,7 +254,7 @@ class TestBookToBookmakerEntry:
         assert len(meta["runners"]) == 3
 
     def test_mlb_entry_shape(self, mlb_book: BetfairBook) -> None:
-        cfg = SPORT_CONFIG["baseball_mlb"]
+        cfg = SPORT_CONFIG["baseball_mlb"].match_odds
         entry = betfair_book_to_bookmaker_entry(
             mlb_book,
             cfg,
@@ -263,7 +268,7 @@ class TestBookToBookmakerEntry:
         assert sorted(names) == ["Baltimore Orioles", "Boston Red Sox"]
 
     def test_returns_none_when_outcomes_missing(self) -> None:
-        cfg = SPORT_CONFIG["soccer_epl"]
+        cfg = SPORT_CONFIG["soccer_epl"].match_odds
         # Only one of three outcomes has a back price
         book = _book(
             market_id="1.x",
@@ -335,3 +340,78 @@ class TestCanonicalTeams:
             "Arsenal",
             "Chelsea",
         )
+
+
+class TestTotalsRunner:
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            ("Over 2.5 Goals", (PriceOutcome.OVER, Decimal("2.5"))),
+            ("Under 2.5 Goals", (PriceOutcome.UNDER, Decimal("2.5"))),
+            ("under 3.5 goals", (PriceOutcome.UNDER, Decimal("3.5"))),
+        ],
+    )
+    def test_reads_side_and_line(self, name: str, expected: tuple[PriceOutcome, Decimal]) -> None:
+        assert totals_runner(name) == expected
+
+    @pytest.mark.parametrize("name", ["Arsenal", "The Draw", "Over Goals", "2.5 Over"])
+    def test_other_names_are_not_totals(self, name: str) -> None:
+        assert totals_runner(name) is None
+
+
+class TestTotalsBookToBookmakerEntry:
+    SPEC = BetfairMarketSpec("OVER_UNDER_25", Market.TOTALS, Decimal("2.5"))
+
+    @staticmethod
+    def _totals_book(under: float | None = 1.9, over: float | None = 2.04) -> BetfairBook:
+        return _book(
+            market_id="1.124",
+            event_id="35480901",
+            event_name="Liverpool v Crystal Palace",
+            market_type="OVER_UNDER_25",
+            runners=[
+                _runner(47972, "Under 2.5 Goals", back=under, lay=1.92, back_size=500, ltp=1.91),
+                _runner(47973, "Over 2.5 Goals", back=over, lay=2.06, back_size=450, ltp=2.04),
+            ],
+        )
+
+    def test_epl_collects_over_under_2_5(self) -> None:
+        assert SPORT_CONFIG["soccer_epl"].market_spec("OVER_UNDER_25") == self.SPEC
+        assert SPORT_CONFIG["baseball_mlb"].markets == (SPORT_CONFIG["baseball_mlb"].match_odds,)
+
+    def test_runners_become_over_and_under_on_line_2_5(self) -> None:
+        entry = betfair_book_to_bookmaker_entry(
+            self._totals_book(), self.SPEC, home_team="Liverpool", away_team="Crystal Palace"
+        )
+
+        assert entry is not None
+        [market] = entry["markets"]
+        assert market["key"] == "totals"
+        assert {o["name"]: (o["point"], o["price_decimal"]) for o in market["outcomes"]} == {
+            "Over": (2.5, 2.04),
+            "Under": (2.5, 1.9),
+        }
+        assert [r["runner_name"] for r in entry["betfair_meta"]["runners"]] == [
+            "Under 2.5 Goals",
+            "Over 2.5 Goals",
+        ]
+
+    def test_a_side_without_a_back_price_leaves_no_entry(self) -> None:
+        entry = betfair_book_to_bookmaker_entry(
+            self._totals_book(over=None),
+            self.SPEC,
+            home_team="Liverpool",
+            away_team="Crystal Palace",
+        )
+
+        assert entry is None
+
+    def test_a_runner_on_another_line_is_dropped(self) -> None:
+        book = self._totals_book()
+        book.runners[1] = _runner(47973, "Over 3.5 Goals", back=3.1, lay=3.2, back_size=450)
+
+        entry = betfair_book_to_bookmaker_entry(
+            book, self.SPEC, home_team="Liverpool", away_team="Crystal Palace"
+        )
+
+        assert entry is None

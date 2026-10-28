@@ -16,8 +16,9 @@ from odds_core.models import (
     utc_now,
 )
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
+from odds_core.vocabulary import Market
 from odds_lambda.storage.event_merge import EventMerger
-from odds_lambda.storage.event_name_repair import repair_team_names
+from odds_lambda.storage.event_name_repair import _betfair_runner_names, repair_team_names
 from odds_lambda.storage.event_unmatched import mark_unmatched
 from sqlalchemy import select
 
@@ -585,6 +586,42 @@ class TestRepairAnnotatedNames:
         assert await _stored_event_ids(session) == {"op_live_B"}
 
 
+class TestBetfairRunnerNames:
+    @pytest.mark.asyncio
+    async def test_totals_snapshot_at_the_same_time_does_not_hide_the_team_runners(
+        self, pglite_async_session
+    ) -> None:
+        session = pglite_async_session
+        session.add(make_epl_event("e1"))
+        await session.flush()
+
+        def snapshot(market: Market, names: list[str]) -> OddsSnapshot:
+            return OddsSnapshot(
+                event_id="e1",
+                snapshot_time=TWIN_KICKOFF,
+                raw_data={
+                    "source": "betfair_api",
+                    "bookmakers": [
+                        {"betfair_meta": {"runners": [{"runner_name": n} for n in names]}}
+                    ],
+                },
+                bookmaker_count=1,
+                market=market,
+            )
+
+        session.add_all(
+            [
+                snapshot(Market.TOTALS, ["Under 2.5 Goals", "Over 2.5 Goals"]),
+                snapshot(Market.ONE_X_TWO, ["Arsenal", "Chelsea", "The Draw"]),
+            ]
+        )
+        await session.flush()
+
+        assert await _betfair_runner_names(session, "soccer_epl") == {
+            "e1": ["Arsenal", "Chelsea", "The Draw"]
+        }
+
+
 class TestRepairGhostsFromRunnerNames:
     @pytest.mark.asyncio
     async def test_cut_off_name_merges_into_clean_event_and_moves_every_row(
@@ -618,6 +655,7 @@ class TestRepairGhostsFromRunnerNames:
                 ],
             },
             bookmaker_count=1,
+            market=Market.H2H,
         )
         session.add(snapshot)
         await session.flush()

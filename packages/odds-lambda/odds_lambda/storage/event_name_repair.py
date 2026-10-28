@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.betfair.adapter import canonical_teams
+from odds_lambda.betfair.constants import SPORT_CONFIG
 from odds_lambda.storage.event_merge import EventMerger, MergeReport
 
 logger = structlog.get_logger()
@@ -50,6 +51,7 @@ async def _betfair_runner_names(session: AsyncSession, sport_key: str) -> dict[s
         select(OddsSnapshot.event_id, OddsSnapshot.raw_data)
         .join(Event, Event.id == OddsSnapshot.event_id)
         .where(Event.sport_key == sport_key)
+        .where(OddsSnapshot.market == SPORT_CONFIG[sport_key].match_odds.market)
         .where(OddsSnapshot.raw_data["source"].as_string() == BETFAIR_SOURCE)
         .order_by(OddsSnapshot.event_id, OddsSnapshot.snapshot_time.desc())
         .distinct(OddsSnapshot.event_id)

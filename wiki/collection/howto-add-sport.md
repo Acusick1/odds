@@ -30,7 +30,7 @@ The Odds API bookmakers and markets are config (`bookmakers`, a per-sport map, a
    - The decision engine skips runs inside the window ([decision-engine](../scheduling/decision-engine.md#overnight-windows)).
 4. If OddsPortal covers it, add a `odds_lambda.jobs.fetch_oddsportal.LeagueSpec` to `odds_lambda.jobs.fetch_oddsportal.LEAGUE_SPECS`, with the sport's OddsPortal `league` slug, `listing_path`, `sport_key`, `sport_title` and markets that are keys of `odds_lambda.oddsportal_client.FEED_MARKETS` (a market not in that table needs a new `odds_lambda.oddsportal_client.FeedMarketSpec` row first).
    - The spec carries its own overnight fields, so keep them equal to step 3 ([fetch-oddsportal-job](fetch-oddsportal-job.md#leagues)).
-5. If Betfair lists it, add an entry to `odds_lambda.betfair.constants.SPORT_CONFIG`.
+5. If Betfair lists it, add an entry to `odds_lambda.betfair.constants.SPORT_CONFIG`, with its match odds market and any other market types to collect (a totals market carries its line).
    - The Betfair allowlist in `odds_lambda.scheduling.jobs._JOB_SPORTS` is derived from that map, so no allowlist edit is needed ([betfair-exchange](betfair-exchange.md)).
 6. If Polymarket lists three-way match markets for it, add an entry to `odds_lambda.polymarket_sports.POLYMARKET_SPORTS` with `three_way_markets=True`; the `fetch-polymarket-odds` allowlist follows `odds_lambda.polymarket_sports.MATCH_ODDS_SPORTS` ([Polymarket odds snapshots](polymarket-odds-snapshots.md#sport-config-and-discovery)).
 7. Add team aliases in `odds_core.team`.

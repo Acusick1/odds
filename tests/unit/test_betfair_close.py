@@ -183,6 +183,49 @@ class TestLineClose:
         assert exchange_price(quoted, "totals", 2.5) is None
 
 
+def _betfair_totals_envelope(minutes_before: float, over: float, under: float) -> list[Quote]:
+    """The quotes of a Betfair job ``OVER_UNDER_25`` entry, read from its runners."""
+    runners = [
+        {"runner_name": "Under 2.5 Goals", "best_back": under},
+        {"runner_name": "Over 2.5 Goals", "best_back": over},
+    ]
+    entry = {
+        "key": "betfair_exchange",
+        "markets": [
+            {
+                "key": "totals",
+                "outcomes": [
+                    {"name": "Over", "point": 2.5, "price_decimal": over},
+                    {"name": "Under", "point": 2.5, "price_decimal": under},
+                ],
+            }
+        ],
+        "betfair_meta": {"inplay": False, "market_status": "OPEN", "runners": runners},
+    }
+    return make_quotes(
+        EVENT, next(_ids), KICKOFF - timedelta(minutes=minutes_before), [entry], "betfair_api"
+    )
+
+
+class TestBetfairTotalsClose:
+    def test_the_betfair_job_totals_entry_closes_on_line_2_5(self) -> None:
+        quoted = _betfair_totals_envelope(20, 2.1, 1.9) + _betfair_totals_envelope(5, 2.0, 2.0)
+
+        close = event_close(quoted, KICKOFF, "totals", line=2.5)
+
+        assert close is not None
+        assert close.time == KICKOFF - timedelta(minutes=5)
+        assert close.fair[PriceOutcome.OVER] == pytest.approx(0.5)
+
+    def test_a_two_way_back_book_wider_than_the_cap_is_not_a_close(self) -> None:
+        # 1/1.9 + 1/1.9 - 1 = 5.3%, over the 5% cap; 1/1.95 + 1/1.95 - 1 = 2.6% is kept.
+        quoted = _betfair_totals_envelope(20, 1.95, 1.95) + _betfair_totals_envelope(5, 1.9, 1.9)
+
+        close = event_close(quoted, KICKOFF, "totals", line=2.5)
+
+        assert close is not None and close.time == KICKOFF - timedelta(minutes=20)
+
+
 class TestPickClose:
     def test_in_play_price_is_not_the_close(self) -> None:
         price = exchange_price(_betfair(10, LATE, inplay=True), "1x2")

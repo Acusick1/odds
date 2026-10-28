@@ -44,7 +44,7 @@ These filters apply only to Odds API requests ([configuration](../foundations/co
 
 - OddsPortal names map through `odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP` (32 entries; unmapped names fall back to `odds_lambda.oddsportal_common.slugify`). The map holds Pinnacle, BetMGM, DraftKings, FanDuel, Betfair Exchange, William Hill, Ladbrokes and others.
 - FDUK issues no event id. Its snapshots carry `raw_data["source"]` `odds_core.snapshot_sources.SnapshotSource.FOOTBALL_DATA_UK` and source `football_data_uk`, and FDUK maps its column prefixes in `BOOKMAKER_PREFIXES` (`scripts/ingest_football_data_uk.py`): pinnacle, bet365, bwin, betfair_exchange (`BFE`), betfair_sportsbook (`BF`), interwetten, williamhill, betvictor (`VC`, `BV`), betfred (`BFD`), paddypower (`PP`), skybet (`SKB`), betmgm (`BMGM`), coral (`CL`), ladbrokes, onexbet, plus pseudo-books `market_max` / `market_avg` (`AGGREGATE_PREFIXES`).
-- Betfair Exchange covers EPL and MLB (`odds_lambda.betfair.constants.SPORT_CONFIG`).
+- Betfair Exchange covers EPL and MLB (`odds_lambda.betfair.constants.SPORT_CONFIG`): match odds for both, and over/under 2.5 goals for EPL (the line is on `odds_lambda.betfair.constants.BetfairMarketSpec`).
 
 ## Sport keys
 
@@ -65,7 +65,7 @@ A market key is whatever string sits in `raw_data.bookmakers[].markets[].key`, a
 | The Odds API | `1x2` (relabelled from `h2h` for soccer) | `h2h` | `totals` |
 | FDUK loader (`scripts/ingest_football_data_uk.py`) | `1x2` | none | none |
 | OddsPortal adapter | `1x2` | `h2h` (scraped as `home_away`) | `totals`, point 2.5 (scraped as `over_under_2_5`) |
-| Betfair (`odds_lambda.betfair.constants.SPORT_CONFIG`) | `1x2` (EPL) | `h2h` (MLB) | none |
+| Betfair (`odds_lambda.betfair.constants.SPORT_CONFIG`) | `1x2` (EPL) | `h2h` (MLB) | `totals`, point 2.5 (EPL, `OVER_UNDER_25`) |
 | Polymarket (`odds_lambda.polymarket_sports.POLYMARKET_SPORTS`) | `1x2` (EPL) | none | none |
 
 - The football three-way key is `1x2` in every source. The Odds API names that market `h2h` and spells teams in full ("Newcastle United"); `odds_core.utils.relabel_three_way_markets` rewrites an `h2h` market with a Draw outcome to `1x2` and its team outcomes to the canonical names of `odds_core.team.normalize_team_name`, for soccer sport keys, as `odds_lambda.data_fetcher.TheOddsAPIClient.get_odds` and `odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_odds` return it. OddsPortal live (`odds_lambda.oddsportal_adapter.convert_market`, which takes the pipeline key from `odds_lambda.oddsportal_client.FEED_MARKETS`), historical OddsPortal ingest (`MARKET_CONFIGS["1x2"]` in `scripts/ingest_oddsportal.py`) and Betfair EPL write `1x2` directly, and FDUK writes it too (`MARKET_KEY` in `scripts/ingest_football_data_uk.py`). MLB and NBA stay `h2h`.

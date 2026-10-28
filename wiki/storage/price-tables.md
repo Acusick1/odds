@@ -65,7 +65,7 @@ A writer builds one envelope per event (`raw_data`, [raw_data format](odds-table
 3. An envelope quoting several markets (the Odds API's 1x2, spreads and totals) becomes one snapshot per market at the same time, with the same tier, `api_request_id` and payload. Each one's `raw_data` is the envelope cut to its own market (`odds_lambda.price_rows.market_envelope`), the first included, so no market is held twice. The odds rows go on the snapshot of their own market.
 4. An envelope that quotes no market is added as it is, with `source`, `time_basis` and `payload_id` set and no market or prices.
 
-A single-market envelope (OddsPortal, Betfair, FDUK, Polymarket) is one snapshot with its whole `raw_data`.
+A single-market envelope (OddsPortal, FDUK, Polymarket, Betfair MLB) is one snapshot with its whole `raw_data`. A Betfair EPL envelope carries one `betfair_exchange` entry per market (match odds and over/under 2.5), each with its own `betfair_meta`, so it splits like the Odds API's.
 
 ### Reading an envelope
 
@@ -73,7 +73,7 @@ A single-market envelope (OddsPortal, Betfair, FDUK, Polymarket) is one snapshot
 |---|---|
 | OddsPortal, the Odds API, FDUK | a `back` row per bookmaker and outcome. `changed_at` is the book's `last_update` for the Odds API (the market's when given) and OddsPortal, and NULL for FDUK, whose stamp is ours. FDUK's `market_max` and `market_avg` (`odds_lambda.price_rows.FDUK_AGGREGATE_BOOKMAKERS`) are not written. OddsPortal live's per-outcome `betfair_matched` volume goes in `matched` on the rows of the entry carrying it (the Betfair Exchange entry). |
 | The Odds API `h2h_lay` | `lay` rows of the 1x2 snapshot, Draw included, or of the h2h snapshot when it quotes no Draw (`odds_lambda.price_rows.stored_market`, which `odds_lambda.price_rows.market_envelope` also cuts by) |
-| Betfair | from `betfair_meta.runners`: `back` (best back, with the back size), `lay` (best lay, with the lay size) and `traded` (last price traded); the runner name is matched after its pitcher annotation is stripped, and `The Draw` is the draw. `inplay`, `market_status` (lower-cased into `odds_core.vocabulary.MarketStatus`; an unknown status is logged and left NULL), `total_matched` and `market_start_time` go on the snapshot. |
+| Betfair | from `betfair_meta.runners`: `back` (best back, with the back size), `lay` (best lay, with the lay size) and `traded` (last price traded); the runner name is matched after its pitcher annotation is stripped, `The Draw` is the draw, and on `totals` an over/under runner ("Over 2.5 Goals") gives the outcome and the line (`odds_lambda.betfair.adapter.totals_runner`). `inplay`, `market_status` (lower-cased into `odds_core.vocabulary.MarketStatus`; an unknown status is logged and left NULL), `total_matched` and `market_start_time` go on the snapshot. |
 | Polymarket | from `polymarket_meta`, as decimal odds 1/p: the Yes midpoint as `mid`, the ask as `back` and the bid as `lay`. History snapshots carry only `mid`. |
 
 - **Outcomes** are matched once, here: a name equal to the event's home or away team after `odds_core.team.normalize_team_name`, `Draw` on 1x2, `Over` and `Under` on totals. Spreads and totals carry the outcome's `point` in `line`. An unmatched name is logged as `unmatched_outcome`; the payload keeps it for a re-parse.
@@ -85,7 +85,7 @@ A single-market envelope (OddsPortal, Betfair, FDUK, Polymarket) is one snapshot
 | Writer | `time_basis` | Payload |
 |---|---|---|
 | OddsPortal live (`odds_lambda.jobs.fetch_oddsportal.ingest_league`) | `observed` | the run's envelopes, one payload per league run |
-| Betfair (`odds_lambda.jobs.fetch_betfair_exchange.ingest_sport`) | `observed` | the run's envelopes, one payload per sport run |
+| Betfair (`odds_lambda.jobs.fetch_betfair_exchange.ingest_sport`) | `observed` | the run's envelopes (one per event, all its markets), one payload per sport run |
 
 `odds_lambda.storage.shaped_snapshots.store_payload` adds the payload in the writer's transaction before its snapshots. A payload is the envelopes as the writer stored them, so `odds_lambda.price_rows.expand_envelope` re-reads it. A writer whose snapshots were all skipped as already stored removes the payload with `odds_lambda.storage.shaped_snapshots.discard_payload`.
 

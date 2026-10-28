@@ -20,7 +20,7 @@ from odds_core.team import normalize_team_name
 from odds_core.time import parse_api_datetime
 from odds_core.vocabulary import Market, MarketStatus, PriceOutcome, Side, Source
 
-from odds_lambda.betfair.adapter import strip_pitcher_annotation
+from odds_lambda.betfair.adapter import strip_pitcher_annotation, totals_runner
 
 DRAW_NAME = "Draw"
 BETFAIR_DRAW_NAMES: frozenset[str] = frozenset({"the draw", "draw"})
@@ -348,10 +348,7 @@ def _read_betfair(reader: _Reader, entry: Mapping[str, Any], raw_key: str) -> No
         )
         for runner in meta.get("runners") or []:
             name = str(runner.get("runner_name") or "")
-            if market is Market.ONE_X_TWO and name.strip().lower() in BETFAIR_DRAW_NAMES:
-                outcome: PriceOutcome | None = PriceOutcome.DRAW
-            else:
-                outcome = reader.outcome_of(strip_pitcher_annotation(name), market)
+            outcome, line = _betfair_outcome(reader, name, market)
             if outcome is None:
                 reader.log_unmatched(market, book, runner.get("runner_name"))
                 continue
@@ -367,7 +364,19 @@ def _read_betfair(reader: _Reader, entry: Mapping[str, Any], raw_key: str) -> No
                 if price is None:
                     continue
                 size = _decimal(_finite(runner.get(size_field))) if size_field else None
-                reader.add(market, PriceSpec(book, outcome, None, side, price, size=size))
+                reader.add(market, PriceSpec(book, outcome, line, side, price, size=size))
+
+
+def _betfair_outcome(
+    reader: _Reader, runner_name: str, market: Market
+) -> tuple[PriceOutcome | None, Decimal | None]:
+    """A Betfair runner's outcome, and its line on ``totals`` ("Over 2.5 Goals")."""
+    if market is Market.TOTALS:
+        read = totals_runner(runner_name)
+        return (None, None) if read is None else read
+    if market is Market.ONE_X_TWO and runner_name.strip().lower() in BETFAIR_DRAW_NAMES:
+        return PriceOutcome.DRAW, None
+    return reader.outcome_of(strip_pitcher_annotation(runner_name), market), None
 
 
 def _read_polymarket(reader: _Reader, entry: Mapping[str, Any], raw_key: str) -> None:

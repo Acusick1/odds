@@ -8,8 +8,9 @@ The pipeline's canonical bookmaker entry is::
       "last_update": "2026-04-25T14:35:00+00:00",
       "markets": [
         {
-          "key": "1x2" | "h2h",
-          "outcomes": [{"name": <canonical team>, "price_decimal": <best back>}, ...]
+          "key": "1x2" | "h2h" | "totals",
+          "outcomes": [{"name": <canonical team> | "Draw", "price_decimal": <best back>}, ...]
+          # totals: [{"name": "Over" | "Under", "point": 2.5, "price_decimal": ...}, ...]
         }
       ],
       "betfair_meta": {  # optional, supplemental
@@ -34,14 +35,16 @@ import re
 from collections.abc import Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 import structlog
 from odds_core.odds_math import PRICE_DECIMAL_KEY
 from odds_core.team import normalize_team_name
+from odds_core.vocabulary import Market, PriceOutcome
 
 from odds_lambda.betfair.client import BetfairBook, BetfairRunner
-from odds_lambda.betfair.constants import SportBetfairConfig
+from odds_lambda.betfair.constants import BetfairMarketSpec, SportBetfairConfig
 
 logger = structlog.get_logger()
 
@@ -58,6 +61,7 @@ DRAW_RUNNER_NAMES: frozenset[str] = frozenset({"the draw", "draw"})
 _PAREN_ANNOTATION_RE = re.compile(r"\s*\([^)]*\)?\s*$")
 _GAME_SUFFIX_RE = re.compile(r"\s*(?:-\s*)?Game\s*\d*\s*$")
 _GAME_NUMBER_RE = re.compile(r"\bGame\s*(\d+)\b")
+_TOTALS_RUNNER_RE = re.compile(r"(over|under)\s+(\d+(?:\.\d+)?)\b", re.IGNORECASE)
 
 
 def strip_pitcher_annotation(name: str) -> str:
@@ -148,69 +152,94 @@ def resolve_teams(
     return canonical_teams(home_raw, away_raw, [r.runner_name for r in book.runners])
 
 
+def totals_runner(name: str) -> tuple[PriceOutcome, Decimal] | None:
+    """The side and goal line of an over/under runner ("Over 2.5 Goals"), or None."""
+    match = _TOTALS_RUNNER_RE.match(name.strip())
+    if match is None:
+        return None
+    side = PriceOutcome.OVER if match.group(1).lower() == "over" else PriceOutcome.UNDER
+    return side, Decimal(match.group(2))
+
+
+def _team_outcome(
+    runner_name: str, market: Market, home_team: str, away_team: str
+) -> dict[str, Any]:
+    if market is Market.ONE_X_TWO and _is_draw(runner_name):
+        return {"name": "Draw"}
+    canonical = _normalize_runner_name(runner_name)
+    if canonical not in (home_team, away_team):
+        # Fallback: use the canonical (may not equal home/away if
+        # alias incomplete, but downstream sees a stable name).
+        logger.warning(
+            "betfair_runner_name_fallback",
+            runner_name=runner_name,
+            normalized=canonical,
+            home_team=home_team,
+            away_team=away_team,
+        )
+    return {"name": canonical}
+
+
 def _runner_to_outcome(
     runner: BetfairRunner,
+    spec: BetfairMarketSpec,
     home_team: str,
     away_team: str,
-    has_draw: bool,
 ) -> dict[str, Any] | None:
     """Build one outcome dict from a Betfair runner.
 
-    Skips runners with no best-back price.
+    Skips runners with no best-back price, and over/under runners whose name carries no line
+    or a line other than the spec's.
     """
     if runner.best_back is None:
         return None
-
     name_in = runner.runner_name or ""
-    if has_draw and _is_draw(name_in):
-        outcome_name = "Draw"
-    else:
-        canonical = _normalize_runner_name(name_in)
-        if canonical == home_team:
-            outcome_name = home_team
-        elif canonical == away_team:
-            outcome_name = away_team
-        else:
-            # Fallback: use the canonical (may not equal home/away if
-            # alias incomplete, but downstream sees a stable name).
+    market = spec.market
+    if market is Market.TOTALS:
+        read = totals_runner(name_in)
+        if read is None:
+            logger.warning("betfair_totals_runner_unparsed", runner_name=name_in)
+            return None
+        side, line = read
+        if line != spec.line:
             logger.warning(
-                "betfair_runner_name_fallback",
+                "betfair_totals_runner_off_line",
                 runner_name=name_in,
-                normalized=canonical,
-                home_team=home_team,
-                away_team=away_team,
+                line=str(line),
+                spec_line=str(spec.line),
             )
-            outcome_name = canonical
-
-    return {"name": outcome_name, PRICE_DECIMAL_KEY: runner.best_back}
+            return None
+        outcome = {"name": side.value.capitalize(), "point": float(line)}
+    else:
+        outcome = _team_outcome(name_in, market, home_team, away_team)
+    return {**outcome, PRICE_DECIMAL_KEY: runner.best_back}
 
 
 def betfair_book_to_bookmaker_entry(
     book: BetfairBook,
-    sport_cfg: SportBetfairConfig,
+    spec: BetfairMarketSpec,
     home_team: str,
     away_team: str,
     snapshot_time: datetime | None = None,
 ) -> dict[str, Any] | None:
-    """Convert a ``BetfairBook`` into a pipeline ``bookmakers[]`` entry.
+    """Convert a ``BetfairBook`` of the ``spec`` market into a pipeline ``bookmakers[]`` entry.
 
-    Returns None if the book has no usable outcomes (all prices missing).
+    Returns None if the book has fewer usable outcomes than the market has runners.
     """
     snapshot_time = snapshot_time or datetime.now(UTC)
     outcomes: list[dict[str, Any]] = []
     for r in book.runners:
-        out = _runner_to_outcome(r, home_team, away_team, sport_cfg.has_draw)
+        out = _runner_to_outcome(r, spec, home_team, away_team)
         if out is not None:
             outcomes.append(out)
 
-    expected_outcomes = 3 if sport_cfg.has_draw else 2
-    if len(outcomes) < expected_outcomes:
+    if len(outcomes) < spec.runner_count:
         logger.warning(
             "betfair_book_missing_outcomes",
             market_id=book.market_id,
-            sport=sport_cfg.sport_key,
+            market_type=book.market_type,
             got=len(outcomes),
-            expected=expected_outcomes,
+            expected=spec.runner_count,
             event_name=book.betfair_event_name,
         )
         return None
@@ -219,7 +248,7 @@ def betfair_book_to_bookmaker_entry(
         "key": "betfair_exchange",
         "title": "Betfair Exchange",
         "last_update": snapshot_time.isoformat(),
-        "markets": [{"key": sport_cfg.market_key, "outcomes": outcomes}],
+        "markets": [{"key": spec.market.value, "outcomes": outcomes}],
         "betfair_meta": {
             "market_id": book.market_id,
             "market_status": book.market_status,
@@ -231,8 +260,3 @@ def betfair_book_to_bookmaker_entry(
             "runners": [asdict(r) for r in book.runners],
         },
     }
-
-
-def build_raw_data(bookmaker_entry: dict[str, Any]) -> dict[str, Any]:
-    """Wrap a single bookmaker entry into a snapshot ``raw_data`` payload."""
-    return {"bookmakers": [bookmaker_entry], "source": "betfair_api"}

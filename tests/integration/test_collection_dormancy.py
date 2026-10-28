@@ -9,7 +9,9 @@ import pytest
 from odds_core.epl_data_models import EspnFixture
 from odds_core.mlb_data_models import MlbProbablePitchers
 from odds_core.models import Event, EventStatus
+from odds_core.vocabulary import Market
 from odds_lambda import collection_calendar
+from odds_lambda.betfair.constants import SPORT_CONFIG
 from odds_lambda.betfair.kickoff import next_betfair_kickoff
 from odds_lambda.collection_calendar import decide_collection_run, next_fixture_kickoff
 from odds_lambda.jobs import fetch_betfair_exchange
@@ -201,13 +203,21 @@ class TestBetfairKickoff:
     LAST_RUN = datetime(2026, 10, 24, 22, 47, tzinfo=UTC)
 
     async def _seed(
-        self, session: Any, *starts: str | None, sport_key: str = "baseball_mlb"
+        self,
+        session: Any,
+        *starts: str | None,
+        sport_key: str = "baseball_mlb",
+        totals_start: str | None = None,
     ) -> None:
         event = _event(self.FIRST_PITCH, sport_key=sport_key)
         session.add(event)
         if sport_key == "baseball_mlb":
             session.add(_mlb_game(849802, self.FIRST_PITCH, self.LAST_RUN - timedelta(hours=6)))
-        for minutes, start in enumerate(starts):
+        match_odds = SPORT_CONFIG[sport_key].match_odds.market  # type: ignore[index]
+        snapshots = [(minutes, start, match_odds) for minutes, start in enumerate(starts)]
+        if totals_start is not None:
+            snapshots.append((len(starts), totals_start, Market.TOTALS))
+        for minutes, start, market in snapshots:
             meta = {"inplay": False, "market_start_time": start}
             snapshot_time = self.LAST_RUN - timedelta(minutes=30 - minutes)
             snapshot = make_tagged_snapshot(
@@ -217,6 +227,7 @@ class TestBetfairKickoff:
                 "betfair_api",
             )
             snapshot.api_request_id = f"betfair_api_{snapshot_time.isoformat()}"
+            snapshot.market = market
             session.add(snapshot)
         await session.commit()
 
@@ -252,6 +263,18 @@ class TestBetfairKickoff:
         assert await self._decide("baseball_mlb", last_cadence_run) == self.FIRST_PITCH - timedelta(
             minutes=5
         )
+
+    async def test_a_totals_snapshot_does_not_move_the_kickoff(
+        self, pglite_async_session: Any
+    ) -> None:
+        await self._seed(
+            pglite_async_session,
+            None,
+            sport_key="soccer_epl",
+            totals_start=self.BETFAIR_START.isoformat(),
+        )
+
+        assert await next_betfair_kickoff("soccer_epl", now=self.LAST_RUN) == self.FIRST_PITCH
 
     async def test_the_latest_snapshot_decides_the_betfair_start(
         self, pglite_async_session: Any

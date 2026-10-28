@@ -35,7 +35,7 @@ status: stable
 
 ## What gets logged
 
-If there are any warnings, `odds_lambda.storage.writers.OddsWriter.store_envelope` writes one `odds_core.models.DataQualityLog`: `issue_type="validation_warnings"`, `severity` `"warning"` when `is_valid` else `"error"`, `description` with the count, and `raw_data={"warnings": first 10}`. Columns: `event_id` (FK, nullable), `severity`, `issue_type`, `description`, JSON `raw_data`, indexed `created_at`. No other severity or issue type is written, so `critical` never occurs.
+If an envelope has any warnings, `odds_lambda.storage.writers.OddsWriter.store_envelope` writes one `odds_core.models.DataQualityLog`: `issue_type="validation_warnings"`, `severity` `"warning"` when `is_valid` else `"error"`, `description` with the count, and `raw_data={"warnings": first 10}`. Columns: `event_id` (FK, nullable), `severity`, `issue_type`, `description`, JSON `raw_data`, indexed `created_at`. No other severity or issue type is written, so `critical` never occurs.
 
 `odds_lambda.storage.readers.OddsReader.get_data_quality_logs` feeds `odds status` and the [health monitor](../operations/health-monitor.md), which alerts when `error` plus `critical` rows in 24 h reach `odds_core.config.AlertConfig.data_quality_error_threshold` (10). Validation results are not propagated to `odds` rows: `is_valid` is always true ([Odds snapshot and odds tables](odds-tables.md)).
 

@@ -22,11 +22,15 @@ logger = structlog.get_logger()
 
 @dataclass(frozen=True)
 class StoredEnvelope:
-    """``snapshot`` is the stored one; ``inserted`` is false when it already held the key."""
+    """``snapshot`` is the stored one; ``inserted`` is false when it already held the key.
+
+    ``snapshots_written`` counts the snapshots inserted: one per market of a shaped envelope.
+    """
 
     snapshot: OddsSnapshot
     odds: list[Odds]
     inserted: bool
+    snapshots_written: int = 0
 
 
 class OddsWriter:
@@ -152,7 +156,9 @@ class OddsWriter:
             hours_until_commence=hours_until,
         )
 
-        return StoredEnvelope(snapshot, odds_records, inserted=True)
+        return StoredEnvelope(
+            snapshot, odds_records, inserted=True, snapshots_written=len(new_snapshots)
+        )
 
     async def store_odds_snapshot(
         self,
