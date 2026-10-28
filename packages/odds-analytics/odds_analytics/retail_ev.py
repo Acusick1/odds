@@ -16,24 +16,20 @@ from typing import TYPE_CHECKING, Any, cast, get_args
 
 import numpy as np
 import structlog
+from odds_core.as_of import by_snapshot
 from odds_core.betfair_close import pick_close
-from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS, canonical_bookmaker_key
+from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS
 from odds_core.exchange_price import (
-    EXCHANGE_BOOKMAKER,
     MAX_EXCHANGE_OVERROUND,
     ExchangePrice,
     devig,
+    exchange_price,
     overround,
 )
-from odds_core.market_prices import (
-    Outcome,
-    book_prices,
-    market_outcomes,
-    outcome_names,
-)
-from odds_core.models import Event, OddsSnapshot
-from odds_core.snapshot_sources import SnapshotKind, snapshot_kind
-from odds_core.vocabulary import Source, TimeBasis
+from odds_core.market_prices import Outcome, market_outcomes
+from odds_core.models import Event
+from odds_core.quotes import Quote, quotes
+from odds_core.vocabulary import Market, Side, Source, TimeBasis
 
 from odds_analytics.epl_schedule_features import EplScheduleFeatures
 from odds_analytics.standings_features import StandingsFeatures
@@ -68,22 +64,18 @@ HORIZON_BUCKET_LABELS: tuple[str, ...] = ("0-1h", "1-6h", "6-24h", "1-3d", "3-7d
 SEASON_START_MONTH = 7
 MAX_EXCHANGE_AGE = timedelta(hours=2)
 
-RETAIL_KINDS: frozenset[SnapshotKind] = frozenset(
-    {
-        SnapshotKind.ODDS_API,
-        SnapshotKind.ODDSPORTAL,
-        SnapshotKind.ODDSPORTAL_LIVE,
-        SnapshotKind.FDUK_OPENING,
-    }
+# Snapshots of these sources give rows, except closing ones (time basis close).
+RETAIL_SOURCES: frozenset[Source] = frozenset(
+    {Source.ODDS_API, Source.ODDSPORTAL, Source.FOOTBALL_DATA_UK}
 )
-# Stamped at FDUK's latest documented collection time, an upper bound on when the price was taken.
-UPPER_BOUND_TIME_KINDS: frozenset[SnapshotKind] = frozenset({SnapshotKind.FDUK_OPENING})
-# The kinds whose exchange prices are read, with the source and time basis they are stored under.
-EXCHANGE_KINDS: dict[SnapshotKind, tuple[Source, TimeBasis]] = {
-    SnapshotKind.BETFAIR_LIVE: (Source.BETFAIR, TimeBasis.OBSERVED),
-    SnapshotKind.FDUK_OPENING: (Source.FOOTBALL_DATA_UK, TimeBasis.UPPER_BOUND),
-    SnapshotKind.FDUK_CLOSING: (Source.FOOTBALL_DATA_UK, TimeBasis.CLOSE),
-}
+# Snapshots of these sources give exchange prices, at t and for the close.
+EXCHANGE_SOURCES: frozenset[Source] = frozenset({Source.BETFAIR, Source.FOOTBALL_DATA_UK})
+# FDUK stamps its opening prices at its latest documented collection time, days after they may
+# have been taken. The Odds API's upper bounds are its historical snapshot times, so its rows count
+# as taken at their time.
+LOOSE_UPPER_BOUND_SOURCES: frozenset[Source] = frozenset({Source.FOOTBALL_DATA_UK})
+# Quotes are read for this many events per query.
+EVENTS_PER_QUERY = 50
 
 
 @dataclass(frozen=True)
@@ -107,7 +99,8 @@ class Dynamics:
 @dataclass(frozen=True)
 class _RetailQuote:
     time: datetime
-    kind: SnapshotKind
+    source: Source
+    time_basis: TimeBasis
     books: dict[str, dict[Outcome, float]]
     implied: dict[Outcome, list[float]]
 
@@ -123,7 +116,8 @@ class RetailEvInput:
     commence_time: datetime
     outcome: Outcome
     book: str
-    retail_kind: SnapshotKind
+    retail_source: Source
+    retail_time_basis: TimeBasis
     decision_time: datetime
     retail_decimal: float
     book_fair_prob: float | None
@@ -137,7 +131,7 @@ class RetailEvInput:
     @property
     def decision_time_is_exact(self) -> bool:
         """Whether the retail price was taken at ``decision_time``, not at some time before it."""
-        return self.retail_kind not in UPPER_BOUND_TIME_KINDS
+        return is_exact_time(self.retail_source, self.retail_time_basis)
 
     @property
     def hours_to_kickoff(self) -> float:
@@ -245,60 +239,36 @@ def latest_at_or_before(times: list[datetime], at: datetime, max_age: timedelta)
     return idx
 
 
-def _is_in_play(raw_data: dict[str, Any]) -> bool:
-    return any(
-        bool((bm.get("betfair_meta") or {}).get("inplay"))
-        for bm in raw_data.get("bookmakers", [])
-        if canonical_bookmaker_key(bm.get("key", ""), SnapshotKind.BETFAIR_LIVE)
-        == EXCHANGE_BOOKMAKER
-    )
+def is_exact_time(source: Source, time_basis: TimeBasis) -> bool:
+    """Whether a retail price of this source and time basis was taken at its snapshot's time."""
+    return not (time_basis is TimeBasis.UPPER_BOUND and source in LOOSE_UPPER_BOUND_SOURCES)
 
 
-def _exchange_price(
-    snapshot: OddsSnapshot,
-    kind: SnapshotKind,
-    market: str,
-    names: dict[str, Outcome],
-    outcomes: tuple[Outcome, ...],
-) -> ExchangePrice | None:
-    """The exchange price of a snapshot of one of ``EXCHANGE_KINDS``, read from its ``raw_data``."""
-    prices = book_prices(snapshot.raw_data, kind, market, names).get(EXCHANGE_BOOKMAKER)
-    if prices is None or set(prices) != set(outcomes):
-        return None
-    source, time_basis = EXCHANGE_KINDS[kind]
-    return ExchangePrice(
-        time=snapshot.snapshot_time,
-        source=source,
-        time_basis=time_basis,
-        in_play=kind is SnapshotKind.BETFAIR_LIVE and _is_in_play(snapshot.raw_data),
-        fair=devig(prices, outcomes),
-        overround=overround(prices, outcomes),
-    )
+def _outcome_prices(
+    snapshot: Sequence[Quote], side: Side, outcomes: tuple[Outcome, ...]
+) -> dict[str, dict[Outcome, float]]:
+    """The snapshot's ``side`` prices of ``outcomes`` per book."""
+    books: dict[str, dict[Outcome, float]] = {}
+    for q in snapshot:
+        if q.side is side and (outcome := Outcome(q.outcome.value)) in outcomes:
+            books.setdefault(q.bookmaker, {})[outcome] = q.price
+    return books
 
 
 def _polymarket_price(
-    snapshot: OddsSnapshot, market: str, names: dict[str, Outcome], outcomes: tuple[Outcome, ...]
+    snapshot: Sequence[Quote], outcomes: tuple[Outcome, ...]
 ) -> PolymarketPrice | None:
-    raw = snapshot.raw_data
-    prices = book_prices(raw, SnapshotKind.POLYMARKET, market, names).get(POLYMARKET_BOOKMAKER)
-    if prices is None or set(prices) != set(outcomes):
+    """The devigged Yes midpoints of a Polymarket snapshot, with the Yes ask minus bid where both
+    are stored (as back and lay prices)."""
+    mids = _outcome_prices(snapshot, Side.MID, outcomes).get(POLYMARKET_BOOKMAKER)
+    if mids is None or set(mids) != set(outcomes):
         return None
-    meta: dict[str, Any] = next(
-        (
-            bm.get("polymarket_meta") or {}
-            for bm in raw.get("bookmakers", [])
-            if bm.get("key") == POLYMARKET_BOOKMAKER
-        ),
-        {},
+    asks = _outcome_prices(snapshot, Side.BACK, outcomes).get(POLYMARKET_BOOKMAKER, {})
+    bids = _outcome_prices(snapshot, Side.LAY, outcomes).get(POLYMARKET_BOOKMAKER, {})
+    spread = {o: 1 / asks[o] - 1 / bids[o] for o in outcomes if o in asks and o in bids}
+    return PolymarketPrice(
+        time=snapshot[0].snapshot_time, fair=devig(mids, outcomes), spread=spread
     )
-    bids: dict[str, float | None] = meta.get("best_bid") or {}
-    asks: dict[str, float | None] = meta.get("best_ask") or {}
-    spread: dict[Outcome, float] = {}
-    for outcome in outcomes:
-        bid, ask = bids.get(outcome.value), asks.get(outcome.value)
-        if bid is not None and ask is not None:
-            spread[outcome] = ask - bid
-    return PolymarketPrice(time=snapshot.snapshot_time, fair=devig(prices, outcomes), spread=spread)
 
 
 def _consensus_move(now: _RetailQuote, before: _RetailQuote, outcome: Outcome) -> float | None:
@@ -346,7 +316,8 @@ def _dynamics(
 def quote_inputs(
     event_id: str,
     kickoff: datetime,
-    kind: SnapshotKind,
+    source: Source,
+    time_basis: TimeBasis,
     t: datetime,
     books: Mapping[str, Mapping[Outcome, float]],
     outcomes: tuple[Outcome, ...],
@@ -371,7 +342,8 @@ def quote_inputs(
                     commence_time=kickoff,
                     outcome=outcome,
                     book=book,
-                    retail_kind=kind,
+                    retail_source=source,
+                    retail_time_basis=time_basis,
                     decision_time=t,
                     retail_decimal=price,
                     book_fair_prob=book_fair[outcome] if book_fair is not None else None,
@@ -388,11 +360,11 @@ def quote_inputs(
 
 def build_event_rows(
     event: Event,
-    snapshots: Sequence[OddsSnapshot],
+    quoted: Sequence[Quote],
     market: str,
     max_exchange_overround: float = MAX_EXCHANGE_OVERROUND,
 ) -> tuple[list[RetailEvRow], DropCounts]:
-    """Build every decision row for one event from its snapshots, in time order.
+    """Build every decision row for one event from its quotes of ``market``, in time order.
 
     The close is ``odds_core.betfair_close.pick_close`` over the event's exchange prices. The
     exchange price at t comes
@@ -403,23 +375,22 @@ def build_event_rows(
     """
     drops = DropCounts()
     outcomes = market_outcomes(market)
-    names = outcome_names(event, market)
     kickoff = event.commence_time
-    ordered = sorted(snapshots, key=lambda s: s.snapshot_time)
-    kinds = [snapshot_kind(s.raw_data) for s in ordered]
+    snapshots = by_snapshot(quoted)
 
     exchange_prices: list[ExchangePrice] = []
     exchange_at_t: list[ExchangePrice] = []
     polymarket: list[PolymarketPrice] = []
-    for snapshot, kind in zip(ordered, kinds, strict=True):
-        if kind is SnapshotKind.POLYMARKET:
-            pm_price = _polymarket_price(snapshot, market, names, outcomes)
+    for snapshot in snapshots:
+        source = snapshot[0].source
+        if source is Source.POLYMARKET:
+            pm_price = _polymarket_price(snapshot, outcomes)
             if pm_price is not None and pm_price.time < kickoff:
                 polymarket.append(pm_price)
             continue
-        if kind not in EXCHANGE_KINDS:
+        if source not in EXCHANGE_SOURCES:
             continue
-        price = _exchange_price(snapshot, kind, market, names, outcomes)
+        price = exchange_price(snapshot, market)
         if price is None:
             continue
         exchange_prices.append(price)
@@ -428,7 +399,7 @@ def build_event_rows(
         if price.overround > max_exchange_overround:
             drops.wide_exchange_snapshots += 1
             continue
-        if kind is not SnapshotKind.FDUK_CLOSING and price.time < kickoff:
+        if price.time_basis is not TimeBasis.CLOSE and price.time < kickoff:
             exchange_at_t.append(price)
 
     close = pick_close(exchange_prices, kickoff, max_exchange_overround)
@@ -446,15 +417,20 @@ def build_event_rows(
     polymarket_times = [p.time for p in polymarket]
     window_start = kickoff - DECISION_WINDOW
     window_end = kickoff - DECISION_CUTOFF
-    quotes_by_kind: dict[SnapshotKind, list[_RetailQuote]] = {}
+    quotes_by_kind: dict[tuple[Source, TimeBasis], list[_RetailQuote]] = {}
     in_window: list[_RetailQuote] = []
-    for snapshot, kind in zip(ordered, kinds, strict=True):
-        t = snapshot.snapshot_time
-        if kind not in RETAIL_KINDS or t >= kickoff:
+    for snapshot in snapshots:
+        first = snapshot[0]
+        t = first.snapshot_time
+        if (
+            first.source not in RETAIL_SOURCES
+            or first.time_basis is TimeBasis.CLOSE
+            or t >= kickoff
+        ):
             continue
         decision = window_start <= t <= window_end
         retail: dict[str, dict[Outcome, float]] = {}
-        for book, prices in book_prices(snapshot.raw_data, kind, market, names).items():
+        for book, prices in _outcome_prices(snapshot, Side.BACK, outcomes).items():
             if book in UK_RETAIL_BOOKMAKERS:
                 retail[book] = prices
             elif decision:
@@ -465,17 +441,20 @@ def build_event_rows(
         for prices in retail.values():
             for outcome, price in prices.items():
                 implied[outcome].append(1 / price)
-        quote = _RetailQuote(time=t, kind=kind, books=retail, implied=implied)
-        quotes_by_kind.setdefault(kind, []).append(quote)
+        quote = _RetailQuote(
+            time=t, source=first.source, time_basis=first.time_basis, books=retail, implied=implied
+        )
+        quotes_by_kind.setdefault((quote.source, quote.time_basis), []).append(quote)
         if decision:
             in_window.append(quote)
-    quote_times = {kind: [q.time for q in quotes] for kind, quotes in quotes_by_kind.items()}
+    quote_times = {kind: [q.time for q in series] for kind, series in quotes_by_kind.items()}
 
     rows: list[RetailEvRow] = []
     for quote in in_window:
         t = quote.time
+        kind = (quote.source, quote.time_basis)
         n_candidates = sum(len(p) for p in quote.books.values())
-        exact = quote.kind not in UPPER_BOUND_TIME_KINDS
+        exact = is_exact_time(quote.source, quote.time_basis)
         if exact:
             idx = bisect.bisect_right(exchange_times, t) - 1
             if idx < 0:
@@ -487,8 +466,7 @@ def build_event_rows(
                 continue
         else:
             # t only bounds when the price was taken, so no other snapshot is known to precede it.
-            own_kind = EXCHANGE_KINDS.get(quote.kind)
-            own = [p for p in exchange_by_kind.get(own_kind, []) if p.time == t] if own_kind else []
+            own = [p for p in exchange_by_kind.get(kind, []) if p.time == t]
             if not own:
                 drops.rows_without_own_exchange += n_candidates
                 continue
@@ -503,8 +481,8 @@ def build_event_rows(
                 exchange_by_kind[(exchange.source, exchange.time_basis)] if exact else [],
                 exchange_times_by_kind[(exchange.source, exchange.time_basis)] if exact else [],
                 quote,
-                quotes_by_kind[quote.kind],
-                quote_times[quote.kind],
+                quotes_by_kind[kind],
+                quote_times[kind],
             )
             for outcome in outcomes
         }
@@ -514,7 +492,8 @@ def build_event_rows(
             for inputs in quote_inputs(
                 event.id,
                 kickoff,
-                quote.kind,
+                quote.source,
+                quote.time_basis,
                 t,
                 quote.books,
                 outcomes,
@@ -749,17 +728,20 @@ async def load_retail_ev_dataset(
     An event that has not kicked off has no close yet, whatever snapshots it holds.
     ``now`` defaults to the current time.
     """
-    from odds_lambda.storage.readers import OddsReader
-
-    reader = OddsReader(session)
     dataset = RetailEvDataset()
     cutoff = now if now is not None else datetime.now(UTC)
     events = [event for event in events if event.commence_time <= cutoff]
-    for event in events:
-        snapshots = await reader.get_snapshots_for_event(event.id)
-        rows, drops = build_event_rows(event, snapshots, market, max_exchange_overround)
-        dataset.rows.extend(rows)
-        dataset.drops.add(drops)
+    for start in range(0, len(events), EVENTS_PER_QUERY):
+        batch = events[start : start + EVENTS_PER_QUERY]
+        by_event: dict[str, list[Quote]] = {event.id: [] for event in batch}
+        for quote in await quotes(session, list(by_event), Market(market)):
+            by_event[quote.event_id].append(quote)
+        for event in batch:
+            rows, drops = build_event_rows(
+                event, by_event[event.id], market, max_exchange_overround
+            )
+            dataset.rows.extend(rows)
+            dataset.drops.add(drops)
     logger.info(
         "retail_ev_rows_built",
         events=len(events),

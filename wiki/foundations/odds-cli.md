@@ -38,7 +38,7 @@ status: stable
 | `odds train` | [Training pipeline](../modelling/training-pipeline.md) (`tune` stores a new timestamped study in a local SQLite file unless `--in-memory`; both subcommands pass the split's sample weights and kick-off times on, [sample weights](../modelling/training-pipeline.md#sample-weights)), [Hyperparameter tuner](../modelling/hyperparameter-tuner.md) |
 | `odds evaluate` | [Retail-EV evaluation](../evaluation/retail-ev-evaluation.md) (`--allow-incomplete <event ID>`, repeatable, and `--force` are recorded in the manifest) |
 | `odds status` | [odds status](../operations/health-monitor.md#odds-status), [Odds API quota](../collection/odds-api-quota.md) |
-| `validate`, `quality` | [Coverage and completeness checks](../storage/coverage-checks.md) |
+| `validate`, `quality` | [Coverage and completeness checks](../storage/coverage-checks.md) (`quality coverage` lists each book by its canonical key, from price rows) |
 | `copy` | [Copy production data locally](howto-copy-production-data.md) |
 | `data` | [Shape backfill and verify](../storage/shape-backfill.md), [Backfill and verify the new shape](../storage/howto-backfill-the-new-shape.md) (`verify-shape` exits 1 on any mismatch, `backfill-shape` exits 2, before writing, when a candidate decision's input would be split or deleted or a twin merge would delete decisions or trades without `--allow-merge-drops`) |
 | `scheduler` | [Local scheduler](../scheduling/local-scheduler.md) |

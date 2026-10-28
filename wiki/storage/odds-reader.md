@@ -16,7 +16,7 @@ status: stable
 
 ## Methods
 
-**Snapshot and event accessors**: `odds_lambda.storage.readers.OddsReader.get_snapshot_count_for_event` (counts distinct snapshot times per event, since a fetch stores one snapshot per market at one time), `odds_lambda.storage.readers.OddsReader.get_snapshots_for_event`, `odds_lambda.storage.readers.OddsReader.snapshot_exists`, `odds_lambda.storage.readers.OddsReader.get_events_by_date_range` (optional `event_id_pattern` LIKE and `min_snapshots`, counted in distinct snapshot times; ordered by `commence_time`, then event ID, so events with the same kick-off have a fixed order that does not depend on the query plan), `odds_lambda.storage.readers.OddsReader.get_events_by_team`, `odds_lambda.storage.readers.OddsReader.get_event_by_id`.
+**Snapshot and event accessors**: `odds_lambda.storage.readers.OddsReader.get_snapshot_count_for_event` (counts distinct snapshot times per event, since a fetch stores one snapshot per market at one time), `odds_lambda.storage.readers.OddsReader.get_snapshots_for_event`, `odds_lambda.storage.readers.OddsReader.snapshot_exists`, `odds_lambda.storage.readers.OddsReader.get_events_by_date_range` (optional `min_snapshots`, counted in distinct snapshot times; ordered by `commence_time`, then event ID, so events with the same kick-off have a fixed order that does not depend on the query plan), `odds_lambda.storage.readers.OddsReader.get_events_by_team`, `odds_lambda.storage.readers.OddsReader.get_event_by_id`.
 
 **Operational**: `odds_lambda.storage.readers.OddsReader.get_fetch_logs`, `odds_lambda.storage.readers.OddsReader.get_data_quality_logs`, `odds_lambda.storage.readers.OddsReader.get_database_stats`, `odds_lambda.storage.readers.OddsReader.get_games_by_date`.
 

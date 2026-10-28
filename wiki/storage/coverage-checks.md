@@ -40,7 +40,7 @@ These checks confirm that every game was collected across the [fetch tiers](fetc
 
 ## odds quality
 
-`odds quality coverage` (`odds_cli.commands.quality`): `--start`, `--end`, `--sport` (default `basketball_nba`). Uses `odds_analytics.quality_metrics.QualityMetrics` for game counts, snapshot counts as distinct snapshot times, odds/score presence, per-tier and per-bookmaker coverage.
+`odds quality coverage` (`odds_cli.commands.quality`): `--start`, `--end`, `--sport` (default `basketball_nba`). Uses `odds_analytics.quality_metrics.QualityMetrics` for game counts, snapshot counts as distinct snapshot times, odds/score presence, per-tier and per-bookmaker coverage. Per-tier coverage counts each event's distinct snapshot times under the tiers `odds_lambda.tier_utils.snapshot_tiers` derives for its snapshots, not the stored `fetch_tier`. Per-bookmaker coverage reads the price rows ([prices](price-tables.md#prices)): the events and the snapshots in which each canonical book key has a price.
 
 - `odds_analytics.quality_metrics.QualityMetrics.get_games_missing_scores` has no status filter, so unplayed games in the range count as missing scores (#467).
 - `odds_analytics.quality_metrics.QualityMetrics._get_tier_hours_range` hardcodes tier hour ranges as display strings rather than deriving them from `odds_lambda.fetch_tier.FetchTier.max_hours` (#467).

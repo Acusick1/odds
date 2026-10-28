@@ -32,7 +32,7 @@ Mechanical rules are the current focus. Three candidates are registered. `exchan
 The repo also holds:
 
 - **The EPL and MLB betting agents** synthesise prices, exchange data and match news ([The betting agent](../agent/betting-agent.md)). Neither is registered or being run.
-- **The EPL retail-EV model** predicts a retail bet's EV against the close ([retail-EV target](../modelling/clv-target.md#the-retail-ev-target)). Its development results are in [Price-only models on the retail-EV target](../evaluation/exp-epl-retail-ev-price-only.md), and it places no bets. Its one re-test on dense live data is a draft backtest of the [retail-EV model rule](../evaluation/candidate-rules.md#the-retail-ev-model-rule) against `exchange-gap-epl` on the same matches ([#657](https://github.com/Acusick1/odds/issues/657)).
+- **The EPL retail-EV model** predicts a retail bet's EV against the close (`odds_analytics.retail_ev`, which reads the price rows of stored snapshots; [retail-EV target](../modelling/clv-target.md#the-retail-ev-target)). Its development results are in [Price-only models on the retail-EV target](../evaluation/exp-epl-retail-ev-price-only.md), and it places no bets. Its one re-test on dense live data is a draft backtest of the [retail-EV model rule](../evaluation/candidate-rules.md#the-retail-ev-model-rule) against `exchange-gap-epl` on the same matches ([#657](https://github.com/Acusick1/odds/issues/657)).
 
 ## How a candidate is judged
 
@@ -53,7 +53,7 @@ The workflow for a mechanical rule exists end to end, from idea to verdict ([Fro
 
 - The [candidate registry](../evaluation/candidate-registry.md), with no candidate in it yet.
 - The candidate, its version and the git commit on each paper trade (`odds_core.paper_trade_models.PaperTrade`, with its selection's line and the decision that placed it), with the candidate checked against the registry when the bet is placed through `odds_mcp.server.paper_bet` ([paper trading](../agent/paper-trading.md#candidate-fields)).
-- The close, computed from stored snapshots when a report runs, so a trade stores none. MLB has no close defined, so its trades are reported without EV.
+- The close, computed from stored price rows when a report runs, so a trade stores none. MLB has no close defined, so its trades are reported without EV.
 - `odds candidates report`, which gives the checkpoint verdict ([Candidate registry](../evaluation/candidate-registry.md#odds-candidates-report)).
 - The [mechanical rule interface](../evaluation/candidate-rules.md) and its first rule, the exchange gap, with the market state at decision time and a code hash that each mechanical candidate records.
 - The [run-candidates job](../evaluation/run-candidates-job.md), which places each active mechanical candidate's flat-stake paper trades at its decision times and records every decision.

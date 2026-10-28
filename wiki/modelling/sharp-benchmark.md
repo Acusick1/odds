@@ -4,8 +4,7 @@ title: Sharp benchmark and retail-sharp divergence
 description: What the sharp reference is and why, its priority semantics, the divergence feature and screener, and how the three code copies differ.
 sources:
   - odds_analytics.feature_extraction.TabularFeatureExtractor
-  - odds_analytics.feature_extraction.calculate_sharp_retail_metrics
-  - odds_analytics.feature_extraction.select_sharp_odds
+  - odds_analytics.feature_extraction.select_sharp_quotes
   - odds_analytics.feature_extraction.DEFAULT_RETAIL_BOOKMAKERS
   - odds_analytics.feature_extraction.DEFAULT_SHARP_BOOKMAKERS
   - odds_analytics.feature_groups.TierSampler
@@ -13,7 +12,6 @@ sources:
   - odds_mcp.server.find_retail_edges
   - odds_mcp.prices.resolve_sharp_prices
   - packages/odds-mcp/agents/common.md
-  - odds_core.models.Odds.implied_probability
   - odds_core.bookmakers.UK_RETAIL_BOOKMAKERS
 status: stable
 ---
@@ -30,10 +28,10 @@ The sharp reference anchors the `retail_sharp_diff` feature, the retail-sharp di
 
 ## Priority semantics
 
-`sharp_bookmakers` is an ordered list and the first bookmaker that has odds for the requested outcome wins (`odds_analytics.feature_extraction.select_sharp_odds`):
+`sharp_bookmakers` is an ordered list and the first bookmaker that has a price for the requested outcome wins (`odds_analytics.feature_extraction.select_sharp_quotes`):
 
-- Features: `odds_analytics.feature_extraction.TabularFeatureExtractor` and `odds_analytics.feature_extraction.calculate_sharp_retail_metrics` both pick the sharp bookmaker with `odds_analytics.feature_extraction.select_sharp_odds`, which filters to the requested outcome itself. Neither reads the target fields, and the extractor's `odds_analytics.feature_extraction.FeatureEvent` carries no prices.
-- Sampling: `odds_analytics.feature_groups.TierSampler` keeps only snapshots containing any (not all) of `required_bookmakers`, and `odds_analytics.feature_groups.prepare_training_data` drops events lacking every sharp bookmaker at close (a check that does not depend on the sampler), after `odds_analytics.feature_groups.collect_event_data` has already loaded the event's group data. That function leaves out snapshots whose only bookmaker is a prediction market (`odds_core.bookmakers.is_reference_only_snapshot`), so no sampler can pick a `polymarket` snapshot as a decision row; the retail-EV builder reads its own snapshots and takes `polymarket` ones only for its `polymarket_at_t` features, never as a decision row, baseline or close ([retail-EV features](clv-target-functions.md#retail-ev-features)). The sampler filter and the closing check both apply to every `raw` target ([feature pipeline](feature-pipeline.md)).
+- Features: `odds_analytics.feature_extraction.TabularFeatureExtractor` picks the sharp bookmaker with `odds_analytics.feature_extraction.select_sharp_quotes`, which filters to the requested outcome itself, from one snapshot's quotes. It does not read the target fields, and the extractor's `odds_analytics.feature_extraction.FeatureEvent` carries no prices.
+- Sampling: `odds_analytics.feature_groups.TierSampler` keeps only snapshots containing any (not all) of `required_bookmakers`, and `odds_analytics.feature_groups.prepare_training_data` drops events whose closes all lack every sharp bookmaker and samples only sources whose close has one, after `odds_analytics.feature_groups.collect_event_data` has already loaded the event's group data and picked each source's raw-target close (`odds_analytics.feature_groups.raw_closes`). That function leaves out Polymarket's snapshots (source `polymarket`), so no sampler can pick a `polymarket` snapshot as a decision row; the retail-EV builder reads its own snapshots and takes `polymarket` ones only for its `polymarket_at_t` features, never as a decision row, baseline or close ([retail-EV features](clv-target-functions.md#retail-ev-features)). The sampler filter and the closing check both apply to every `raw` target ([feature pipeline](feature-pipeline.md)).
 - MCP: `odds_mcp.prices.resolve_sharp_prices` scans snapshots newest first within a 2 h lookback and, per outcome and line, takes the first sharp book in priority order that has a price ([MCP market tools](../agent/mcp-market-tools.md#retail-edges)); `odds_mcp.server.find_retail_edges` compares each retail row with the sharp price at its own line and defaults to `[pinnacle, betfair_exchange]` and never lists `odds_core.bookmakers.NON_BETTABLE_BOOKMAKERS` (Pinnacle, `polymarket`) as retail.
 
 ## Why a sharp reference
@@ -43,21 +41,19 @@ The sharp reference anchors the `retail_sharp_diff` feature, the retail-sharp di
 
 ## Retail-sharp divergence
 
-**Definition.** `divergence = retail_implied_prob - sharp_implied_prob` for one outcome. Each implied probability is below 1 because `price_decimal` is constrained above 1.0. Negative means the retail book prices that outcome longer than the sharp reference. Implied probabilities come from `odds_core.models.Odds.implied_probability` (1 over the stored decimal price) and are not devigged, so a retail book with a larger margin shows a more positive divergence on every outcome; compare with `market_hold` in the screener output to separate margin from divergence ([devigging](../foundations/devigging.md)). The `retail_ev` target is devigged ([CLV target](clv-target.md#the-retail-ev-target)).
+**Definition.** `divergence = retail_implied_prob - sharp_implied_prob` for one outcome. Each implied probability is below 1 because `price_decimal` is constrained above 1.0. Negative means the retail book prices that outcome longer than the sharp reference. Implied probabilities are 1 over the stored decimal price and are not devigged, so a retail book with a larger margin shows a more positive divergence on every outcome; compare with `market_hold` in the screener output to separate margin from divergence ([devigging](../foundations/devigging.md)). The `retail_ev` target is devigged ([CLV target](clv-target.md#the-retail-ev-target)).
 
 It is the core tabular feature `retail_sharp_diff` ([feature groups](feature-groups.md)).
 
 ## Code copies
 
-| | Feature, tabular path | Feature, helper path | MCP screener |
-|---|---|---|---|
-| Where | `odds_analytics.feature_extraction.TabularFeatureExtractor` | `odds_analytics.feature_extraction.calculate_sharp_retail_metrics` | `odds_mcp.server.find_retail_edges`, sharp from `odds_mcp.prices.resolve_sharp_prices` |
-| Retail side | Mean of per-book implied probabilities for the outcome, over configured `retail_bookmakers` | Mean of per-book implied probabilities (`odds_analytics.feature_extraction.calculate_avg_probability`) | One row per book, every non-sharp book in the window |
-| Sharp side | First bookmaker in the list with odds for the requested outcome (`odds_analytics.feature_extraction.select_sharp_odds`) | Same | First bookmaker per outcome, so outcomes can resolve to different books, and sharp and retail prices can come from different snapshots |
-| Defaults | `["pinnacle"]`; retail `fanduel`, `draftkings`, `betmgm` (`odds_analytics.feature_extraction.DEFAULT_RETAIL_BOOKMAKERS`) | Same | `["pinnacle", "betfair_exchange"]`; no retail list |
-| Time | Snapshot at decision time | Same | Newest price per book within a lookback window (default 2 h) |
-
-Both feature paths average per-book implied probabilities, so a feature of the same name agrees between them.
+| | Feature (tabular group) | MCP screener |
+|---|---|---|
+| Where | `odds_analytics.feature_extraction.TabularFeatureExtractor` | `odds_mcp.server.find_retail_edges`, sharp from `odds_mcp.prices.resolve_sharp_prices` |
+| Retail side | Mean of per-book implied probabilities for the outcome, over configured `retail_bookmakers` | One row per book, every non-sharp book in the window |
+| Sharp side | First bookmaker in the list with a price for the requested outcome (`odds_analytics.feature_extraction.select_sharp_quotes`) | First bookmaker per outcome, so outcomes can resolve to different books, and sharp and retail prices can come from different snapshots |
+| Defaults | `["pinnacle"]`; retail `fanduel`, `draftkings`, `betmgm_us` (`odds_analytics.feature_extraction.DEFAULT_RETAIL_BOOKMAKERS`; canonical keys, so US BetMGM is `betmgm_us`) | `["pinnacle", "betfair_exchange"]`; no retail list |
+| Time | Snapshot at decision time | Newest price per book within a lookback window (default 2 h) |
 
 The sharp roster is defined in several places in the code. `odds_analytics.training.config.FeatureConfig.sharp_bookmakers` and `odds_analytics.feature_extraction.DEFAULT_SHARP_BOOKMAKERS` default to `["pinnacle"]`, the strategies default to `pinnacle`, and `odds_mcp.server._DEFAULT_SHARP_BOOKMAKERS` is `["pinnacle", "betfair_exchange"]` with a comment saying to keep it in sync. The two lists differ on purpose, a maintainer decision recorded in #421 and [ADR-0003](../../docs/adr/0003-hybrid-sharp-reference.md). `odds_mcp.server.save_match_brief` stamps the hybrid list literal ([match briefs](../agent/match-briefs.md)). A training YAML that omits `betfair_exchange` silently loses the fallback, and a single training set can mix Pinnacle-based and Betfair-based `sharp_prob` values that the model cannot tell apart except through the level shift. A `retail_ev` config rejects any `sharp_bookmakers` other than the default, because its baseline and close are fixed to Betfair Exchange ([training config](training-config.md)). A `raw` config sets the hybrid list explicitly. The MCP-side point-bucket and bookmaker-mixing behaviour is on [MCP market tools](../agent/mcp-market-tools.md#retail-edges).
 

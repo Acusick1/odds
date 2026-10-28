@@ -4,11 +4,11 @@ from datetime import UTC, datetime
 
 import pytest
 from odds_analytics.feature_extraction import FeatureEvent, TabularFeatureExtractor
-from odds_core.models import Event, EventStatus, Odds
-from odds_core.odds_math import american_to_decimal
-from sqlalchemy import select
+from odds_core.models import Event, EventStatus
+from odds_core.quotes import quotes
+from odds_core.vocabulary import Market, PriceOutcome
 
-from tests.test_helpers import add_event
+from tests.test_helpers import add_event, make_tagged_snapshot, store_tagged
 
 
 @pytest.mark.asyncio
@@ -16,7 +16,7 @@ class TestFeatureExtractionIntegration:
     """Integration tests for feature extractors with database."""
 
     async def test_tabular_extractor_with_database_odds(self, test_session):
-        """Test TabularFeatureExtractor with odds from database."""
+        """Test TabularFeatureExtractor with quotes from database."""
         # Create test event
         event = Event(
             id="test_event_tabular_1",
@@ -30,68 +30,38 @@ class TestFeatureExtractionIntegration:
             away_score=105,
         )
 
-        # Create test odds
         odds_time = datetime(2024, 11, 1, 18, 0, 0, tzinfo=UTC)
-        odds_records = [
-            Odds(
-                event_id=event.id,
-                bookmaker_key="pinnacle",
-                bookmaker_title="Pinnacle",
-                market_key="h2h",
-                outcome_name=event.home_team,
-                price_decimal=american_to_decimal(-120),
-                point=None,
-                odds_timestamp=odds_time,
-                last_update=odds_time,
-            ),
-            Odds(
-                event_id=event.id,
-                bookmaker_key="pinnacle",
-                bookmaker_title="Pinnacle",
-                market_key="h2h",
-                outcome_name=event.away_team,
-                price_decimal=american_to_decimal(+100),
-                point=None,
-                odds_timestamp=odds_time,
-                last_update=odds_time,
-            ),
-            Odds(
-                event_id=event.id,
-                bookmaker_key="fanduel",
-                bookmaker_title="FanDuel",
-                market_key="h2h",
-                outcome_name=event.home_team,
-                price_decimal=american_to_decimal(-115),
-                point=None,
-                odds_timestamp=odds_time,
-                last_update=odds_time,
-            ),
-            Odds(
-                event_id=event.id,
-                bookmaker_key="fanduel",
-                bookmaker_title="FanDuel",
-                market_key="h2h",
-                outcome_name=event.away_team,
-                price_decimal=american_to_decimal(-105),
-                point=None,
-                odds_timestamp=odds_time,
-                last_update=odds_time,
-            ),
+        bookmakers = [
+            {
+                "key": key,
+                "title": key.title(),
+                "last_update": odds_time.isoformat(),
+                "markets": [
+                    {
+                        "key": "h2h",
+                        "outcomes": [
+                            {"name": event.home_team, "price": home_price},
+                            {"name": event.away_team, "price": away_price},
+                        ],
+                    }
+                ],
+            }
+            for key, home_price, away_price in [
+                ("pinnacle", -120, 100),
+                ("fanduel", -115, -105),
+            ]
         ]
 
-        # Insert into database
+        # Insert into database, with price rows as the writers store them
         await add_event(test_session, event)
-
-        for odds in odds_records:
-            test_session.add(odds)
+        await store_tagged(
+            test_session, make_tagged_snapshot(event.id, odds_time, bookmakers, source=None)
+        )
         await test_session.commit()
 
         # Query back and extract features
-        queried_odds = list(
-            (await test_session.execute(select(Odds).where(Odds.event_id == event.id))).scalars()
-        )
+        queried = await quotes(test_session, [event.id], Market.H2H)
 
-        # Extract features
         feature_event = FeatureEvent(
             id=event.id,
             commence_time=event.commence_time,
@@ -103,11 +73,10 @@ class TestFeatureExtractionIntegration:
         )
 
         extractor = TabularFeatureExtractor()
-        features = extractor.extract_features(
-            feature_event, queried_odds, outcome=event.home_team, market="h2h"
-        )
+        features = extractor.extract_features(feature_event, queried, outcome=PriceOutcome.HOME)
 
         # Verify features were extracted
         assert features.consensus_prob is not None
         assert features.sharp_prob is not None
+        assert features.retail_sharp_diff is not None
         assert 0 < features.consensus_prob < 1

@@ -56,7 +56,6 @@ from odds_analytics.retail_ev_metrics import (
 )
 from odds_analytics.training.data_preparation import filter_events_by_date_range
 from odds_core.database import async_session_maker
-from odds_core.snapshot_sources import SnapshotKind
 from odds_core.vocabulary import Source, TimeBasis
 from retail_ev_target_report import MARKET, SPORT_KEY
 
@@ -201,7 +200,8 @@ def frame_rows(dataset_rows: list[RetailEvRow]) -> pd.DataFrame:
             "event_id": [r.event_id for r in dataset_rows],
             "season": [r.season for r in dataset_rows],
             "horizon_bucket": [HORIZON_BUCKET_LABELS.index(r.horizon_bucket) for r in dataset_rows],
-            "retail_kind": [r.retail_kind for r in dataset_rows],
+            "retail_source": [r.retail_source for r in dataset_rows],
+            "retail_time_basis": [r.retail_time_basis for r in dataset_rows],
             "exchange_fduk_opening": [
                 r.exchange.source is Source.FOOTBALL_DATA_UK
                 and r.exchange.time_basis is TimeBasis.UPPER_BOUND
@@ -219,9 +219,12 @@ def frame_rows(dataset_rows: list[RetailEvRow]) -> pd.DataFrame:
 def regime_rows(df: pd.DataFrame, regime: Regime) -> pd.DataFrame:
     """FDUK-only keeps rows a season gets with no live collection; dense keeps live events."""
     if regime is Regime.FDUK_ONLY:
-        keep = (df["retail_kind"] == SnapshotKind.FDUK_OPENING) & df["exchange_fduk_opening"]
+        keep = (df["retail_source"] == Source.FOOTBALL_DATA_UK) & df["exchange_fduk_opening"]
         return df[keep]
-    live_events = df.loc[df["retail_kind"] == SnapshotKind.ODDSPORTAL_LIVE, "event_id"].unique()
+    live = (df["retail_source"] == Source.ODDSPORTAL) & (
+        df["retail_time_basis"] == TimeBasis.OBSERVED
+    )
+    live_events = df.loc[live, "event_id"].unique()
     return df[df["event_id"].isin(live_events)]
 
 

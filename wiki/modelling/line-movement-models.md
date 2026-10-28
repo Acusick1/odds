@@ -18,7 +18,7 @@ status: stable
 
 ## Feature vector
 
-`odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy` takes feature arrays and their names as given and extracts no features itself. The arrays come from `odds_analytics.feature_groups.prepare_training_data`, which adds `hours_until_event` (from the XGBoost adapter) to the configured feature groups, so the width depends on the config (#476; read from code, not run).
+`odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy` takes feature arrays and their names as given and extracts no features itself. The arrays come from `odds_analytics.feature_groups.prepare_training_data`, which extracts each configured group from the decision snapshot's price rows, measures the target against that snapshot's own source's close (it samples only of the sources whose close has a sharp book), and adds `hours_until_event` (from the XGBoost adapter) to the configured feature groups, so the width depends on the config (#476; read from code, not run).
 
 ## Related
 

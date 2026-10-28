@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from types import MappingProxyType
-from typing import Any
 
-from odds_core.snapshot_sources import SnapshotKind
 from odds_core.vocabulary import PRICE_SOURCES, Source
 
 EXCHANGE_BOOKMAKERS: frozenset[str] = frozenset(
@@ -62,14 +60,8 @@ UK_RETAIL_BOOKMAKERS: frozenset[str] = frozenset(
 ODDS_API_KEY_ALIASES: dict[str, str] = {"betmgm": "betmgm_us"}
 
 
-def canonical_bookmaker_key(key: str, kind: SnapshotKind) -> str:
-    if kind is SnapshotKind.ODDS_API and key in ODDS_API_KEY_ALIASES:
-        return ODDS_API_KEY_ALIASES[key]
-    return BOOKMAKER_ALIASES.get(key, key)
-
-
 # Odds API keys that differ from the pipeline's bookmaker keys, rewritten in its responses as
-# they are fetched. Kept apart from the read-time maps above.
+# they are fetched. Kept apart from the alias maps above.
 ODDS_API_BOOKMAKER_KEY_MAP: dict[str, str] = {
     "betfair_ex_uk": "betfair_exchange",
     "betfair_ex_eu": "betfair_exchange",
@@ -95,9 +87,3 @@ BOOKMAKER_ALIASES_BY_SOURCE: Mapping[Source, Mapping[str, str]] = MappingProxyTy
 def canonical_bookmaker(source: Source, key: str) -> str:
     """The canonical key of the book ``source`` names ``key``."""
     return BOOKMAKER_ALIASES_BY_SOURCE[source].get(key, key)
-
-
-def is_reference_only_snapshot(raw_data: dict[str, Any] | None) -> bool:
-    """True when every bookmaker in the snapshot is a prediction market."""
-    keys = {bm.get("key") for bm in (raw_data or {}).get("bookmakers", [])}
-    return bool(keys) and keys <= PREDICTION_MARKET_BOOKMAKERS

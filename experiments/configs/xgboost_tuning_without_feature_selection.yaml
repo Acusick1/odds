@@ -47,7 +47,7 @@ training:
   features:
     adapter: "xgboost"
     sharp_bookmakers: ["pinnacle"]
-    retail_bookmakers: ["fanduel", "draftkings", "betmgm"]
+    retail_bookmakers: ["fanduel", "draftkings", "betmgm_us"]
     markets: ["h2h", "spreads", "totals"]
     outcome: "home"
     normalize: false

@@ -13,7 +13,7 @@ import hashlib
 import json
 import platform
 import subprocess
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -27,9 +27,11 @@ import xgboost
 import yaml
 from odds_core.betfair_close import LIVE_CLOSE_WINDOW
 from odds_core.market_prices import THREE_WAY_MARKET, market_outcomes
-from odds_core.models import Event, EventStatus
-from odds_core.snapshot_sources import SnapshotKind, snapshot_kind
+from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.vocabulary import Source, TimeBasis
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, PositiveInt, model_validator
+from sqlalchemy import select
+from sqlmodel import col
 
 from odds_analytics.retail_ev import (
     DECISION_WINDOW,
@@ -51,7 +53,6 @@ from odds_analytics.retail_ev_metrics import (
 from odds_analytics.training.config import RetailEvArm, RetailEvFeatureGroupName, XGBoostConfig
 
 if TYPE_CHECKING:
-    from odds_core.models import OddsSnapshot
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from odds_analytics.as_of_team_features import TeamHistory
@@ -61,7 +62,6 @@ logger = structlog.get_logger()
 DEFAULT_BOOTSTRAP_RESAMPLES = 10_000
 # One EPL matchday; a longer run of events without live collection is reported as an outage.
 OUTAGE_MIN_EVENTS = 10
-FDUK_OPENING_SOURCE = "fduk_opening"
 MANIFEST_FILE = "manifest.json"
 REPORT_FILE = "report.json"
 SLICES_FILE = "slices.csv"
@@ -206,8 +206,8 @@ class EvaluationData:
         digest.update("\n".join(self.rows["event_id"].astype(str)).encode())
         digest.update("\n".join(self.feature_names).encode())
         digest.update(np.ascontiguousarray(self.X, dtype=np.float32).tobytes())
-        for col in ("y", "baseline", "w_loss", "w_event"):
-            digest.update(np.ascontiguousarray(self.rows[col], dtype=np.float64).tobytes())
+        for column in ("y", "baseline", "w_loss", "w_event"):
+            digest.update(np.ascontiguousarray(self.rows[column], dtype=np.float64).tobytes())
         return digest.hexdigest()
 
 
@@ -231,7 +231,8 @@ def _row_frame(dataset: RetailEvDataset) -> pd.DataFrame:
             "commence_time": pd.to_datetime(dataset.commence_times),
             "decision_time": pd.to_datetime([_naive_utc(r.decision_time) for r in dataset.rows]),
             "horizon": [r.horizon_bucket for r in dataset.rows],
-            "retail_source": [r.retail_kind.value for r in dataset.rows],
+            "retail_source": [r.retail_source.value for r in dataset.rows],
+            "retail_time_basis": [r.retail_time_basis.value for r in dataset.rows],
             "close_source": [r.close.source.value for r in dataset.rows],
             "outcome": [r.outcome.value for r in dataset.rows],
             "book": [r.book for r in dataset.rows],
@@ -242,28 +243,64 @@ def _row_frame(dataset: RetailEvDataset) -> pd.DataFrame:
             "w_loss": dataset.loss_weights,
         }
     )
-    live_events = set(rows.loc[rows["retail_source"] != FDUK_OPENING_SOURCE, "event_id"])
+    live_events = set(rows.loc[rows["retail_source"] != Source.FOOTBALL_DATA_UK.value, "event_id"])
     rows["event_type"] = np.where(rows["event_id"].isin(live_events), "live_collected", "fduk_only")
     return rows
 
 
+@dataclass(frozen=True)
+class SnapshotStamp:
+    """Which source and time basis an event's snapshot is stored under, and its time."""
+
+    source: Source
+    time_basis: TimeBasis
+    time: datetime
+
+
+async def snapshot_stamps(
+    session: AsyncSession, events: Sequence[Event]
+) -> dict[str, list[SnapshotStamp]]:
+    """The stamps of every snapshot of ``events``, of any market, per event id."""
+    stamps: dict[str, list[SnapshotStamp]] = {e.id: [] for e in events}
+    if not stamps:
+        return stamps
+    rows = await session.execute(
+        select(
+            col(OddsSnapshot.event_id),
+            col(OddsSnapshot.source),
+            col(OddsSnapshot.time_basis),
+            col(OddsSnapshot.snapshot_time),
+        ).where(col(OddsSnapshot.event_id).in_(list(stamps)))
+    )
+    for event_id, source, time_basis, time in rows.all():
+        if source is not None and time_basis is not None:
+            stamps[event_id].append(SnapshotStamp(source, time_basis, time))
+    return stamps
+
+
 def _window_event_frame(
-    events: Sequence[Event], snapshots: dict[str, Sequence[OddsSnapshot]]
+    events: Sequence[Event], stamps: Mapping[str, Sequence[SnapshotStamp]]
 ) -> pd.DataFrame:
     records: list[dict[str, Any]] = []
     for event in events:
         kickoff = event.commence_time
-        kinds = [(snapshot_kind(s.raw_data), s.snapshot_time) for s in snapshots[event.id]]
+        held = stamps[event.id]
         records.append(
             {
                 "event_id": event.id,
                 "commence_time": _naive_utc(kickoff),
                 "status": event.status.value,
-                "has_fduk_closing": any(k is SnapshotKind.FDUK_CLOSING for k, _ in kinds),
-                "has_oddsportal_live": any(k is SnapshotKind.ODDSPORTAL_LIVE for k, _ in kinds),
+                "has_fduk_closing": any(
+                    s.source is Source.FOOTBALL_DATA_UK and s.time_basis is TimeBasis.CLOSE
+                    for s in held
+                ),
+                "has_oddsportal_live": any(
+                    s.source is Source.ODDSPORTAL and s.time_basis is TimeBasis.OBSERVED
+                    for s in held
+                ),
                 "has_live_betfair_near_kickoff": any(
-                    k is SnapshotKind.BETFAIR_LIVE and kickoff - LIVE_CLOSE_WINDOW <= t <= kickoff
-                    for k, t in kinds
+                    s.source is Source.BETFAIR and kickoff - LIVE_CLOSE_WINDOW <= s.time <= kickoff
+                    for s in held
                 ),
             }
         )
@@ -318,9 +355,7 @@ async def load_evaluation_data(
     check_window_end((e.commence_time for e in events), spec.window.end)
     training_events = [e for e in events if e.commence_time < spec.window.start]
     window_events = [e for e in events if e.commence_time >= spec.window.start]
-    window_frame = _window_event_frame(
-        window_events, {e.id: await reader.get_snapshots_for_event(e.id) for e in window_events}
-    )
+    window_frame = _window_event_frame(window_events, await snapshot_stamps(session, window_events))
     incomplete = incomplete_events(window_frame)
     refused = [e for e in incomplete if e not in set(allow_incomplete)]
     if refused:
@@ -533,6 +568,7 @@ def _slice_metrics(sub: pd.DataFrame, bootstrap: BootstrapSpec) -> dict[str, Any
 SLICE_KEYS: tuple[str, ...] = (
     "horizon",
     "retail_source",
+    "retail_time_basis",
     "close_source",
     "event_type",
     "outcome",
@@ -820,6 +856,7 @@ async def run_evaluation(
             "decision_time",
             "horizon",
             "retail_source",
+            "retail_time_basis",
             "close_source",
             "event_type",
             "outcome",

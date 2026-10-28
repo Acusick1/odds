@@ -30,10 +30,83 @@ from odds_analytics.training import (
 )
 from odds_core.game_log_models import NbaTeamGameLog
 from odds_core.injury_models import InjuryReport, InjuryStatus
-from odds_lambda.fetch_tier import FetchTier
+from odds_core.models import Event, EventStatus
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from tests.test_helpers import make_tagged_snapshot, store_tagged
 
 # Mark all tests in this module as integration tests
 pytestmark = pytest.mark.integration
+
+
+@pytest.fixture
+async def nba_events_with_prices(pglite_async_session: AsyncSession) -> list[Event]:
+    """Eight FINAL events with price rows at 48h, 7.5h and 0.5h before kick-off.
+
+    Bookmakers are pinnacle, fanduel and draftkings; the line moves toward home between
+    snapshots, and the 7.5h snapshot falls in the default [3h, 12h] decision window.
+    """
+    events = []
+    base_time = datetime(2024, 10, 15, 19, 0, tzinfo=UTC)
+    bookmakers = ["pinnacle", "fanduel", "draftkings"]
+
+    for i in range(8):
+        commence_time = base_time + timedelta(days=i)
+        event = Event(
+            id=f"test_event_{i}",
+            sport_key="basketball_nba",
+            sport_title="NBA",
+            commence_time=commence_time,
+            home_team=f"Home Team {i}",
+            away_team=f"Away Team {i}",
+            status=EventStatus.FINAL,
+            home_score=100 + i * 2,
+            away_score=95 + i,
+            completed_at=commence_time + timedelta(hours=3),
+        )
+        pglite_async_session.add(event)
+        events.append(event)
+
+        opening_home_price = -110 + i * 5
+        opening_away_price = -110 - i * 5
+        for hours_before, shift in [(48.0, 0), (7.5, 5), (0.5, 10)]:
+            snapshot_time = commence_time - timedelta(hours=hours_before)
+            await store_tagged(
+                pglite_async_session,
+                make_tagged_snapshot(
+                    event.id,
+                    snapshot_time,
+                    [
+                        {
+                            "key": bookmaker,
+                            "title": bookmaker.title(),
+                            "last_update": snapshot_time.isoformat(),
+                            "markets": [
+                                {
+                                    "key": "h2h",
+                                    "outcomes": [
+                                        {
+                                            "name": event.home_team,
+                                            "price": opening_home_price - shift,
+                                        },
+                                        {
+                                            "name": event.away_team,
+                                            "price": opening_away_price + shift,
+                                        },
+                                    ],
+                                }
+                            ],
+                        }
+                        for bookmaker in bookmakers
+                    ],
+                    source=None,
+                ),
+            )
+
+    await pglite_async_session.commit()
+    for event in events:
+        await pglite_async_session.refresh(event)
+    return events
 
 
 class TestTrainingDataIntegration:
@@ -69,7 +142,6 @@ class TestTrainingDataIntegration:
                     markets=["h2h"],
                     sharp_bookmakers=["pinnacle"],
                     retail_bookmakers=["fanduel", "draftkings"],
-                    closing_tier=FetchTier.CLOSING,
                 ),
             ),
         )
@@ -145,7 +217,7 @@ class TestTrainingDataIntegration:
 
     @pytest.mark.asyncio
     async def test_full_pipeline_xgboost(
-        self, xgboost_config, pglite_async_session, test_events_with_odds
+        self, xgboost_config, pglite_async_session, nba_events_with_prices
     ):
         """Test full XGBoost pipeline: config -> data -> result."""
         result = await prepare_training_data_from_config(xgboost_config, pglite_async_session)
@@ -178,7 +250,7 @@ class TestTrainingDataIntegration:
 
     @pytest.mark.asyncio
     async def test_result_to_dict_integration(
-        self, xgboost_config, pglite_async_session, test_events_with_odds
+        self, xgboost_config, pglite_async_session, nba_events_with_prices
     ):
         """Test that result can be converted to dict for serialization."""
         result = await prepare_training_data_from_config(xgboost_config, pglite_async_session)
@@ -209,7 +281,7 @@ class TestTrainingDataIntegration:
 
     @pytest.mark.asyncio
     async def test_variance_filter_removes_constant_features(
-        self, xgboost_config, pglite_async_session, test_events_with_odds
+        self, xgboost_config, pglite_async_session, nba_events_with_prices
     ):
         """Constant features are absent from the pipeline output."""
         import numpy as np
@@ -258,16 +330,15 @@ class TestInjuryFeaturesIntegration:
                     markets=["h2h"],
                     sharp_bookmakers=["pinnacle"],
                     retail_bookmakers=["fanduel", "draftkings"],
-                    closing_tier=FetchTier.CLOSING,
                     feature_groups=("tabular", "injuries"),
                 ),
             ),
         )
 
     @pytest.fixture
-    async def test_events_with_injury_reports(self, pglite_async_session, test_events_with_odds):
+    async def test_events_with_injury_reports(self, pglite_async_session, nba_events_with_prices):
         """Add injury reports to a subset of test events."""
-        events = test_events_with_odds
+        events = nba_events_with_prices
         base_time = datetime(2024, 10, 15, 19, 0, tzinfo=UTC)
 
         # Add injury reports for the first 3 events only.
@@ -387,16 +458,15 @@ class TestRestFeaturesIntegration:
                     markets=["h2h"],
                     sharp_bookmakers=["pinnacle"],
                     retail_bookmakers=["fanduel", "draftkings"],
-                    closing_tier=FetchTier.CLOSING,
                     feature_groups=("tabular", "rest"),
                 ),
             ),
         )
 
     @pytest.fixture
-    async def test_events_with_game_logs(self, pglite_async_session, test_events_with_odds):
+    async def test_events_with_game_logs(self, pglite_async_session, nba_events_with_prices):
         """Add game log records for a subset of test events."""
-        events = test_events_with_odds
+        events = nba_events_with_prices
         base_time = datetime(2024, 10, 15, 19, 0, tzinfo=UTC)
 
         # Add game logs for the first 5 events with prior games

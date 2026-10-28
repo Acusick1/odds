@@ -25,7 +25,7 @@ Odds are stored twice (the normalized rows keep `price_decimal`, constrained abo
 
 ## Which readers use which
 
-`odds_lambda.storage.readers.OddsReader` reads events, snapshots and logs and counts snapshots as distinct snapshot times per event ([OddsReader](odds-reader.md#methods)); no price reader reads the normalized rows or rebuilds them from `raw_data`. Prices are read from the `prices` table through `odds_core.quotes.quotes`, which every source fills, historical ones included ([Reading quotes](price-tables.md#reading-quotes)).
+`odds_lambda.storage.readers.OddsReader` reads events (by date range, sport, status and minimum snapshot count), snapshots and logs and counts snapshots as distinct snapshot times per event ([OddsReader](odds-reader.md#methods)); no price reader reads the normalized rows or rebuilds them from `raw_data`. Prices are read from the `prices` table through `odds_core.quotes.quotes`, which every source fills, historical ones included ([Reading quotes](price-tables.md#reading-quotes)).
 
 ## Two parsers, one price rule
 

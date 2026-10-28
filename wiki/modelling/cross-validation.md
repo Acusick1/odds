@@ -40,7 +40,7 @@ The retail-EV config `experiments/configs/xgboost_epl_retail_ev.yaml` sets `cv_m
 
 ## Test split
 
-The events are those `odds_analytics.training.data_preparation.prepare_training_data_from_config` selects. The event-level split takes `int(n * test_split)` events, at least one when `test_split > 0`; `test_split: 0.0` holds out none ([training pipeline](training-pipeline.md#steps-of-odds-train-run)). With no test set, `odds_analytics.training.cross_validation.train_with_cv` fits the final model without a validation set, so its history has no `val_*` metrics beyond the merged CV means.
+The events are those `odds_analytics.training.data_preparation.prepare_training_data_from_config` selects, with `data_source` filtering on the snapshot's source ([training pipeline](training-pipeline.md#steps-of-odds-train-run)). The event-level split takes `int(n * test_split)` events, at least one when `test_split > 0`; `test_split: 0.0` holds out none ([training pipeline](training-pipeline.md#steps-of-odds-train-run)). With no test set, `odds_analytics.training.cross_validation.train_with_cv` fits the final model without a validation set, so its history has no `val_*` metrics beyond the merged CV means.
 
 ## Related
 

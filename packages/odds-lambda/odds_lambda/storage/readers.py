@@ -50,7 +50,6 @@ class OddsReader:
         end_date: datetime,
         sport_key: str | None = None,
         status: EventStatus | None = None,
-        event_id_pattern: str | None = None,
         min_snapshots: int | None = None,
     ) -> list[Event]:
         """
@@ -61,7 +60,6 @@ class OddsReader:
             end_date: End of range
             sport_key: Filter by sport (optional)
             status: Filter by status (optional)
-            event_id_pattern: SQL LIKE pattern for event IDs (e.g. 'op_%')
             min_snapshots: Minimum number of distinct snapshot times required per event
 
         Returns:
@@ -79,9 +77,6 @@ class OddsReader:
 
         if status:
             query = query.where(Event.status == status)
-
-        if event_id_pattern is not None:
-            query = query.where(Event.id.like(event_id_pattern))
 
         if min_snapshots is not None:
             snapshot_count = (

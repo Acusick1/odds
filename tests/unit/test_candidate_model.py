@@ -23,8 +23,8 @@ from odds_analytics.retail_ev import RetailEvInput
 from odds_core.market_prices import Outcome, market_outcomes
 from odds_core.models import Event
 from odds_core.quotes import Quote
-from odds_core.snapshot_sources import FdukTimeBasis, SnapshotKind
-from odds_core.vocabulary import Source
+from odds_core.snapshot_sources import FdukTimeBasis
+from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.candidate_rules import RetailEvModelParams, SharpInput, build_market_state
 
 from tests.test_helpers import (
@@ -72,7 +72,10 @@ class TestTrainingRows:
             (book, outcome) for book in ("bet365", "betway") for outcome in market_outcomes("1x2")
         }
         assert {r.decision_time for r in rows} == {_time(CO_TIMED)}
-        assert all(r.retail_kind is SnapshotKind.ODDSPORTAL_LIVE for r in rows)
+        assert all(
+            (r.retail_source, r.retail_time_basis) == (Source.ODDSPORTAL, TimeBasis.OBSERVED)
+            for r in rows
+        )
         assert all(r.exchange.fair[Outcome.HOME] == pytest.approx(0.5) for r in rows)
         assert all(r.close.source is Source.BETFAIR for r in rows)
 
