@@ -34,7 +34,7 @@ status: stable
 | `in_play`, `market_status`, `total_matched`, `market_start_time` | the exchange market's state (Betfair only, `odds_core.vocabulary.MarketStatus` a closed set) |
 | `payload_id` | FK `snapshot_payloads.id`, the archived envelope ([snapshot_payloads](price-tables.md#snapshot_payloads)) |
 
-`source`, `market`, `time_basis` and `market_status` are CHECKed closed sets ([closed sets](price-tables.md#closed-sets)). `source` and `time_basis` are nullable in the schema, but every writer sets them, and `migrations/versions/b8e2d5f7a1c3_drop_old_odds_representations.py` refuses to run while a stored snapshot lacks either, or while an `odds` row's price has no matching price row.
+`source`, `market`, `time_basis` and `market_status` are CHECKed closed sets ([closed sets](price-tables.md#closed-sets)). `source` and `time_basis` are nullable in the schema, but every writer sets them, and `migrations/versions/b8e2d5f7a1c3_drop_old_odds_representations.py` refuses to run while a stored snapshot lacks either, or while its snapshot holds fewer matching price rows than an `odds` row's price needs (team outcomes counted as home and away together).
 
 - `uq_odds_snapshots_event_source_market_time` makes (`event_id`, `source`, `market`, `snapshot_time`) unique. PostgreSQL treats NULLs as distinct here, so snapshots with no market never conflict. How a writer handles a stored key is on [storing a snapshot under its key](price-tables.md#storing-a-snapshot-under-its-key).
 - Indexes: single-column `event_id`, `snapshot_time` and `payload_id`; composite `ix_event_snapshot_time` (`event_id`, `snapshot_time`).

@@ -16,10 +16,10 @@ health-check acknowledgement (#658). This drops what they replace:
 
 The upgrade first refuses, dropping nothing, while any of them holds data found nowhere else
 (``_GUARDS`` and ``_UNHELD_ODDS_PRICES``): odds rows and their prices, raw_data, gamePks,
-no-gamePk reasons, legacy Polymarket moneyline prices of linked events and order books. It drops knowingly the legacy Polymarket rows the history
-migration left out (games linked to no event, spread and total markets, probabilities outside
-0 to 1) and ``polymarket_fetch_logs``. The downgrade recreates the structures empty; the dropped
-data does not come back.
+no-gamePk reasons, legacy Polymarket moneyline prices of linked events and order books. It
+drops knowingly the legacy Polymarket rows the history migration left out (games linked to no
+event, spread and total markets, probabilities outside 0 to 1) and ``polymarket_fetch_logs``.
+The downgrade recreates the structures empty; the dropped data does not come back.
 """
 
 import sqlalchemy as sa
@@ -91,38 +91,62 @@ _POLYMARKET_TABLES = (
 )
 
 
-# Distinct odds-row prices that no price row of their snapshot holds. A row's price row has the
-# book's canonical key for the snapshot's source (``book_aliases``), side ``lay`` for the Odds
-# API's ``h2h_lay`` market, ``mid`` for Polymarket and ``back`` otherwise, the line on spreads
-# and totals only, and the outcome Draw, Over or Under by name; a team name is home or away,
-# which the writer decided. Prices compare within 1e-9: an American price converted to decimal
-# twice can differ in the last binary digit.
+# Distinct odds-row prices that no price row of their snapshot holds, counted per key so a
+# missing price is caught even when another outcome of its class has the same price. A row's
+# price row has the book's canonical key for the snapshot's source (``book_aliases``), side
+# ``lay`` for the Odds API's ``h2h_lay`` market, ``mid`` for Polymarket and ``back`` otherwise,
+# the line on spreads and totals only, and the outcome Draw, Over or Under by name; a team name
+# is home or away, which the writer decided, so team rows are counted against home and away
+# price rows together. Prices compare rounded to 8 decimals: an American price converted to
+# decimal twice can differ in the last binary digit.
 _UNHELD_ODDS_PRICES = """
-    SELECT count(*) FROM (
-        SELECT DISTINCT snapshot_id, bookmaker_key, market_key, outcome_name, point, price_decimal
+    WITH odds_rows AS (
+        SELECT DISTINCT snapshot_id, bookmaker_key, market_key, outcome_name, point,
+               round(price_decimal::numeric, 8) AS price
         FROM odds WHERE snapshot_id IS NOT NULL
-    ) o
-    JOIN odds_snapshots s ON s.id = o.snapshot_id
-    LEFT JOIN book_aliases a ON a.source = s.source AND a.raw_key = o.bookmaker_key
-    WHERE NOT EXISTS (
-        SELECT 1 FROM prices p
-        WHERE p.snapshot_id = o.snapshot_id
-          AND p.bookmaker = coalesce(a.canonical_key, o.bookmaker_key)
-          AND p.side = CASE
-                WHEN o.market_key = 'h2h_lay' THEN 'lay'
-                WHEN s.source = 'polymarket' THEN 'mid'
-                ELSE 'back'
-              END
-          AND abs(p.price::float8 - o.price_decimal) < 1e-9
-          AND p.line::float8 IS NOT DISTINCT FROM
-              CASE WHEN s.market IN ('spreads', 'totals') THEN o.point END
-          AND CASE o.outcome_name
-                WHEN 'Draw' THEN p.outcome = 'draw'
-                WHEN 'Over' THEN p.outcome = 'over'
-                WHEN 'Under' THEN p.outcome = 'under'
-                ELSE p.outcome IN ('home', 'away')
-              END
+    ),
+    needed AS (
+        SELECT o.snapshot_id,
+               coalesce(a.canonical_key, o.bookmaker_key) AS bookmaker,
+               CASE
+                   WHEN o.market_key = 'h2h_lay' THEN 'lay'
+                   WHEN s.source = 'polymarket' THEN 'mid'
+                   ELSE 'back'
+               END AS side,
+               CASE WHEN s.market IN ('spreads', 'totals') THEN o.point END AS line,
+               o.price,
+               CASE o.outcome_name
+                   WHEN 'Draw' THEN 'draw'
+                   WHEN 'Over' THEN 'over'
+                   WHEN 'Under' THEN 'under'
+                   ELSE 'team'
+               END AS outcome_class,
+               count(*) AS rows
+        FROM odds_rows o
+        JOIN odds_snapshots s ON s.id = o.snapshot_id
+        LEFT JOIN book_aliases a ON a.source = s.source AND a.raw_key = o.bookmaker_key
+        GROUP BY 1, 2, 3, 4, 5, 6
+    ),
+    held AS (
+        SELECT p.snapshot_id, p.bookmaker, p.side, p.line::float8 AS line,
+               round(p.price, 8) AS price,
+               CASE WHEN p.outcome IN ('home', 'away') THEN 'team' ELSE p.outcome END
+                   AS outcome_class,
+               count(*) AS rows
+        FROM prices p
+        WHERE p.snapshot_id IN (SELECT snapshot_id FROM odds_rows)
+        GROUP BY 1, 2, 3, 4, 5, 6
     )
+    SELECT coalesce(sum(n.rows - coalesce(h.rows, 0)), 0)
+    FROM needed n
+    LEFT JOIN held h
+      ON h.snapshot_id = n.snapshot_id
+     AND h.bookmaker = n.bookmaker
+     AND h.side = n.side
+     AND h.line IS NOT DISTINCT FROM n.line
+     AND h.price = n.price
+     AND h.outcome_class = n.outcome_class
+    WHERE n.rows > coalesce(h.rows, 0)
 """
 
 
