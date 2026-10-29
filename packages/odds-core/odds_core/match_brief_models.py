@@ -5,7 +5,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from sqlalchemy import JSON, Column, DateTime
+from sqlalchemy import JSON, BigInteger, Column, DateTime
 from sqlmodel import Field, SQLModel
 
 from odds_core.models import utc_now
@@ -43,7 +43,7 @@ class MatchBrief(SQLModel, table=True):
     __tablename__ = "match_briefs"
 
     id: int | None = Field(default=None, primary_key=True)
-    event_id: str = Field(foreign_key="events.id", index=True)
+    event_id: int = Field(sa_type=BigInteger, foreign_key="events.id", index=True)
 
     decision: BriefDecision = Field(description="Agent decision: watching, bet, or skip")
     summary: str = Field(description="One-line summary of the brief for triage views")

@@ -1,4 +1,4 @@
-"""Tests for OddsPortal ingestion script — build_envelope and build_event_id."""
+"""Tests for OddsPortal ingestion script — build_envelope and team_abbrev."""
 
 from __future__ import annotations
 
@@ -9,8 +9,6 @@ import pytest
 # Import directly from script (it's on sys.path via the repo root)
 from odds_core.team import team_abbrev
 from odds_lambda.oddsportal_common import build_envelope
-
-from scripts.ingest_oddsportal import build_event_id
 
 
 def _make_bookmaker(
@@ -213,36 +211,3 @@ class TestTeamAbbrev:
 
     def test_manchester_derby_unique(self) -> None:
         assert team_abbrev("Manchester United") != team_abbrev("Manchester City")
-
-
-class TestBuildEventId:
-    def test_with_canonical_to_abbrev(self) -> None:
-        mapping = {"Boston Celtics": "BOS", "Los Angeles Lakers": "LAL"}
-        result = build_event_id(
-            "2024-2025",
-            "Boston Celtics",
-            "Los Angeles Lakers",
-            datetime(2025, 1, 15).date(),
-            canonical_to_abbrev=mapping,
-        )
-        assert result == "op_2024-2025_BOS_LAL_2025-01-15"
-
-    def test_without_mapping_uses_team_abbrev(self) -> None:
-        result = build_event_id(
-            "2024-2025",
-            "Manchester United",
-            "Manchester City",
-            datetime(2025, 1, 15).date(),
-        )
-        assert result == "op_2024-2025_MANUNI_MANCIT_2025-01-15"
-
-    def test_fallback_when_team_not_in_mapping(self) -> None:
-        mapping = {"Boston Celtics": "BOS"}
-        result = build_event_id(
-            "2024-2025",
-            "Boston Celtics",
-            "Arsenal",
-            datetime(2025, 1, 15).date(),
-            canonical_to_abbrev=mapping,
-        )
-        assert result == "op_2024-2025_BOS_ARS_2025-01-15"

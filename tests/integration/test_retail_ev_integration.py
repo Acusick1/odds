@@ -37,7 +37,7 @@ async def retail_ev_events(pglite_async_session):
     session = pglite_async_session
     for i in range(3):
         kickoff = FIRST_KICKOFF + timedelta(days=7 * i)
-        event_id = f"fduk_retail_ev_{i}"
+        event_id = 100 + i
         session.add(
             make_epl_event(event_id, kickoff, status=EventStatus.FINAL, home_score=1, away_score=0)
         )
@@ -71,7 +71,7 @@ async def retail_ev_events(pglite_async_session):
 
 async def _add_fduk_event(
     session,
-    event_id: str,
+    event_id: int,
     kickoff: datetime,
     *,
     status: EventStatus,
@@ -151,7 +151,7 @@ class TestRetailEvTrainingData:
         kickoff = FIRST_KICKOFF + timedelta(days=30)
         await _add_fduk_event(
             retail_ev_events,
-            "fduk_unsettled_with_close",
+            201,
             kickoff,
             status=EventStatus.SCHEDULED,
             scores=None,
@@ -159,7 +159,7 @@ class TestRetailEvTrainingData:
         )
         await _add_fduk_event(
             retail_ev_events,
-            "fduk_final_without_scores",
+            202,
             kickoff + timedelta(days=1),
             status=EventStatus.FINAL,
             scores=None,
@@ -167,7 +167,7 @@ class TestRetailEvTrainingData:
         )
         await _add_fduk_event(
             retail_ev_events,
-            "fduk_final_without_close",
+            203,
             kickoff + timedelta(days=2),
             status=EventStatus.FINAL,
             scores=(2, 1),
@@ -179,17 +179,17 @@ class TestRetailEvTrainingData:
 
         assert result.event_ids_train is not None
         assert set(result.event_ids_train.tolist()) == {
-            "fduk_retail_ev_0",
-            "fduk_retail_ev_1",
-            "fduk_retail_ev_2",
-            "fduk_unsettled_with_close",
-            "fduk_final_without_scores",
+            100,
+            101,
+            102,
+            201,
+            202,
         }
 
     async def test_events_that_have_not_kicked_off_are_not_selected(self, retail_ev_events) -> None:
         await _add_fduk_event(
             retail_ev_events,
-            "fduk_upcoming",
+            204,
             datetime.now(UTC) + timedelta(days=2),
             status=EventStatus.SCHEDULED,
             scores=None,
@@ -202,7 +202,7 @@ class TestRetailEvTrainingData:
         result = await prepare_training_data_from_config(config, retail_ev_events)
 
         assert result.event_ids_train is not None
-        assert "fduk_upcoming" not in set(result.event_ids_train.tolist())
+        assert 204 not in set(result.event_ids_train.tolist())
 
     async def test_rejects_a_sampler(self, retail_ev_events) -> None:
         config = _config().training.features

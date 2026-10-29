@@ -37,7 +37,7 @@ async def _outranked(session: AsyncSession, event: Event, above: tuple[Source, .
         return False
     held = await session.execute(
         select(EventExternalId.source).where(
-            EventExternalId.event_id == event.surrogate_id,
+            EventExternalId.event_id == event.id,
             EventExternalId.source.in_(above),  # type: ignore[attr-defined]
         )
     )

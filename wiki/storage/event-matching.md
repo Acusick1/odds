@@ -20,7 +20,6 @@ sources:
   - odds_lambda.live_events.alert_dropped_games
   - odds_lambda.storage.event_resolver.resolve_unscheduled_mlb_event
   - odds_lambda.live_events.LiveEventFinder.store_listings
-  - odds_lambda.live_events.live_event_id
   - odds_lambda.odds_api_events
 mentions:
   - odds_lambda.mlb_stats_fetcher.MlbStatsFetcher.fetch_results
@@ -36,7 +35,7 @@ There is no shared matcher for deciding which `events` row a piece of incoming d
 
 | Matcher | Used by | Window | Teams | Ambiguity |
 |---|---|---|---|---|
-| `odds_lambda.storage.event_resolver.resolve_event` with `odds_lambda.storage.event_resolver.MatchWindow.HISTORICAL` | historical OddsPortal and FDUK ingest scripts | commence time ±24 h | `odds_core.team.normalize_team_name` applied first; same sport | one candidate matches; several match only through the nearest within ±2 h, else no match and the row creates its own event (logged) ([Event resolver](event-resolver.md#steps)) |
+| `odds_lambda.storage.event_resolver.resolve_event` with `odds_lambda.storage.event_resolver.MatchWindow.HISTORICAL` | historical OddsPortal and FDUK ingest scripts | commence time ±24 h | `odds_core.team.normalize_team_name` applied first; same sport | one candidate matches; several match only through the nearest within ±2 h, else, with none within ±2 h, `odds_lambda.storage.event_resolver.AmbiguousHistoricalMatch` is raised before anything is written and the ingest script skips the row (logged `ambiguous_historical_match`); with no candidate at all the row creates its own event (logged) ([Event resolver](event-resolver.md#steps)) |
 | `odds_lambda.storage.event_resolver.resolve_event` | live OddsPortal scrape and Betfair jobs and the Odds API writers, through `odds_lambda.live_events.LiveEventFinder` | MLB: the event holding the row's `gamePk`, else the source's id, else ±2 h among events with none; other sports: the source's id, else ±2 h | `odds_core.team.normalize_team_name` applied first; sport filter | the nearest candidate, ties to the one stored first ([Event resolver](event-resolver.md#steps)) |
 | `odds_lambda.storage.injury_writer.InjuryWriter._match_event` | [NBA injury reports](../collection/nba-injuries-and-stats.md) | ET `game_date` 10:00 to next day 06:00, converted to UTC | team is home or away | `None` |
 | `odds_lambda.storage.game_log_writer.GameLogWriter._match_event` | [NBA game logs](../collection/nba-injuries-and-stats.md) | same ET window (a verbatim copy) | team is home or away | `None` |
@@ -44,7 +43,7 @@ There is no shared matcher for deciding which `events` row a piece of incoming d
 
 ## Consequences of the differences
 
-- **Create on miss.** If `odds_lambda.storage.event_resolver.resolve_event` finds nothing it creates an event, so for EPL a name or window mismatch there yields a duplicate event rather than a miss. An MLB event is found by its `gamePk` first, so sources that list one game at different times land on one event ([live MLB events](#live-mlb-events)). A game absent from `events` gets an `op_`/`fduk_` row from the historical scripts, so cross-source joins depend on the matchers agreeing.
+- **Create on miss.** If `odds_lambda.storage.event_resolver.resolve_event` finds nothing it creates an event, so for EPL a name or window mismatch there yields a duplicate event rather than a miss. An MLB event is found by its `gamePk` first, so sources that list one game at different times land on one event ([live MLB events](#live-mlb-events)). A game absent from `events` gets a row from the historical scripts, unless several events match it only within ±24 h, which the scripts skip, so cross-source joins depend on the matchers agreeing.
 - **Different windows.** `odds_lambda.storage.event_resolver.resolve_event` uses ±2 h for live listings and ±24 h for historical ones (`odds_lambda.storage.event_resolver.MatchWindow`); both reuse an existing event (including a hex-id one) on a team match.
 - **Finders never merge.** `odds_lambda.storage.event_merge.find_match_id` only reads, and returns the candidate a merge would keep ([kept event](event-merge.md#kept-event)). The resolver's historical match takes the nearest candidate within ±2 h when there are several, and none when no candidate is within ±2 h, so neighbouring fixtures of the same teams (an NBA back-to-back) are never conflated. Merging is explicit ([Event merge](event-merge.md)).
 - **Odds API writers resolve.** Event sync, ingestion, `odds discover games` and the historical backfill attach a listed game to the event of its match whichever source stored it first, and create one only when none matches ([Odds API events](#odds-api-events)). Twins stored before the resolver stay until they are merged ([Event merge](event-merge.md)).
@@ -74,7 +73,7 @@ The same module reads a game's slots for the jobs that follow it after resolutio
   1. The event holding that `gamePk`.
   2. Else the event holding the source's id for the game, when it holds no `gamePk`.
   3. Else the nearest same-pair event within ±2 h of the anchor (ties go to the one stored first), which takes the `gamePk` when it holds none and no sibling start is nearer to it. An event holding a `gamePk` is never claimed, and a nearer sibling means it is that game's event, so a TBD game 2 listed a few minutes after game 1 does not take game 1's event.
-  4. Else a new event created with the `gamePk` at the anchor time, with the `op_live_` id that time gives (`odds_lambda.live_events.live_event_id`). When that id belongs to another event, the resolver logs `event_id_collision` and uses the id with `_<gamePk>` appended, which no other game can produce.
+  4. Else a new event created with the `gamePk` at the anchor time.
 
   When the event found or claimed has a `commence_time` other than the scheduled start (a postponed game replayed in another slot), it moves to that start and a POSTPONED event becomes SCHEDULED (`odds_lambda.storage.event_kickoff.move_kickoff` on the MLB Stats API's authority at the current time, which may move a game to a past start, [Kick-off authority](kickoff-authority.md#before-and-after-the-stored-kick-off)), and `event_rescheduled` is logged. Tiers are derived against the current kick-off, so the pre-slot snapshots of a postponed game lose their closing tier. A concurrent run resolving the same pair waits on the resolver's fixture lock until this run commits, so it finds the event holding the `gamePk` ([locks and transactions](event-resolver.md#locks-and-transactions)). The MLB Stats API ranks first for MLB, so `odds_lambda.storage.event_kickoff.move_kickoff` never holds its move back for another source's snapshots.
 - **Unresolved**: no event and no snapshot. `odds_lambda.mlb_game_resolver.resolve_batch` has logged `mlb_game_unresolved` with the reason, and the job records an `odds_lambda.live_events.DroppedGame` (counted as `games_unresolved`).

@@ -27,8 +27,8 @@ async def mark_unmatched(session: AsyncSession, event: Event, reason: str) -> No
     reason = reason.strip()
     if not reason:
         raise ValueError("a reason is required")
-    if event.surrogate_id is None:
-        raise ValueError(f"event {event.id} is not stored")
+    if event.id is None:
+        raise ValueError(f"event {event.home_team} v {event.away_team} is not stored")
     if event.sport_key != MLB_SPORT_KEY:
         raise ValueError(f"{event.id} is a {event.sport_key} event")
     if await holds_game_pk(session, event):
@@ -36,7 +36,7 @@ async def mark_unmatched(session: AsyncSession, event: Event, reason: str) -> No
     held = (
         await session.execute(
             select(HealthCheckAcknowledgement).where(
-                HealthCheckAcknowledgement.event_id == event.surrogate_id,
+                HealthCheckAcknowledgement.event_id == event.id,
                 HealthCheckAcknowledgement.check_name == HealthCheck.MISSING_MLB_GAME_PK,
             )
         )
@@ -44,7 +44,7 @@ async def mark_unmatched(session: AsyncSession, event: Event, reason: str) -> No
     if held is None:
         session.add(
             HealthCheckAcknowledgement(
-                event_id=event.surrogate_id,
+                event_id=event.id,
                 check_name=HealthCheck.MISSING_MLB_GAME_PK,
                 reason=reason,
             )
@@ -61,10 +61,10 @@ async def mark_unmatched(session: AsyncSession, event: Event, reason: str) -> No
 async def clear_unmatched(session: AsyncSession, event: Event) -> None:
     """Undo ``mark_unmatched`` once the event has a game: the acknowledgement is deleted and an
     ``UNMATCHED`` event becomes ``SCHEDULED``. Does not flush."""
-    if event.surrogate_id is not None:
+    if event.id is not None:
         await session.execute(
             delete(HealthCheckAcknowledgement).where(
-                HealthCheckAcknowledgement.event_id == event.surrogate_id,
+                HealthCheckAcknowledgement.event_id == event.id,
                 HealthCheckAcknowledgement.check_name == HealthCheck.MISSING_MLB_GAME_PK,
             )
         )
@@ -73,17 +73,17 @@ async def clear_unmatched(session: AsyncSession, event: Event) -> None:
         event.updated_at = datetime.now(UTC)
 
 
-async def unmatched_reasons(session: AsyncSession, events: Sequence[Event]) -> dict[str, str]:
+async def unmatched_reasons(session: AsyncSession, events: Sequence[Event]) -> dict[int, str]:
     """The ``mark_unmatched`` reason of each of ``events`` that has one, by event id. A final
     event keeps its status when marked, so this, not the status, says which events have no game
     in MLB's schedule."""
-    by_key = {e.surrogate_id: e.id for e in events if e.surrogate_id is not None}
-    if not by_key:
+    ids = [e.id for e in events if e.id is not None]
+    if not ids:
         return {}
     rows = await session.execute(
         select(HealthCheckAcknowledgement.event_id, HealthCheckAcknowledgement.reason).where(
             HealthCheckAcknowledgement.check_name == HealthCheck.MISSING_MLB_GAME_PK,
-            HealthCheckAcknowledgement.event_id.in_(list(by_key)),  # type: ignore[attr-defined]
+            HealthCheckAcknowledgement.event_id.in_(ids),  # type: ignore[attr-defined]
         )
     )
-    return {by_key[key]: reason for key, reason in rows.all()}
+    return dict(rows.tuples().all())

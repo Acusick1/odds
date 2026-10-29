@@ -3,7 +3,6 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from odds_core.api_models import create_scheduled_event
 from odds_core.models import DataQualityLog, Event, EventStatus, FetchLog, OddsSnapshot, Price
 from odds_core.vocabulary import Market, Source, TimeBasis
 from odds_lambda.storage.readers import OddsReader
@@ -21,7 +20,7 @@ class TestDatabaseIntegration:
     async def test_create_event(self, test_session):
         """Test creating an event in database."""
         event = Event(
-            id="test123",
+            id=1,
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=datetime.now(UTC),
@@ -32,7 +31,7 @@ class TestDatabaseIntegration:
         result = await add_event(test_session, event)
         await test_session.commit()
 
-        assert result.id == "test123"
+        assert result.id == 1
         assert result.home_team == "Lakers"
         assert result.status == EventStatus.SCHEDULED
 
@@ -43,7 +42,7 @@ class TestDatabaseIntegration:
 
         # Create event
         event = Event(
-            id=sample_odds_data["id"],
+            id=1,
             sport_key=sample_odds_data["sport_key"],
             sport_title=sample_odds_data["sport_title"],
             commence_time=datetime.now(UTC),
@@ -53,7 +52,7 @@ class TestDatabaseIntegration:
         await add_event(test_session, event)
 
         stored = await writer.store_envelope(
-            event_id=sample_odds_data["id"],
+            event_id=1,
             envelope=sample_odds_data,
             validate=False,
             shape=SnapshotShape(Source.ODDS_API, TimeBasis.OBSERVED, None),
@@ -62,14 +61,10 @@ class TestDatabaseIntegration:
         await test_session.commit()
 
         assert stored.inserted
-        assert stored.snapshot.event_id == sample_odds_data["id"]
+        assert stored.snapshot.event_id == 1
         assert stored.snapshots_written == 3
         snapshots = (
-            (
-                await test_session.execute(
-                    select(OddsSnapshot).where(OddsSnapshot.event_id == sample_odds_data["id"])
-                )
-            )
+            (await test_session.execute(select(OddsSnapshot).where(OddsSnapshot.event_id == 1)))
             .scalars()
             .all()
         )
@@ -93,7 +88,7 @@ class TestDatabaseIntegration:
 
         # Create event
         event = Event(
-            id="test123",
+            id=1,
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=datetime.now(UTC),
@@ -106,7 +101,7 @@ class TestDatabaseIntegration:
 
         # Update to final with scores
         await writer.update_event_status(
-            event_id="test123",
+            event_id=1,
             status=EventStatus.FINAL,
             home_score=112,
             away_score=108,
@@ -114,7 +109,7 @@ class TestDatabaseIntegration:
         await test_session.commit()
 
         # Verify update
-        event = await reader.get_event_by_id("test123")
+        event = await reader.get_event_by_id(1)
         assert event is not None
         assert event.status == EventStatus.FINAL
         assert event.home_score == 112
@@ -172,15 +167,14 @@ class TestDatabaseIntegration:
         now = datetime.now(UTC)
 
         for i in range(3):
-            event_data = {
-                "id": f"test{i}",
-                "sport_key": "basketball_nba",
-                "sport_title": "NBA",
-                "commence_time": (now + timedelta(days=i)).isoformat(),
-                "home_team": f"Team{i}",
-                "away_team": f"Team{i + 1}",
-            }
-            event = create_scheduled_event(event_data)
+            event = Event(
+                id=i + 1,
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=now + timedelta(days=i),
+                home_team=f"Team{i}",
+                away_team=f"Team{i + 1}",
+            )
             await add_event(test_session, event)
 
         await test_session.commit()
@@ -200,7 +194,7 @@ class TestDatabaseIntegration:
 
         # Create events
         event1 = Event(
-            id="test1",
+            id=1,
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=datetime.now(UTC),
@@ -208,7 +202,7 @@ class TestDatabaseIntegration:
             away_team="Boston Celtics",
         )
         event2 = Event(
-            id="test2",
+            id=2,
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=datetime.now(UTC),
@@ -234,7 +228,7 @@ class TestDatabaseIntegration:
 
         # Create some data
         event = Event(
-            id=sample_odds_data["id"],
+            id=1,
             sport_key=sample_odds_data["sport_key"],
             sport_title=sample_odds_data["sport_title"],
             commence_time=datetime.now(UTC),
@@ -244,7 +238,7 @@ class TestDatabaseIntegration:
         await add_event(test_session, event)
 
         await writer.store_envelope(
-            event_id=sample_odds_data["id"],
+            event_id=1,
             envelope=sample_odds_data,
             validate=False,
             shape=SnapshotShape(Source.ODDS_API, TimeBasis.OBSERVED, None),

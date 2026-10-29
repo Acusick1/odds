@@ -36,7 +36,7 @@ ERRORS_SHOWN = 3
 class EventKey:
     """A fixture of an event-backed sport, by its ``events`` row."""
 
-    event_id: str
+    event_id: int
 
 
 @dataclass(frozen=True, slots=True)

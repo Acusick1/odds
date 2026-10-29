@@ -106,7 +106,7 @@ def outcome_label(event: Event, outcome: PriceOutcome) -> str:
 
 
 async def latest_priced_snapshot(
-    session: AsyncSession, event_id: str, market: Market
+    session: AsyncSession, event_id: int, market: Market
 ) -> OddsSnapshot | None:
     """The newest snapshot of ``market`` that holds a book price."""
     has_book_price = exists().where(
@@ -128,7 +128,7 @@ async def latest_priced_snapshot(
 
 async def book_quotes(
     session: AsyncSession,
-    event_id: str,
+    event_id: int,
     market: Market,
     *,
     since: datetime | None = None,

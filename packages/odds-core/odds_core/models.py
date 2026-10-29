@@ -99,12 +99,8 @@ class Event(SQLModel, table=True):
 
     __tablename__ = "events"
 
-    # Primary identification
-    id: str = Field(primary_key=True, description="API event ID")
-    # The event's key once the string ids are dropped; new tables reference it already.
-    surrogate_id: int | None = Field(
-        default=None, sa_column=Column(BigInteger, Identity(), nullable=False)
-    )
+    # Numbered by the database; source ids are in ``event_external_ids``.
+    id: int | None = Field(default=None, sa_column=Column(BigInteger, Identity(), primary_key=True))
     sport_key: str = Field(index=True, description="Sport identifier")
     sport_title: str = Field(description="Sport display name")
 
@@ -139,8 +135,6 @@ class Event(SQLModel, table=True):
         description="Record last update time",
     )
 
-    __table_args__ = (UniqueConstraint("surrogate_id", name="uq_events_surrogate_id"),)
-
 
 class OddsSnapshot(SQLModel, table=True):
     """One source's prices for one market of an event at one time; the prices are ``Price``
@@ -149,7 +143,9 @@ class OddsSnapshot(SQLModel, table=True):
     __tablename__ = "odds_snapshots"
 
     id: int | None = Field(default=None, primary_key=True)
-    event_id: str = Field(foreign_key="events.id", index=True, description="Event reference")
+    event_id: int = Field(
+        sa_type=BigInteger, foreign_key="events.id", index=True, description="Event reference"
+    )
     snapshot_time: datetime = Field(
         sa_column=Column(DateTime(timezone=True), index=True),
         description="Time of snapshot capture",
@@ -249,9 +245,7 @@ class EventExternalId(SQLModel, table=True):
 
     source: Source = Field(sa_column=Column(StrEnumText(Source), primary_key=True))
     external_id: str = Field(sa_column=Column(Text, primary_key=True))
-    event_id: int = Field(
-        sa_column=Column(BigInteger, ForeignKey("events.surrogate_id"), nullable=False)
-    )
+    event_id: int = Field(sa_column=Column(BigInteger, ForeignKey("events.id"), nullable=False))
     created_at: datetime = Field(
         sa_column=Column(DateTime(timezone=True), nullable=False), default_factory=utc_now
     )
@@ -268,9 +262,7 @@ class HealthCheckAcknowledgement(SQLModel, table=True):
     __tablename__ = "health_check_acknowledgements"
 
     id: int | None = Field(default=None, sa_column=Column(BigInteger, Identity(), primary_key=True))
-    event_id: int = Field(
-        sa_column=Column(BigInteger, ForeignKey("events.surrogate_id"), nullable=False)
-    )
+    event_id: int = Field(sa_column=Column(BigInteger, ForeignKey("events.id"), nullable=False))
     check_name: HealthCheck = Field(sa_column=Column(StrEnumText(HealthCheck), nullable=False))
     reason: str = Field(sa_column=Column(Text, nullable=False))
     acknowledged_at: datetime = Field(
@@ -291,7 +283,9 @@ class DataQualityLog(SQLModel, table=True):
     __tablename__ = "data_quality_logs"
 
     id: int | None = Field(default=None, primary_key=True)
-    event_id: str | None = Field(foreign_key="events.id", description="Related event ID")
+    event_id: int | None = Field(
+        sa_type=BigInteger, foreign_key="events.id", description="Related event ID"
+    )
 
     severity: str = Field(description="Severity: warning, error, critical")
     issue_type: str = Field(description="Issue type: missing_data, suspicious_odds, etc.")

@@ -73,7 +73,7 @@ def event_close(
 
 
 async def live_close_quotes(
-    session: AsyncSession, event_ids: Collection[str], market: str
+    session: AsyncSession, event_ids: Collection[int], market: str
 ) -> list[Quote]:
     """The Betfair Exchange backs of the events' live Betfair snapshots within
     ``LIVE_CLOSE_WINDOW`` before each one's kick-off, in one query."""
@@ -90,10 +90,10 @@ async def live_close_quotes(
 
 async def close_quotes(
     session: AsyncSession, events: Sequence[Event], market: str
-) -> dict[str, list[Quote]]:
+) -> dict[int, list[Quote]]:
     """The quotes of ``events`` that ``event_close`` can pick, per event id: the live ones
     (``live_close_quotes``) and the Betfair Exchange backs of FDUK closing snapshots."""
-    by_event: dict[str, list[Quote]] = {e.id: [] for e in events}
+    by_event: dict[int, list[Quote]] = {e.id: [] for e in events}
     if not events:
         return by_event
     fduk = await quotes(

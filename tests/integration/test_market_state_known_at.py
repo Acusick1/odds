@@ -34,7 +34,7 @@ class TestLookback:
     async def test_snapshot_older_than_the_max_age_is_not_loaded(
         self, pglite_async_session
     ) -> None:
-        event = make_epl_event("evt", KICKOFF)
+        event = make_epl_event(1, KICKOFF)
         pglite_async_session.add(event)
         await store_tagged(
             pglite_async_session,
@@ -56,7 +56,7 @@ class TestKnownAt:
     @pytest.fixture
     async def event(self, pglite_async_session):
         session = pglite_async_session
-        event = make_epl_event("evt", KICKOFF)
+        event = make_epl_event(1, KICKOFF)
         session.add(event)
         # Stamped 10 minutes before t, but stored 5 minutes after it.
         late = make_tagged_snapshot(
@@ -96,7 +96,7 @@ class TestPolymarket:
     @pytest.fixture
     async def event(self, pglite_async_session):
         session = pglite_async_session
-        event = make_epl_event("evt", KICKOFF)
+        event = make_epl_event(1, KICKOFF)
         session.add(event)
         await store_tagged(
             session,

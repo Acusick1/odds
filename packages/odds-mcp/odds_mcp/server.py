@@ -184,7 +184,7 @@ async def get_upcoming_fixtures(
 
 @mcp.tool()
 async def get_current_odds(
-    event_id: str,
+    event_id: int,
     market: MarketKey,
     lookback_hours: float = 2.0,
 ) -> dict[str, Any]:
@@ -302,7 +302,7 @@ async def get_current_odds(
 
 
 @mcp.tool()
-async def get_odds_history(event_id: str, market: MarketKey) -> dict[str, Any]:
+async def get_odds_history(event_id: int, market: MarketKey) -> dict[str, Any]:
     """Get the full odds movement timeline for an event (all snapshots).
 
     Returns structured bookmaker back prices per snapshot to keep response
@@ -510,7 +510,7 @@ async def get_scrape_status(
 
 @mcp.tool()
 async def paper_bet(
-    event_id: str,
+    event_id: int,
     market: str,
     selection: str,
     price_decimal: float,
@@ -674,7 +674,7 @@ async def settle_bets() -> dict[str, Any]:
 
 @mcp.tool()
 async def save_match_brief(
-    event_id: str,
+    event_id: int,
     market: MarketKey,
     decision: Literal["watching", "bet", "skip"],
     summary: str,
@@ -743,7 +743,7 @@ async def save_match_brief(
 
 @mcp.tool()
 async def get_match_brief(
-    event_id: str,
+    event_id: int,
     limit: int | None = None,
 ) -> dict[str, Any]:
     """Retrieve saved match briefs for an event.
@@ -824,7 +824,7 @@ async def get_slate_briefs(
         )
 
         # Fetch latest brief per event using DISTINCT ON
-        latest_by_event: dict[str, Any] = {}
+        latest_by_event: dict[int, Any] = {}
         if events:
             event_ids = [e.id for e in events]
             result = await session.execute(
@@ -858,7 +858,7 @@ async def get_slate_briefs(
 
 @mcp.tool()
 async def find_retail_edges(
-    event_id: str,
+    event_id: int,
     market: MarketKey,
     sharp_bookmakers: str | list[str] | None = None,
     sharp_lookback_hours: float = 2.0,

@@ -16,8 +16,7 @@ from typing import Any
 import structlog
 from odds_core.alerts import send_recorded_alert
 from odds_core.config import get_settings
-from odds_core.event_ids import LIVE_EVENT_ID_PREFIX
-from odds_core.team import normalize_team_name, team_abbrev
+from odds_core.team import normalize_team_name
 from odds_core.vocabulary import Source
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -50,17 +49,6 @@ logger = structlog.get_logger()
 DROPPED_GAMES_SHOWN = 10
 # A live listing this far past its start matches an event but creates none.
 LIVE_EVENT_STALE_THRESHOLD = timedelta(hours=1)
-
-
-def live_event_id(home_team: str, away_team: str, start: datetime) -> str:
-    """The string id an event a live listing creates takes, while ``events.id`` is a string.
-
-    It carries the start to the minute, so a doubleheader's games get distinct ids.
-    """
-    return (
-        f"{LIVE_EVENT_ID_PREFIX}{team_abbrev(home_team)}_{team_abbrev(away_team)}_"
-        f"{start:%Y-%m-%dT%H%M}"
-    )
 
 
 def lock_order(sport_key: str, game: GameRow) -> int:
@@ -178,13 +166,11 @@ class LiveEventFinder:
         external_id: str | None,
         *,
         now: datetime | None = None,
-        legacy_id: str | None = None,
         create_stale: bool = False,
     ) -> ResolvedEvent | DroppedGame:
         """The game's event, recording ``source``'s id for it, or the game dropped from this run.
 
-        An event the game creates takes ``legacy_id``, by default the ``op_live_`` id of its teams
-        and start. With ``create_stale`` a game that started long ago may still create an event,
+        With ``create_stale`` a game that started long ago may still create an event,
         for a source that lists games already under way.
 
         Without the MLB schedule a game attaches only to the one event of its pair within ±2 h
@@ -197,7 +183,6 @@ class LiveEventFinder:
         """
         now = now or datetime.now(UTC)
         mlb_game: ResolvedGame | None = None
-        start = game.start
         if self.sport_key == MLB_SPORT_KEY:
             if self.resolutions is None:
                 found = await resolve_unscheduled_mlb_event(
@@ -214,7 +199,6 @@ class LiveEventFinder:
             if isinstance(resolution, UnresolvedGame):
                 return DroppedGame(game, SkipReason.UNRESOLVED, resolution.reason)
             mlb_game = resolution
-            start = resolution.start or game.start
         return await resolve_event(
             session,
             ListedGame(
@@ -224,10 +208,6 @@ class LiveEventFinder:
                 home_team=game.home_team,
                 away_team=game.away_team,
                 commence_time=game.start,
-                legacy_id=legacy_id
-                or live_event_id(
-                    normalize_team_name(game.home_team), normalize_team_name(game.away_team), start
-                ),
                 external_id=external_id,
                 mlb_game=mlb_game,
                 earliest_created_start=None if create_stale else now - LIVE_EVENT_STALE_THRESHOLD,

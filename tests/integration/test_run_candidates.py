@@ -121,7 +121,7 @@ def write_candidate(directory: Path, name: str = "cand", **fields: Any) -> None:
 
 
 async def add_event(
-    session: Any, event_id: str, kickoff: datetime, away_team: str = "Chelsea"
+    session: Any, event_id: int, kickoff: datetime, away_team: str = "Chelsea"
 ) -> None:
     session.add(make_epl_event(event_id, kickoff, away_team=away_team))
     snapshot = make_tagged_snapshot(
@@ -157,7 +157,7 @@ class TestDecisions:
         self, pglite_async_session, registry
     ) -> None:
         write_candidate(registry)
-        await add_event(pglite_async_session, "e1", DUE)
+        await add_event(pglite_async_session, 1, DUE)
 
         summary = await run(pglite_async_session)
 
@@ -166,7 +166,7 @@ class TestDecisions:
         assert (decision.candidate_name, decision.candidate_version, decision.event_id) == (
             "cand",
             1,
-            "e1",
+            1,
         )
         assert decision.decision_time == DUE - timedelta(minutes=60)
         assert decision.kickoff_at_decision == DUE
@@ -185,15 +185,15 @@ class TestDecisions:
     ) -> None:
         params = {"threshold": 0.02, "minutes_before_kickoff": [60], "max_input_age_minutes": 120}
         write_candidate(registry, rule="polymarket_gap", params=params)
-        pglite_async_session.add(make_epl_event("e1", DUE))
+        pglite_async_session.add(make_epl_event(1, DUE))
         retail = make_tagged_snapshot(
-            "e1",
+            1,
             NOW - timedelta(hours=1),
             [three_way_bookmaker("bet365", (2.2, 3.4, 4.0))],
             "oddsportal_live",
         )
         polymarket = make_tagged_snapshot(
-            "e1",
+            1,
             NOW - timedelta(minutes=30),
             [polymarket_bookmaker((0.5, 0.25, 0.25))],
             "polymarket",
@@ -237,7 +237,7 @@ class TestDecisions:
         alert = AsyncMock()
         monkeypatch.setattr(run_candidates, "send_recorded_alert", alert)
         write_candidate(registry)
-        await add_event(pglite_async_session, "e1", LATE)
+        await add_event(pglite_async_session, 1, LATE)
         assert NOW - (LATE - timedelta(minutes=60)) > MAX_LATENESS
 
         with structlog.testing.capture_logs() as logs:
@@ -250,7 +250,7 @@ class TestDecisions:
         assert decision.input_snapshot_ids == []
         [missed] = [log for log in logs if log["event"] == "candidate_decision_missed"]
         assert missed["log_level"] == "warning"
-        assert (missed["candidate"], missed["event_id"], missed["reason"]) == ("cand", "e1", "late")
+        assert (missed["candidate"], missed["event_id"], missed["reason"]) == ("cand", 1, "late")
         alert.assert_not_awaited()
 
     async def test_decision_without_a_recent_snapshot_is_recorded_as_missed(
@@ -261,7 +261,7 @@ class TestDecisions:
         write_candidate(
             registry, params={"minutes_before_kickoff": [60], "max_input_age_minutes": 10}
         )
-        await add_event(pglite_async_session, "e1", DUE)
+        await add_event(pglite_async_session, 1, DUE)
 
         with structlog.testing.capture_logs() as logs:
             summary = await run(pglite_async_session)
@@ -277,13 +277,13 @@ class TestDecisions:
         assert missed["reason"] == "no_input"
         [call] = alert.await_args_list
         assert call.args[:2] == ("candidate_no_input:cand:60", "warning")
-        assert "e1" in call.args[2] and "60 minutes before kick-off" in call.args[2]
+        assert "decision on 1 at" in call.args[2] and "60 minutes before kick-off" in call.args[2]
         assert call.kwargs["every"] == run_candidates.stale_reminder_interval()
 
     async def test_rerun_places_nothing_new(self, pglite_async_session, registry) -> None:
         write_candidate(registry)
-        await add_event(pglite_async_session, "e1", DUE)
-        await add_event(pglite_async_session, "e2", LATE, away_team="Spurs")
+        await add_event(pglite_async_session, 1, DUE)
+        await add_event(pglite_async_session, 2, LATE, away_team="Spurs")
 
         await run(pglite_async_session)
         again = await run(pglite_async_session, NOW + timedelta(minutes=1))
@@ -294,7 +294,7 @@ class TestDecisions:
 
     async def test_zero_bet_decision_is_recorded_once(self, pglite_async_session, registry) -> None:
         write_candidate(registry, rule="no_bet")
-        await add_event(pglite_async_session, "e1", DUE)
+        await add_event(pglite_async_session, 1, DUE)
 
         first = await run(pglite_async_session)
         second = await run(pglite_async_session)
@@ -306,7 +306,7 @@ class TestDecisions:
 
     async def test_event_not_yet_due_is_left_alone(self, pglite_async_session, registry) -> None:
         write_candidate(registry)
-        await add_event(pglite_async_session, "e1", NOT_DUE)
+        await add_event(pglite_async_session, 1, NOT_DUE)
 
         await run(pglite_async_session)
 
@@ -316,14 +316,14 @@ class TestDecisions:
         self, pglite_async_session, registry
     ) -> None:
         write_candidate(registry)
-        await add_event(pglite_async_session, "e1", NOW - timedelta(minutes=5))
-        await add_event(pglite_async_session, "e2", NOW - timedelta(days=8))
+        await add_event(pglite_async_session, 1, NOW - timedelta(minutes=5))
+        await add_event(pglite_async_session, 2, NOW - timedelta(days=8))
 
         summary = await run(pglite_async_session)
 
         assert (summary.missed, summary.placed) == (1, 0)
         [decision] = await all_of(pglite_async_session, CandidateDecision)
-        assert (decision.event_id, decision.missed, decision.bets_placed) == ("e1", True, 0)
+        assert (decision.event_id, decision.missed, decision.bets_placed) == (1, True, 0)
         assert await all_of(pglite_async_session, PaperTrade) == []
 
     async def test_decision_time_before_the_start_date_is_not_decided(
@@ -331,7 +331,7 @@ class TestDecisions:
     ) -> None:
         write_candidate(registry, start_date=NOW.date().isoformat())
         before_start = datetime.combine(NOW.date(), datetime.min.time(), tzinfo=UTC)
-        await add_event(pglite_async_session, "e1", before_start + timedelta(minutes=30))
+        await add_event(pglite_async_session, 1, before_start + timedelta(minutes=30))
 
         await run(pglite_async_session, before_start + timedelta(hours=2))
 
@@ -341,7 +341,7 @@ class TestDecisions:
         self, pglite_async_session, registry, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         write_candidate(registry)
-        await add_event(pglite_async_session, "e1", DUE)
+        await add_event(pglite_async_session, 1, DUE)
         real_decide = run_candidates._decide
 
         async def racing(session: Any, item: Any, event: Any, minutes: int, now: datetime) -> Any:
@@ -350,7 +350,7 @@ class TestDecisions:
                 CandidateDecision(
                     candidate_name="cand",
                     candidate_version=1,
-                    event_id="e1",
+                    event_id=1,
                     minutes_before_kickoff=60,
                     decision_time=DUE - timedelta(minutes=60),
                     kickoff_at_decision=DUE,
@@ -371,7 +371,7 @@ class TestDecisions:
         self, pglite_async_session, registry, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         write_candidate(registry)
-        await add_event(pglite_async_session, "e1", DUE)
+        await add_event(pglite_async_session, 1, DUE)
         spy = AsyncMock(side_effect=rules_module.load_market_state)
         monkeypatch.setattr(rules_module, "load_market_state", spy)
 
@@ -387,7 +387,7 @@ class TestDecisions:
     ) -> None:
         write_candidate(registry, "a-twice", rule="twice")
         write_candidate(registry, "b-good")
-        await add_event(pglite_async_session, "e1", DUE)
+        await add_event(pglite_async_session, 1, DUE)
 
         summary = await run(pglite_async_session)
 
@@ -406,7 +406,7 @@ class TestSeveralDecisionTimes:
         self, pglite_async_session, registry
     ) -> None:
         write_candidate(registry, params=self.TIMES)
-        await add_event(pglite_async_session, "e1", DUE)
+        await add_event(pglite_async_session, 1, DUE)
 
         early = await run(pglite_async_session, self.EARLY_RUN)
         late = await run(pglite_async_session)
@@ -428,10 +428,10 @@ class TestSeveralDecisionTimes:
         self, pglite_async_session, registry
     ) -> None:
         write_candidate(registry, rule="bet_longest", params=self.TIMES)
-        await add_event(pglite_async_session, "e1", DUE)
+        await add_event(pglite_async_session, 1, DUE)
         # Away is longest at the early time; this later snapshot makes the draw longest.
         later = make_tagged_snapshot(
-            "e1",
+            1,
             NOW - timedelta(minutes=5),
             [three_way_bookmaker("bet365", (1.5, 9.0, 3.0)), EXCHANGE_ROW],
             "oddsportal_live",
@@ -450,9 +450,9 @@ class TestSeveralDecisionTimes:
         self, pglite_async_session, registry
     ) -> None:
         write_candidate(registry)
-        await add_event(pglite_async_session, "e1", DUE)
+        await add_event(pglite_async_session, 1, DUE)
         await run(pglite_async_session)
-        event = await pglite_async_session.get(Event, "e1")
+        event = await pglite_async_session.get(Event, 1)
         assert event is not None
         event.commence_time = DUE + timedelta(minutes=20)
         await pglite_async_session.commit()
@@ -471,7 +471,7 @@ class TestSeveralDecisionTimes:
         write_candidate(
             registry, params={"minutes_before_kickoff": [12, 5], "max_input_age_minutes": 120}
         )
-        await add_event(pglite_async_session, "e1", NOW + timedelta(minutes=4))
+        await add_event(pglite_async_session, 1, NOW + timedelta(minutes=4))
         real_decide = run_candidates._decide
 
         async def fail_early(session: Any, item: Any, event: Any, minutes: int, now: Any) -> Any:
@@ -490,7 +490,7 @@ class TestSeveralDecisionTimes:
         self, pglite_async_session, registry
     ) -> None:
         write_candidate(registry, params=self.TIMES)
-        await add_event(pglite_async_session, "e1", DUE)
+        await add_event(pglite_async_session, 1, DUE)
 
         summary = await run(pglite_async_session)
 
@@ -517,7 +517,7 @@ class TestTotals:
         session: Any, retail: dict[float, tuple[float, float]], minutes_ago: int
     ) -> None:
         snapshot = make_tagged_snapshot(
-            "e1",
+            1,
             NOW - timedelta(minutes=minutes_ago),
             [totals_book("bet365", retail), totals_book("betfair_exchange", TestTotals.EXCHANGE)],
             "oddsportal_live",
@@ -550,7 +550,7 @@ class TestTotals:
     ) -> None:
         session = pglite_async_session
         write_candidate(registry, market="totals", rule="exchange_gap", params=self.PARAMS)
-        session.add(make_epl_event("e1", DUE))
+        session.add(make_epl_event(1, DUE))
         await self.add_snapshot(session, self.RETAIL, 60)
 
         early = await run(session, self.EARLY_RUN)
@@ -577,7 +577,7 @@ class TestTotals:
     ) -> None:
         session = pglite_async_session
         write_candidate(registry, market="totals", rule="exchange_gap", params=self.PARAMS)
-        session.add(make_epl_event("e1", DUE))
+        session.add(make_epl_event(1, DUE))
         await self.add_snapshot(session, self.RETAIL, 60)
         await run(session, self.EARLY_RUN)
         trade = next(t for t in await all_of(session, PaperTrade) if t.selection == "over")
@@ -591,10 +591,10 @@ class TestTotals:
     async def test_trades_settle_on_the_total_score(self, pglite_async_session, registry) -> None:
         session = pglite_async_session
         write_candidate(registry, market="totals", rule="exchange_gap", params=self.PARAMS)
-        session.add(make_epl_event("e1", DUE))
+        session.add(make_epl_event(1, DUE))
         await self.add_snapshot(session, self.RETAIL, 60)
         await run(session, self.EARLY_RUN)
-        event = await session.get(Event, "e1")
+        event = await session.get(Event, 1)
         assert event is not None
         event.status, event.home_score, event.away_score = EventStatus.FINAL, 4, 0
         await session.commit()
@@ -815,10 +815,10 @@ class TestFlatStakeTrades:
     ) -> None:
         session = pglite_async_session
         write_candidate(registry)
-        await add_event(session, "e1", DUE)
+        await add_event(session, 1, DUE)
         await place_trade(
             session,
-            event_id="e1",
+            event_id=1,
             market="1x2",
             selection="away",
             bookmaker="bet365",
@@ -839,9 +839,9 @@ class TestFlatStakeTrades:
     ) -> None:
         session = pglite_async_session
         write_candidate(registry)
-        await add_event(session, "e1", DUE)
+        await add_event(session, 1, DUE)
         await run(session)
-        event = await session.get(Event, "e1")
+        event = await session.get(Event, 1)
         assert event is not None
         event.status = EventStatus.FINAL
         event.home_score, event.away_score = 2, 0
@@ -853,12 +853,12 @@ class TestFlatStakeTrades:
         assert settled.bankroll_before is None and settled.bankroll_after is None
 
     async def test_a_trade_without_a_candidate_needs_a_bankroll(self, pglite_async_session) -> None:
-        await add_event(pglite_async_session, "e1", DUE)
+        await add_event(pglite_async_session, 1, DUE)
 
         with pytest.raises(ValueError, match="needs a bankroll"):
             await place_trade(
                 pglite_async_session,
-                event_id="e1",
+                event_id=1,
                 market="1x2",
                 selection="home",
                 bookmaker="bet365",
@@ -871,11 +871,11 @@ class TestFlatStakeTrades:
         self, pglite_async_session
     ) -> None:
         session = pglite_async_session
-        await add_event(session, "e1", DUE)
+        await add_event(session, 1, DUE)
         decision = CandidateDecision(
             candidate_name="cand",
             candidate_version=1,
-            event_id="e1",
+            event_id=1,
             minutes_before_kickoff=60,
             decision_time=NOW,
             kickoff_at_decision=DUE,
@@ -886,7 +886,7 @@ class TestFlatStakeTrades:
 
         def trade(decision_id: int | None, bookmaker: str = "bet365") -> PaperTrade:
             return PaperTrade(
-                event_id="e1",
+                event_id=1,
                 market="1x2",
                 selection="home",
                 bookmaker=bookmaker,
@@ -908,11 +908,11 @@ class TestFlatStakeTrades:
 
     async def test_unique_index_takes_the_line_into_a_selection(self, pglite_async_session) -> None:
         session = pglite_async_session
-        await add_event(session, "e1", DUE)
+        await add_event(session, 1, DUE)
         decision = CandidateDecision(
             candidate_name="cand",
             candidate_version=1,
-            event_id="e1",
+            event_id=1,
             minutes_before_kickoff=60,
             decision_time=NOW,
             kickoff_at_decision=DUE,
@@ -923,7 +923,7 @@ class TestFlatStakeTrades:
 
         def trade(line: float) -> PaperTrade:
             return PaperTrade(
-                event_id="e1",
+                event_id=1,
                 market="totals",
                 selection="over",
                 line=line,

@@ -90,11 +90,11 @@ class TestBackfillExecutor:
 
             # Check both events are represented
             event_ids = {p.event_id for p in progress_updates}
-            assert event_ids == {"test_event_1", "test_event_2"}
+            assert event_ids == {1, 2}
 
             # Each event has 2 snapshots
-            event1_updates = [p for p in progress_updates if p.event_id == "test_event_1"]
-            event2_updates = [p for p in progress_updates if p.event_id == "test_event_2"]
+            event1_updates = [p for p in progress_updates if p.event_id == 1]
+            event2_updates = [p for p in progress_updates if p.event_id == 2]
             assert len(event1_updates) == 2
             assert len(event2_updates) == 2
 
@@ -103,7 +103,7 @@ class TestBackfillExecutor:
         """Test that rate limiting is applied after successful requests."""
         from unittest.mock import MagicMock, patch
 
-        from odds_core.api_models import api_dict_to_event
+        from odds_core.api_models import parse_api_event
 
         # First part: dry run mode (no sleeps)
         mock_client = AsyncMock()
@@ -141,28 +141,28 @@ class TestBackfillExecutor:
         # Create responses - first 2 calls for event1, next 2 for event2
         responses = [
             HistoricalOddsResponse(
-                events=[api_dict_to_event(event1_dict)],
+                events=[parse_api_event(event1_dict)],
                 raw_events_data=[event1_dict],
                 response_time_ms=100,
                 quota_remaining=19950,
                 timestamp=datetime(2024, 1, 15, 18, 0, 0, tzinfo=UTC),
             ),
             HistoricalOddsResponse(
-                events=[api_dict_to_event(event1_dict)],
+                events=[parse_api_event(event1_dict)],
                 raw_events_data=[event1_dict],
                 response_time_ms=100,
                 quota_remaining=19940,
                 timestamp=datetime(2024, 1, 15, 18, 30, 0, tzinfo=UTC),
             ),
             HistoricalOddsResponse(
-                events=[api_dict_to_event(event2_dict)],
+                events=[parse_api_event(event2_dict)],
                 raw_events_data=[event2_dict],
                 response_time_ms=100,
                 quota_remaining=19930,
                 timestamp=datetime(2024, 1, 15, 20, 0, 0, tzinfo=UTC),
             ),
             HistoricalOddsResponse(
-                events=[api_dict_to_event(event2_dict)],
+                events=[parse_api_event(event2_dict)],
                 raw_events_data=[event2_dict],
                 response_time_ms=100,
                 quota_remaining=19920,

@@ -31,12 +31,12 @@ async def stored(pglite_async_session) -> dict[str, int]:
     """Two events: an OddsPortal snapshot of retail, Pinnacle and exchange prices, a live
     Betfair snapshot, and another event's OddsPortal snapshot."""
     session = pglite_async_session
-    session.add(make_epl_event("e1", KICKOFF))
-    session.add(make_epl_event("e2", KICKOFF, away_team="Spurs"))
+    session.add(make_epl_event(1, KICKOFF))
+    session.add(make_epl_event(2, KICKOFF, away_team="Spurs"))
     oddsportal = await store_tagged(
         session,
         make_tagged_snapshot(
-            "e1",
+            1,
             T - timedelta(minutes=5),
             [
                 three_way_bookmaker("bet365", (2.0, 3.0, 4.0)),
@@ -50,7 +50,7 @@ async def stored(pglite_async_session) -> dict[str, int]:
     betfair = await store_tagged(
         session,
         make_tagged_snapshot(
-            "e1",
+            1,
             T - timedelta(minutes=1),
             [
                 betfair_exchange_bookmaker(
@@ -67,7 +67,7 @@ async def stored(pglite_async_session) -> dict[str, int]:
     other = await store_tagged(
         session,
         make_tagged_snapshot(
-            "e2",
+            2,
             T - timedelta(minutes=5),
             [
                 three_way_bookmaker("bet365", (2.0, 3.0, 4.0), away_team="Spurs"),
@@ -83,9 +83,7 @@ async def stored(pglite_async_session) -> dict[str, int]:
 
 class TestQuotes:
     async def test_carries_the_snapshot_fields(self, pglite_async_session, stored) -> None:
-        rows = await quotes(
-            pglite_async_session, ["e1"], Market.ONE_X_TWO, sources=[Source.BETFAIR]
-        )
+        rows = await quotes(pglite_async_session, [1], Market.ONE_X_TWO, sources=[Source.BETFAIR])
         assert {q.snapshot_id for q in rows} == {stored["betfair"]}
         back = next(q for q in rows if q.side is Side.BACK and q.outcome == "home")
         assert (back.source, back.time_basis, back.in_play) == (
@@ -99,23 +97,23 @@ class TestQuotes:
     async def test_filters_narrow_in_sql(self, pglite_async_session, stored) -> None:
         session = pglite_async_session
         backs = await quotes(
-            session, ["e1", "e2"], Market.ONE_X_TWO, bookmakers=["bet365"], sides=[Side.BACK]
+            session, [1, 2], Market.ONE_X_TWO, bookmakers=["bet365"], sides=[Side.BACK]
         )
-        assert {(q.event_id, q.bookmaker) for q in backs} == {("e1", "bet365"), ("e2", "bet365")}
-        window = await quotes(session, ["e1"], Market.ONE_X_TWO, since=T - timedelta(minutes=2))
+        assert {(q.event_id, q.bookmaker) for q in backs} == {(1, "bet365"), (2, "bet365")}
+        window = await quotes(session, [1], Market.ONE_X_TWO, since=T - timedelta(minutes=2))
         assert {q.snapshot_id for q in window} == {stored["betfair"]}
-        known = await quotes(session, ["e1"], Market.ONE_X_TWO, known_at=T)
+        known = await quotes(session, [1], Market.ONE_X_TWO, known_at=T)
         assert {q.snapshot_id for q in known} == {stored["betfair"]}
-        by_id = await quotes(session, ["e1"], Market.ONE_X_TWO, snapshot_ids=[stored["betfair"]])
+        by_id = await quotes(session, [1], Market.ONE_X_TWO, snapshot_ids=[stored["betfair"]])
         assert {q.snapshot_id for q in by_id} == {stored["betfair"]}
-        assert await quotes(session, ["e1"], Market.TOTALS) == []
+        assert await quotes(session, [1], Market.TOTALS) == []
 
 
 class TestRuleQuotes:
     async def test_reads_only_retail_sources_backs_and_rule_books(
         self, pglite_async_session, stored
     ) -> None:
-        rows = await rule_quotes(pglite_async_session, "e1", "1x2", EXCHANGE)
+        rows = await rule_quotes(pglite_async_session, 1, "1x2", EXCHANGE)
         assert {q.snapshot_id for q in rows} == {stored["oddsportal"]}
         assert {q.bookmaker for q in rows} == {"bet365", "betfair_exchange"}
         assert {q.side for q in rows} == {Side.BACK}
@@ -126,7 +124,7 @@ class TestRuleQuotes:
         polymarket = await store_tagged(
             pglite_async_session,
             make_tagged_snapshot(
-                "e1",
+                1,
                 T - timedelta(minutes=3),
                 [polymarket_bookmaker((0.5, 0.3, 0.2))],
                 "polymarket",
@@ -134,8 +132,8 @@ class TestRuleQuotes:
         )
         await pglite_async_session.commit()
 
-        without = await rule_quotes(pglite_async_session, "e1", "1x2", EXCHANGE)
-        with_polymarket = await rule_quotes(pglite_async_session, "e1", "1x2", POLYMARKET)
+        without = await rule_quotes(pglite_async_session, 1, "1x2", EXCHANGE)
+        with_polymarket = await rule_quotes(pglite_async_session, 1, "1x2", POLYMARKET)
 
         assert polymarket.id not in {q.snapshot_id for q in without}
         mids = [q for q in with_polymarket if q.snapshot_id == polymarket.id]
@@ -146,11 +144,11 @@ class TestRuleQuotes:
         self, pglite_async_session, stored
     ) -> None:
         rows = await rule_quotes(
-            pglite_async_session, "e1", "1x2", EXCHANGE, snapshot_ids=[stored["other"]]
+            pglite_async_session, 1, "1x2", EXCHANGE, snapshot_ids=[stored["other"]]
         )
-        assert {q.event_id for q in rows} == {"e2"}
+        assert {q.event_id for q in rows} == {2}
 
     async def test_known_at_drops_snapshots_stored_later(
         self, pglite_async_session, stored
     ) -> None:
-        assert await rule_quotes(pglite_async_session, "e1", "1x2", EXCHANGE, known_at=T) == []
+        assert await rule_quotes(pglite_async_session, 1, "1x2", EXCHANGE, known_at=T) == []

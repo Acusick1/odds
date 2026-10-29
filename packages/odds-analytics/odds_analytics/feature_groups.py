@@ -640,7 +640,7 @@ async def prepare_training_data(
 
     X_list: list[np.ndarray] = []
     y_list: list[float] = []
-    event_id_list: list[str] = []
+    event_id_list: list[int] = []
     skipped_events = 0
     sharp_filtered_count = 0
     total_rows = 0

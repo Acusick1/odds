@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 import structlog
+from odds_core.api_models import ApiEvent
 from odds_core.models import Event, EventExternalId
 from odds_core.vocabulary import Source
 from sqlalchemy import select
@@ -21,21 +22,21 @@ from odds_lambda.storage.event_resolver import (
 logger = structlog.get_logger()
 
 
-def game_row(event: Event) -> GameRow:
+def game_row(event: ApiEvent) -> GameRow:
     return GameRow(event.home_team, event.away_team, event.commence_time)
 
 
-async def odds_api_finder(sport_key: str, events: Sequence[Event]) -> LiveEventFinder:
+async def odds_api_finder(sport_key: str, events: Sequence[ApiEvent]) -> LiveEventFinder:
     sport_title = events[0].sport_title if events else sport_key
     return await LiveEventFinder.for_run(sport_key, sport_title, [game_row(e) for e in events])
 
 
 async def resolve_odds_api_event(
-    finder: LiveEventFinder, session: AsyncSession, event: Event
+    finder: LiveEventFinder, session: AsyncSession, event: ApiEvent
 ) -> ResolvedEvent | DroppedGame:
     # The API lists games already under way, so a game with no event creates one however late.
     return await finder.resolve(
-        session, game_row(event), Source.ODDS_API, event.id, legacy_id=event.id, create_stale=True
+        session, game_row(event), Source.ODDS_API, event.odds_api_id, create_stale=True
     )
 
 
@@ -58,7 +59,7 @@ class OddsApiResolutions:
 
 
 async def resolve_odds_api_events(
-    session: AsyncSession, finder: LiveEventFinder, events: Sequence[Event]
+    session: AsyncSession, finder: LiveEventFinder, events: Sequence[ApiEvent]
 ) -> OddsApiResolutions:
     result = OddsApiResolutions()
     for event in sorted(events, key=lambda e: lock_order(finder.sport_key, game_row(e))):
@@ -66,13 +67,15 @@ async def resolve_odds_api_events(
             async with session.begin_nested():
                 found = await resolve_odds_api_event(finder, session, event)
         except Exception as e:
-            error = ResolutionError(event.id, type(e).__name__, str(e))
+            error = ResolutionError(event.odds_api_id, type(e).__name__, str(e))
             result.errors.append(error)
             logger.error("odds_api_event_resolution_failed", error=error.describe(), exc_info=True)
             continue
         if isinstance(found, DroppedGame):
             result.dropped.append(found)
-            logger.warning("odds_api_game_dropped", event_id=event.id, game=found.describe())
+            logger.warning(
+                "odds_api_game_dropped", odds_api_id=event.odds_api_id, game=found.describe()
+            )
         elif found.resolution is Resolution.CREATED:
             result.created += 1
         else:
@@ -83,7 +86,7 @@ async def resolve_odds_api_events(
 async def find_event_by_odds_api_id(session: AsyncSession, odds_api_id: str) -> Event | None:
     held = await session.execute(
         select(Event)
-        .join(EventExternalId, EventExternalId.event_id == Event.surrogate_id)  # type: ignore[arg-type]
+        .join(EventExternalId, EventExternalId.event_id == Event.id)  # type: ignore[arg-type]
         .where(
             EventExternalId.source == Source.ODDS_API, EventExternalId.external_id == odds_api_id
         )
@@ -91,10 +94,10 @@ async def find_event_by_odds_api_id(session: AsyncSession, odds_api_id: str) -> 
     return held.scalar_one_or_none()
 
 
-async def odds_api_id_of(session: AsyncSession, event_id: str) -> str | None:
+async def odds_api_id_of(session: AsyncSession, event_id: int) -> str | None:
     held = await session.execute(
-        select(EventExternalId.external_id)
-        .join(Event, EventExternalId.event_id == Event.surrogate_id)  # type: ignore[arg-type]
-        .where(EventExternalId.source == Source.ODDS_API, Event.id == event_id)
+        select(EventExternalId.external_id).where(
+            EventExternalId.source == Source.ODDS_API, EventExternalId.event_id == event_id
+        )
     )
     return held.scalar_one_or_none()

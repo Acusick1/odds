@@ -94,7 +94,7 @@ class TestCoerceBookmakerList:
 class TestEventToDict:
     def _make_event(self, **overrides: object) -> Event:
         defaults = {
-            "id": "evt-1",
+            "id": 1,
             "sport_key": "soccer_epl",
             "sport_title": "EPL",
             "home_team": "Arsenal",
@@ -116,7 +116,7 @@ class TestEventToDict:
 
         event = self._make_event()
         result = _event_to_dict(event)
-        assert result["id"] == "evt-1"
+        assert result["id"] == 1
         assert result["sport_key"] == "soccer_epl"
         assert result["sport_title"] == "EPL"
         assert result["home_team"] == "Arsenal"
@@ -202,7 +202,7 @@ class TestTradeToDict:
 
         trade = MagicMock(spec=PaperTrade)
         trade.id = 1
-        trade.event_id = "evt-1"
+        trade.event_id = 1
         trade.market = "h2h"
         trade.selection = "home"
         trade.bookmaker = "bet365"
@@ -234,7 +234,7 @@ class TestTradeToDict:
 
         trade = MagicMock(spec=PaperTrade)
         trade.id = 2
-        trade.event_id = "evt-1"
+        trade.event_id = 1
         trade.market = "h2h"
         trade.selection = "home"
         trade.bookmaker = "bet365"
@@ -407,7 +407,7 @@ class TestGetUpcomingFixtures:
         from odds_mcp.server import get_upcoming_fixtures
 
         mock_event = MagicMock(spec=Event)
-        mock_event.id = "evt-1"
+        mock_event.id = 1
         mock_event.sport_key = "soccer_epl"
         mock_event.sport_title = "EPL"
         mock_event.home_team = "Arsenal"
@@ -430,7 +430,7 @@ class TestGetUpcomingFixtures:
 
             result = await get_upcoming_fixtures()
             assert len(result) == 1
-            assert result[0]["id"] == "evt-1"
+            assert result[0]["id"] == 1
 
 
 class TestGetCurrentOddsMissingEvent:
@@ -448,9 +448,9 @@ class TestGetCurrentOddsMissingEvent:
             mock_session_maker.return_value.__aenter__ = AsyncMock()
             mock_session_maker.return_value.__aexit__ = AsyncMock()
 
-            result = await get_current_odds("nonexistent", market="h2h")
+            result = await get_current_odds(999, market="h2h")
             assert "error" in result
-            assert "nonexistent" in result["error"]
+            assert "999" in result["error"]
 
 
 class TestPaperBetValidation:
@@ -459,7 +459,7 @@ class TestPaperBetValidation:
         from odds_mcp.server import paper_bet
 
         mock_event = MagicMock(spec=Event)
-        mock_event.id = "evt-1"
+        mock_event.id = 1
         mock_event.status = EventStatus.FINAL
 
         mock_result = MagicMock()
@@ -473,7 +473,7 @@ class TestPaperBetValidation:
             mock_session_maker.return_value.__aexit__ = AsyncMock()
 
             result = await paper_bet(
-                event_id="evt-1",
+                event_id=1,
                 market="h2h",
                 selection="home",
                 price_decimal=1.91,
@@ -497,14 +497,14 @@ class TestPaperBetValidation:
             mock_session_maker.return_value.__aexit__ = AsyncMock()
 
             result = await paper_bet(
-                event_id="nonexistent",
+                event_id=999,
                 market="h2h",
                 selection="home",
                 price_decimal=1.91,
                 stake=10.0,
             )
             assert "error" in result
-            assert "nonexistent" in result["error"]
+            assert "999" in result["error"]
 
 
 class TestPaperBetCandidate:
@@ -536,7 +536,7 @@ class TestPaperBetCandidate:
             maker.return_value.__aenter__ = AsyncMock(return_value=session)
             maker.return_value.__aexit__ = AsyncMock()
             result = await paper_bet(
-                event_id="evt-1",
+                event_id=1,
                 market="1x2",
                 selection="home",
                 price_decimal=2.2,
@@ -567,7 +567,7 @@ class TestPaperBetCandidate:
             maker.return_value.__aenter__ = AsyncMock(return_value=session)
             maker.return_value.__aexit__ = AsyncMock()
             result = await paper_bet(
-                event_id="evt-1",
+                event_id=1,
                 market="1x2",
                 selection="home",
                 price_decimal=2.2,
@@ -666,7 +666,7 @@ class TestFindRetailEdges:
 
     def _make_event(self) -> MagicMock:
         event = MagicMock(spec=Event)
-        event.id = "evt-1"
+        event.id = 1
         event.sport_key = "soccer_epl"
         event.sport_title = "EPL"
         event.home_team = "Arsenal"
@@ -755,7 +755,7 @@ class TestFindRetailEdges:
             mock_session_maker.return_value.__aenter__ = AsyncMock()
             mock_session_maker.return_value.__aexit__ = AsyncMock()
 
-            return await find_retail_edges(event_id="evt-1", market=market)
+            return await find_retail_edges(event_id=1, market=market)
 
     @pytest.mark.asyncio
     async def test_response_shape(self) -> None:

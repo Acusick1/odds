@@ -57,7 +57,7 @@ _COLUMNS: tuple[Any, ...] = (
 
 async def rule_quotes(
     session: AsyncSession,
-    event_id: str,
+    event_id: int,
     market: Market,
     sharp_inputs: Collection[SharpInput],
     *,

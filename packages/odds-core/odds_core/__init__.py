@@ -5,12 +5,11 @@ Provides models, database connection, and configuration.
 """
 
 from odds_core.api_models import (
+    ApiEvent,
     HistoricalOddsResponse,
     OddsResponse,
     ScoresResponse,
-    api_dict_to_event,
-    create_completed_event,
-    create_scheduled_event,
+    parse_api_event,
     parse_scores_from_api_dict,
 )
 from odds_core.config import Settings, get_settings
@@ -48,8 +47,7 @@ __all__ = [
     "OddsResponse",
     "ScoresResponse",
     "HistoricalOddsResponse",
-    "api_dict_to_event",
-    "create_scheduled_event",
-    "create_completed_event",
+    "ApiEvent",
+    "parse_api_event",
     "parse_scores_from_api_dict",
 ]

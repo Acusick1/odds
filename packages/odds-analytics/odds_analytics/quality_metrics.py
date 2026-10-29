@@ -26,7 +26,7 @@ class GameCountResult(BaseModel):
 class GameWithOddsResult(BaseModel):
     """Result model for games with odds data."""
 
-    event_id: str = Field(description="Event identifier")
+    event_id: int = Field(description="Event identifier")
     sport_key: str = Field(description="Sport identifier")
     home_team: str = Field(description="Home team name")
     away_team: str = Field(description="Away team name")
@@ -37,7 +37,7 @@ class GameWithOddsResult(BaseModel):
 class GameWithScoresResult(BaseModel):
     """Result model for games with final scores."""
 
-    event_id: str = Field(description="Event identifier")
+    event_id: int = Field(description="Event identifier")
     sport_key: str = Field(description="Sport identifier")
     home_team: str = Field(description="Home team name")
     away_team: str = Field(description="Away team name")
@@ -49,7 +49,7 @@ class GameWithScoresResult(BaseModel):
 class GameMissingScoresResult(BaseModel):
     """Result model for games missing score data."""
 
-    event_id: str = Field(description="Event identifier")
+    event_id: int = Field(description="Event identifier")
     sport_key: str = Field(description="Sport identifier")
     home_team: str = Field(description="Home team name")
     away_team: str = Field(description="Away team name")

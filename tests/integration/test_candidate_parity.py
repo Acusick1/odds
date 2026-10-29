@@ -45,9 +45,9 @@ async def add_event(
     ``late_stored`` after ``KNOWN_AT`` (negative: before it); the run did not see it, so its
     id is not returned.
     """
-    session.add(make_epl_event("e1", KICKOFF))
+    session.add(make_epl_event(1, KICKOFF))
     snapshot = make_tagged_snapshot(
-        "e1",
+        1,
         T - timedelta(minutes=5),
         [three_way_bookmaker("bet365", retail), betfair(EXCHANGE)],
         "oddsportal_live",
@@ -56,7 +56,7 @@ async def add_event(
     await store_tagged(session, snapshot)
     if late_retail is not None:
         late = make_tagged_snapshot(
-            "e1",
+            1,
             T - timedelta(minutes=2),
             [three_way_bookmaker("bet365", late_retail), betfair(EXCHANGE)],
             "oddsportal_live",
@@ -72,7 +72,7 @@ async def add_polymarket_snapshot(session: Any) -> int:
     """A Polymarket snapshot stamped 5 minutes before the decision and stored before the run,
     and its id."""
     snapshot = make_tagged_snapshot(
-        "e1",
+        1,
         T - timedelta(minutes=5),
         [polymarket_bookmaker(POLYMARKET)],
         "polymarket",
@@ -99,7 +99,7 @@ async def add_decision(
     decision = CandidateDecision(
         candidate_name="gap",
         candidate_version=version,
-        event_id="e1",
+        event_id=1,
         minutes_before_kickoff=int((kickoff - decision_time).total_seconds() // 60),
         decision_time=decision_time,
         kickoff_at_decision=kickoff,
@@ -113,7 +113,7 @@ async def add_decision(
     for selection, book, price in trades:
         session.add(
             PaperTrade(
-                event_id="e1",
+                event_id=1,
                 market="1x2",
                 selection=selection,
                 bookmaker=book,
@@ -247,7 +247,7 @@ class TestCheckParity:
         later_ids = await add_event(pglite_async_session)
         early_time = KICKOFF - timedelta(minutes=90)
         early = make_tagged_snapshot(
-            "e1",
+            1,
             early_time - timedelta(minutes=5),
             [three_way_bookmaker("bet365", RETAIL), betfair(EXCHANGE)],
             "oddsportal_live",
@@ -307,7 +307,7 @@ class TestCheckParity:
         # taken next, has an earlier decision time and bet nothing because home was bet.
         await add_event(pglite_async_session)
         snapshot = make_tagged_snapshot(
-            "e1",
+            1,
             KICKOFF - timedelta(minutes=95),
             [three_way_bookmaker("bet365", RETAIL), betfair(EXCHANGE)],
             "oddsportal_live",
@@ -348,7 +348,7 @@ class TestCheckParity:
         # The event moved after the decision; the replay uses the kick-off the decision saw.
         ids = await add_event(pglite_async_session)
         await add_decision(pglite_async_session, ids, [("home", "bet365", 2.2)])
-        event = await pglite_async_session.get(type(make_epl_event("x")), "e1")
+        event = await pglite_async_session.get(type(make_epl_event(1)), 1)
         event.commence_time = datetime(2026, 4, 11, 15, 0, tzinfo=UTC)
         await pglite_async_session.commit()
 

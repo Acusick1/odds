@@ -22,9 +22,9 @@ logger = structlog.get_logger(__name__)
 
 @dataclass(slots=True)
 class EventIngestionFailure:
-    """Information about a single event that failed to ingest."""
+    """A listed game that failed to ingest, by The Odds API's id for it."""
 
-    event_id: str | None
+    odds_api_id: str
     error: str
 
 
@@ -93,7 +93,7 @@ class OddsIngestionCallbacks:
 
     on_fetch_complete: Callable[[OddsResponse], None] | None = None
     on_event_processed: Callable[[str], None] | None = None
-    on_event_failed: Callable[[str | None, Exception], None] | None = None
+    on_event_failed: Callable[[str, Exception], None] | None = None
 
 
 class OddsIngestionService:
@@ -166,21 +166,22 @@ class OddsIngestionService:
 
                 processed += 1
                 if callback_bundle.on_event_processed:
-                    callback_bundle.on_event_processed(event.id)
+                    callback_bundle.on_event_processed(event.odds_api_id)
 
             except Exception as exc:  # pragma: no cover - defensive logging
                 if payload_written:
                     payload_id = None
-                event_id = getattr(event, "id", None)
                 logger.warning(
                     "ingestion_event_failed",
                     sport=sport_key,
-                    event_id=event_id,
+                    odds_api_id=event.odds_api_id,
                     error=str(exc),
                 )
-                failures.append(EventIngestionFailure(event_id=event_id, error=str(exc)))
+                failures.append(
+                    EventIngestionFailure(odds_api_id=event.odds_api_id, error=str(exc))
+                )
                 if callback_bundle.on_event_failed:
-                    callback_bundle.on_event_failed(event_id, exc)
+                    callback_bundle.on_event_failed(event.odds_api_id, exc)
 
         async with self._session_factory() as session:
             writer = OddsWriter(session)
@@ -195,7 +196,7 @@ class OddsIngestionService:
                     }
                 ),
                 success=len(failures) == 0,
-                error_message="; ".join(f"{f.event_id}: {f.error}" for f in failures) or None,
+                error_message="; ".join(f"{f.odds_api_id}: {f.error}" for f in failures) or None,
                 api_quota_remaining=response.quota_remaining,
                 response_time_ms=response.response_time_ms,
             )

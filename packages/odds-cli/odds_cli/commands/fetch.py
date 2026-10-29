@@ -53,10 +53,9 @@ async def _fetch_current(sport: str):
                         description=f"Processing {len(response.events)} events...",
                     )
 
-                def _on_event_failed(event_id: str | None, exc: Exception) -> None:
-                    identifier = event_id or "unknown"
+                def _on_event_failed(odds_api_id: str, exc: Exception) -> None:
                     console.print(
-                        f"[yellow]Warning: Failed to process event {identifier}: {exc}[/yellow]"
+                        f"[yellow]Warning: Failed to process event {odds_api_id}: {exc}[/yellow]"
                     )
 
                 callbacks = OddsIngestionCallbacks(

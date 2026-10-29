@@ -29,8 +29,8 @@ The scripts load `odds_core.models.Event` rows with `odds_core.models.OddsSnapsh
    ```
    - `--sport soccer` is required: the default sport is basketball.
    - Pass `--seasons` with one or more seasons, or `--all` for the script's full season list.
-   - Check the dry-run counts, then run without `--dry-run`.
-   - OddsPortal goes first because it creates the `op_<season>_*` events that the FDUK ingest attaches to.
+   - Check the dry-run counts (`games_skipped` includes a game that matches several events), then run without `--dry-run`.
+   - OddsPortal goes first because it creates the events that the FDUK ingest attaches to.
 3. Ingest football-data.co.uk.
    ```bash
    uv run python scripts/ingest_football_data_uk.py --seasons 2023-2024 --dry-run

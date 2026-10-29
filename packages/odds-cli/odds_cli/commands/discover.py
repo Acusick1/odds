@@ -4,9 +4,8 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 import typer
-from odds_core.api_models import create_scheduled_event
+from odds_core.api_models import ApiEvent, parse_api_event
 from odds_core.database import async_session_maker
-from odds_core.models import Event
 from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.event_sync import EventSyncService
 from odds_lambda.odds_api_events import odds_api_finder, resolve_odds_api_events
@@ -73,7 +72,7 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str):
     total_events_found = 0
     total_api_requests = 0
     quota_remaining = None
-    all_events: list[Event] = []
+    all_events: list[ApiEvent] = []
 
     # Progress tracking
     with Progress(
@@ -119,11 +118,9 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str):
 
                     total_events_found += len(events_data)
 
-                    # Create Event objects with SCHEDULED status
                     for event_data in events_data:
                         try:
-                            # Create scheduled event (no scores)
-                            event = create_scheduled_event(event_data)
+                            event = parse_api_event(event_data)
                             all_events.append(event)
                         except Exception as e:
                             console.print(
@@ -148,9 +145,9 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str):
         console.print(f"  API quota remaining: {quota_remaining:,}")
 
     # Deduplicate events (API returns same event across multiple dates)
-    seen: dict[str, Event] = {}
+    seen: dict[str, ApiEvent] = {}
     for event in all_events:
-        seen[event.id] = event
+        seen[event.odds_api_id] = event
     unique_events = list(seen.values())
 
     if unique_events:

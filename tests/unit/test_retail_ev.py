@@ -39,7 +39,7 @@ from tests.test_helpers import (
 )
 
 KICKOFF = datetime(2025, 10, 4, 14, 0, tzinfo=UTC)
-EVENT_ID = "fduk_ARS_CHE_2025-10-04"
+EVENT_ID = 1
 OUTCOMES = market_outcomes("1x2")
 PRICE_GROUPS = RetailEvFeatures(OUTCOMES, ("polymarket_at_t", "dynamics"))
 
@@ -380,7 +380,7 @@ class TestFeaturesAndWeights:
         self, event: Event, snapshots: list[Snap]
     ) -> None:
         rows, _ = _build(event, snapshots)
-        dense_rows = [replace(r, event_id="dense") for r in rows for _ in range(10)]
+        dense_rows = [replace(r, event_id=998) for r in rows for _ in range(10)]
         alone = RetailEvDataset(rows=rows).loss_weights
         with_dense = RetailEvDataset(rows=rows + dense_rows).loss_weights
         np.testing.assert_array_equal(with_dense[: len(rows)], alone)
@@ -560,7 +560,7 @@ TEAM_T = (
 )
 
 
-def _final(event_id: str, kickoff: datetime, home: str, away: str, score: tuple[int, int]) -> Event:
+def _final(event_id: int, kickoff: datetime, home: str, away: str, score: tuple[int, int]) -> Event:
     return make_epl_event(
         event_id,
         kickoff,
@@ -585,13 +585,13 @@ def season(event: Event) -> list[Event]:
         away_score=0,
     )
     return [
-        _final("m1", datetime(2025, 9, 20, 14, 0, tzinfo=UTC), "Arsenal", "Everton", (1, 0)),
-        _final("m2", datetime(2025, 9, 21, 16, 30, tzinfo=UTC), "Chelsea", "Fulham", (0, 0)),
-        _final("m3", datetime(2025, 9, 27, 14, 0, tzinfo=UTC), "Fulham", "Arsenal", (2, 1)),
-        _final("m4", datetime(2025, 9, 28, 14, 0, tzinfo=UTC), "Everton", "Chelsea", (1, 3)),
-        _final("m5", datetime(2025, 10, 1, 19, 45, tzinfo=UTC), "Arsenal", "Fulham", (4, 0)),
+        _final(101, datetime(2025, 9, 20, 14, 0, tzinfo=UTC), "Arsenal", "Everton", (1, 0)),
+        _final(102, datetime(2025, 9, 21, 16, 30, tzinfo=UTC), "Chelsea", "Fulham", (0, 0)),
+        _final(103, datetime(2025, 9, 27, 14, 0, tzinfo=UTC), "Fulham", "Arsenal", (2, 1)),
+        _final(104, datetime(2025, 9, 28, 14, 0, tzinfo=UTC), "Everton", "Chelsea", (1, 3)),
+        _final(105, datetime(2025, 10, 1, 19, 45, tzinfo=UTC), "Arsenal", "Fulham", (4, 0)),
         played,
-        _final("m6", datetime(2025, 10, 18, 14, 0, tzinfo=UTC), "Chelsea", "Arsenal", (1, 1)),
+        _final(106, datetime(2025, 10, 18, 14, 0, tzinfo=UTC), "Chelsea", "Arsenal", (1, 1)),
     ]
 
 
@@ -666,7 +666,7 @@ class TestTeamFeaturesAsOfT:
     def test_team_without_played_fixtures_has_no_congestion(
         self, season: list[Event], fixtures: pd.DataFrame
     ) -> None:
-        newcomer = make_epl_event("new", KICKOFF, "Brentford", "Chelsea")
+        newcomer = make_epl_event(999, KICKOFF, "Brentford", "Chelsea")
         features = _history(season, fixtures).schedule_at(newcomer, TEAM_T[-1])
         assert features.home_matches_last_14d is None
         assert features.home_european_last_7d is None

@@ -254,8 +254,9 @@ class TestOddsPortalLive:
         )
 
         [event] = await _all(job_session, Event)
-        assert await _external_ids(job_session) == {("oddsportal", "Kl1AOZN9")}
-        assert event.id.startswith("op_live_ARS_CHE_")
+        [external] = await _all(job_session, EventExternalId)
+        assert (external.source.value, external.external_id) == ("oddsportal", "Kl1AOZN9")
+        assert external.event_id == event.id
 
     async def test_a_repeated_scrape_at_the_same_time_writes_nothing_twice(
         self, job_session: AsyncSession
@@ -423,7 +424,7 @@ class TestBetfair:
         store = OddsWriter.store_envelope
 
         async def failing(
-            self: OddsWriter, event_id: str, envelope: dict, *args: Any, **kwargs: Any
+            self: OddsWriter, event_id: int, envelope: dict, *args: Any, **kwargs: Any
         ) -> Any:
             result = await store(self, event_id, envelope, *args, **kwargs)
             if envelope["betfair_event_id"] == "35002":

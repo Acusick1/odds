@@ -53,7 +53,7 @@ class EventSyncService:
             logger.info("event_sync_no_events", sport=sport_key)
             return EventSyncResult(sport_key=sport_key, inserted=0, updated=0)
 
-        events = list({event.id: event for event in response.events}.values())
+        events = list({event.odds_api_id: event for event in response.events}.values())
         finder = await odds_api_finder(sport_key, events)
         async with self._session_factory() as session:
             resolved = await resolve_odds_api_events(session, finder, events)

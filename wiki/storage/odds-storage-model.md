@@ -16,7 +16,7 @@ status: stable
 
 # How odds are stored
 
-A fetch of one event from one source becomes one `odds_core.models.OddsSnapshot` per market it quotes, each with one `odds_core.models.Price` row per bookmaker, outcome, line and side. The envelope the writer built from the source's response is archived as an `odds_core.models.SnapshotPayload` that the snapshots point at. Columns are on [Odds snapshots table](odds-tables.md) and [Prices and snapshot payloads tables](price-tables.md).
+A fetch of one event from one source becomes one `odds_core.models.OddsSnapshot` per market it quotes, each holding the event's integer id, each with one `odds_core.models.Price` row per bookmaker, outcome, line and side. The envelope the writer built from the source's response is archived as an `odds_core.models.SnapshotPayload` that the snapshots point at. Columns are on [Odds snapshots table](odds-tables.md) and [Prices and snapshot payloads tables](price-tables.md).
 
 ## One shape for every source
 

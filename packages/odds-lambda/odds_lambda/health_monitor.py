@@ -129,7 +129,7 @@ class MissingBetfairClose:
     """A played EPL event with no live Betfair close in the window before kick-off: on the
     three-way market, or on the line of a totals paper trade."""
 
-    event_id: str
+    event_id: int
     home_team: str
     away_team: str
     commence_time: datetime
@@ -424,7 +424,7 @@ class HealthMonitor:
             )
         return missing
 
-    async def _event_ids_alerted(self, alert_type: str, since: datetime) -> set[str]:
+    async def _event_ids_alerted(self, alert_type: str, since: datetime) -> set[int]:
         contexts = (
             await self.session.execute(
                 select(AlertHistory.context).where(
@@ -494,7 +494,7 @@ class HealthMonitor:
 
         return is_healthy, total_errors
 
-    async def find_mlb_events_without_game_pk(self, now: datetime) -> list[str]:
+    async def find_mlb_events_without_game_pk(self, now: datetime) -> list[int]:
         """MLB events created over ``GAME_PK_GRACE`` ago with no ``gamePk`` (``mlb_stats_api``
         external id) and no ``missing_mlb_game_pk`` acknowledgement (``mark_unmatched``).
 
@@ -504,7 +504,7 @@ class HealthMonitor:
         holds_game_pk = (
             select(EventExternalId.event_id)
             .where(
-                EventExternalId.event_id == Event.surrogate_id,
+                EventExternalId.event_id == Event.id,
                 EventExternalId.source == Source.MLB_STATS_API,
             )
             .exists()
@@ -512,7 +512,7 @@ class HealthMonitor:
         acknowledged = (
             select(HealthCheckAcknowledgement.event_id)
             .where(
-                HealthCheckAcknowledgement.event_id == Event.surrogate_id,
+                HealthCheckAcknowledgement.event_id == Event.id,
                 HealthCheckAcknowledgement.check_name == HealthCheck.MISSING_MLB_GAME_PK,
             )
             .exists()
@@ -570,7 +570,7 @@ class HealthMonitor:
 
         missing = await self.find_mlb_events_without_game_pk(moment)
         if missing:
-            shown = ", ".join(missing[:EVENT_IDS_SHOWN])
+            shown = ", ".join(str(i) for i in missing[:EVENT_IDS_SHOWN])
             more = (
                 f" and {len(missing) - EVENT_IDS_SHOWN} more"
                 if len(missing) > EVENT_IDS_SHOWN
@@ -605,7 +605,7 @@ class HealthMonitor:
             if not events:
                 continue
             ids = [event.id for event in events]
-            shown = ", ".join(ids[:EVENT_IDS_SHOWN])
+            shown = ", ".join(str(i) for i in ids[:EVENT_IDS_SHOWN])
             more = f" and {len(ids) - EVENT_IDS_SHOWN} more" if len(ids) > EVENT_IDS_SHOWN else ""
             issue = f"{len(ids)} {sport} events unsettled over 24 h after kick-off: {shown}{more}"
             issues.append(issue)

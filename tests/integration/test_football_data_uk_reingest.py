@@ -53,10 +53,10 @@ class TestShape:
         session = pglite_async_session
         row = {**ROW, "MaxH": "1.35", "MaxD": "5.80", "MaxA": "11.00"}
 
-        await ingest_row(session, row, "2024-2025", FdukStats())
+        await ingest_row(session, row, FdukStats())
         await session.flush()
 
-        snaps = await _snaps(session, FDUK_ID)
+        snaps = await _snaps(session, (await _created_event(session)).id)
         assert [(s.source, s.market, s.time_basis) for s in snaps] == [
             (Source.FOOTBALL_DATA_UK, Market.ONE_X_TWO, TimeBasis.UPPER_BOUND),
             (Source.FOOTBALL_DATA_UK, Market.ONE_X_TWO, TimeBasis.CLOSE),
@@ -94,11 +94,10 @@ class TestShape:
     ) -> None:
         session = pglite_async_session
 
-        await ingest_row(session, ROW, "2024-2025", FdukStats())
+        await ingest_row(session, ROW, FdukStats())
         await session.flush()
 
-        event = await session.get(Event, FDUK_ID)
-        assert event is not None
+        event = await _created_event(session)
         assert event.commence_time == datetime(2024, 8, 17, 11, 30, tzinfo=UTC)
         assert (event.status, event.home_score, event.away_score) == (EventStatus.FINAL, 2, 0)
         assert event.completed_at == event.commence_time + timedelta(hours=2)
@@ -110,11 +109,10 @@ class TestReplacementRefusal:
     @pytest.mark.asyncio
     async def test_snapshots_a_decision_used_as_input_are_kept(self, pglite_async_session) -> None:
         session = pglite_async_session
-        await ingest_row(session, ROW, "2024-2025", FdukStats())
+        await ingest_row(session, ROW, FdukStats())
         await session.flush()
-        stored = await _snaps(session, FDUK_ID)
-        event = await session.get(Event, FDUK_ID)
-        assert event is not None
+        event = await _created_event(session)
+        stored = await _snaps(session, event.id)
         session.add(
             CandidateDecision(
                 candidate_name="c",
@@ -130,13 +128,13 @@ class TestReplacementRefusal:
         await session.flush()
 
         stats = FdukStats()
-        await ingest_row(session, {**ROW, "B365CH": "1.50"}, "2024-2025", stats)
+        await ingest_row(session, {**ROW, "B365CH": "1.50"}, stats)
         await session.flush()
 
-        assert [s.id for s in await _snaps(session, FDUK_ID)] == [s.id for s in stored]
+        assert [s.id for s in await _snaps(session, event.id)] == [s.id for s in stored]
         assert (stats.replacements_refused, stats.snapshots_updated) == (1, 0)
         issues = await session.execute(
-            select(DataQualityLog.issue_type).where(DataQualityLog.event_id == FDUK_ID)
+            select(DataQualityLog.issue_type).where(DataQualityLog.event_id == event.id)
         )
         assert "fduk_replace_refused" in set(issues.scalars())
 
@@ -154,7 +152,7 @@ class TestReplacement:
         await session.flush()
 
         stats = FdukStats()
-        await ingest_row(session, ROW, "2024-2025", stats)
+        await ingest_row(session, ROW, stats)
         await session.flush()
 
         snaps = await _snaps(session, FDUK_ID)
@@ -164,20 +162,19 @@ class TestReplacement:
     @pytest.mark.asyncio
     async def test_a_moved_kickoff_leaves_one_close(self, pglite_async_session) -> None:
         session = pglite_async_session
-        await ingest_row(session, ROW, "2024-2025", FdukStats())
+        await ingest_row(session, ROW, FdukStats())
         await session.flush()
-        event = await session.get(Event, FDUK_ID)
-        assert event is not None
+        event = await _created_event(session)
         await _hold_oddsportal_id(session, event)
         moved = event.commence_time + timedelta(hours=3)
         event.commence_time = moved
         await session.flush()
 
         stats = FdukStats()
-        await ingest_row(session, ROW, "2024-2025", stats)
+        await ingest_row(session, ROW, stats)
         await session.flush()
 
-        closes = [s for s in await _snaps(session, FDUK_ID) if s.time_basis is TimeBasis.CLOSE]
+        closes = [s for s in await _snaps(session, event.id) if s.time_basis is TimeBasis.CLOSE]
         assert [s.snapshot_time for s in closes] == [moved]
         assert stats.snapshots_updated == 2
 
@@ -186,11 +183,11 @@ class TestReplacement:
         self, pglite_async_session
     ) -> None:
         session = pglite_async_session
-        await ingest_row(session, ROW, "2024-2025", FdukStats())
+        await ingest_row(session, ROW, FdukStats())
         await session.flush()
         changed = {**ROW, "B365CH": "1.50"}
 
-        await ingest_row(session, changed, "2024-2025", FdukStats())
+        await ingest_row(session, changed, FdukStats())
         await session.flush()
 
         prices = (
@@ -207,11 +204,11 @@ class TestReplacement:
         assert payloads.scalar_one() == 1
 
 
-FDUK_ID = "fduk_2024-2025_ARS_WOL_2024-08-17"
-OP_ID = "op_2024-2025_ARS_WOL_2024-08-17"
+FDUK_ID = 1
+OP_ID = 2
 
 
-def _event(event_id: str, commence: datetime) -> Event:
+def _event(event_id: int, commence: datetime) -> Event:
     return Event(
         id=event_id,
         sport_key="soccer_epl",
@@ -226,7 +223,7 @@ def _event(event_id: str, commence: datetime) -> Event:
     )
 
 
-def _snapshot(event_id: str, source: Source, when: datetime) -> OddsSnapshot:
+def _snapshot(event_id: int, source: Source, when: datetime) -> OddsSnapshot:
     """A stored snapshot that holds no prices."""
     return OddsSnapshot(event_id=event_id, snapshot_time=when, source=source)
 
@@ -234,14 +231,16 @@ def _snapshot(event_id: str, source: Source, when: datetime) -> OddsSnapshot:
 async def _hold_oddsportal_id(session, event: Event) -> None:
     await session.flush()
     session.add(
-        EventExternalId(
-            source=Source.ODDSPORTAL, external_id="AbCd1234", event_id=event.surrogate_id
-        )
+        EventExternalId(source=Source.ODDSPORTAL, external_id="AbCd1234", event_id=event.id)
     )
     await session.flush()
 
 
-async def _snaps(session, event_id: str) -> list[OddsSnapshot]:
+async def _created_event(session) -> Event:
+    return (await session.execute(select(Event))).scalar_one()
+
+
+async def _snaps(session, event_id: int) -> list[OddsSnapshot]:
     result = await session.execute(
         select(OddsSnapshot)
         .where(OddsSnapshot.event_id == event_id)
@@ -263,7 +262,7 @@ class TestMatchedAndAmbiguousEvents:
         await session.flush()
 
         stats = FdukStats()
-        await ingest_row(session, ROW, "2024-2025", stats)
+        await ingest_row(session, ROW, stats)
         await session.flush()
 
         event = await session.get(Event, OP_ID)
@@ -282,14 +281,14 @@ class TestMatchedAndAmbiguousEvents:
         session = pglite_async_session
         listed = datetime(2024, 8, 17, 12, 30, tzinfo=UTC)
         session.add(_event(FDUK_ID, listed))
-        session.add(_event("op_live_other", listed + timedelta(hours=20)))
+        session.add(_event(3, listed + timedelta(hours=20)))
         await session.flush()
 
         stats = FdukStats()
-        await ingest_row(session, ROW, "2024-2025", stats)
+        await ingest_row(session, ROW, stats)
         await session.flush()
 
-        assert await _snaps(session, "op_live_other") == []
+        assert await _snaps(session, 3) == []
         assert len(await _snaps(session, FDUK_ID)) == 2
         assert stats.events_matched == 1
 
@@ -299,7 +298,7 @@ class TestMatchedAndAmbiguousEvents:
         session.add(_event(FDUK_ID, datetime(2024, 8, 17, 12, 30, tzinfo=UTC)))
         await session.flush()
 
-        await ingest_row(session, ROW, "2024-2025", FdukStats())
+        await ingest_row(session, ROW, FdukStats())
         await session.flush()
 
         event = await session.get(Event, FDUK_ID)
@@ -319,7 +318,7 @@ class TestMatchedAndAmbiguousEvents:
         await session.flush()
 
         stats = FdukStats()
-        await ingest_row(session, ROW, "2024-2025", stats)
+        await ingest_row(session, ROW, stats)
         await session.flush()
 
         event = await session.get(Event, OP_ID)
@@ -336,38 +335,40 @@ class TestMatchedAndAmbiguousEvents:
         session.add(event)
         await session.flush()
         session.add(
-            EventExternalId(
-                source=Source.ODDSPORTAL, external_id="AbCd1234", event_id=event.surrogate_id
-            )
+            EventExternalId(source=Source.ODDSPORTAL, external_id="AbCd1234", event_id=event.id)
         )
         await session.flush()
 
         stats = FdukStats()
-        await ingest_row(session, ROW, "2024-2025", stats)
+        await ingest_row(session, ROW, stats)
         await session.flush()
 
         assert event.commence_time == listed
         assert stats.kickoff_mismatches == 1
 
     @pytest.mark.asyncio
-    async def test_two_candidates_none_within_two_hours_create_a_new_event(
+    async def test_two_candidates_none_within_two_hours_skip_the_row(
         self, pglite_async_session
     ) -> None:
         session = pglite_async_session
         kickoff = datetime(2024, 8, 17, 11, 30, tzinfo=UTC)
-        session.add(_event("before", kickoff - timedelta(hours=10)))
-        session.add(_event("after", kickoff + timedelta(hours=10)))
+        session.add(_event(3, kickoff - timedelta(hours=10)))
+        session.add(_event(4, kickoff + timedelta(hours=10)))
         await session.flush()
 
         stats = FdukStats()
-        await ingest_row(session, ROW, "2024-2025", stats)
+        for _ in range(2):
+            await ingest_row(session, ROW, stats)
         await session.flush()
 
-        assert stats.events_created == 1
-        assert len(await _snaps(session, FDUK_ID)) == 2
+        assert (stats.events_created, stats.games_skipped, stats.errors) == (0, 2, [])
+        assert (await session.execute(select(func.count()).select_from(Event))).scalar_one() == 2
+        assert (
+            await session.execute(select(func.count()).select_from(OddsSnapshot))
+        ).scalar_one() == 0
 
 
-def _unsettled_event(event_id: str, kickoff: datetime, status: EventStatus) -> Event:
+def _unsettled_event(event_id: int, kickoff: datetime, status: EventStatus) -> Event:
     event = _event(event_id, kickoff)
     event.status = status
     event.home_score = None
@@ -389,7 +390,7 @@ class TestResultsOnExistingEvents:
         await _hold_oddsportal_id(session, event)
 
         stats = FdukStats()
-        await ingest_row(session, ROW, "2024-2025", stats)
+        await ingest_row(session, ROW, stats)
         await session.flush()
         await session.refresh(event)
 
@@ -406,7 +407,7 @@ class TestResultsOnExistingEvents:
         await _hold_oddsportal_id(session, event)
 
         stats = FdukStats()
-        await ingest_row(session, ROW, "2024-2025", stats)
+        await ingest_row(session, ROW, stats)
         await session.flush()
         await session.refresh(event)
 
@@ -420,10 +421,10 @@ class TestOpeningWithheld:
         session = pglite_async_session
         row = {**ROW, "Date": "26/12/2023", "Time": "12:30"}
         stats = FdukStats()
-        await ingest_row(session, row, "2023-2024", stats)
+        await ingest_row(session, row, stats)
         await session.flush()
 
-        snaps = await _snaps(session, "fduk_2023-2024_ARS_WOL_2023-12-26")
+        snaps = await _snaps(session, (await _created_event(session)).id)
         assert [s.time_basis for s in snaps] == [TimeBasis.CLOSE]
         assert stats.openings_withheld == 1
 
@@ -434,11 +435,10 @@ class TestOpeningWithheld:
         session = pglite_async_session
         # Tuesday 19:00 GMT: the Tuesday 13:00 deadline is 6 h out
         row = {**ROW, "Date": "14/01/2025", "Time": "19:00"}
-        await ingest_row(session, row, "2024-2025", FdukStats())
+        await ingest_row(session, row, FdukStats())
         await session.flush()
 
-        event = await session.get(Event, "fduk_2024-2025_ARS_WOL_2025-01-14")
-        assert event is not None
+        event = await _created_event(session)
         snaps = await _snaps(session, event.id)
         assert snapshot_tiers(
             [(s.snapshot_time, s.source, s.time_basis, s.market) for s in snaps],
@@ -462,7 +462,7 @@ class TestAtomicityAndIdempotency:
 
         monkeypatch.setattr("scripts.ingest_football_data_uk.store_shaped_snapshot", boom)
         stats = FdukStats()
-        await ingest_row(session, ROW, "2024-2025", stats)
+        await ingest_row(session, ROW, stats)
 
         assert len(stats.errors) == 1
         assert len(await _snaps(session, FDUK_ID)) == 1
@@ -470,12 +470,12 @@ class TestAtomicityAndIdempotency:
     @pytest.mark.asyncio
     async def test_unchanged_rerun_reports_no_updates(self, pglite_async_session) -> None:
         session = pglite_async_session
-        await ingest_row(session, ROW, "2024-2025", FdukStats())
+        await ingest_row(session, ROW, FdukStats())
         await session.flush()
         stats = FdukStats()
-        await ingest_row(session, ROW, "2024-2025", stats)
+        await ingest_row(session, ROW, stats)
         await session.flush()
 
         assert stats.snapshots_updated == 0
         assert stats.snapshots_inserted == 0
-        assert len(await _snaps(session, FDUK_ID)) == 2
+        assert len(await _snaps(session, (await _created_event(session)).id)) == 2

@@ -38,7 +38,6 @@ from zoneinfo import ZoneInfo
 
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot
-from odds_core.team import team_abbrev
 from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.oddsportal_common import (
     IngestionStats,
@@ -46,7 +45,13 @@ from odds_lambda.oddsportal_common import (
     event_id_from_match_link,
     parse_match_date,
 )
-from odds_lambda.storage.event_resolver import ListedGame, MatchWindow, Resolution, resolve_event
+from odds_lambda.storage.event_resolver import (
+    AmbiguousHistoricalMatch,
+    ListedGame,
+    MatchWindow,
+    Resolution,
+    resolve_event,
+)
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload, store_shaped_snapshot
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -157,23 +162,6 @@ def _normalize_team_passthrough(name: str) -> str | None:
     return name.strip() if name and name.strip() else None
 
 
-def build_event_id(
-    season: str,
-    home_team: str,
-    away_team: str,
-    game_date: date,
-    canonical_to_abbrev: dict[str, str] | None = None,
-) -> str:
-    """Generate deterministic event ID for OddsPortal-sourced events."""
-    home_abbrev = (
-        canonical_to_abbrev.get(home_team) if canonical_to_abbrev else None
-    ) or team_abbrev(home_team)
-    away_abbrev = (
-        canonical_to_abbrev.get(away_team) if canonical_to_abbrev else None
-    ) or team_abbrev(away_team)
-    return f"op_{season}_{home_abbrev}_{away_abbrev}_{game_date.isoformat()}"
-
-
 # ---------------------------------------------------------------------------
 # Multi-directory loading and merging
 # ---------------------------------------------------------------------------
@@ -253,7 +241,6 @@ async def ingest_season(
     json_market_key: str,
     file_prefix: str,
     normalize_fn: Callable[[str], str | None],
-    canonical_to_abbrev: dict[str, str] | None,
     dry_run: bool = False,
 ) -> IngestionStats:
     """Ingest one season of OddsPortal data into the database."""
@@ -283,14 +270,15 @@ async def ingest_season(
                     await _ingest_one_game(
                         session,
                         record,
-                        season,
                         stats,
                         sport_config=sport_config,
                         market_config=market_config,
                         json_market_key=json_market_key,
                         normalize_fn=normalize_fn,
-                        canonical_to_abbrev=canonical_to_abbrev,
                     )
+            except AmbiguousHistoricalMatch as e:
+                stats.games_skipped += 1
+                log.warning(f"  Skipped: {e}")
             except Exception as e:
                 msg = f"{record.get('home_team', '?')} vs {record.get('away_team', '?')}: {e}"
                 stats.errors.append(msg)
@@ -304,14 +292,12 @@ async def ingest_season(
 async def _ingest_one_game(
     session: AsyncSession,
     record: dict,
-    season: str,
     stats: IngestionStats,
     *,
     sport_config: dict[str, Any],
     market_config: dict[str, Any],
     json_market_key: str,
     normalize_fn: Callable[[str], str | None],
-    canonical_to_abbrev: dict[str, str] | None,
 ) -> None:
     """Ingest a single OddsPortal game record."""
     market_key: str = json_market_key
@@ -352,9 +338,6 @@ async def _ingest_one_game(
             home_team=home_team,
             away_team=away_team,
             commence_time=match_dt,
-            legacy_id=build_event_id(
-                season, home_team, away_team, match_dt.date(), canonical_to_abbrev
-            ),
             external_id=event_id_from_match_link(record.get("match_link")),
             match_window=MatchWindow.HISTORICAL,
         ),
@@ -449,7 +432,7 @@ async def relink_game_logs(stats: IngestionStats) -> None:
 
         log.info(f"  Found {len(unlinked)} unlinked game log rows")
         linked = 0
-        cache: dict[tuple[str, date], str | None] = {}
+        cache: dict[tuple[str, date], int | None] = {}
 
         for row in unlinked:
             canonical = abbrev_to_canonical.get(row.team_abbreviation)
@@ -491,7 +474,7 @@ async def relink_injuries(stats: IngestionStats) -> None:
 
         log.info(f"  Found {len(unlinked)} unlinked injury report rows")
         linked = 0
-        cache: dict[tuple[str, date], str | None] = {}
+        cache: dict[tuple[str, date], int | None] = {}
 
         for row in unlinked:
             canonical = normalize_team(row.team)
@@ -520,7 +503,7 @@ async def _match_event_for_relink(
     team_name: str,
     game_date: date,
     eastern: ZoneInfo,
-) -> str | None:
+) -> int | None:
     """Match a team + game_date to an Event using the standard ET window."""
     day_start_et = datetime(game_date.year, game_date.month, game_date.day, 10, tzinfo=eastern)
     day_end_et = day_start_et + timedelta(hours=20)
@@ -614,13 +597,11 @@ def main() -> None:
         f"{base_prefix}_{market}" if market != sport_config["default_market"] else base_prefix
     )
 
-    # Resolve team normalization and abbreviation map per sport
+    # Resolve team normalization per sport
     if args.sport == "basketball":
-        abbrev_to_canonical, normalize_fn = _get_nba_normalizer()
-        canonical_to_abbrev: dict[str, str] | None = {v: k for k, v in abbrev_to_canonical.items()}
+        _, normalize_fn = _get_nba_normalizer()
     else:
         normalize_fn = _normalize_team_passthrough
-        canonical_to_abbrev = None
 
     if args.relink and args.sport != "basketball":
         log.warning("--relink is only supported for basketball — ignoring")
@@ -636,7 +617,6 @@ def main() -> None:
             file_prefix=file_prefix,
             sport=args.sport,
             normalize_fn=normalize_fn,
-            canonical_to_abbrev=canonical_to_abbrev,
             dry_run=args.dry_run,
             relink=args.relink,
         )
@@ -653,7 +633,6 @@ async def _run(
     file_prefix: str,
     sport: str,
     normalize_fn: Callable[[str], str | None],
-    canonical_to_abbrev: dict[str, str] | None,
     dry_run: bool,
     relink: bool,
 ) -> None:
@@ -669,7 +648,6 @@ async def _run(
             json_market_key=json_market_key,
             file_prefix=file_prefix,
             normalize_fn=normalize_fn,
-            canonical_to_abbrev=canonical_to_abbrev,
             dry_run=dry_run,
         )
 

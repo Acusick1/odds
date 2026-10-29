@@ -16,7 +16,7 @@ status: stable
 
 # Agent run traces
 
-Each run of the [agent runtime](agent-run-job.md#runtime) writes its full `stream-json` output to a file. The file is the only durable record of the run's reasoning and has no database component: `odds_lambda.jobs.agent_run._run_claude_agent` writes the file only, and the agent's persistent memory is `odds_core.match_brief_models.MatchBrief` ([match briefs](match-briefs.md)). Deleting `logs/agent_runs/` loses the traces.
+Each run of the [agent runtime](agent-run-job.md#runtime) writes its full `stream-json` output to a file. The file is the only durable record of the run's reasoning and has no database component: `odds_lambda.jobs.agent_run._run_claude_agent` writes the file only, and the agent's persistent memory is `odds_core.match_brief_models.MatchBrief`, one row per researched event keyed by its integer id ([match briefs](match-briefs.md)). Deleting `logs/agent_runs/` loses the traces.
 
 ## Files
 

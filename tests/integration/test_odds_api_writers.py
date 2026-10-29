@@ -10,10 +10,11 @@ from unittest.mock import AsyncMock
 import pytest
 from odds_analytics.backfill_executor import BackfillExecutor
 from odds_core.api_models import (
+    ApiEvent,
     EventsResponse,
     HistoricalOddsResponse,
     OddsResponse,
-    create_scheduled_event,
+    parse_api_event,
 )
 from odds_core.models import (
     DataQualityLog,
@@ -103,7 +104,7 @@ def _book(key: str, home: str = "Arsenal", away: str = "Chelsea") -> dict[str, A
 
 
 def _sync(session: AsyncSession, listed: list[dict[str, Any]], sport_key: str = "soccer_epl"):
-    events = [create_scheduled_event(item) for item in listed]
+    events = [parse_api_event(item) for item in listed]
     client = StubOddsClient(
         OddsResponse([], [], 0, None, datetime.now(UTC)),
         EventsResponse(events, 0, None, datetime.now(UTC)),
@@ -113,7 +114,7 @@ def _sync(session: AsyncSession, listed: list[dict[str, Any]], sport_key: str = 
 
 
 async def _events(session: AsyncSession) -> list[Event]:
-    return list((await session.execute(select(Event).order_by(Event.surrogate_id))).scalars())
+    return list((await session.execute(select(Event).order_by(Event.id))).scalars())
 
 
 async def _odds_api_ids(session: AsyncSession) -> dict[int, str]:
@@ -160,34 +161,31 @@ def _mlb_game(pk: int, start: datetime, home: str, away: str) -> MlbGameResult:
     )
 
 
-async def _holding_api_id(session: AsyncSession, event: Event) -> Event:
-    """Store ``event`` holding its own key as its Odds API id."""
+async def _holding_api_id(session: AsyncSession, event: Event, api_id: str) -> Event:
+    """Store ``event`` holding ``api_id`` as its Odds API id."""
     session.add(event)
     await session.flush()
-    session.add(
-        EventExternalId(source=Source.ODDS_API, external_id=event.id, event_id=event.surrogate_id)
-    )
+    session.add(EventExternalId(source=Source.ODDS_API, external_id=api_id, event_id=event.id))
     await session.flush()
     return event
 
 
 @pytest.mark.asyncio
 class TestEventSync:
-    async def test_new_game_creates_an_event_keyed_and_recorded_by_the_api_id(
+    async def test_new_game_creates_an_event_recorded_by_the_api_id(
         self, pglite_async_session: AsyncSession
     ) -> None:
         result = await _sync(pglite_async_session, [_listed("apihex1")])
 
         assert (result.inserted, result.updated) == (1, 0)
         (event,) = await _events(pglite_async_session)
-        assert event.id == "apihex1"
         assert event.status == EventStatus.SCHEDULED
-        assert await _odds_api_ids(pglite_async_session) == {event.surrogate_id: "apihex1"}
+        assert await _odds_api_ids(pglite_async_session) == {event.id: "apihex1"}
 
     async def test_game_another_source_stored_attaches_to_that_event(
         self, pglite_async_session: AsyncSession
     ) -> None:
-        stored = make_epl_event("op_live_ARS_CHE_x", KICKOFF)
+        stored = make_epl_event(1, KICKOFF)
         pglite_async_session.add(stored)
         await pglite_async_session.flush()
 
@@ -195,28 +193,28 @@ class TestEventSync:
 
         assert (result.inserted, result.updated) == (0, 1)
         (event,) = await _events(pglite_async_session)
-        assert event.id == "op_live_ARS_CHE_x"
-        assert await _odds_api_ids(pglite_async_session) == {event.surrogate_id: "apihex1"}
+        assert event.id == 1
+        assert await _odds_api_ids(pglite_async_session) == {event.id: "apihex1"}
 
     async def test_event_holding_the_api_id_is_found_after_the_api_moves_it(
         self, pglite_async_session: AsyncSession
     ) -> None:
-        await _holding_api_id(pglite_async_session, make_epl_event("apihex1", KICKOFF))
+        await _holding_api_id(pglite_async_session, make_epl_event(1, KICKOFF), "apihex1")
         moved = KICKOFF + timedelta(days=3)
 
         result = await _sync(pglite_async_session, [_listed("apihex1", moved)])
 
         assert (result.inserted, result.updated) == (0, 1)
         (event,) = await _events(pglite_async_session)
-        assert event.id == "apihex1"
+        assert event.id == 1
         assert event.commence_time == moved
-        assert await _odds_api_ids(pglite_async_session) == {event.surrogate_id: "apihex1"}
+        assert await _odds_api_ids(pglite_async_session) == {event.id: "apihex1"}
 
     async def test_postponed_event_the_api_lists_at_a_new_start_is_scheduled_again(
         self, pglite_async_session: AsyncSession
     ) -> None:
-        stored = make_epl_event("apihex1", KICKOFF, status=EventStatus.POSTPONED)
-        await _holding_api_id(pglite_async_session, stored)
+        stored = make_epl_event(1, KICKOFF, status=EventStatus.POSTPONED)
+        await _holding_api_id(pglite_async_session, stored, "apihex1")
 
         await _sync(pglite_async_session, [_listed("apihex1", KICKOFF + timedelta(days=5))])
 
@@ -231,13 +229,14 @@ class TestEventSync:
         await _holding_api_id(
             pglite_async_session,
             make_epl_event(
-                "apihex1",
+                1,
                 past,
                 status=EventStatus.FINAL,
                 home_score=2,
                 away_score=1,
                 completed_at=past + timedelta(hours=2),
             ),
+            "apihex1",
         )
 
         await _sync(pglite_async_session, [_listed("apihex1", past, home="Arsenal FC")])
@@ -260,8 +259,8 @@ class TestEventSync:
     ) -> None:
         real = odds_api_events.resolve_odds_api_event
 
-        async def _resolve(finder: Any, session: AsyncSession, event: Event) -> Any:
-            if event.id == "bad":
+        async def _resolve(finder: Any, session: AsyncSession, event: ApiEvent) -> Any:
+            if event.odds_api_id == "bad":
                 raise RuntimeError("resolver down")
             return await real(finder, session, event)
 
@@ -273,14 +272,14 @@ class TestEventSync:
                 [_listed("bad", home="Fulham", away="Leeds"), _listed("good")],
             )
 
-        assert [e.id for e in await _events(pglite_async_session)] == ["good"]
+        assert [e.home_team for e in await _events(pglite_async_session)] == ["Arsenal"]
 
     async def test_mlb_game_attaches_to_the_event_holding_its_game_pk(
         self, pglite_async_session: AsyncSession, mlb_schedule: list[MlbGameResult]
     ) -> None:
         start = KICKOFF.replace(hour=23)
         held = Event(
-            id="op_live_NYY_BOS_x",
+            id=1,
             sport_key=MLB,
             sport_title="MLB",
             commence_time=start,
@@ -291,9 +290,7 @@ class TestEventSync:
         pglite_async_session.add(held)
         await pglite_async_session.flush()
         pglite_async_session.add(
-            EventExternalId(
-                source=Source.MLB_STATS_API, external_id="824101", event_id=held.surrogate_id
-            )
+            EventExternalId(source=Source.MLB_STATS_API, external_id="824101", event_id=held.id)
         )
         await pglite_async_session.flush()
         mlb_schedule.append(_mlb_game(824101, start, "New York Yankees", "Boston Red Sox"))
@@ -315,9 +312,9 @@ class TestEventSync:
 
         assert (result.inserted, result.updated) == (0, 1)
         (event,) = await _events(pglite_async_session)
-        assert event.id == "op_live_NYY_BOS_x"
+        assert event.id == 1
         assert await game_pk_of(pglite_async_session, event) == 824101
-        assert await _odds_api_ids(pglite_async_session) == {event.surrogate_id: "apimlb1"}
+        assert await _odds_api_ids(pglite_async_session) == {event.id: "apimlb1"}
 
     async def test_mlb_game_the_schedule_lacks_creates_no_event(
         self, pglite_async_session: AsyncSession, mlb_schedule: list[MlbGameResult]
@@ -355,7 +352,7 @@ class TestIngestion:
     ) -> Any:
         payload = {**listed, "bookmakers": bookmakers}
         response = OddsResponse(
-            events=[create_scheduled_event(listed)],
+            events=[parse_api_event(listed)],
             raw_events_data=[payload],
             response_time_ms=10,
             quota_remaining=100,
@@ -396,16 +393,16 @@ class TestIngestion:
         self, pglite_async_session: AsyncSession, mock_settings: Any
     ) -> None:
         session = pglite_async_session
-        session.add(make_epl_event("op_live_ARS_CHE_x", KICKOFF))
+        session.add(make_epl_event(1, KICKOFF))
         await session.flush()
 
         await self._ingest(session, mock_settings, _listed("apihex1"), [_book("bet365")])
 
         events = await _events(session)
-        assert [e.id for e in events] == ["op_live_ARS_CHE_x"]
+        assert [e.id for e in events] == [1]
         snapshots = (await session.execute(select(OddsSnapshot))).scalars().all()
-        assert {s.event_id for s in snapshots} == {"op_live_ARS_CHE_x"}
-        assert await _odds_api_ids(session) == {events[0].surrogate_id: "apihex1"}
+        assert {s.event_id for s in snapshots} == {1}
+        assert await _odds_api_ids(session) == {events[0].id: "apihex1"}
 
     async def test_dropped_mlb_game_is_not_a_failure_and_writes_no_payload(
         self,
@@ -426,7 +423,7 @@ class TestIngestion:
         mlb_schedule.append(_mlb_game(900, start, "Chicago Cubs", "St. Louis Cardinals"))
         mock_settings.data_collection.bookmakers[MLB] = ["bet365"]
         response = OddsResponse(
-            events=[create_scheduled_event(listed)],
+            events=[parse_api_event(listed)],
             raw_events_data=[{**listed, "bookmakers": [_book("bet365")]}],
             response_time_ms=10,
             quota_remaining=100,
@@ -456,7 +453,7 @@ class TestIngestion:
             _listed("apihex2", KICKOFF + timedelta(days=1), "Fulham", "Leeds"),
         ]
         response = OddsResponse(
-            events=[create_scheduled_event(item) for item in listed],
+            events=[parse_api_event(item) for item in listed],
             raw_events_data=[
                 {**item, "bookmakers": [_book("bet365", item["home_team"], item["away_team"])]}
                 for item in listed
@@ -485,7 +482,7 @@ class TestIngestion:
         session = pglite_async_session
         listed = _listed("apihex1")
         response = OddsResponse(
-            events=[create_scheduled_event(listed)],
+            events=[parse_api_event(listed)],
             raw_events_data=[{**listed, "bookmakers": [_book("bet365")]}],
             response_time_ms=10,
             quota_remaining=100,
@@ -513,16 +510,16 @@ class TestScores:
     ) -> None:
         session = pglite_async_session
         await _sync(session, [_listed("apihex1")])
-        stored = make_epl_event("op_live_ARS_CHE_y", KICKOFF + timedelta(days=9), "Fulham", "Leeds")
+        stored = make_epl_event(2, KICKOFF + timedelta(days=9), "Fulham", "Leeds")
         session.add(stored)
         await session.flush()
         await _sync(session, [_listed("apihex2", KICKOFF + timedelta(days=9), "Fulham", "Leeds")])
 
         found = await find_event_by_odds_api_id(session, "apihex2")
 
-        assert found is not None and found.id == "op_live_ARS_CHE_y"
-        assert await odds_api_id_of(session, "op_live_ARS_CHE_y") == "apihex2"
-        assert await odds_api_id_of(session, "op_live_NOPE") is None
+        assert found is not None and found.id == 2
+        assert await odds_api_id_of(session, 2) == "apihex2"
+        assert await odds_api_id_of(session, 999) is None
 
     async def test_reissued_api_id_replaces_the_recorded_one_and_is_logged(
         self, pglite_async_session: AsyncSession
@@ -533,7 +530,7 @@ class TestScores:
         await _sync(session, [_listed("newid")])
 
         (event,) = await _events(session)
-        assert await _odds_api_ids(session) == {event.surrogate_id: "newid"}
+        assert await _odds_api_ids(session) == {event.id: "newid"}
         found = await find_event_by_odds_api_id(session, "newid")
         assert found is not None and found.id == event.id
         replaced = (
@@ -549,22 +546,22 @@ class TestScores:
         )
         assert [log.raw_data["old_external_id"] for log in replaced] == ["oldid"]
 
-    async def test_an_event_keyed_by_an_api_id_without_it_recorded_is_not_found(
+    async def test_an_event_without_a_recorded_api_id_is_not_found(
         self, pglite_async_session: AsyncSession
     ) -> None:
         session = pglite_async_session
-        session.add(make_epl_event("apihex1"))
+        session.add(make_epl_event(1))
         await session.flush()
 
         assert await find_event_by_odds_api_id(session, "apihex1") is None
-        assert await odds_api_id_of(session, "apihex1") is None
+        assert await odds_api_id_of(session, 1) is None
 
     async def test_job_settles_the_event_the_api_id_names(
         self, pglite_async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         session = pglite_async_session
         past = datetime.now(UTC) - timedelta(hours=6)
-        session.add(make_epl_event("op_live_ARS_CHE_z", past))
+        session.add(make_epl_event(1, past))
         await session.flush()
         await _sync(session, [_listed("apihex1", past)])
         scores = [
@@ -596,7 +593,7 @@ class TestScores:
 
         await fetch_scores._fetch_and_update_scores(["soccer_epl"])
 
-        event = await session.get(Event, "op_live_ARS_CHE_z", populate_existing=True)
+        event = await session.get(Event, 1, populate_existing=True)
         assert event is not None
         assert (event.status, event.home_score, event.away_score) == (EventStatus.FINAL, 2, 1)
 
@@ -608,11 +605,11 @@ class TestBackfill:
     ) -> None:
         session = pglite_async_session
         past = datetime(2024, 1, 15, 19, 0, tzinfo=UTC)
-        session.add(make_epl_event("op_live_ARS_CHE_h", past))
+        session.add(make_epl_event(1, past))
         await session.flush()
         await _sync(session, [_listed("apihex1", past)])
         listed = _listed("apihex1", past)
-        event = create_scheduled_event(listed)
+        event = parse_api_event(listed)
         client = AsyncMock()
         response = HistoricalOddsResponse(
             events=[event],
@@ -626,7 +623,7 @@ class TestBackfill:
         plan = {
             "games": [
                 {
-                    "event_id": "op_live_ARS_CHE_h",
+                    "event_id": 1,
                     "odds_api_id": "apihex1",
                     "home_team": "Arsenal",
                     "away_team": "Chelsea",
@@ -644,9 +641,9 @@ class TestBackfill:
             result = await executor.execute_plan(plan)
 
         assert result.successful_snapshots == 1
-        assert [e.id for e in await _events(session)] == ["op_live_ARS_CHE_h"]
+        assert [e.id for e in await _events(session)] == [1]
         snapshots = (await session.execute(select(OddsSnapshot))).scalars().all()
         assert {(s.event_id, s.source, s.time_basis) for s in snapshots} == {
-            ("op_live_ARS_CHE_h", Source.ODDS_API, TimeBasis.UPPER_BOUND)
+            (1, Source.ODDS_API, TimeBasis.UPPER_BOUND)
         }
         assert {s.market for s in snapshots} == {Market.ONE_X_TWO, Market.TOTALS}

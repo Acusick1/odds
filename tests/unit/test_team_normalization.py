@@ -70,7 +70,7 @@ class TestEventFieldValidator:
 
     def test_normalizes_home_team(self) -> None:
         event = Event(
-            id="test1",
+            id=1,
             sport_key="soccer_epl",
             sport_title="EPL",
             commence_time=datetime(2026, 1, 1, tzinfo=UTC),
@@ -81,7 +81,7 @@ class TestEventFieldValidator:
 
     def test_normalizes_away_team(self) -> None:
         event = Event(
-            id="test2",
+            id=2,
             sport_key="soccer_epl",
             sport_title="EPL",
             commence_time=datetime(2026, 1, 1, tzinfo=UTC),
@@ -92,7 +92,7 @@ class TestEventFieldValidator:
 
     def test_normalizes_both_teams(self) -> None:
         event = Event(
-            id="test3",
+            id=3,
             sport_key="soccer_epl",
             sport_title="EPL",
             commence_time=datetime(2026, 1, 1, tzinfo=UTC),
@@ -104,7 +104,7 @@ class TestEventFieldValidator:
 
     def test_canonical_names_unchanged(self) -> None:
         event = Event(
-            id="test4",
+            id=4,
             sport_key="soccer_epl",
             sport_title="EPL",
             commence_time=datetime(2026, 1, 1, tzinfo=UTC),
@@ -116,7 +116,7 @@ class TestEventFieldValidator:
 
     def test_whitespace_cleaned(self) -> None:
         event = Event(
-            id="test5",
+            id=5,
             sport_key="soccer_epl",
             sport_title="EPL",
             commence_time=datetime(2026, 1, 1, tzinfo=UTC),
@@ -150,7 +150,7 @@ class TestLiveEventFinderNormalization:
     async def test_finds_existing_event_with_alias_input(self, test_session) -> None:
         test_session.add(
             Event(
-                id="existing_wolves",
+                id=1,
                 sport_key="soccer_epl",
                 sport_title="EPL",
                 commence_time=datetime(2026, 4, 15, 15, 0, tzinfo=UTC),
@@ -168,18 +168,18 @@ class TestLiveEventFinderNormalization:
             datetime(2026, 4, 15, 16, 0, tzinfo=UTC),
         )
 
-        assert (event_id, created) == ("existing_wolves", False)
+        assert (event_id, created) == (1, False)
 
 
 class TestLiveEventFinderCreates:
     @pytest.mark.asyncio
-    async def test_creates_an_op_live_event_when_none_exists(self, test_session) -> None:
+    async def test_creates_an_event_when_none_exists(self, test_session) -> None:
         event_id, created = await _resolve(
             test_session, "Arsenal", "Chelsea", datetime.now(UTC) + timedelta(days=7)
         )
 
         assert created is True
-        assert event_id.startswith("op_live_ARS_CHE_")
+        assert isinstance(event_id, int)
 
     @pytest.mark.asyncio
     async def test_re_listing_is_idempotent(self, test_session) -> None:
@@ -261,7 +261,7 @@ class TestLiveEventFinderStaleListing:
         match_date = datetime.now(UTC) - timedelta(hours=5)
         test_session.add(
             Event(
-                id="op_live_ARS_CHE_2020-01-01T1500",
+                id=1,
                 sport_key="soccer_epl",
                 sport_title="EPL",
                 commence_time=match_date,
@@ -274,4 +274,4 @@ class TestLiveEventFinderStaleListing:
 
         event_id, created = await _resolve(test_session, "Arsenal", "Chelsea", match_date)
 
-        assert (event_id, created) == ("op_live_ARS_CHE_2020-01-01T1500", False)
+        assert (event_id, created) == (1, False)

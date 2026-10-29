@@ -11,7 +11,7 @@ status: stable
 
 # Assign MLB events their gamePk
 
-MLB events stored before the live jobs keyed events to the MLB Stats API `gamePk` hold no `gamePk`, and some games are split across several events. This backfill gives each event its `gamePk` and merges the events of one game. What each command does is on [Event merge](event-merge.md#assigning-gamepks).
+MLB events stored before the live jobs assigned MLB Stats API `gamePk`s hold no `gamePk`, and some games are split across several events. This backfill gives each event its `gamePk` and merges the events of one game. What each command does is on [Event merge](event-merge.md#assigning-gamepks).
 
 > [!WARNING]
 > `--apply` merges and deletes events in the database `DATABASE_URL` names. On the production host that is the production database; elsewhere point it at a copy ([environments](../foundations/databases-and-environments.md#environments)).
@@ -41,7 +41,7 @@ MLB events stored before the live jobs keyed events to the MLB Stats API `gamePk
 
 4. **Run it again.** The second dry run assigns nothing new; it lists only the events left unresolved, refused or failed.
 5. **Settle each unresolved or refused event by hand.** Find its game on the MLB schedule, then dry-run before adding `--apply`:
-   - it is a game: `odds events set-game-pk EVENT_ID GAME_PK`. Add `--merge` when another event already holds that `gamePk`, to merge into it. A merge that would delete a candidate decision or trade is refused here too; resolve the clashing decision first.
+   - it is a game: `odds events set-game-pk EVENT_ID GAME_PK` (`EVENT_ID` is the event's integer id, as the plan lists it). Add `--merge` when another event already holds that `gamePk`, to merge into it. A merge that would delete a candidate decision or trade is refused here too; resolve the clashing decision first.
    - it has no game: `odds events mark-unassignable EVENT_ID --reason "..."`, so the `missing_game_pk` warning leaves it out.
 6. **Re-check the scores.** Merging moves results between events, so run `odds events repair-scores` ([results jobs](../collection/results-jobs.md#verifying-mlb-scores)).
 

@@ -16,7 +16,7 @@ async def sample_events_with_gaps(test_session):
     """Create sample events with tier coverage gaps."""
     # Event 1: Missing CLOSING tier (highest priority)
     event1 = Event(
-        id="event_missing_closing",
+        id=1,
         sport_key="basketball_nba",
         sport_title="NBA",
         commence_time=datetime(2024, 10, 24, 19, 0, 0, tzinfo=UTC),
@@ -29,7 +29,7 @@ async def sample_events_with_gaps(test_session):
 
     # Event 2: Missing OPENING and EARLY tiers (lower priority)
     event2 = Event(
-        id="event_missing_opening",
+        id=2,
         sport_key="basketball_nba",
         sport_title="NBA",
         commence_time=datetime(2024, 10, 24, 21, 0, 0, tzinfo=UTC),
@@ -42,7 +42,7 @@ async def sample_events_with_gaps(test_session):
 
     # Event 3: Complete coverage (no gaps)
     event3 = Event(
-        id="event_complete",
+        id=3,
         sport_key="basketball_nba",
         sport_title="NBA",
         commence_time=datetime(2024, 10, 25, 19, 0, 0, tzinfo=UTC),
@@ -112,7 +112,7 @@ class TestGapBackfillPlanner:
         """Test analyze_gaps when no gaps exist."""
         # Create event with complete coverage
         event = Event(
-            id="complete_event",
+            id=4,
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=datetime(2024, 10, 24, 19, 0, 0, tzinfo=UTC),
@@ -159,12 +159,12 @@ class TestGapBackfillPlanner:
         prioritized = planner._prioritize_games(analysis)
 
         # First game should be the one missing CLOSING (highest priority)
-        assert prioritized[0].event_id == "event_missing_closing"
+        assert prioritized[0].event_id == 1
         assert prioritized[0].highest_priority_missing == FetchTier.CLOSING
 
         # Second game should be the one missing EARLY (next highest priority)
         # Note: event_missing_opening is missing both OPENING and EARLY, but EARLY has higher priority
-        assert prioritized[1].event_id == "event_missing_opening"
+        assert prioritized[1].event_id == 2
         assert prioritized[1].highest_priority_missing == FetchTier.EARLY
 
     async def test_get_highest_priority_missing_tier(self, test_session):
@@ -201,7 +201,7 @@ class TestGapBackfillPlanner:
 
     async def test_planned_fetches_stored_as_upper_bound_close_the_gap(self, test_session):
         event = Event(
-            id="event_unfetched",
+            id=5,
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=datetime(2024, 10, 24, 19, 0, 0, tzinfo=UTC),

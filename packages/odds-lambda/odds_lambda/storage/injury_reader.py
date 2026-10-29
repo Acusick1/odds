@@ -33,7 +33,7 @@ class InjuryReader:
 
     async def get_injuries_for_event(
         self,
-        event_id: str,
+        event_id: int,
         before_time: datetime | None = None,
     ) -> list[InjuryReport]:
         """Get injury reports linked to a specific event.
@@ -58,7 +58,7 @@ class InjuryReader:
 
     async def get_latest_report_for_event(
         self,
-        event_id: str,
+        event_id: int,
         as_of: datetime,
     ) -> list[InjuryReport]:
         """Get the most recent injury report snapshot for an event.

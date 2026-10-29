@@ -3,7 +3,7 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from odds_core.models import Event, EventStatus, OddsSnapshot
+from odds_core.models import Event, EventExternalId, EventStatus, OddsSnapshot
 from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.storage.tier_validator import TierCoverageReport, TierCoverageValidator
@@ -15,7 +15,7 @@ from tests.test_helpers import TIER_HOURS_BEFORE
 async def sample_event(test_session):
     """Create a sample completed event."""
     event = Event(
-        id="test_event_123",
+        id=123,
         sport_key="basketball_nba",
         sport_title="NBA",
         commence_time=datetime(2024, 10, 24, 19, 0, 0, tzinfo=UTC),
@@ -37,7 +37,7 @@ class TestTierCoverageReport:
     def test_is_complete_with_all_tiers(self):
         """Test is_complete returns True when no tiers missing."""
         report = TierCoverageReport(
-            event_id="test123",
+            event_id=123,
             home_team="Lakers",
             away_team="Celtics",
             commence_time=datetime.now(UTC),
@@ -59,7 +59,7 @@ class TestTierCoverageReport:
     def test_is_complete_with_only_warning_tiers_missing(self):
         """Test is_complete returns True when only warning tiers missing."""
         report = TierCoverageReport(
-            event_id="test123",
+            event_id=123,
             home_team="Lakers",
             away_team="Celtics",
             commence_time=datetime.now(UTC),
@@ -78,7 +78,7 @@ class TestTierCoverageReport:
     def test_is_complete_with_critical_tiers_missing(self):
         """Test is_complete returns False when critical tiers missing."""
         report = TierCoverageReport(
-            event_id="test123",
+            event_id=123,
             home_team="Lakers",
             away_team="Celtics",
             commence_time=datetime.now(UTC),
@@ -94,7 +94,7 @@ class TestTierCoverageReport:
     def test_is_complete_with_mixed_missing_tiers(self):
         """Test is_complete returns False when any critical tier missing."""
         report = TierCoverageReport(
-            event_id="test123",
+            event_id=123,
             home_team="Lakers",
             away_team="Celtics",
             commence_time=datetime.now(UTC),
@@ -110,7 +110,7 @@ class TestTierCoverageReport:
     def test_coverage_percentage_full(self):
         """Test coverage percentage with all tiers."""
         report = TierCoverageReport(
-            event_id="test123",
+            event_id=123,
             home_team="Lakers",
             away_team="Celtics",
             commence_time=datetime.now(UTC),
@@ -131,7 +131,7 @@ class TestTierCoverageReport:
     def test_coverage_percentage_partial(self):
         """Test coverage percentage with partial coverage."""
         report = TierCoverageReport(
-            event_id="test123",
+            event_id=123,
             home_team="Lakers",
             away_team="Celtics",
             commence_time=datetime.now(UTC),
@@ -145,7 +145,7 @@ class TestTierCoverageReport:
     def test_coverage_percentage_empty(self):
         """Test coverage percentage with no tiers."""
         report = TierCoverageReport(
-            event_id="test123",
+            event_id=123,
             home_team="Lakers",
             away_team="Celtics",
             commence_time=datetime.now(UTC),
@@ -302,7 +302,7 @@ class TestTierCoverageValidator:
         validator = TierCoverageValidator(test_session)
 
         with pytest.raises(ValueError, match="Event .* not found"):
-            await validator.validate_game("nonexistent_event_id")
+            await validator.validate_game(999)
 
     @pytest.mark.asyncio
     async def test_validate_game_snapshots_by_tier_count(self, test_session, sample_event):
@@ -338,7 +338,7 @@ class TestTierCoverageValidatorDailyValidation:
         # Create 2 complete games in the noon-to-noon window
         for i in range(2):
             event = Event(
-                id=f"event_{i}",
+                id=i + 1,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 # Games at noon and 1 PM UTC (within noon-to-noon window)
@@ -380,7 +380,7 @@ class TestTierCoverageValidatorDailyValidation:
         # First game gets all tiers, second game only gets critical tiers (PREGAME, CLOSING)
         for i in range(2):
             event = Event(
-                id=f"event_{i}",
+                id=i + 1,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 # Games at noon and 1 PM UTC (within noon-to-noon window)
@@ -428,7 +428,7 @@ class TestTierCoverageValidatorDailyValidation:
         # Second game missing CLOSING (critical tier)
         for i in range(2):
             event = Event(
-                id=f"event_{i}",
+                id=i + 1,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 # Games at noon and 1 PM UTC (within noon-to-noon window)
@@ -476,7 +476,7 @@ class TestTierCoverageValidatorDailyValidation:
         # Create 3 games in the noon-to-noon window, each missing CLOSING tier
         for i in range(3):
             event = Event(
-                id=f"event_{i}",
+                id=i + 1,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 # Games at noon, 1 PM, 2 PM UTC (within noon-to-noon window)
@@ -507,3 +507,45 @@ class TestTierCoverageValidatorDailyValidation:
         assert report.missing_tier_breakdown[FetchTier.CLOSING] == 3
         # No games should be missing OPENING tier
         assert FetchTier.OPENING not in report.missing_tier_breakdown
+
+
+class TestApiGameChecks:
+    """The discovery checks match the API's games to events by their Odds API ids."""
+
+    @pytest.fixture
+    async def held(self, test_session, sample_event) -> Event:
+        test_session.add(
+            EventExternalId(source=Source.ODDS_API, external_id="api-123", event_id=sample_event.id)
+        )
+        sample_event.status = EventStatus.LIVE
+        sample_event.home_score = None
+        await test_session.commit()
+        return sample_event
+
+    @staticmethod
+    def _api_game(game_id: str) -> dict:
+        return {
+            "id": game_id,
+            "home_team": "Lakers",
+            "away_team": "Celtics",
+            "commence_time": "2024-10-24T19:00:00Z",
+            "completed": True,
+        }
+
+    async def test_a_game_held_as_an_external_id_is_not_missing(self, test_session, held):
+        validator = TierCoverageValidator(test_session)
+
+        missing = await validator._check_missing_games(
+            held.commence_time, [held], [self._api_game("api-123"), self._api_game("api-999")]
+        )
+
+        assert [game["id"] for game in missing] == ["api-999"]
+
+    async def test_a_held_game_without_scores_is_reported_by_event_id(self, test_session, held):
+        validator = TierCoverageValidator(test_session)
+
+        missing = await validator._check_missing_scores(
+            held.commence_time, [held], [self._api_game("api-123")]
+        )
+
+        assert [game["id"] for game in missing] == [held.id]

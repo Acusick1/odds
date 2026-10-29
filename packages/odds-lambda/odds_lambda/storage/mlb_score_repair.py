@@ -40,7 +40,7 @@ class ScoreCheck:
 
 
 def check_scores(
-    events: Sequence[Event], game_pks: Mapping[str, int], games: Sequence[MlbGameResult]
+    events: Sequence[Event], game_pks: Mapping[int, int], games: Sequence[MlbGameResult]
 ) -> list[ScoreCheck]:
     """Compare each event's score with the Final score of the game its ``gamePk`` (``game_pks``,
     by event id) names.
@@ -67,7 +67,7 @@ def check_scores(
 
 
 async def _fetch_games(
-    fetcher: MlbStatsFetcher, events: Sequence[Event], game_pks: Mapping[str, int]
+    fetcher: MlbStatsFetcher, events: Sequence[Event], game_pks: Mapping[int, int]
 ) -> list[MlbGameResult]:
     """The schedule over the events' MLB dates, plus each game not Final in it fetched by
     ``gamePk``, which finds a game played away from the event's date."""

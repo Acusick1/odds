@@ -166,7 +166,7 @@ async def main(ctx: JobContext) -> None:
                     logger.warning(
                         "event_processing_failed",
                         sport=sport_result.sport_key,
-                        event_id=failure.event_id,
+                        odds_api_id=failure.odds_api_id,
                         error=failure.error,
                     )
 

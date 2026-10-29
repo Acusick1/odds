@@ -11,7 +11,6 @@ from scripts.ingest_football_data_uk import (
     UK_TZ,
     _build_envelope,
     _extract_three_way_odds,
-    build_event_id,
     normalize_team,
     opening_snapshot_time,
     parse_kickoff,
@@ -367,27 +366,3 @@ class TestDuplicateBookmakerKeys:
 class TestSeasons:
     def test_2026_2027_registered(self) -> None:
         assert SEASONS["2026-2027"] == "2627"
-
-
-class TestBuildEventId:
-    def test_deterministic_format(self) -> None:
-        dt = datetime(2025, 1, 15, 15, 0, tzinfo=UTC)
-        result = build_event_id("2024-2025", "Manchester United", "Manchester City", dt)
-        assert result == "fduk_2024-2025_MANUNI_MANCIT_2025-01-15"
-
-    def test_single_word_team(self) -> None:
-        dt = datetime(2025, 3, 8, 15, 0, tzinfo=UTC)
-        result = build_event_id("2024-2025", "Arsenal", "Chelsea", dt)
-        assert result == "fduk_2024-2025_ARS_CHE_2025-03-08"
-
-    def test_uses_fduk_prefix(self) -> None:
-        dt = datetime(2025, 1, 15, 15, 0, tzinfo=UTC)
-        result = build_event_id("2024-2025", "Arsenal", "Chelsea", dt)
-        assert result.startswith("fduk_")
-
-    def test_different_dates_produce_different_ids(self) -> None:
-        dt1 = datetime(2025, 1, 15, 15, 0, tzinfo=UTC)
-        dt2 = datetime(2025, 3, 15, 15, 0, tzinfo=UTC)
-        id1 = build_event_id("2024-2025", "Arsenal", "Chelsea", dt1)
-        id2 = build_event_id("2024-2025", "Arsenal", "Chelsea", dt2)
-        assert id1 != id2

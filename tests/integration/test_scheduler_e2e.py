@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from apscheduler import AsyncScheduler
-from odds_core.api_models import OddsResponse, api_dict_to_event
+from odds_core.api_models import OddsResponse, parse_api_event
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.quotes import quotes
 from odds_core.vocabulary import Market
@@ -32,7 +32,8 @@ from tests.test_helpers import StubOddsClient, add_event
 
 # Test constants
 GAME_TIME = datetime(2025, 1, 15, 19, 0, 0, tzinfo=UTC)
-EVENT_ID = "e2e_test_game"
+EVENT_ID = 1
+API_ID = "e2e_test_game"
 HOME_TEAM = "Los Angeles Lakers"
 AWAY_TEAM = "Boston Celtics"
 
@@ -102,7 +103,7 @@ def mock_odds_data():
 
     def _create() -> dict:
         return {
-            "id": EVENT_ID,
+            "id": API_ID,
             "sport_key": "basketball_nba",
             "sport_title": "NBA",
             "commence_time": (datetime.now(UTC) + timedelta(hours=2)).isoformat(),
@@ -185,7 +186,7 @@ async def test_scheduler_end_to_end(
     _e2e_session_factory = mock_session_factory
 
     odds_data = mock_odds_data()
-    event = api_dict_to_event(odds_data)
+    event = parse_api_event(odds_data)
     response = OddsResponse(
         events=[event],
         raw_events_data=[odds_data],
@@ -266,9 +267,9 @@ async def test_job_self_scheduling_chain(test_session, mock_session_factory):
         (GAME_TIME - timedelta(hours=1), FetchTier.CLOSING, fetch_odds.CADENCE.closing, "CLOSING"),
     ]
 
-    for test_time, _, expected_hours, tier_name in test_cases:
+    for event_id, (test_time, _, expected_hours, tier_name) in enumerate(test_cases, start=1):
         event = Event(
-            id=f"e2e_{tier_name.lower()}",
+            id=event_id,
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=GAME_TIME,

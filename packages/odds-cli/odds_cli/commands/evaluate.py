@@ -18,7 +18,7 @@ console = Console()
 
 
 async def _run(
-    spec: Path, output_dir: Path, force: bool, allow_incomplete: list[str]
+    spec: Path, output_dir: Path, force: bool, allow_incomplete: list[int]
 ) -> EvaluationReport:
     async with async_session_maker() as session:
         return await run_evaluation(
@@ -42,7 +42,7 @@ def evaluate_retail_ev(
         "recorded in the manifest",
     ),
     allow_incomplete: Annotated[
-        list[str] | None,
+        list[int] | None,
         typer.Option(
             "--allow-incomplete",
             help="Score this window event although it is not FINAL or has no FDUK closing "

@@ -20,7 +20,7 @@ status: stable
 
 # Fetch tier
 
-A fetch tier labels an odds snapshot by how long before kickoff it was taken. `odds_lambda.fetch_tier.FetchTier` is the enum. No tier is stored: every reader derives a snapshot's tier from its time, source, time basis and market against the event's current kick-off ([odds_snapshots columns](odds-tables.md#odds_snapshots)), so a moved kick-off re-tiers every snapshot at once. Tiers feed scheduling cadence, validation and ML sampling.
+A fetch tier labels an odds snapshot by how long before kickoff it was taken. `odds_lambda.fetch_tier.FetchTier` is the enum. No tier is stored: every reader derives a snapshot's tier from its time, source, time basis and market against the current kick-off of the event its integer `event_id` names ([odds_snapshots columns](odds-tables.md#odds_snapshots)), so a moved kick-off re-tiers every snapshot at once. Tiers feed scheduling cadence, validation and ML sampling.
 
 ## Tier table
 
@@ -59,7 +59,7 @@ Every tier in the system comes from `odds_lambda.tier_utils.snapshot_tier` or `o
 ## Where tiers are read
 
 - **Scheduling** uses the tier to pick a cadence; the per-job cadence table is on [Decision engine](../scheduling/decision-engine.md#cadence).
-- **Validation**: `odds_lambda.storage.tier_validator.TierCoverageValidator` takes each snapshot's tier from `odds_lambda.storage.tier_validator.covered_tiers` against the event's current kick-off, and treats pregame and closing (`odds_lambda.storage.tier_validator.CRITICAL_TIERS`) as required ([Coverage and completeness checks](coverage-checks.md)).
+- **Validation**: `odds_lambda.storage.tier_validator.TierCoverageValidator` takes each snapshot's tier from `odds_lambda.storage.tier_validator.covered_tiers` against the event's current kick-off, and treats pregame and closing (`odds_lambda.storage.tier_validator.CRITICAL_TIERS`) as required; its discovery check matches the API's games to events by their `odds_api` external ids ([Coverage and completeness checks](coverage-checks.md)).
 - **ML sampling**: `odds_analytics.feature_groups.TierSampler` takes each snapshot's tier from `odds_analytics.feature_groups.tiers_of`, which applies `odds_lambda.tier_utils.snapshot_tiers` to the event's snapshots of the market, picks the latest snapshot, only of the sources whose close has a sharp book, whose tier is the `decision_tier` or any tier farther from kickoff, excludes IN_PLAY, and so falls back to farther tiers. The `raw` target's close is the decision snapshot's own source's latest CLOSING snapshot by the same tiers ([closing snapshot](../modelling/clv-target-functions.md#closing-snapshot-of-a-raw-target), [Look-ahead bias](../modelling/look-ahead-bias.md), [Feature pipeline](../modelling/feature-pipeline.md)).
 
 Missing-tier diagnosis steps are in [Debug the AWS self-scheduling jobs](../scheduling/howto-debug-aws-scheduler.md).

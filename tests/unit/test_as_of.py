@@ -10,7 +10,7 @@ from odds_core.quotes import Quote
 from tests.test_helpers import make_epl_event, make_quotes, three_way_bookmaker
 
 T = datetime(2026, 11, 7, 14, 0, tzinfo=UTC)
-EVENT = make_epl_event("evt", T + timedelta(hours=1))
+EVENT = make_epl_event(1, T + timedelta(hours=1))
 
 
 def _snap(snapshot_id: int, minutes_before_t: float, *books: str) -> list[Quote]:

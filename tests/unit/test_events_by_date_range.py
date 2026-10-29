@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 KICKOFF = datetime(2024, 5, 19, 15, 0, tzinfo=UTC)
 
 
-def _event(event_id: str, commence_time: datetime) -> Event:
+def _event(event_id: int, commence_time: datetime) -> Event:
     return Event(
         id=event_id,
         sport_key="soccer_epl",
@@ -26,7 +26,7 @@ class TestGetEventsByDateRangeOrder:
         self, pglite_async_session: AsyncSession
     ) -> None:
         early = datetime(2024, 5, 18, 15, 0, tzinfo=UTC)
-        for event_id, commence in [("c", KICKOFF), ("a", KICKOFF), ("z", early), ("b", KICKOFF)]:
+        for event_id, commence in [(3, KICKOFF), (1, KICKOFF), (4, early), (2, KICKOFF)]:
             pglite_async_session.add(_event(event_id, commence))
         await pglite_async_session.commit()
 
@@ -35,4 +35,4 @@ class TestGetEventsByDateRangeOrder:
             end_date=datetime(2024, 5, 31, tzinfo=UTC),
         )
 
-        assert [e.id for e in events] == ["z", "a", "b", "c"]
+        assert [e.id for e in events] == [4, 1, 2, 3]

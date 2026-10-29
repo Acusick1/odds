@@ -112,7 +112,7 @@ class RetailEvInput:
     ``dynamics`` is ``None`` for an input built from one snapshot, which has no history.
     """
 
-    event_id: str
+    event_id: int
     commence_time: datetime
     outcome: Outcome
     book: str
@@ -314,7 +314,7 @@ def _dynamics(
 
 
 def quote_inputs(
-    event_id: str,
+    event_id: int,
     kickoff: datetime,
     source: Source,
     time_basis: TimeBasis,
@@ -650,7 +650,7 @@ class RetailEvFeatures:
         outcomes: tuple[Outcome, ...],
         groups: Sequence[RetailEvFeatureGroupName] = (),
         teams: TeamHistory | None = None,
-        events: Mapping[str, Event] | None = None,
+        events: Mapping[int, Event] | None = None,
     ) -> None:
         unknown = set(groups) - set(_FEATURE_GROUPS)
         if unknown:
@@ -665,7 +665,7 @@ class RetailEvFeatures:
             raise ValueError("schedule_as_of_t and standings_as_of_t need teams and events")
         self._teams = teams
         self._events = events or {}
-        self._team_cache: dict[tuple[RetailEvFeatureGroupName, str, datetime], list[float]] = {}
+        self._team_cache: dict[tuple[RetailEvFeatureGroupName, int, datetime], list[float]] = {}
 
     @staticmethod
     def needs_teams(groups: Sequence[RetailEvFeatureGroupName]) -> bool:
@@ -733,7 +733,7 @@ async def load_retail_ev_dataset(
     events = [event for event in events if event.commence_time <= cutoff]
     for start in range(0, len(events), EVENTS_PER_QUERY):
         batch = events[start : start + EVENTS_PER_QUERY]
-        by_event: dict[str, list[Quote]] = {event.id: [] for event in batch}
+        by_event: dict[int, list[Quote]] = {event.id: [] for event in batch}
         for quote in await quotes(session, list(by_event), Market(market)):
             by_event[quote.event_id].append(quote)
         for event in batch:

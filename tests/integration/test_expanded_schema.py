@@ -46,48 +46,57 @@ def price(snapshot_id: int | None, **fields: object) -> Price:
     return Price(**(values | fields))
 
 
-class TestEventSurrogateKey:
+class TestEventId:
     @pytest.mark.asyncio
-    async def test_every_event_gets_a_distinct_key(self, pglite_async_session) -> None:
-        events = [make_epl_event(f"e{i}") for i in range(3)]
+    async def test_every_event_gets_a_distinct_id(self, pglite_async_session) -> None:
+        events = [
+            Event(
+                sport_key="soccer_epl",
+                sport_title="EPL",
+                commence_time=TWIN_KICKOFF,
+                home_team="Arsenal",
+                away_team="Chelsea",
+            )
+            for _ in range(3)
+        ]
         pglite_async_session.add_all(events)
         await pglite_async_session.flush()
 
-        keys = [e.surrogate_id for e in events]
+        keys = [e.id for e in events]
         assert None not in keys
         assert len(set(keys)) == 3
 
     @pytest.mark.asyncio
     async def test_unmatched_is_a_stored_status(self, pglite_async_session) -> None:
-        pglite_async_session.add(make_epl_event("e1", status=EventStatus.UNMATCHED))
+        pglite_async_session.add(make_epl_event(1, status=EventStatus.UNMATCHED))
         await pglite_async_session.flush()
         pglite_async_session.expunge_all()
 
-        stored = await pglite_async_session.get(Event, "e1")
+        stored = await pglite_async_session.get(Event, 1)
         assert stored is not None and stored.status is EventStatus.UNMATCHED
 
 
 class TestEventExternalIds:
     @pytest.mark.asyncio
     async def test_one_event_per_source_id(self, pglite_async_session) -> None:
-        a, b = make_epl_event("a"), make_epl_event("b")
+        a, b = make_epl_event(1), make_epl_event(2)
         pglite_async_session.add_all([a, b])
         await pglite_async_session.flush()
         pglite_async_session.add(
-            EventExternalId(source=Source.BETFAIR, external_id="1", event_id=a.surrogate_id)
+            EventExternalId(source=Source.BETFAIR, external_id="1", event_id=a.id)
         )
         await pglite_async_session.flush()
 
         assert await rejected(
             pglite_async_session,
-            EventExternalId(source=Source.BETFAIR, external_id="1", event_id=b.surrogate_id),
+            EventExternalId(source=Source.BETFAIR, external_id="1", event_id=b.id),
         )
 
     @pytest.mark.asyncio
     async def test_one_id_per_source_per_event(
         self, pglite_async_session, stored_epl_event
     ) -> None:
-        key = stored_epl_event.surrogate_id
+        key = stored_epl_event.id
         pglite_async_session.add(
             EventExternalId(source=Source.BETFAIR, external_id="1", event_id=key)
         )
@@ -111,7 +120,7 @@ class TestEventExternalIds:
             EventExternalId(
                 source=Source.FOOTBALL_DATA_UK,
                 external_id="1",
-                event_id=stored_epl_event.surrogate_id,
+                event_id=stored_epl_event.id,
             ),
         )
 
@@ -119,13 +128,11 @@ class TestEventExternalIds:
     async def test_a_merge_moves_the_duplicates_ids_to_the_kept_event(
         self, pglite_async_session
     ) -> None:
-        keep, duplicate = make_epl_event("keep"), make_epl_event("dup")
+        keep, duplicate = make_epl_event(1), make_epl_event(2)
         pglite_async_session.add_all([keep, duplicate])
         await pglite_async_session.flush()
         pglite_async_session.add(
-            EventExternalId(
-                source=Source.ODDSPORTAL, external_id="op-1", event_id=duplicate.surrogate_id
-            )
+            EventExternalId(source=Source.ODDSPORTAL, external_id="op-1", event_id=duplicate.id)
         )
         await pglite_async_session.flush()
 
@@ -133,13 +140,13 @@ class TestEventExternalIds:
         await pglite_async_session.flush()
 
         moved = await pglite_async_session.get(EventExternalId, (Source.ODDSPORTAL, "op-1"))
-        assert moved is not None and moved.event_id == keep.surrogate_id
+        assert moved is not None and moved.event_id == keep.id
 
 
 class TestMergeClashes:
     @pytest.fixture
     async def twins(self, pglite_async_session) -> tuple[Event, Event]:
-        keep, duplicate = make_epl_event("keep"), make_epl_event("op_dup")
+        keep, duplicate = make_epl_event(1), make_epl_event(2)
         pglite_async_session.add_all([keep, duplicate])
         await pglite_async_session.flush()
         return keep, duplicate
@@ -151,15 +158,11 @@ class TestMergeClashes:
         keep, duplicate = twins
         pglite_async_session.add_all(
             [
+                EventExternalId(source=Source.ODDSPORTAL, external_id="op-keep", event_id=keep.id),
                 EventExternalId(
-                    source=Source.ODDSPORTAL, external_id="op-keep", event_id=keep.surrogate_id
+                    source=Source.ODDSPORTAL, external_id="op-dup", event_id=duplicate.id
                 ),
-                EventExternalId(
-                    source=Source.ODDSPORTAL, external_id="op-dup", event_id=duplicate.surrogate_id
-                ),
-                EventExternalId(
-                    source=Source.BETFAIR, external_id="bf-dup", event_id=duplicate.surrogate_id
-                ),
+                EventExternalId(source=Source.BETFAIR, external_id="bf-dup", event_id=duplicate.id),
             ]
         )
         await pglite_async_session.flush()
@@ -169,7 +172,7 @@ class TestMergeClashes:
 
         held = await pglite_async_session.execute(
             select(EventExternalId.source, EventExternalId.external_id).where(
-                EventExternalId.event_id == keep.surrogate_id
+                EventExternalId.event_id == keep.id
             )
         )
         assert set(held.all()) == {(Source.ODDSPORTAL, "op-keep"), (Source.BETFAIR, "bf-dup")}
@@ -186,7 +189,7 @@ class TestMergeClashes:
         for event, reason in ((keep, "kept reason"), (duplicate, "duplicate reason")):
             pglite_async_session.add(
                 HealthCheckAcknowledgement(
-                    event_id=event.surrogate_id,
+                    event_id=event.id,
                     check_name=HealthCheck.MISSING_MLB_GAME_PK,
                     reason=reason,
                 )
@@ -210,7 +213,7 @@ class TestHealthCheckAcknowledgements:
     ) -> None:
         def ack() -> HealthCheckAcknowledgement:
             return HealthCheckAcknowledgement(
-                event_id=stored_epl_event.surrogate_id,
+                event_id=stored_epl_event.id,
                 check_name=HealthCheck.MISSING_MLB_GAME_PK,
                 reason="exhibition game",
             )

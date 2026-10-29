@@ -29,7 +29,7 @@ class TestOddsValidator:
                 {"key": "bet365", "markets": [{"key": "h2h", "outcomes": [{"name": "Home"}]}]}
             ],
         }
-        is_valid, warnings = OddsValidator.validate_odds_snapshot(data, "e1")
+        is_valid, warnings = OddsValidator.validate_odds_snapshot(data, 1)
         assert not is_valid
         assert "Missing or invalid price" in warnings[0]
 
@@ -195,12 +195,6 @@ class TestOddsValidator:
         assert is_valid
         assert len(warnings) == 0
 
-    def test_validate_odds_snapshot_empty_data(self):
-        """Test validation of empty odds data."""
-        is_valid, warnings = OddsValidator.validate_odds_snapshot([], "test123")
-        assert not is_valid
-        assert any("Empty" in w for w in warnings)
-
     def test_validate_odds_snapshot_no_bookmakers(self):
         """Test validation of snapshot with no bookmakers."""
         data = {
@@ -212,7 +206,7 @@ class TestOddsValidator:
             "bookmakers": [],
         }
 
-        is_valid, warnings = OddsValidator.validate_odds_snapshot(data, "test123")
+        is_valid, warnings = OddsValidator.validate_odds_snapshot(data, 123)
         assert not is_valid
         assert any("No bookmakers" in w for w in warnings)
 
@@ -241,7 +235,7 @@ class TestOddsValidator:
                 }
             ],
         }
-        is_valid, warnings = OddsValidator.validate_odds_snapshot(data, "test123")
+        is_valid, warnings = OddsValidator.validate_odds_snapshot(data, 123)
         # Vig is ~0.5% which is below the 2.0% retail floor, producing a warning
         assert len(warnings) > 0
         assert any("too low" in w for w in warnings)
@@ -274,6 +268,6 @@ class TestOddsValidator:
             ],
         }
 
-        is_valid, warnings = OddsValidator.validate_odds_snapshot(data, "test123")
+        is_valid, warnings = OddsValidator.validate_odds_snapshot(data, 123)
         assert not is_valid
         assert any("Future timestamp" in w for w in warnings)

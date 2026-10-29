@@ -21,7 +21,7 @@ class Quote:
     metadata. Numeric columns are read as floats."""
 
     snapshot_id: int
-    event_id: str
+    event_id: int
     snapshot_time: datetime
     created_at: datetime
     source: Source
@@ -67,7 +67,7 @@ QUOTE_COLUMNS: tuple[Any, ...] = (
 
 async def quotes(
     session: AsyncSession,
-    event_ids: Collection[str],
+    event_ids: Collection[int],
     market: Market,
     *,
     sources: Collection[Source] | None = None,

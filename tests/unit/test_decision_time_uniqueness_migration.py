@@ -51,7 +51,7 @@ async def _decide(session: AsyncSession, minutes: int, with_lead: bool = True) -
             text(
                 "INSERT INTO candidate_decisions (candidate_name, candidate_version, event_id,"
                 f" decision_time, kickoff_at_decision, known_at, bets_placed{lead_column})"
-                f" VALUES ('cand', 1, 'e1', :t, :k, :t, 0{lead_value}) RETURNING id"
+                f" VALUES ('cand', 1, 1, :t, :k, :t, 0{lead_value}) RETURNING id"
             ),
             {"t": KICKOFF - timedelta(minutes=minutes), "k": KICKOFF, "m": minutes},
         )
@@ -64,7 +64,7 @@ async def _bet(session: AsyncSession, decision_id: int, selection: str, bookmake
         text(
             "INSERT INTO paper_trades (event_id, market, selection, bookmaker, price_decimal,"
             " stake, placed_at, candidate_name, candidate_version, decision_id)"
-            " VALUES ('e1', '1x2', :s, :b, 2.0, 1, now(), 'cand', 1, :d)"
+            " VALUES (1, '1x2', :s, :b, 2.0, 1, now(), 'cand', 1, :d)"
         ),
         {"s": selection, "b": bookmaker, "d": decision_id},
     )
@@ -75,7 +75,7 @@ class TestUpgradeAndDowngrade:
     async def session(self, pglite_async_session: AsyncSession) -> AsyncSession:
         pglite_async_session.add(
             Event(
-                id="e1",
+                id=1,
                 sport_key="soccer_epl",
                 sport_title="EPL",
                 commence_time=KICKOFF,

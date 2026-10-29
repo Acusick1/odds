@@ -37,7 +37,7 @@ class BackfillResult:
 class BackfillProgress:
     """Progress update during backfill."""
 
-    event_id: str
+    event_id: int
     home_team: str
     away_team: str
     snapshot_time: str
@@ -205,7 +205,7 @@ class BackfillExecutor:
 
     async def _process_snapshot(
         self,
-        event_id: str,
+        event_id: int,
         odds_api_id: str | None,
         home_team: str,
         away_team: str,
@@ -277,7 +277,7 @@ class BackfillExecutor:
         event = None
         event_data = None
         for evt, raw_evt in zip(response.events, response.raw_events_data, strict=True):
-            if evt.id == odds_api_id:
+            if evt.odds_api_id == odds_api_id:
                 event = evt
                 event_data = raw_evt
                 break

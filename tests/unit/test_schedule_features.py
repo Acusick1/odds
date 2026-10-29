@@ -9,7 +9,7 @@ from odds_core.models import Event
 
 
 def _make_event(
-    event_id: str = "test_event_1",
+    event_id: int = 1,
     home_team: str = "Los Angeles Lakers",
     away_team: str = "Boston Celtics",
     commence_time: datetime | None = None,
@@ -30,7 +30,7 @@ def _make_game_log(
     team_abbreviation: str = "LAL",
     game_date: date = date(2025, 1, 15),
     matchup: str = "LAL vs. BOS",
-    event_id: str | None = "test_event_1",
+    event_id: int | None = 1,
     nba_game_id: str = "0022400100",
     team_id: int = 1610612747,
     season: str = "2024-25",
@@ -95,8 +95,8 @@ class TestExtractRestFeatures:
 
     def test_no_event_logs_returns_all_none(self) -> None:
         """Game logs exist but none linked to this event."""
-        event = _make_event(event_id="test_event_1")
-        unlinked_log = _make_game_log(event_id="other_event")
+        event = _make_event(event_id=1)
+        unlinked_log = _make_game_log(event_id=2)
         features = extract_rest_features([unlinked_log], event)
         assert np.all(np.isnan(features.to_array()))
 
@@ -107,13 +107,13 @@ class TestExtractRestFeatures:
             team_abbreviation="LAL",
             game_date=date(2025, 1, 15),
             matchup="LAL vs. BOS",
-            event_id="test_event_1",
+            event_id=1,
         )
         event_log_away = _make_game_log(
             team_abbreviation="BOS",
             game_date=date(2025, 1, 15),
             matchup="BOS @ LAL",
-            event_id="test_event_1",
+            event_id=1,
             nba_game_id="0022400100",
             team_id=1610612738,
         )
@@ -129,13 +129,13 @@ class TestExtractRestFeatures:
                 team_abbreviation="LAL",
                 game_date=date(2025, 1, 15),
                 matchup="LAL vs. BOS",
-                event_id="test_event_1",
+                event_id=1,
             ),
             _make_game_log(
                 team_abbreviation="BOS",
                 game_date=date(2025, 1, 15),
                 matchup="BOS @ LAL",
-                event_id="test_event_1",
+                event_id=1,
                 nba_game_id="0022400100",
                 team_id=1610612738,
             ),
@@ -172,13 +172,13 @@ class TestExtractRestFeatures:
                 team_abbreviation="LAL",
                 game_date=date(2025, 1, 15),
                 matchup="LAL vs. BOS",
-                event_id="test_event_1",
+                event_id=1,
             ),
             _make_game_log(
                 team_abbreviation="BOS",
                 game_date=date(2025, 1, 15),
                 matchup="BOS @ LAL",
-                event_id="test_event_1",
+                event_id=1,
                 nba_game_id="0022400100",
                 team_id=1610612738,
             ),
@@ -215,13 +215,13 @@ class TestExtractRestFeatures:
                 team_abbreviation="LAL",
                 game_date=date(2025, 1, 15),
                 matchup="LAL vs. BOS",
-                event_id="test_event_1",
+                event_id=1,
             ),
             _make_game_log(
                 team_abbreviation="BOS",
                 game_date=date(2025, 1, 15),
                 matchup="BOS @ LAL",
-                event_id="test_event_1",
+                event_id=1,
                 nba_game_id="0022400100",
                 team_id=1610612738,
             ),
@@ -258,13 +258,13 @@ class TestExtractRestFeatures:
                 team_abbreviation="LAL",
                 game_date=date(2025, 1, 15),
                 matchup="LAL vs. BOS",
-                event_id="test_event_1",
+                event_id=1,
             ),
             _make_game_log(
                 team_abbreviation="BOS",
                 game_date=date(2025, 1, 15),
                 matchup="BOS @ LAL",
-                event_id="test_event_1",
+                event_id=1,
                 nba_game_id="0022400100",
                 team_id=1610612738,
             ),
@@ -292,13 +292,13 @@ class TestExtractRestFeatures:
                 team_abbreviation="LAL",
                 game_date=date(2025, 1, 15),
                 matchup="LAL vs. BOS",
-                event_id="test_event_1",
+                event_id=1,
             ),
             _make_game_log(
                 team_abbreviation="BOS",
                 game_date=date(2025, 1, 15),
                 matchup="BOS @ LAL",
-                event_id="test_event_1",
+                event_id=1,
                 nba_game_id="0022400100",
                 team_id=1610612738,
             ),
@@ -330,13 +330,13 @@ class TestExtractRestFeatures:
                 team_abbreviation="LAL",
                 game_date=date(2025, 1, 15),
                 matchup="LAL vs. BOS",
-                event_id="test_event_1",
+                event_id=1,
             ),
             _make_game_log(
                 team_abbreviation="BOS",
                 game_date=date(2025, 1, 15),
                 matchup="BOS @ LAL",
-                event_id="test_event_1",
+                event_id=1,
                 nba_game_id="0022400100",
                 team_id=1610612738,
             ),

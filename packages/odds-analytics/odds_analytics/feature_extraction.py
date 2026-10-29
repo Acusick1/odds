@@ -53,7 +53,7 @@ class FeatureEvent(BaseModel):
     Scores are ``None`` for events not yet played, scored at inference time.
     """
 
-    id: str
+    id: int
     commence_time: datetime
     home_team: str
     away_team: str

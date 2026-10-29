@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 from odds_cli.main import app
-from odds_core.api_models import OddsResponse, create_scheduled_event
+from odds_core.api_models import OddsResponse, parse_api_event
 
 
 class TestWriteCLI:
@@ -32,7 +32,7 @@ class TestWriteCLI:
             event_data = json.load(f)
 
         # Create OddsResponse with sample data
-        event = create_scheduled_event(event_data)
+        event = parse_api_event(event_data)
         mock_response = OddsResponse(
             events=[event],
             raw_events_data=[event_data],

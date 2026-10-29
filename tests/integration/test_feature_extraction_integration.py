@@ -19,7 +19,7 @@ class TestFeatureExtractionIntegration:
         """Test TabularFeatureExtractor with quotes from database."""
         # Create test event
         event = Event(
-            id="test_event_tabular_1",
+            id=1,
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),

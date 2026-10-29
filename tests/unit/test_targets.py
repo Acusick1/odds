@@ -22,7 +22,7 @@ def _quote(
     """A back quote of the home (or given) outcome, priced from American odds."""
     return Quote(
         snapshot_id=1,
-        event_id="test",
+        event_id=1,
         snapshot_time=TIMESTAMP,
         created_at=TIMESTAMP,
         source=Source.ODDS_API,

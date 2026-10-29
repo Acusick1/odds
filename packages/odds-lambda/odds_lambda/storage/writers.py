@@ -45,7 +45,7 @@ class OddsWriter:
 
     async def store_envelope(
         self,
-        event_id: str,
+        event_id: int,
         envelope: dict[str, Any],
         snapshot_time: datetime | None = None,
         validate: bool = True,
@@ -110,7 +110,7 @@ class OddsWriter:
 
     async def update_event_status(
         self,
-        event_id: str,
+        event_id: int,
         status: EventStatus,
         home_score: int | None = None,
         away_score: int | None = None,

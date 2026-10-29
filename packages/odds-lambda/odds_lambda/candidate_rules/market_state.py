@@ -55,7 +55,7 @@ class MarketState:
     retail prices and no sharp prices.
     """
 
-    event_id: str
+    event_id: int
     sport_key: str
     market: Market
     kickoff: datetime

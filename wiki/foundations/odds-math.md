@@ -35,7 +35,7 @@ The docstring examples show rounded values (`1.909`, `0.524`), so a doctest runn
 
 ## Consumers
 
-`odds_lambda.storage.readers.OddsReader` ([OddsReader](../storage/odds-reader.md); it reads events, snapshots and logs, never prices, which come from `odds_core.quotes.quotes`), `odds_lambda.paper_trading` (settlement grades with `odds_core.odds_math.selection_won`, takes profit from `odds_core.odds_math.calculate_profit_from_decimal` and voids trades on cancelled events, with no bankroll arithmetic for a flat-stake trade; placement rejects a draw bet on a two-way sport and an `h2h` candidate trade on a three-way sport), backtesting services, the feature extractors and the MCP server tools. Analytics-side hold helpers (`odds_analytics.utils.calculate_market_hold`, `odds_analytics.utils.per_book_market_holds`) are built on `odds_core.odds_math.decimal_to_implied_probability` and take decimal prices; `odds_analytics.utils.per_book_market_holds` drops books missing any required outcome rather than returning a partial hold. The training target maths built on these helpers is on [Target functions](../modelling/clv-target-functions.md).
+`odds_lambda.storage.readers.OddsReader` ([OddsReader](../storage/odds-reader.md); it reads events (keyed by integer id), snapshots and logs, never prices, which come from `odds_core.quotes.quotes`), `odds_lambda.paper_trading` (settlement grades with `odds_core.odds_math.selection_won`, takes profit from `odds_core.odds_math.calculate_profit_from_decimal` and voids trades on cancelled events, with no bankroll arithmetic for a flat-stake trade; placement rejects a draw bet on a two-way sport and an `h2h` candidate trade on a three-way sport), backtesting services, the feature extractors and the MCP server tools. Analytics-side hold helpers (`odds_analytics.utils.calculate_market_hold`, `odds_analytics.utils.per_book_market_holds`) are built on `odds_core.odds_math.decimal_to_implied_probability` and take decimal prices; `odds_analytics.utils.per_book_market_holds` drops books missing any required outcome rather than returning a partial hold. The training target maths built on these helpers is on [Target functions](../modelling/clv-target-functions.md).
 
 ## Price encodings
 
@@ -43,10 +43,10 @@ The docstring examples show rounded values (`1.909`, `0.524`), so a doctest runn
 
 The envelope a source returns (archived in `odds_core.models.SnapshotPayload`, [envelope format](../storage/odds-tables.md#envelope-format)) carries each outcome's price in one of two encodings, named by `odds_core.odds_math.PRICE_DECIMAL_KEY` (`price_decimal`) and `odds_core.odds_math.PRICE_AMERICAN_KEY` (`price`):
 
-- The envelopes built by this pipeline hold the source decimal under `price_decimal` and have no `price` key: Betfair (`odds_lambda.betfair.adapter.betfair_book_to_bookmaker_entry`, every market it collects, each totals runner on its spec's line), OddsPortal live (`odds_lambda.oddsportal_adapter.convert_market`), OddsPortal historical (`odds_lambda.oddsportal_common.build_envelope`) and `scripts/ingest_football_data_uk.py`.
+- The envelopes built by this pipeline hold the source decimal under `price_decimal` and have no `price` key: Betfair (`odds_lambda.betfair.adapter.betfair_book_to_bookmaker_entry`, every market it collects, each totals runner on its spec's line), OddsPortal live (`odds_lambda.oddsportal_adapter.convert_market`), OddsPortal historical (`odds_lambda.oddsportal_common.build_envelope`) and `scripts/ingest_football_data_uk.py`, which skips a game whose event match is ambiguous.
 - The Odds API's responses keep their integer American `price` unchanged, which `odds_core.odds_math.american_to_decimal` converts exactly.
 
-`odds_core.odds_math.outcome_price_decimal` reads either encoding; `odds_lambda.price_rows.expand_envelope` (which turns an envelope into price rows) and `odds_lambda.storage.validators.OddsValidator` both go through it.
+`odds_core.odds_math.outcome_price_decimal` reads either encoding; `odds_lambda.price_rows.expand_envelope` (which turns an envelope into price rows) and `odds_lambda.storage.validators.OddsValidator`, which validates one event's envelope at a time, both go through it.
 
 ## Related
 

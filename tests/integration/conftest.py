@@ -48,7 +48,7 @@ def job_session(
 
 @pytest.fixture
 async def live_twin_with_rows(pglite_async_session):
-    """An op_live_ event owning a snapshot, paper trade and match brief."""
+    """An event owning a snapshot, paper trade and match brief."""
     from odds_core.match_brief_models import BriefDecision, MatchBrief
     from odds_core.paper_trade_models import PaperTrade
 
@@ -92,7 +92,7 @@ async def live_twin_with_rows(pglite_async_session):
 @pytest.fixture
 async def stored_epl_event(pglite_async_session) -> Event:
     """One stored EPL event (Arsenal v Chelsea at ``TWIN_KICKOFF``) with no external ids."""
-    event = make_epl_event("odds_api_hex_1")
+    event = make_epl_event(11)
     pglite_async_session.add(event)
     await pglite_async_session.flush()
     return event
@@ -118,7 +118,7 @@ async def mixed_source_event(pglite_async_session):
     """An event with an Odds API snapshot and a later Polymarket snapshot carrying mid, ask and bid."""
     session = pglite_async_session
     kickoff = datetime(2026, 4, 18, 15, 0, tzinfo=UTC)
-    event = make_epl_event("epl_test_mixed", kickoff)
+    event = make_epl_event(12, kickoff)
     session.add(event)
     api_time = kickoff - timedelta(hours=3)
     await store_tagged(

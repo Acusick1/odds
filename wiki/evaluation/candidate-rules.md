@@ -29,7 +29,7 @@ A mechanical candidate records the hash of its rule's code, so the YAML version 
 
 | Field | Meaning |
 |---|---|
-| `odds_lambda.candidate_rules.MarketState.event_id`, `odds_lambda.candidate_rules.MarketState.sport_key`, `odds_lambda.candidate_rules.MarketState.kickoff`, `odds_lambda.candidate_rules.MarketState.decision_time` | The event and the time of the state |
+| `odds_lambda.candidate_rules.MarketState.event_id`, `odds_lambda.candidate_rules.MarketState.sport_key`, `odds_lambda.candidate_rules.MarketState.kickoff`, `odds_lambda.candidate_rules.MarketState.decision_time` | The event (its integer id) and the time of the state |
 | `market` | The candidate's market ([market keys](../collection/sport-and-market-keys.md)) |
 | `odds_lambda.candidate_rules.MarketState.snapshot_id`, `odds_lambda.candidate_rules.MarketState.snapshot_time` | The retail snapshot the state was built from, or `None` when it has no inputs (`odds_lambda.candidate_rules.MarketState.has_input` is false) |
 | `retail` | Per line, decimal back prices per outcome for each UK retail book (`odds_core.bookmakers.UK_RETAIL_BOOKMAKERS`) in that snapshot |

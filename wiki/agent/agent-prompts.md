@@ -24,7 +24,7 @@ Every [agent](betting-agent.md) wake-up follows the same steps, defined in the p
 
 ## Steps
 
-1. **Orient.** Check the date, weekday and UTC time (`date -u`), then load upcoming fixtures with `odds_mcp.server.get_upcoming_fixtures`. The event id it returns is the id every other tool takes; the base prompts tell the agent to treat it as opaque.
+1. **Orient.** Check the date, weekday and UTC time (`date -u`), then load upcoming fixtures with `odds_mcp.server.get_upcoming_fixtures`. The integer event id it returns is the id every other tool takes; the base prompts tell the agent to treat it as opaque.
 2. **Settle.** Settle finished bets (`odds_mcp.server.settle_bets`, see [settlement](paper-trading.md#settlement)).
 3. **Triage.** Read the latest brief per upcoming match (`odds_mcp.server.get_slate_briefs`) and choose what to research ([match briefs](match-briefs.md)). Briefs are append-only and do not store the market.
 4. **Pre-market read**, for new fixtures only.

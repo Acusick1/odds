@@ -67,19 +67,21 @@ async def _ingest(session, record: dict[str, Any]) -> IngestionStats:
     await _ingest_one_game(
         session,
         record,
-        "2024-2025",
         stats,
         sport_config=SPORT_CONFIGS["soccer"],
         market_config=MARKET_CONFIGS["1x2"],
         json_market_key="1x2_market",
         normalize_fn=_normalize_team_passthrough,
-        canonical_to_abbrev=None,
     )
     await session.flush()
     return stats
 
 
-async def _snaps(session, event_id: str) -> list[OddsSnapshot]:
+async def _created_event(session) -> Event:
+    return (await session.execute(select(Event))).scalar_one()
+
+
+async def _snaps(session, event_id: int) -> list[OddsSnapshot]:
     result = await session.execute(
         select(OddsSnapshot)
         .where(OddsSnapshot.event_id == event_id)
@@ -117,12 +119,11 @@ class TestNewEvent:
 
         stats = await _ingest(session, _record())
 
-        event = await session.get(Event, "op_2024-2025_ARS_CHE_2024-08-17")
-        assert event is not None
+        event = await _created_event(session)
         assert (event.status, event.home_score, event.away_score) == (EventStatus.FINAL, 2, 1)
         assert event.commence_time == MATCH_DT and event.completed_at == MATCH_DT
         ids = await session.execute(
-            select(EventExternalId).where(EventExternalId.event_id == event.surrogate_id)
+            select(EventExternalId).where(EventExternalId.event_id == event.id)
         )
         assert [(r.source, r.external_id) for r in ids.scalars()] == [
             (Source.ODDSPORTAL, "AbCd1234")
@@ -136,7 +137,7 @@ class TestNewEvent:
         session = pglite_async_session
         await _ingest(session, _record())
 
-        snaps = await _snaps(session, "op_2024-2025_ARS_CHE_2024-08-17")
+        snaps = await _snaps(session, (await _created_event(session)).id)
 
         assert [(s.source, s.market, s.time_basis) for s in snaps] == [
             (Source.ODDSPORTAL, Market.ONE_X_TWO, TimeBasis.SOURCE_STAMPED)
@@ -175,17 +176,15 @@ class TestNewEvent:
         await _ingest_one_game(
             session,
             record,
-            "2024-2025",
             stats,
             sport_config=SPORT_CONFIGS["soccer"],
             market_config=get_market_config("over_under_2_5"),
             json_market_key="over_under_2_5_market",
             normalize_fn=_normalize_team_passthrough,
-            canonical_to_abbrev=None,
         )
         await session.flush()
 
-        [snap, *_] = await _snaps(session, "op_2024-2025_ARS_CHE_2024-08-17")
+        [snap, *_] = await _snaps(session, (await _created_event(session)).id)
         assert snap.market is Market.TOTALS
         prices = (
             (await session.execute(select(Price).where(Price.snapshot_id == snap.id)))
@@ -205,7 +204,7 @@ class TestNewEvent:
         stats = await _ingest(session, _record())
 
         assert (stats.events_matched, stats.snapshots_inserted) == (1, 0)
-        assert len(await _snaps(session, "op_2024-2025_ARS_CHE_2024-08-17")) == 2
+        assert len(await _snaps(session, (await _created_event(session)).id)) == 2
         count = await session.execute(select(func.count()).select_from(SnapshotPayload))
         assert count.scalar_one() == 1
 
@@ -216,7 +215,7 @@ class TestExistingEvent:
         self, pglite_async_session
     ) -> None:
         session = pglite_async_session
-        stored = make_epl_event("odds_api_hex", MATCH_DT + timedelta(hours=20))
+        stored = make_epl_event(1, MATCH_DT + timedelta(hours=20))
         session.add(stored)
         await session.flush()
 
@@ -225,21 +224,19 @@ class TestExistingEvent:
         assert (stats.events_matched, stats.events_created) == (1, 0)
         assert stored.status is EventStatus.SCHEDULED and stored.home_score is None
         assert stored.commence_time == MATCH_DT + timedelta(hours=20)
-        assert len(await _snaps(session, "odds_api_hex")) == 2
+        assert len(await _snaps(session, stored.id)) == 2
 
     @pytest.mark.asyncio
     async def test_finds_an_event_by_its_recorded_oddsportal_id(self, pglite_async_session) -> None:
         session = pglite_async_session
-        stored = make_epl_event("op_live_x", MATCH_DT + timedelta(days=3))
+        stored = make_epl_event(1, MATCH_DT + timedelta(days=3))
         session.add(stored)
         await session.flush()
         session.add(
-            EventExternalId(
-                source=Source.ODDSPORTAL, external_id="AbCd1234", event_id=stored.surrogate_id
-            )
+            EventExternalId(source=Source.ODDSPORTAL, external_id="AbCd1234", event_id=stored.id)
         )
         await session.flush()
 
         await _ingest(session, _record())
 
-        assert len(await _snaps(session, "op_live_x")) == 2
+        assert len(await _snaps(session, stored.id)) == 2

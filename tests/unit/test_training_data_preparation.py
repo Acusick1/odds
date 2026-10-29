@@ -180,7 +180,7 @@ class TestPrepareTrainingDataFromConfig:
         events = []
         for i in range(10):
             event = MagicMock(spec=Event)
-            event.id = f"event_{i}"
+            event.id = i + 1
             event.home_team = "Team A"
             event.away_team = "Team B"
             event.home_score = 100 + i
@@ -257,7 +257,7 @@ class TestPrepareTrainingDataFromConfig:
             X = np.random.randn(num_samples, num_features).astype(np.float32)
             y = np.random.randn(num_samples).astype(np.float32)
             feature_names = [f"feature_{i}" for i in range(num_features)]
-            event_ids = np.array([f"event_{i}" for i in range(num_samples)])
+            event_ids = np.array([i + 1 for i in range(num_samples)])
             mock_prepare.return_value = PreparedFeatureData(
                 X=X,
                 y=y,
@@ -669,20 +669,18 @@ class TestDataSourceFiltering:
 
     @pytest.fixture
     async def stored_events(self, test_session: AsyncSession) -> None:
-        """An op_-prefixed event with only FDUK snapshots, an Odds API event with an Odds
+        """An event with only FDUK snapshots, an Odds API event with an Odds
         API and an OddsPortal snapshot, and an event with no snapshots."""
         kickoff = datetime(2026, 4, 15, 15, 0, tzinfo=UTC)
         books = [three_way_bookmaker("bet365", (2.0, 3.4, 3.8))]
-        test_session.add(
-            make_epl_event("op_fduk_only", status=EventStatus.FINAL, commence_time=kickoff)
-        )
-        test_session.add(make_epl_event("api_event", status=EventStatus.FINAL))
-        test_session.add(make_epl_event("no_snapshots", status=EventStatus.FINAL))
+        test_session.add(make_epl_event(1, status=EventStatus.FINAL, commence_time=kickoff))
+        test_session.add(make_epl_event(2, status=EventStatus.FINAL))
+        test_session.add(make_epl_event(3, status=EventStatus.FINAL))
         await test_session.flush()
         for event_id, source, basis in [
-            ("op_fduk_only", "football_data_uk", "kickoff"),
-            ("api_event", None, None),
-            ("api_event", "oddsportal", None),
+            (1, "football_data_uk", "kickoff"),
+            (2, None, None),
+            (2, "oddsportal", None),
         ]:
             await store_tagged(
                 test_session,
@@ -692,7 +690,7 @@ class TestDataSourceFiltering:
             )
         await test_session.commit()
 
-    async def _kept(self, session: AsyncSession, data_source: Source | None) -> set[str]:
+    async def _kept(self, session: AsyncSession, data_source: Source | None) -> set[int]:
         events = await filter_events_by_date_range(
             session=session,
             start_date=self.START,
@@ -704,20 +702,20 @@ class TestDataSourceFiltering:
     async def test_none_keeps_every_event(
         self, test_session: AsyncSession, stored_events: None
     ) -> None:
-        assert await self._kept(test_session, None) == {"op_fduk_only", "api_event", "no_snapshots"}
+        assert await self._kept(test_session, None) == {1, 2, 3}
 
-    async def test_prefix_does_not_decide_the_source(
+    async def test_snapshots_decide_the_source(
         self, test_session: AsyncSession, stored_events: None
     ) -> None:
-        """An op_-prefixed event with only FDUK snapshots is an FDUK event, not an OddsPortal one."""
-        assert "op_fduk_only" in await self._kept(test_session, Source.FOOTBALL_DATA_UK)
-        assert "op_fduk_only" not in await self._kept(test_session, Source.ODDSPORTAL)
+        """An event with only FDUK snapshots is an FDUK event, not an OddsPortal one."""
+        assert 1 in await self._kept(test_session, Source.FOOTBALL_DATA_UK)
+        assert 1 not in await self._kept(test_session, Source.ODDSPORTAL)
 
     async def test_event_with_several_sources_kept_for_each(
         self, test_session: AsyncSession, stored_events: None
     ) -> None:
-        assert await self._kept(test_session, Source.ODDS_API) == {"api_event"}
-        assert await self._kept(test_session, Source.ODDSPORTAL) == {"api_event"}
+        assert await self._kept(test_session, Source.ODDS_API) == {2}
+        assert await self._kept(test_session, Source.ODDSPORTAL) == {2}
 
     async def test_source_without_snapshots_keeps_nothing(
         self, test_session: AsyncSession, stored_events: None
@@ -787,7 +785,7 @@ class TestSaveVerificationArtifacts:
         import csv
 
         X, y, names = sample_data
-        event_ids = np.array([f"evt_{i}" for i in range(50)])
+        event_ids = np.array([i + 1 for i in range(50)])
         save_verification_artifacts(X, y, names, tmp_path, event_ids=event_ids)
 
         with open(tmp_path / "feature_sample.csv") as f:
@@ -795,7 +793,7 @@ class TestSaveVerificationArtifacts:
             first_row = next(reader)
 
         assert "event_id" in first_row
-        assert first_row["event_id"] == "evt_0"
+        assert first_row["event_id"] == "1"
 
     def test_correlation_output(self, tmp_path: Path, sample_data: tuple) -> None:
         import csv

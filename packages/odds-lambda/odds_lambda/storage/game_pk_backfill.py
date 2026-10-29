@@ -121,7 +121,7 @@ class GamePkAssignment:
 
 @dataclass(frozen=True)
 class UnresolvedEvent:
-    event_id: str
+    event_id: int
     reason: UnresolvedReason | BackfillSkip
     detail: str = ""
 
@@ -135,15 +135,15 @@ class GamePkPlan:
     pending: int
     assignments: tuple[GamePkAssignment, ...]
     unresolved: tuple[UnresolvedEvent, ...]
-    ghost_ids: tuple[str, ...]
-    marked: dict[str, str]
+    ghost_ids: tuple[int, ...]
+    marked: dict[int, str]
 
 
 @dataclass(frozen=True)
 class AssignmentOutcome:
     game_pk: int
-    kept_id: str
-    merged_ids: tuple[str, ...]
+    kept_id: int
+    merged_ids: tuple[int, ...]
     rule: ResolutionRule | None
     status: OutcomeStatus = OutcomeStatus.APPLIED
     detail: str = ""
@@ -185,7 +185,7 @@ def _pair_date(event: Event) -> _PairDate:
     )
 
 
-def _rows_by_event(events: Sequence[Event]) -> dict[str, GameRow]:
+def _rows_by_event(events: Sequence[Event]) -> dict[int, GameRow]:
     """One resolver row per cluster of a team pair's events on an MLB date whose starts lie
     within ``START_MATCH_WINDOW`` of the cluster's first, at that first start. Twins listed a
     few minutes apart are then one row, so they cannot be paired with two games by start order.
@@ -193,7 +193,7 @@ def _rows_by_event(events: Sequence[Event]) -> dict[str, GameRow]:
     by_key: dict[_PairDate, list[Event]] = defaultdict(list)
     for event in events:
         by_key[_pair_date(event)].append(event)
-    rows: dict[str, GameRow] = {}
+    rows: dict[int, GameRow] = {}
     for group in by_key.values():
         row: GameRow | None = None
         for event in sorted(group, key=lambda e: (ensure_utc(e.commence_time), e.id)):
@@ -306,7 +306,7 @@ async def plan_game_pks(
         )
 
     merger = EventMerger(session)
-    ghosts: list[str] = []
+    ghosts: list[int] = []
     still_unresolved: list[UnresolvedEvent] = []
     for item in unresolved:
         if item.reason is UnresolvedReason.NO_GAME and not await merger.reference_counts(
@@ -451,7 +451,7 @@ async def run_assignments(
     return outcomes
 
 
-async def delete_ghosts(session: AsyncSession, event_ids: Sequence[str]) -> int:
+async def delete_ghosts(session: AsyncSession, event_ids: Sequence[int]) -> int:
     """Delete the given events, refusing any that something now references. Caller commits."""
     merger = EventMerger(session)
     deleted = 0
@@ -465,7 +465,7 @@ async def delete_ghosts(session: AsyncSession, event_ids: Sequence[str]) -> int:
     return deleted
 
 
-async def _mlb_event_without_game_pk(session: AsyncSession, event_id: str) -> Event:
+async def _mlb_event_without_game_pk(session: AsyncSession, event_id: int) -> Event:
     event = await session.get(Event, event_id)
     if event is None:
         raise GamePkRefused(f"no event {event_id}")
@@ -478,7 +478,7 @@ async def _mlb_event_without_game_pk(session: AsyncSession, event_id: str) -> Ev
 
 
 async def plan_hand_assignment(
-    session: AsyncSession, fetcher: MlbStatsFetcher, event_id: str, game_pk: int, merge: bool
+    session: AsyncSession, fetcher: MlbStatsFetcher, event_id: int, game_pk: int, merge: bool
 ) -> GamePkAssignment:
     """The assignment of ``game_pk`` to an event without one, after checking that the game has
     the event's teams and a slot on its MLB date or within ``MAX_SINGLE_GAME_GAP`` of its start.
@@ -516,7 +516,7 @@ async def plan_hand_assignment(
     return GamePkAssignment(game_pk, holder, (event,), played, None, final)
 
 
-async def mark_no_game_pk(session: AsyncSession, event_id: str, reason: str) -> Event:
+async def mark_no_game_pk(session: AsyncSession, event_id: int, reason: str) -> Event:
     """Record why an MLB event has no ``gamePk`` (``mark_unmatched``), so the health check,
     settlement and the planning leave it out. Caller commits."""
     if not reason.strip():

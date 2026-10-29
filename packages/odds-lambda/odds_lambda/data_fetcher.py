@@ -11,7 +11,7 @@ from odds_core.api_models import (
     HistoricalOddsResponse,
     OddsResponse,
     ScoresResponse,
-    create_scheduled_event,
+    parse_api_event,
 )
 from odds_core.bookmakers import ODDS_API_BOOKMAKER_KEY_MAP
 from odds_core.config import get_settings
@@ -181,7 +181,7 @@ class TheOddsAPIClient:
             bookmakers: List of bookmakers (defaults to settings)
 
         Returns:
-            OddsResponse with parsed Event instances and raw data
+            OddsResponse with the listed games and raw data
 
         Example:
             async with TheOddsAPIClient() as client:
@@ -210,8 +210,7 @@ class TheOddsAPIClient:
         ]
         canonicalize_bookmaker_keys(raw_events_data)
 
-        # Convert API dicts to Event instances (scheduled games only)
-        events = [create_scheduled_event(event_dict) for event_dict in raw_events_data]
+        events = [parse_api_event(event_dict) for event_dict in raw_events_data]
 
         logger.info(
             "odds_fetched",
@@ -236,7 +235,7 @@ class TheOddsAPIClient:
             sport: Sport key (e.g., 'basketball_nba')
 
         Returns:
-            EventsResponse with parsed Event instances (no odds data)
+            EventsResponse with the listed games (no odds data)
 
         Note:
             This endpoint costs 0 quota units. Use it for event discovery
@@ -245,7 +244,7 @@ class TheOddsAPIClient:
         data, response_time = await self._make_request(f"sports/{sport}/events")
 
         raw_events_data = data if isinstance(data, list) else [data] if data else []
-        events = [create_scheduled_event(event_dict) for event_dict in raw_events_data]
+        events = [parse_api_event(event_dict) for event_dict in raw_events_data]
 
         logger.info(
             "events_fetched",
@@ -273,7 +272,7 @@ class TheOddsAPIClient:
             ScoresResponse with scores data
 
         Note:
-            Scores are kept as dicts since we only extract scores, not full Event objects
+            Scores are kept as dicts since only the scores are extracted
         """
         params = {"daysFrom": days_from}
 
@@ -316,7 +315,7 @@ class TheOddsAPIClient:
             bookmakers: List of bookmakers (defaults to settings)
 
         Returns:
-            HistoricalOddsResponse with parsed Event instances and raw data
+            HistoricalOddsResponse with the listed games and raw data
         """
         app_settings = get_settings()
         regions = regions or app_settings.data_collection.regions
@@ -343,8 +342,7 @@ class TheOddsAPIClient:
         ]
         canonicalize_bookmaker_keys(raw_events_data)
 
-        # Convert API dicts to Event instances (scheduled games only)
-        events = [create_scheduled_event(event_dict) for event_dict in raw_events_data]
+        events = [parse_api_event(event_dict) for event_dict in raw_events_data]
 
         logger.info(
             "historical_odds_fetched",

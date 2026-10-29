@@ -30,7 +30,7 @@ class GameLogReader:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def get_game_logs_for_event(self, event_id: str) -> list[NbaTeamGameLog]:
+    async def get_game_logs_for_event(self, event_id: int) -> list[NbaTeamGameLog]:
         """Get game log rows linked to a specific event (both teams).
 
         Returns:

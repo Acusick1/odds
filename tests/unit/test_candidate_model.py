@@ -34,7 +34,7 @@ from tests.test_helpers import (
 )
 
 KICKOFF = datetime(2026, 11, 7, 15, 0, tzinfo=UTC)
-EVENT = make_epl_event("evt", KICKOFF)
+EVENT = make_epl_event(1, KICKOFF)
 EXCHANGE_INPUT = frozenset({SharpInput.EXCHANGE})
 EXCHANGE = (2.0, 4.0, 4.0)
 
@@ -158,7 +158,7 @@ class TestStateInputs:
 
 
 def _events(n: int) -> list[Event]:
-    return [make_epl_event(f"e{i}", KICKOFF + timedelta(hours=i)) for i in range(n)]
+    return [make_epl_event(10 + i, KICKOFF + timedelta(hours=i)) for i in range(n)]
 
 
 def _params(**overrides: Any) -> RetailEvModelParams:
@@ -182,7 +182,7 @@ class TestRefitBlocks:
     def test_scored_matches_follow_the_training_prefix_in_blocks(self) -> None:
         events = _events(8)
         blocks = refit_blocks(events, _params())
-        assert [[e.id for e in b.events] for b in blocks] == [["e3", "e4"], ["e5", "e6"], ["e7"]]
+        assert [[e.id for e in b.events] for b in blocks] == [[13, 14], [15, 16], [17]]
         assert [b.index for b in blocks] == [0, 1, 2]
 
     def test_a_block_refits_at_its_first_decision_time(self) -> None:
@@ -194,7 +194,7 @@ class TestRefitBlocks:
 
 
 def _weekly(n: int) -> list[Event]:
-    return [make_epl_event(f"w{i}", KICKOFF + timedelta(days=8 * i)) for i in range(n)]
+    return [make_epl_event(20 + i, KICKOFF + timedelta(days=8 * i)) for i in range(n)]
 
 
 class TestTuningFolds:
@@ -202,22 +202,22 @@ class TestTuningFolds:
         events = _weekly(6)
         folds = tuning_folds(events, _params(tuning_min_train_matches=2, tuning_step_matches=2))
         assert [([e.id for e in f.train], [e.id for e in f.validate]) for f in folds] == [
-            (["w0", "w1"], ["w2", "w3"]),
-            (["w0", "w1", "w2", "w3"], ["w4", "w5"]),
+            ([20, 21], [22, 23]),
+            ([20, 21, 22, 23], [24, 25]),
         ]
 
     def test_training_matches_end_a_decision_window_before_validation(self) -> None:
-        events = [*_events(2), make_epl_event("late", KICKOFF + timedelta(days=9))]
+        events = [*_events(2), make_epl_event(99, KICKOFF + timedelta(days=9))]
         [first, second] = tuning_folds(events, _params(training_matches=3))
         assert first.train == ()
-        assert [e.id for e in second.train] == ["e0", "e1"]
+        assert [e.id for e in second.train] == [10, 11]
 
 
 class TestTune:
     def _folds(self) -> list[tuple[list[Any], list[Any]]]:
         rows = []
         for i, home in enumerate((2.2, 2.0, 1.9)):
-            event = make_epl_event(f"t{i}", KICKOFF + timedelta(days=8 * i))
+            event = make_epl_event(30 + i, KICKOFF + timedelta(days=8 * i))
             snap = make_quotes(
                 event,
                 next(_ids),
@@ -257,8 +257,8 @@ class TestTrainingPrefix:
     def test_takes_matches_tied_with_the_last_one(self) -> None:
         events = [
             *_events(3),
-            make_epl_event("tie", KICKOFF + timedelta(hours=2)),
-            make_epl_event("later", KICKOFF + timedelta(hours=5)),
+            make_epl_event(90, KICKOFF + timedelta(hours=2)),
+            make_epl_event(91, KICKOFF + timedelta(hours=5)),
         ]
         assert training_prefix(events, _params()) == 4
 

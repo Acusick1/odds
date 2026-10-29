@@ -309,7 +309,7 @@ class Refit:
     at: datetime
     training_matches: int
     training_rows: int
-    event_ids: tuple[str, ...]
+    event_ids: tuple[int, ...]
 
 
 class ModelReplay:
@@ -332,7 +332,7 @@ class ModelReplay:
         self._params = params
         self._market = market
         self._events = events
-        self._rows: dict[str, list[RetailEvRow]] = {}
+        self._rows: dict[int, list[RetailEvRow]] = {}
 
     async def _training_rows(self, events: Sequence[Event]) -> list[RetailEvRow]:
         market = self._market

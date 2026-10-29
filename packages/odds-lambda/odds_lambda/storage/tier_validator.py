@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 
 import structlog
-from odds_core.models import EventStatus, OddsSnapshot
+from odds_core.models import Event, EventExternalId, EventStatus, OddsSnapshot
 from odds_core.vocabulary import Source, TimeBasis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,7 +34,7 @@ WARNING_TIERS = frozenset({FetchTier.OPENING, FetchTier.EARLY, FetchTier.SHARP})
 class TierCoverageReport:
     """Coverage report for a single game (immutable)."""
 
-    event_id: str
+    event_id: int
     home_team: str
     away_team: str
     commence_time: datetime
@@ -173,7 +173,7 @@ class TierCoverageValidator:
 
     async def validate_game(
         self,
-        event_id: str,
+        event_id: int,
         required_tiers: set[FetchTier] | None = None,
         check_scores: bool = True,
     ) -> TierCoverageReport:
@@ -440,6 +440,17 @@ class TierCoverageValidator:
             )
             raise
 
+    async def _by_odds_api_id(self, db_games: Sequence[Event]) -> dict[str, Event]:
+        """The events of ``db_games`` that hold an Odds API id, by that id."""
+        by_id = {game.id: game for game in db_games}
+        rows = await self.session.execute(
+            select(EventExternalId.external_id, EventExternalId.event_id).where(
+                EventExternalId.source == Source.ODDS_API,
+                EventExternalId.event_id.in_(list(by_id)),  # type: ignore[attr-defined]
+            )
+        )
+        return {external_id: by_id[event_id] for external_id, event_id in rows.all()}
+
     async def _check_missing_games(
         self, target_date: date | datetime, db_games: list, api_games: list[dict]
     ) -> list[dict]:
@@ -454,8 +465,7 @@ class TierCoverageValidator:
         Returns:
             List of missing game dicts (games in API but not in database) - ERROR
         """
-        # Build set of game IDs in our database
-        db_game_ids = {game.id for game in db_games}
+        db_game_ids = set(await self._by_odds_api_id(db_games))
 
         # Find completed games in API response that aren't in our DB
         missing_games = []
@@ -507,8 +517,7 @@ class TierCoverageValidator:
         """
         from odds_core.models import EventStatus
 
-        # Build mapping of game IDs to game objects in our database
-        db_game_map = {game.id: game for game in db_games}
+        db_game_map = await self._by_odds_api_id(db_games)
 
         # Find games that are completed in API but not updated in DB
         missing_scores = []
@@ -529,11 +538,11 @@ class TierCoverageValidator:
 
             if db_game.status != EventStatus.FINAL or db_game.home_score is None:
                 # WARNING: Game in DB but scores not updated yet
-                snapshot_count = await self.reader.get_snapshot_count_for_event(game_id)
+                snapshot_count = await self.reader.get_snapshot_count_for_event(db_game.id)
 
                 missing_scores.append(
                     {
-                        "id": game_id,
+                        "id": db_game.id,
                         "home_team": api_game.get("home_team"),
                         "away_team": api_game.get("away_team"),
                         "commence_time": api_game.get("commence_time"),

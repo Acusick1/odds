@@ -16,7 +16,7 @@ status: stable
 
 ## Methods
 
-**Snapshot and event accessors**: `odds_lambda.storage.readers.OddsReader.get_snapshot_count_for_event` (counts distinct snapshot times per event, since a fetch stores one snapshot per market at one time), `odds_lambda.storage.readers.OddsReader.get_snapshots_for_event`, `odds_lambda.storage.readers.OddsReader.snapshot_exists`, `odds_lambda.storage.readers.OddsReader.get_events_by_date_range` (optional `min_snapshots`, counted in distinct snapshot times; ordered by `commence_time`, then event ID, so events with the same kick-off have a fixed order that does not depend on the query plan), `odds_lambda.storage.readers.OddsReader.get_events_by_team`, `odds_lambda.storage.readers.OddsReader.get_event_by_id`.
+**Snapshot and event accessors**: `odds_lambda.storage.readers.OddsReader.get_snapshot_count_for_event` (counts distinct snapshot times per event, since a fetch stores one snapshot per market at one time), `odds_lambda.storage.readers.OddsReader.get_snapshots_for_event`, `odds_lambda.storage.readers.OddsReader.snapshot_exists`, `odds_lambda.storage.readers.OddsReader.get_events_by_date_range` (optional `min_snapshots`, counted in distinct snapshot times; ordered by `commence_time`, then the integer event id, so events with the same kick-off have a fixed order that does not depend on the query plan), `odds_lambda.storage.readers.OddsReader.get_events_by_team`, `odds_lambda.storage.readers.OddsReader.get_event_by_id`. Each takes the event's integer id.
 
 **Operational**: `odds_lambda.storage.readers.OddsReader.get_fetch_logs`, `odds_lambda.storage.readers.OddsReader.get_data_quality_logs`, `odds_lambda.storage.readers.OddsReader.get_database_stats`, `odds_lambda.storage.readers.OddsReader.get_games_by_date`.
 
@@ -27,7 +27,7 @@ status: stable
 
 ## Naming
 
-- `odds_lambda.storage.readers.OddsReader.get_database_stats` is the only `*_stats` method on this class; the sibling readers (`odds_lambda.storage.injury_reader.InjuryReader`, `odds_lambda.storage.game_log_reader.GameLogReader`, `odds_lambda.storage.pbpstats_reader.PbpStatsReader`) name theirs differently.
+- `odds_lambda.storage.readers.OddsReader.get_database_stats` is the only `*_stats` method on this class; the sibling readers (`odds_lambda.storage.injury_reader.InjuryReader`, `odds_lambda.storage.game_log_reader.GameLogReader`, `odds_lambda.storage.pbpstats_reader.PbpStatsReader`) name theirs differently; the first two take the same integer event id.
 - "Snapshot" means an `odds_core.models.OddsSnapshot` ([columns and indexes](odds-tables.md#odds_snapshots)) row in every method, and something else again in the Polymarket tables.
 
 ## Related

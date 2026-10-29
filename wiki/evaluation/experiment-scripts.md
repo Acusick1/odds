@@ -35,7 +35,7 @@ A results directory holds CSV tables, a `summary.json` and, for the retail-EV ev
 | File | Content |
 |---|---|
 | `feature_stats.csv` | count, null_count, null_pct, mean, std, min, max, nunique per feature |
-| `feature_sample.csv` | first 20 rows with event ids and target |
+| `feature_sample.csv` | first 20 rows with integer event ids and target |
 | `feature_target_corr.csv` | Pearson and Spearman correlation with the target |
 
 ## Inventory

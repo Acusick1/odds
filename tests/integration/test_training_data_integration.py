@@ -53,7 +53,7 @@ async def nba_events_with_prices(pglite_async_session: AsyncSession) -> list[Eve
     for i in range(8):
         commence_time = base_time + timedelta(days=i)
         event = Event(
-            id=f"test_event_{i}",
+            id=i + 1,
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=commence_time,
@@ -358,7 +358,7 @@ class TestInjuryFeaturesIntegration:
                 player_name=f"Player, Home{i}",
                 status=InjuryStatus.OUT,
                 reason="Left Knee; Sprain",
-                event_id=f"test_event_{i}",
+                event_id=i + 1,
             )
             report_away = InjuryReport(
                 report_time=report_time,
@@ -369,7 +369,7 @@ class TestInjuryFeaturesIntegration:
                 player_name=f"Player, Away{i}",
                 status=InjuryStatus.QUESTIONABLE,
                 reason="Right Ankle; Soreness",
-                event_id=f"test_event_{i}",
+                event_id=i + 1,
             )
             pglite_async_session.add(report_home)
             pglite_async_session.add(report_away)
@@ -482,7 +482,7 @@ class TestRestFeaturesIntegration:
                 game_date=game_date,
                 matchup=f"HM{i} vs. AW{i}",
                 season="2024-25",
-                event_id=f"test_event_{i}",
+                event_id=i + 1,
             )
             away_log = NbaTeamGameLog(
                 nba_game_id=f"002240010{i}",
@@ -491,7 +491,7 @@ class TestRestFeaturesIntegration:
                 game_date=game_date,
                 matchup=f"AW{i} @ HM{i}",
                 season="2024-25",
-                event_id=f"test_event_{i}",
+                event_id=i + 1,
             )
             pglite_async_session.add(home_log)
             pglite_async_session.add(away_log)

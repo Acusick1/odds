@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 KICKOFF = datetime(2026, 5, 17, 14, 0, tzinfo=UTC)
 
 
-def _event(event_id: str, status: EventStatus, commence_time: datetime = KICKOFF) -> Event:
+def _event(event_id: int, status: EventStatus, commence_time: datetime = KICKOFF) -> Event:
     return Event(
         id=event_id,
         sport_key="soccer_epl",
@@ -71,24 +71,22 @@ class TestMarkPostponedEvents:
     async def test_postponed_match_marks_its_event(
         self, test_session: AsyncSession, session_maker: MagicMock
     ) -> None:
-        test_session.add(_event("scheduled", EventStatus.SCHEDULED))
+        test_session.add(_event(1, EventStatus.SCHEDULED))
         test_session.add_all(_postponed_pair())
         await test_session.commit()
 
         assert await fetch_espn_fixtures._mark_postponed_events() == 1
 
         test_session.expire_all()
-        event = await test_session.get(Event, "scheduled")
+        event = await test_session.get(Event, 1)
         assert event is not None
         assert event.status == EventStatus.POSTPONED
 
     async def test_final_and_postponed_events_are_left_alone(
         self, test_session: AsyncSession, session_maker: MagicMock
     ) -> None:
-        test_session.add(_event("final", EventStatus.FINAL))
-        test_session.add(
-            _event("postponed", EventStatus.POSTPONED, KICKOFF + timedelta(minutes=30))
-        )
+        test_session.add(_event(1, EventStatus.FINAL))
+        test_session.add(_event(2, EventStatus.POSTPONED, KICKOFF + timedelta(minutes=30)))
         test_session.add_all(_postponed_pair())
         await test_session.commit()
 
@@ -98,14 +96,14 @@ class TestMarkPostponedEvents:
         test_session.expire_all()
         statuses = {
             event_id: (await test_session.get(Event, event_id)).status  # type: ignore[union-attr]
-            for event_id in ("final", "postponed")
+            for event_id in (1, 2)
         }
-        assert statuses == {"final": EventStatus.FINAL, "postponed": EventStatus.POSTPONED}
+        assert statuses == {1: EventStatus.FINAL, 2: EventStatus.POSTPONED}
 
     async def test_pairing_listed_again_by_espn_within_the_window_is_not_marked(
         self, test_session: AsyncSession, session_maker: MagicMock
     ) -> None:
-        test_session.add(_event("moved_slightly", EventStatus.SCHEDULED))
+        test_session.add(_event(1, EventStatus.SCHEDULED))
         test_session.add_all(_postponed_pair())
         relisted = _fixture("Bournemouth", "Manchester City", "home", status="Scheduled")
         relisted.date = KICKOFF + timedelta(hours=1)
@@ -117,7 +115,7 @@ class TestMarkPostponedEvents:
     async def test_event_at_a_different_kickoff_is_not_marked(
         self, test_session: AsyncSession, session_maker: MagicMock
     ) -> None:
-        test_session.add(_event("rescheduled", EventStatus.SCHEDULED, KICKOFF + timedelta(days=2)))
+        test_session.add(_event(1, EventStatus.SCHEDULED, KICKOFF + timedelta(days=2)))
         test_session.add_all(_postponed_pair())
         await test_session.commit()
 
@@ -126,7 +124,7 @@ class TestMarkPostponedEvents:
     async def test_other_competitions_and_statuses_are_ignored(
         self, test_session: AsyncSession, session_maker: MagicMock
     ) -> None:
-        test_session.add(_event("scheduled", EventStatus.SCHEDULED))
+        test_session.add(_event(1, EventStatus.SCHEDULED))
         test_session.add_all(_postponed_pair(competition="FA Cup"))
         test_session.add_all(
             [_fixture("Bournemouth", "Manchester City", "home", status="Scheduled")]
