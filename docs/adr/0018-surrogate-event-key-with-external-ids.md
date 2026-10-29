@@ -6,7 +6,7 @@ status: accepted
 
 ## Context
 
-Before the redesign in #658, an event's id was the id of the source that first stored it ([events table](../../wiki/storage/events.md#id-prefix-identifies-the-source)):
+Before the redesign in #658, an event's id was the id of the source that first stored it ([events table](../../wiki/storage/events.md#legacy-string-ids)):
 
 - The Odds API events carried the API's own id.
 - OddsPortal and football-data.co.uk events carried ids built from teams and kick-off (`op_`, `op_live_`, `fduk_`), which the sources never issued.
