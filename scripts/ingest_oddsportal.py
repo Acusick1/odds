@@ -45,7 +45,13 @@ from odds_lambda.oddsportal_common import (
     event_id_from_match_link,
     parse_match_date,
 )
-from odds_lambda.storage.event_resolver import ListedGame, MatchWindow, Resolution, resolve_event
+from odds_lambda.storage.event_resolver import (
+    AmbiguousHistoricalMatch,
+    ListedGame,
+    MatchWindow,
+    Resolution,
+    resolve_event,
+)
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload, store_shaped_snapshot
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -270,6 +276,9 @@ async def ingest_season(
                         json_market_key=json_market_key,
                         normalize_fn=normalize_fn,
                     )
+            except AmbiguousHistoricalMatch as e:
+                stats.games_skipped += 1
+                log.warning(f"  Skipped: {e}")
             except Exception as e:
                 msg = f"{record.get('home_team', '?')} vs {record.get('away_team', '?')}: {e}"
                 stats.errors.append(msg)

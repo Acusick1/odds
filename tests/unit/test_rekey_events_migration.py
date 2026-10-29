@@ -94,7 +94,7 @@ async def session(pglite_async_session: AsyncSession, migration: ModuleType) -> 
                 alert_type="unsettled_events:soccer_epl",
                 severity="warning",
                 message="m",
-                context={"sport_key": "soccer_epl", "event_ids": [1, 3, 99]},
+                context={"sport_key": "soccer_epl", "event_ids": [1, 3, 99, "op_gone"]},
             ),
         ]
     )
@@ -136,7 +136,7 @@ class TestDowngrade:
             (3,),
         ]
         context = (await session.execute(text("SELECT context FROM alert_history"))).scalar_one()
-        assert context["event_ids"] == ["op_live_ARS_CHE_2026-11-07T1500", "def4567", 99]
+        assert context["event_ids"] == ["op_live_ARS_CHE_2026-11-07T1500", "def4567", 99, "op_gone"]
         assert await _rows(session, "SELECT to_regclass('legacy_event_ids')") == [(None,)]
 
 
@@ -155,7 +155,7 @@ class TestUpgrade:
             session, "SELECT event_id FROM data_quality_logs ORDER BY event_id NULLS FIRST"
         ) == [(None,), (4,)]
         context = (await session.execute(text("SELECT context FROM alert_history"))).scalar_one()
-        assert context["event_ids"] == [1, 3, 99]
+        assert context["event_ids"] == [1, 3, 99, "op_gone"]
         assert await _rows(
             session, "SELECT event_id, legacy_id FROM legacy_event_ids ORDER BY event_id"
         ) == [

@@ -87,6 +87,11 @@ class ResolvedEvent:
     resolution: Resolution
 
 
+class AmbiguousHistoricalMatch(ValueError):
+    """A historical row has several same-fixture events within ±24 h and none within ±2 h, so
+    it could be any of them or a game of its own."""
+
+
 class StaleListing(ValueError):
     """A live listing matched no event, and its start is too far past to create one."""
 
@@ -134,6 +139,8 @@ async def resolve_event(session: AsyncSession, game: ListedGame) -> ResolvedEven
     Raises:
         StaleListing: when no event matches and the game starts before
             ``game.earliest_created_start``.
+        AmbiguousHistoricalMatch: when a historical game is ambiguous (``_match_historical``);
+            nothing is written.
     """
     home_team = normalize_team_name(game.home_team)
     away_team = normalize_team_name(game.away_team)
@@ -338,8 +345,9 @@ async def _match_historical(
 ) -> Event | None:
     """The event of a historical row: a lone same-fixture event within ±24 h, else (several)
     the nearest of those within ±2 h. When several lie within ±24 h and none within ±2 h the
-    row is ambiguous and matches nothing, so neighbouring fixtures of the same teams (an NBA
-    back-to-back) are never conflated."""
+    row is ambiguous: it raises ``AmbiguousHistoricalMatch`` rather than create another event of
+    the fixture, and neighbouring fixtures of the same teams (an NBA back-to-back) are never
+    conflated."""
     anchor = ensure_utc(game.commence_time)
     candidates = await find_historical_candidates(
         session, home_team, away_team, anchor, game.sport_key
@@ -356,7 +364,11 @@ async def _match_historical(
                 commence_time=anchor.isoformat(),
                 candidates=[e.id for e in candidates],
             )
-            return None
+            raise AmbiguousHistoricalMatch(
+                f"{home_team} v {away_team} at {anchor.isoformat()}: events "
+                f"{sorted(e.id for e in candidates if e.id is not None)} lie within 24 h and none "
+                "within 2 h"
+            )
         candidates = within
     if not candidates:
         return None

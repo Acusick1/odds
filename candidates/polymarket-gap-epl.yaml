@@ -5,7 +5,7 @@ market: 1x2
 sport: soccer_epl
 version: 2
 issue: 655
-start_date: 2026-10-31
+start_date: 2026-10-30
 status: active
 rule: polymarket_gap
 rule_sha256: d59fef612cd50f467835b60379934dabbc94bd9ff89d38efb6f302ac96d22820

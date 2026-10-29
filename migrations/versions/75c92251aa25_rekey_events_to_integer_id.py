@@ -311,7 +311,8 @@ def downgrade() -> None:
     op.create_primary_key("events_pkey", "events", ["id"])
     _create_foreign_keys(referencing, integer_column="surrogate_id", string_column="id")
     _rekey_alert_contexts(
-        "jsonb_typeof(x.v) = 'number' AND e.surrogate_id = (x.v #>> '{}')::bigint", "e.id"
+        "e.surrogate_id = CASE WHEN jsonb_typeof(x.v) = 'number' THEN (x.v #>> '{}')::bigint END",
+        "e.id",
     )
     op.drop_table("legacy_event_ids")
 

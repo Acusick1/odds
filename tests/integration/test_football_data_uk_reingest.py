@@ -347,7 +347,7 @@ class TestMatchedAndAmbiguousEvents:
         assert stats.kickoff_mismatches == 1
 
     @pytest.mark.asyncio
-    async def test_two_candidates_none_within_two_hours_create_a_new_event(
+    async def test_two_candidates_none_within_two_hours_skip_the_row(
         self, pglite_async_session
     ) -> None:
         session = pglite_async_session
@@ -357,12 +357,15 @@ class TestMatchedAndAmbiguousEvents:
         await session.flush()
 
         stats = FdukStats()
-        await ingest_row(session, ROW, stats)
+        for _ in range(2):
+            await ingest_row(session, ROW, stats)
         await session.flush()
 
-        assert stats.events_created == 1
-        created = (await session.execute(select(Event).where(Event.id.not_in([3, 4])))).scalar_one()
-        assert len(await _snaps(session, created.id)) == 2
+        assert (stats.events_created, stats.games_skipped, stats.errors) == (0, 2, [])
+        assert (await session.execute(select(func.count()).select_from(Event))).scalar_one() == 2
+        assert (
+            await session.execute(select(func.count()).select_from(OddsSnapshot))
+        ).scalar_one() == 0
 
 
 def _unsettled_event(event_id: int, kickoff: datetime, status: EventStatus) -> Event:

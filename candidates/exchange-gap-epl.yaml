@@ -5,7 +5,7 @@ market: 1x2
 sport: soccer_epl
 version: 3
 issue: 626
-start_date: 2026-10-31
+start_date: 2026-10-30
 status: active
 rule: exchange_gap
 rule_sha256: ce8d329b559651d5559db59b7f9efe8e3b19ea4c124a88a557b0c18dadd3b864

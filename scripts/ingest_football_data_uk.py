@@ -43,7 +43,13 @@ from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.oddsportal_common import IngestionStats
 from odds_lambda.price_rows import PriceSpec, expand_envelope
 from odds_lambda.storage.data_quality import record_issue
-from odds_lambda.storage.event_resolver import ListedGame, MatchWindow, Resolution, resolve_event
+from odds_lambda.storage.event_resolver import (
+    AmbiguousHistoricalMatch,
+    ListedGame,
+    MatchWindow,
+    Resolution,
+    resolve_event,
+)
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload, store_shaped_snapshot
 from odds_lambda.storage.snapshot_store import PriceRow, price_row
 from sqlalchemy import delete, func, select
@@ -415,6 +421,9 @@ async def ingest_row(
     try:
         async with session.begin_nested():
             await _ingest_one_match(session, row, stats)
+    except AmbiguousHistoricalMatch as e:
+        stats.games_skipped += 1
+        log.warning(f"  Skipped: {e}")
     except Exception as e:
         home = row.get("HomeTeam", "?")
         away = row.get("AwayTeam", "?")

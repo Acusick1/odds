@@ -16,6 +16,7 @@ from odds_core.vocabulary import HealthCheck, Source
 from odds_lambda.mlb_game_resolver import ResolutionRule, ResolvedGame
 from odds_lambda.storage import event_resolver
 from odds_lambda.storage.event_resolver import (
+    AmbiguousHistoricalMatch,
     ListedGame,
     LockOrderError,
     MatchWindow,
@@ -642,7 +643,7 @@ class TestHistoricalWindow:
         assert resolved.event.id == first.id
 
     @pytest.mark.asyncio
-    async def test_back_to_back_fixtures_with_none_within_two_hours_are_ambiguous(
+    async def test_back_to_back_fixtures_with_none_within_two_hours_are_refused(
         self, pglite_async_session
     ) -> None:
         session = pglite_async_session
@@ -654,10 +655,11 @@ class TestHistoricalWindow:
         )
         await session.flush()
 
-        resolved = await resolve_event(session, historical_listing())
+        with pytest.raises(AmbiguousHistoricalMatch):
+            await resolve_event(session, historical_listing())
 
-        assert resolved.resolution is Resolution.CREATED
-        assert resolved.event.id not in {1, 2}
+        count = await session.execute(select(func.count()).select_from(Event))
+        assert count.scalar_one() == 2
 
     @pytest.mark.asyncio
     async def test_is_scoped_to_the_sport(self, pglite_async_session, stored_epl_event) -> None:
