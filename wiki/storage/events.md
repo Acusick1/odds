@@ -48,7 +48,7 @@ No events column names a source. Training's `data_source` filter keeps events wi
 
 ## Legacy string ids
 
-The table `legacy_event_ids` (`event_id`, `legacy_id`) holds the string key each event stored before `migrations/versions/75c92251aa25_rekey_events_to_integer_id.py` had: the Odds API's id for an event an Odds API listing created, else an id built from teams and kick-off (`op_`, `op_live_` or `fduk_`). It has no model and no foreign key, and only that migration's downgrade reads it, to restore the string keys. Every Odds API key in it is also its event's `odds_api` external id, where the resolver finds it; the built ids were never a source's, and nothing matches on them.
+The table `legacy_event_ids` (`event_id`, `legacy_id`) holds the string key each event stored before `migrations/versions/75c92251aa25_rekey_events_to_integer_id.py` had: the Odds API's id for an event an Odds API listing created, else an id built from teams and kick-off (`op_`, `op_live_` or `fduk_`). It has no model and no foreign key, and only that migration's downgrade reads it, to restore the string keys; the downgrade's alert-context re-key casts an `event_ids` element to bigint only when it is a JSON number, so string elements stay as they are. Every Odds API key in it is also its event's `odds_api` external id, where the resolver finds it; the built ids were never a source's, and nothing matches on them.
 
 ## Team-name normalizers
 
@@ -61,7 +61,7 @@ The two share no data.
 
 - `odds_lambda.storage.writers.OddsWriter.update_event_status`: raises `ValueError` for `FINAL` unless both scores are given, and for a move `odds_core.models.EventStatus.can_become` refuses (a FINAL event never changes status), so a FINAL event written through it always has scores; it then sets the scores and `completed_at`. Scores passed with any other status are ignored.
 - `odds_lambda.odds_api_events.resolve_odds_api_events`, for `odds_lambda.event_sync.EventSyncService.sync_sport` (every fetch-odds run) and `odds discover games`: resolves each game the API lists (`odds_core.api_models.ApiEvent`, which carries the API's id as `odds_api_id`) through `odds_lambda.storage.event_resolver.resolve_event` ([Odds API events](event-matching.md#odds-api-events)), in fixture-lock order and one savepoint per game, and returns how many events were created and how many matched. A matched event keeps its sport, teams, status, scores, `gamePk` and key; only its Odds API id is recorded and its kick-off offered to `odds_lambda.storage.event_kickoff.move_kickoff` with the Odds API as the source ([Kick-off authority](kickoff-authority.md)), so a POSTPONED event that moves, or a LIVE one moved to a start after the clock, becomes SCHEDULED. An event the resolver creates is SCHEDULED with null scores and the API's id as its `odds_api` external id.
-- `odds_lambda.storage.event_resolver.resolve_event` creates the live jobs' events and the historical scripts' ones, MLB ones with their `gamePk` as an external id, and records each source's id: [Event resolver](event-resolver.md).
+- `odds_lambda.storage.event_resolver.resolve_event` creates the live jobs' events and the historical scripts' ones (it refuses an ambiguous historical match instead), MLB ones with their `gamePk` as an external id, and records each source's id: [Event resolver](event-resolver.md).
 
 ## Related
 

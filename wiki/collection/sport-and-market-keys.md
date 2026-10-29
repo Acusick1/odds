@@ -63,7 +63,7 @@ A market key is whatever string sits in an envelope's `bookmakers[].markets[].ke
 | Writer | Football 3-way | Two-way moneyline | Totals |
 |---|---|---|---|
 | The Odds API | `1x2` (relabelled from `h2h` for soccer) | `h2h` | `totals` |
-| FDUK loader (`scripts/ingest_football_data_uk.py`, opening and closing `1x2` only) | `1x2` | none | none |
+| FDUK loader (`scripts/ingest_football_data_uk.py`, opening and closing `1x2` only; skips a game whose event match is ambiguous) | `1x2` | none | none |
 | OddsPortal adapter | `1x2` | `h2h` (scraped as `home_away`) | `totals`, point 2.5 (scraped as `over_under_2_5`) |
 | Betfair (`odds_lambda.betfair.constants.SPORT_CONFIG`) | `1x2` (EPL) | `h2h` (MLB) | `totals`, point 2.5 (EPL, `OVER_UNDER_25`) |
 | Polymarket (`odds_lambda.polymarket_sports.POLYMARKET_SPORTS`) | `1x2` (EPL) | none | none |
