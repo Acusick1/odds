@@ -46,7 +46,7 @@ class TestUpgradeAndDowngrade:
         session = pglite_async_session
         session.add(
             Event(
-                id="e1",
+                id=1,
                 sport_key="soccer_epl",
                 sport_title="EPL",
                 commence_time=MOMENT,
@@ -65,7 +65,7 @@ class TestUpgradeAndDowngrade:
         await session.execute(
             text(
                 "INSERT INTO paper_trades (event_id, market, selection, bookmaker, odds, stake,"
-                " bankroll_before, placed_at) VALUES ('e1', '1x2', 'home', 'bet365', :odds, 10,"
+                " bankroll_before, placed_at) VALUES (1, '1x2', 'home', 'bet365', :odds, 10,"
                 " 1000, now())"
             ),
             {"odds": odds},
@@ -102,7 +102,7 @@ class TestUpgradeAndDowngrade:
         insert = (
             "INSERT INTO paper_trades (event_id, market, selection, bookmaker, price_decimal,"
             " stake, bankroll_before, placed_at, candidate_name, candidate_version)"
-            " VALUES ('e1', '1x2', 'home', 'bet365', :price, 10, 1000, now(), :name, :version)"
+            " VALUES (1, '1x2', 'home', 'bet365', :price, 10, 1000, now(), :name, :version)"
         )
         for params in (
             {"price": 1.0, "name": None, "version": None},
@@ -126,7 +126,7 @@ class TestUpgradeAndDowngrade:
                 text(
                     "INSERT INTO paper_trades (event_id, market, selection, bookmaker,"
                     " price_decimal, stake, bankroll_before, placed_at)"
-                    " VALUES ('e1', '1x2', 'home', 'bet365', :p, 10, 1000, now())"
+                    " VALUES (1, '1x2', 'home', 'bet365', :p, 10, 1000, now())"
                 ),
                 {"p": price},
             )

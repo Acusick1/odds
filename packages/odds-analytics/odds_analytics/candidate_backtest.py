@@ -99,7 +99,7 @@ class BacktestResult:
     comparison: BacktestResult | None = None
 
     @property
-    def decided_event_ids(self) -> tuple[str, ...] | None:
+    def decided_event_ids(self) -> tuple[int, ...] | None:
         """A model rule's scored matches; ``None`` for a rule that decides every range event."""
         if not isinstance(RULES[self.rule], ModelRuleSpec):
             return None
@@ -215,7 +215,7 @@ async def replay(
     now: datetime | None = None,
     n_boot: int = DEFAULT_BOOTSTRAP_SAMPLES,
     seed: int = BOOTSTRAP_SEED,
-    only_events: Collection[str] | None = None,
+    only_events: Collection[int] | None = None,
 ) -> BacktestResult:
     """Replay ``candidate`` over the events kicked off from ``start`` to ``end`` inclusive.
 

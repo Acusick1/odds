@@ -3,7 +3,7 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from odds_core.api_models import OddsResponse, api_dict_to_event
+from odds_core.api_models import OddsResponse, parse_api_event
 from odds_core.models import Event, FetchLog, OddsSnapshot, Price
 from odds_lambda.ingestion import (
     EventIngestionFailure,
@@ -51,7 +51,7 @@ class TestOddsIngestionService:
                 }
             ],
         }
-        event = api_dict_to_event(event_payload)
+        event = parse_api_event(event_payload)
         response = OddsResponse(
             events=[event],
             raw_events_data=[event_payload],
@@ -99,14 +99,12 @@ class TestOddsIngestionService:
 
         await test_session.rollback()
 
-        db_event = (
-            await test_session.execute(select(Event).where(Event.id == "ingest_event_success"))
-        ).scalar_one()
+        db_event = (await test_session.execute(select(Event))).scalar_one()
         assert db_event.home_team == "Los Angeles Lakers"
 
         snapshot = (
             await test_session.execute(
-                select(OddsSnapshot).where(OddsSnapshot.event_id == "ingest_event_success")
+                select(OddsSnapshot).where(OddsSnapshot.event_id == db_event.id)
             )
         ).scalar_one()
         assert snapshot.payload_id is not None
@@ -148,7 +146,7 @@ class TestOddsIngestionService:
             "away_team": "Miami Heat",
             "bookmakers": [],
         }
-        event = api_dict_to_event(event_payload)
+        event = parse_api_event(event_payload)
         response = OddsResponse(
             events=[event],
             raw_events_data=[event_payload],
@@ -184,7 +182,7 @@ class TestOddsIngestionService:
 
         failure = result.failures[0]
         assert isinstance(failure, EventIngestionFailure)
-        assert failure.event_id == "ingest_event_failure"
+        assert failure.odds_api_id == "ingest_event_failure"
         assert failure.error == "snapshot_failure"
 
         await test_session.rollback()

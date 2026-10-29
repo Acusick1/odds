@@ -62,7 +62,7 @@ async def hold_game_pks(session: AsyncSession) -> None:
                 "INSERT INTO event_external_ids (source, external_id, event_id, created_at) "
                 "VALUES ('mlb_stats_api', :game_pk, :event_id, now()) ON CONFLICT DO NOTHING"
             ),
-            {"game_pk": str(game_pk), "event_id": event.surrogate_id},
+            {"game_pk": str(game_pk), "event_id": event.id},
         )
 
 
@@ -185,12 +185,12 @@ class StubHistoricalOddsClient:
 
 
 TWIN_KICKOFF = datetime(2026, 4, 15, 15, 0, tzinfo=UTC)
-API_EVENT_ID = "zz9hexapievent"
-TWIN_EVENT_ID = "op_live_ARS_CHE_2026-04-15T1500"
+TWIN_EVENT_ID = 1
+API_EVENT_ID = 2
 
 
 def make_epl_event(
-    event_id: str,
+    event_id: int,
     commence_time: datetime = TWIN_KICKOFF,
     home_team: str = "Arsenal",
     away_team: str = "Chelsea",
@@ -288,7 +288,7 @@ class TaggedSnapshot:
     the timing basis that pick the source and time basis it is stored under
     (``snapshot_shape``)."""
 
-    event_id: str
+    event_id: int
     snapshot_time: datetime
     bookmakers: list[dict[str, Any]]
     source: str | None
@@ -303,7 +303,7 @@ class TaggedSnapshot:
 
 
 def make_tagged_snapshot(
-    event_id: str,
+    event_id: int,
     snapshot_time: datetime,
     bookmakers: list[dict[str, Any]],
     source: str | None,

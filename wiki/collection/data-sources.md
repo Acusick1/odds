@@ -5,7 +5,6 @@ description: Every odds feed and what each one supplies, bookmaker roles, the Pi
 sources:
   - odds_core.config.DataCollectionConfig
   - odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP
-  - odds_core.event_ids.LIVE_EVENT_ID_PREFIX
   - scripts/ingest_football_data_uk.py
   - odds_lambda.jobs.fetch_polymarket_odds
 status: stable
@@ -13,15 +12,15 @@ status: stable
 
 # Data sources
 
-Five feeds write snapshots from envelopes in The Odds API shape ([odds tables](../storage/odds-tables.md#envelope-format)). The Odds API's outcomes carry its integer American `price`; the others carry the source decimal as `price_decimal` ([price encodings](../foundations/odds-math.md#price-encodings)). A snapshot's feed is its `odds_core.models.OddsSnapshot.source`, and an event's creator shows in its `odds_core.models.Event.id` prefix ([events](../storage/events.md)); the per-source [stale-data check](../operations/health-monitor.md#stale-data-check) keys on `source`. The keys and defaults each feed uses are in [sport-and-market-keys](sport-and-market-keys.md).
+Five feeds write snapshots from envelopes in The Odds API shape ([odds tables](../storage/odds-tables.md#envelope-format)). The Odds API's outcomes carry its integer American `price`; the others carry the source decimal as `price_decimal` ([price encodings](../foundations/odds-math.md#price-encodings)). A snapshot's feed is its `odds_core.models.OddsSnapshot.source`, and an event's id is numbered by the database whichever feed created it, with each feed's own id for it held as an external id ([events](../storage/events.md#external-ids)); the per-source [stale-data check](../operations/health-monitor.md#stale-data-check) keys on `source`. The keys and defaults each feed uses are in [sport-and-market-keys](sport-and-market-keys.md).
 
-| Source | Supplies | Collected by | Where it runs | Event ids |
+| Source | Supplies | Collected by | Where it runs | Events |
 |---|---|---|---|---|
-| The Odds API | Pinnacle, Betfair Exchange and UK retail books for EPL; US books for MLB and NBA; dense snapshots | `fetch-odds` job ([fetch-odds-job](fetch-odds-job.md), [client](odds-api-client.md)) | production host, EPL only | API hex ids |
-| OddsPortal | UK books, upcoming and closing odds | `fetch-oddsportal` job ([fetch-oddsportal-job](fetch-oddsportal-job.md)) | production host | `op_live_*` (`odds_core.event_ids.LIVE_EVENT_ID_PREFIX`) |
-| Betfair Exchange | Best back price per outcome | `fetch-betfair-exchange` job ([betfair-exchange](betfair-exchange.md)) | production host | joins existing events |
+| The Odds API | Pinnacle, Betfair Exchange and UK retail books for EPL; US books for MLB and NBA; dense snapshots | `fetch-odds` job ([fetch-odds-job](fetch-odds-job.md), [client](odds-api-client.md)) | production host, EPL only | creates events, recording the API's id |
+| OddsPortal | UK books, upcoming and closing odds | `fetch-oddsportal` job ([fetch-oddsportal-job](fetch-oddsportal-job.md)) | production host | creates events, recording the OddsPortal id |
+| Betfair Exchange | Best back price per outcome | `fetch-betfair-exchange` job ([betfair-exchange](betfair-exchange.md)) | production host | creates events, recording the Betfair id |
 | Polymarket | EPL three-way match midpoints, history from 2025-08 | `odds polymarket backfill-odds` (manual) and the bootstrapped per-sport `fetch-polymarket-odds-epl` job ([polymarket-odds-snapshots](polymarket-odds-snapshots.md)) | backfill manual; the job self-schedules and is dormant with no stored event in 28 days | attaches to existing events, recording the Polymarket id, and creates none; snapshots stored as source `polymarket` |
-| football-data.co.uk (FDUK) | Historical EPL opening and closing odds from Pinnacle, the exchange and UK retail books, with snapshot times stamped from FDUK's documented collection times (`scripts/ingest_football_data_uk.py`; time basis `upper_bound` for the opening and `close` for the closing, from which a snapshot's tier is derived, [fetch tier](../storage/fetch-tier.md)) and the full-time score for events that have none; snapshots and price rows, and the kick-off of events no better source holds an id on | manual script ([historical-ingest-scripts](historical-ingest-scripts.md)) | manual | `fduk_*` / `op_<season>_*` |
+| football-data.co.uk (FDUK) | Historical EPL opening and closing odds from Pinnacle, the exchange and UK retail books, with snapshot times stamped from FDUK's documented collection times (`scripts/ingest_football_data_uk.py`; time basis `upper_bound` for the opening and `close` for the closing, from which a snapshot's tier is derived, [fetch tier](../storage/fetch-tier.md)) and the full-time score for events that have none; snapshots and price rows, and the kick-off of events no better source holds an id on | manual script ([historical-ingest-scripts](historical-ingest-scripts.md)) | manual | creates events of matches no stored event has; FDUK issues no id |
 
 ESPN and MLB are non-odds feeds: [epl-context-data](epl-context-data.md), [mlb-probable-pitchers](mlb-probable-pitchers.md). Polymarket is collected for EPL only ([ADR-0013](../../docs/adr/0013-collect-polymarket-epl-as-sharp-reference.md), [market research](polymarket-market-research.md)). The ESPN and MLB collectors run as a daily cron. Every scheduled collector runs on the production host ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). The agent-facing view of the same feeds, including sources it rejected, is [agent-data-sources](../agent/agent-data-sources.md).
 

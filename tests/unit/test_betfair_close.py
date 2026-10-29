@@ -22,7 +22,7 @@ from tests.test_helpers import (
 )
 
 KICKOFF = datetime(2025, 10, 4, 14, 0, tzinfo=UTC)
-EVENT = make_epl_event("fduk_ARS_CHE_2025-10-04", KICKOFF)
+EVENT = make_epl_event(1, KICKOFF)
 _ids = count(1)
 EARLY = (2.2, 3.5, 3.8)
 LATE = (2.3, 3.4, 3.6)

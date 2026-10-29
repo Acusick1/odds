@@ -52,7 +52,7 @@ async def events_with_gaps(test_session):
 
     # Event 1: Missing CLOSING tier (highest priority gap)
     event1 = Event(
-        id="gap_test_event_1",
+        id=1,
         sport_key="basketball_nba",
         sport_title="NBA",
         commence_time=datetime(2024, 1, 15, 19, 0, 0, tzinfo=UTC),
@@ -65,7 +65,7 @@ async def events_with_gaps(test_session):
 
     # Event 2: Missing OPENING and EARLY tiers (lower priority gap)
     event2 = Event(
-        id="gap_test_event_2",
+        id=2,
         sport_key="basketball_nba",
         sport_title="NBA",
         commence_time=datetime(2024, 1, 15, 21, 0, 0, tzinfo=UTC),
@@ -78,7 +78,7 @@ async def events_with_gaps(test_session):
 
     # Event 3: Complete coverage (no gaps)
     event3 = Event(
-        id="gap_test_event_3",
+        id=3,
         sport_key="basketball_nba",
         sport_title="NBA",
         commence_time=datetime(2024, 1, 16, 19, 0, 0, tzinfo=UTC),
@@ -93,7 +93,7 @@ async def events_with_gaps(test_session):
         await add_event(test_session, event)
         test_session.add(
             EventExternalId(
-                source=Source.ODDS_API, external_id=event.id, event_id=event.surrogate_id
+                source=Source.ODDS_API, external_id=f"gap_test_event_{event.id}", event_id=event.id
             )
         )
 
@@ -258,7 +258,7 @@ class TestGapDetectionWorkflow:
 
         # event1 should be missing CLOSING tier snapshot
         closing_time = events_with_gaps[0].commence_time - timedelta(minutes=30)
-        exists_before = await reader.snapshot_exists("gap_test_event_1", closing_time)
+        exists_before = await reader.snapshot_exists(1, closing_time)
         assert exists_before is False
 
         # Step 2: Generate and execute plan
@@ -291,7 +291,7 @@ class TestGapDetectionWorkflow:
         # Refresh session to see new data
         test_session.expire_all()
 
-        exists_after = await reader.snapshot_exists("gap_test_event_1", closing_time)
+        exists_after = await reader.snapshot_exists(1, closing_time)
         assert exists_after is True
 
     @pytest.mark.asyncio
@@ -312,8 +312,8 @@ class TestGapDetectionWorkflow:
         game_ids = [game["event_id"] for game in plan["games"]]
 
         # Find positions
-        event1_pos = game_ids.index("gap_test_event_1") if "gap_test_event_1" in game_ids else -1
-        event2_pos = game_ids.index("gap_test_event_2") if "gap_test_event_2" in game_ids else -1
+        event1_pos = game_ids.index(1) if 1 in game_ids else -1
+        event2_pos = game_ids.index(2) if 2 in game_ids else -1
 
         if event1_pos >= 0 and event2_pos >= 0:
             # event1 (CLOSING gap) should come before event2 (EARLY gap)
@@ -326,7 +326,7 @@ class TestGapDetectionWorkflow:
         # Create event with complete tier coverage
 
         event = Event(
-            id="complete_event",
+            id=4,
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=datetime(2024, 2, 1, 19, 0, 0, tzinfo=UTC),
@@ -390,7 +390,7 @@ class TestGapDetectionWorkflow:
             "total_games": 1,
             "total_snapshots": 1,
             "estimated_quota_usage": 30,
-            "games": [g for g in plan1["games"] if g["event_id"] == "gap_test_event_1"],
+            "games": [g for g in plan1["games"] if g["event_id"] == 1],
         }
 
         async with BackfillExecutor(

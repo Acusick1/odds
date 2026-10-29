@@ -71,7 +71,7 @@ def merge_twins(
     asyncio.run(_twins(sport, apply))
 
 
-async def _merge(keep_id: str, drop_id: str, apply: bool) -> None:
+async def _merge(keep_id: int, drop_id: int, apply: bool) -> None:
     async with async_session_maker() as session:
         if keep_id == drop_id:
             raise typer.BadParameter("keep_id and drop_id are the same event")
@@ -96,8 +96,8 @@ async def _merge(keep_id: str, drop_id: str, apply: bool) -> None:
 
 @app.command("merge")
 def merge(
-    keep_id: str = typer.Argument(..., help="Event id that stays"),
-    drop_id: str = typer.Argument(..., help="Event id merged into it and deleted"),
+    keep_id: int = typer.Argument(..., help="Event id that stays"),
+    drop_id: int = typer.Argument(..., help="Event id merged into it and deleted"),
     apply: bool = typer.Option(False, "--apply", help="Merge; without it only prints the plan"),
 ) -> None:
     """Merge one event into another of the same sport and teams, e.g. a rescheduled match.
@@ -198,7 +198,7 @@ def _outcome_line(tag: str, outcome: AssignmentOutcome) -> str:
     line = f"{tag} game_pk={outcome.game_pk} kept={outcome.kept_id}"
     if outcome.rule is not None:
         line += f" rule={outcome.rule.value}"
-    merged = ",".join(outcome.merged_ids) or "none"
+    merged = ",".join(map(str, outcome.merged_ids)) or "none"
     if outcome.status is OutcomeStatus.REFUSED:
         return (
             f"{line} merged={merged} reason={outcome.detail}"
@@ -315,7 +315,7 @@ def assign_game_pks(
     asyncio.run(_assign_game_pks(since_date, apply, delete_ghosts_))
 
 
-async def _set_game_pk(event_id: str, game_pk: int, merge: bool, apply: bool) -> None:
+async def _set_game_pk(event_id: int, game_pk: int, merge: bool, apply: bool) -> None:
     async with async_session_maker() as session, MlbStatsFetcher() as fetcher:
         try:
             assignment = await plan_hand_assignment(session, fetcher, event_id, game_pk, merge)
@@ -333,7 +333,7 @@ async def _set_game_pk(event_id: str, game_pk: int, merge: bool, apply: bool) ->
 
 @app.command("set-game-pk")
 def set_game_pk(
-    event_id: str = typer.Argument(..., help="MLB event without a gamePk"),
+    event_id: int = typer.Argument(..., help="MLB event without a gamePk"),
     game_pk: int = typer.Argument(..., help="MLB Stats API gamePk of its game"),
     merge: bool = typer.Option(
         False, "--merge", help="Merge the event into the event already holding the gamePk"
@@ -345,12 +345,12 @@ def set_game_pk(
     Refuses a game of other teams, and a gamePk another event holds unless --merge.
 
     Example:
-        odds events set-game-pk op_live_PITPIR_MILBRE_2026-07-10T2240 823357 --merge --apply
+        odds events set-game-pk 10412 823357 --merge --apply
     """
     asyncio.run(_set_game_pk(event_id, game_pk, merge, apply))
 
 
-async def _mark_unassignable(event_id: str, reason: str, apply: bool) -> None:
+async def _mark_unassignable(event_id: int, reason: str, apply: bool) -> None:
     async with async_session_maker() as session:
         try:
             await mark_no_game_pk(session, event_id, reason)
@@ -366,7 +366,7 @@ async def _mark_unassignable(event_id: str, reason: str, apply: bool) -> None:
 
 @app.command("mark-unassignable")
 def mark_unassignable(
-    event_id: str = typer.Argument(..., help="MLB event without a gamePk"),
+    event_id: int = typer.Argument(..., help="MLB event without a gamePk"),
     reason: str = typer.Option(..., "--reason", help="Why the event has no MLB game"),
     apply: bool = typer.Option(False, "--apply", help="Write; without it nothing is stored"),
 ) -> None:
@@ -375,6 +375,6 @@ def mark_unassignable(
     Setting a gamePk later clears the mark.
 
     Example:
-        odds events mark-unassignable op_live_ATLBRA_SANGIA_2026-06-17T1605 --reason "no such game" --apply
+        odds events mark-unassignable 10398 --reason "no such game" --apply
     """
     asyncio.run(_mark_unassignable(event_id, reason, apply))

@@ -31,7 +31,7 @@ class OddsReader:
         """
         self.session = session
 
-    async def get_event_by_id(self, event_id: str) -> Event | None:
+    async def get_event_by_id(self, event_id: int) -> Event | None:
         """
         Get event by ID.
 
@@ -128,7 +128,7 @@ class OddsReader:
         return list(result.scalars().all())
 
     async def snapshot_exists(
-        self, event_id: str, snapshot_time: datetime, tolerance_minutes: int = 5
+        self, event_id: int, snapshot_time: datetime, tolerance_minutes: int = 5
     ) -> bool:
         """
         Check if a snapshot exists for an event at a specific time.
@@ -193,7 +193,7 @@ class OddsReader:
 
     async def get_data_quality_logs(
         self,
-        event_id: str | None = None,
+        event_id: int | None = None,
         severity: str | None = None,
         start_time: datetime | None = None,
         limit: int = 100,
@@ -265,7 +265,7 @@ class OddsReader:
             "api_quota_remaining": latest_quota,
         }
 
-    async def get_snapshot_count_for_event(self, event_id: str) -> int:
+    async def get_snapshot_count_for_event(self, event_id: int) -> int:
         """
         Get total count of odds snapshots for an event.
 
@@ -287,7 +287,7 @@ class OddsReader:
         result = await self.session.execute(query)
         return result.scalar() or 0
 
-    async def get_snapshots_for_event(self, event_id: str) -> list[OddsSnapshot]:
+    async def get_snapshots_for_event(self, event_id: int) -> list[OddsSnapshot]:
         """
         Get all odds snapshots for an event.
 

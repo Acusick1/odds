@@ -13,7 +13,7 @@ def sample_db_events():
     """Sample Event models representing games in database."""
     return [
         Event(
-            id="test_event_1",
+            id=1,
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=datetime(2024, 1, 15, 19, 0, 0, tzinfo=UTC),
@@ -24,7 +24,7 @@ def sample_db_events():
             away_score=105,
         ),
         Event(
-            id="test_event_2",
+            id=2,
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=datetime(2024, 1, 16, 20, 0, 0, tzinfo=UTC),
@@ -35,7 +35,7 @@ def sample_db_events():
             away_score=102,
         ),
         Event(
-            id="test_event_3",
+            id=3,
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=datetime(2024, 1, 17, 19, 30, 0, tzinfo=UTC),

@@ -28,7 +28,7 @@ def sample_events():
     """Three events spread over a week, sorted chronologically."""
     return [
         Event(
-            id=f"event_{i}",
+            id=i + 1,
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=datetime(2024, 11, 1 + i, 19, 0, 0, tzinfo=UTC),
@@ -44,7 +44,7 @@ def sample_events():
 
 def _make_snapshot(
     idx: int,
-    event_id: str,
+    event_id: int,
     snapshot_time: datetime,
     home_price: int = -150,
     away_price: int = 130,
@@ -149,7 +149,7 @@ class TestGroupTimeseriesCV:
         y = np.random.randn(n_rows).astype(np.float32)
         feature_names = [f"f_{i}" for i in range(n_features)]
 
-        event_ids = np.array([f"evt_{i}" for i in range(n_events) for _ in range(rows_per_event)])
+        event_ids = np.array([i for i in range(n_events) for _ in range(rows_per_event)])
 
         # min_train=2, val_step=1 → 3 folds for 5 events
         config = self._make_config()
@@ -172,7 +172,7 @@ class TestGroupTimeseriesCV:
         y = np.random.randn(n_rows).astype(np.float32)
         feature_names = [f"f_{i}" for i in range(n_features)]
 
-        event_ids = np.array([f"evt_{i}" for i in range(n_events) for _ in range(rows_per_event)])
+        event_ids = np.array([i for i in range(n_events) for _ in range(rows_per_event)])
 
         config = self._make_config()
 
@@ -223,7 +223,7 @@ class TestGroupTimeseriesCV:
         X = np.random.randn(n_rows, n_features).astype(np.float32)
         y = np.random.randn(n_rows).astype(np.float32)
         feature_names = [f"f_{i}" for i in range(n_features)]
-        event_ids = np.array([f"evt_{i}" for i in range(n_events) for _ in range(rows_per_event)])
+        event_ids = np.array([i for i in range(n_events) for _ in range(rows_per_event)])
 
         # min_train=2, val_step=1 → 2 folds for 4 events
         config = self._make_config()
@@ -314,7 +314,7 @@ class TestTierSampler:
     @pytest.fixture
     def event(self):
         return Event(
-            id="tier_test",
+            id=1,
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),
@@ -503,7 +503,7 @@ class TestTimeRangeSampler:
     @pytest.fixture
     def event(self):
         return Event(
-            id="range_test",
+            id=2,
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),
@@ -866,7 +866,7 @@ class TestPrepareTrainingDataRows:
     @pytest.fixture
     def event(self):
         return Event(
-            id="mask_test",
+            id=3,
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),

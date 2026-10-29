@@ -98,7 +98,7 @@ def full_history() -> dict[str, list[Observation]]:
 
 @pytest.fixture
 async def finished_event(pglite_async_session: Any) -> Any:
-    event = make_epl_event("e1", KICKOFF, "Bournemouth", "Chelsea", status=EventStatus.FINAL)
+    event = make_epl_event(1, KICKOFF, "Bournemouth", "Chelsea", status=EventStatus.FINAL)
     pglite_async_session.add(event)
     await pglite_async_session.commit()
     return event
@@ -239,7 +239,7 @@ class TestBackfill:
         self, pglite_async_session: Any, patch_backfill: FakeClient, gamma_event: Any
     ) -> None:
         early_event = make_epl_event(
-            "e1",
+            1,
             KICKOFF - timedelta(minutes=30),
             "Bournemouth",
             "Chelsea",
@@ -279,7 +279,7 @@ class TestBackfill:
 
         held = await pglite_async_session.get(EventExternalId, (Source.POLYMARKET, "900"))
         assert held is not None
-        assert held.event_id == finished_event.surrogate_id
+        assert held.event_id == finished_event.id
 
     async def test_creates_no_event_for_an_unmatched_match(
         self, pglite_async_session: Any, patch_backfill: FakeClient
@@ -293,7 +293,7 @@ class TestBackfill:
     async def test_skips_an_event_that_is_not_finished(
         self, pglite_async_session: Any, patch_backfill: FakeClient
     ) -> None:
-        pglite_async_session.add(make_epl_event("e1", KICKOFF, "Bournemouth", "Chelsea"))
+        pglite_async_session.add(make_epl_event(1, KICKOFF, "Bournemouth", "Chelsea"))
         await pglite_async_session.commit()
 
         report = await backfill_sport("soccer_epl", since=KICKOFF - timedelta(days=1))
@@ -310,7 +310,7 @@ class TestBackfill:
     ) -> None:
         other_kickoff = KICKOFF + timedelta(days=1)
         pglite_async_session.add(
-            make_epl_event("e2", other_kickoff, "Arsenal", "Everton", status=EventStatus.FINAL)
+            make_epl_event(2, other_kickoff, "Arsenal", "Everton", status=EventStatus.FINAL)
         )
         await pglite_async_session.commit()
         second = gamma_event(
@@ -330,7 +330,7 @@ class TestBackfill:
         owners = set(
             (await pglite_async_session.execute(select(OddsSnapshot.event_id))).scalars().all()
         )
-        assert owners == {"e1"}
+        assert owners == {1}
         assert (report.events_written, len(report.errors)) == (1, 1)
         assert report.errors[0].startswith("epl-ars-eve-2025-12-07:")
 
@@ -348,7 +348,7 @@ class TestBackfill:
 
         report = await backfill_sport("soccer_epl", since=KICKOFF - timedelta(days=1))
 
-        assert report.unmatched_event_ids == ["e1"]
+        assert report.unmatched_event_ids == [1]
         assert report.snapshots_written == 0
 
     async def test_rejects_sport_without_three_way_markets(self) -> None:
@@ -371,7 +371,7 @@ class TestLiveIngestion:
     async def test_stores_snapshot_with_both_halves(
         self, pglite_async_session: Any, patch_live: FakeClient
     ) -> None:
-        pglite_async_session.add(make_epl_event("e1", KICKOFF, "Bournemouth", "Chelsea"))
+        pglite_async_session.add(make_epl_event(1, KICKOFF, "Bournemouth", "Chelsea"))
         await pglite_async_session.commit()
         now = KICKOFF - timedelta(hours=5)
 
@@ -388,7 +388,7 @@ class TestLiveIngestion:
     async def test_skips_matches_already_started(
         self, pglite_async_session: Any, patch_live: FakeClient
     ) -> None:
-        pglite_async_session.add(make_epl_event("e1", KICKOFF, "Bournemouth", "Chelsea"))
+        pglite_async_session.add(make_epl_event(1, KICKOFF, "Bournemouth", "Chelsea"))
         await pglite_async_session.commit()
 
         stats = await fetch_polymarket_odds.ingest_sport("soccer_epl", KICKOFF + timedelta(hours=1))
@@ -407,7 +407,7 @@ class TestLiveIngestion:
     async def test_rejects_prices_off_sum(
         self, pglite_async_session: Any, patch_live: FakeClient
     ) -> None:
-        pglite_async_session.add(make_epl_event("e1", KICKOFF, "Bournemouth", "Chelsea"))
+        pglite_async_session.add(make_epl_event(1, KICKOFF, "Bournemouth", "Chelsea"))
         await pglite_async_session.commit()
         for market in patch_live.events[0]["markets"]:
             market["bestBid"], market["bestAsk"] = 0.49, 0.51
@@ -419,7 +419,7 @@ class TestLiveIngestion:
     async def test_counts_matches_without_prices(
         self, pglite_async_session: Any, patch_live: FakeClient
     ) -> None:
-        pglite_async_session.add(make_epl_event("e1", KICKOFF, "Bournemouth", "Chelsea"))
+        pglite_async_session.add(make_epl_event(1, KICKOFF, "Bournemouth", "Chelsea"))
         await pglite_async_session.commit()
         patch_live.events[0]["markets"][0]["bestBid"] = None
 
@@ -430,7 +430,7 @@ class TestLiveIngestion:
     async def test_stores_quotes_in_meta(
         self, pglite_async_session: Any, patch_live: FakeClient
     ) -> None:
-        pglite_async_session.add(make_epl_event("e1", KICKOFF, "Bournemouth", "Chelsea"))
+        pglite_async_session.add(make_epl_event(1, KICKOFF, "Bournemouth", "Chelsea"))
         await pglite_async_session.commit()
 
         await fetch_polymarket_odds.ingest_sport("soccer_epl", KICKOFF - timedelta(hours=5))
@@ -446,7 +446,7 @@ class TestLiveIngestion:
     async def test_skips_wide_spreads(
         self, pglite_async_session: Any, patch_live: FakeClient
     ) -> None:
-        pglite_async_session.add(make_epl_event("e1", KICKOFF, "Bournemouth", "Chelsea"))
+        pglite_async_session.add(make_epl_event(1, KICKOFF, "Bournemouth", "Chelsea"))
         await pglite_async_session.commit()
         patch_live.events[0]["markets"][0]["bestBid"] = 0.10
         patch_live.events[0]["markets"][0]["bestAsk"] = 0.30
@@ -459,7 +459,7 @@ class TestLiveIngestion:
         self, pglite_async_session: Any, patch_live: FakeClient
     ) -> None:
         pglite_async_session.add(
-            make_epl_event("e1", KICKOFF - timedelta(hours=1), "Bournemouth", "Chelsea")
+            make_epl_event(1, KICKOFF - timedelta(hours=1), "Bournemouth", "Chelsea")
         )
         await pglite_async_session.commit()
 
@@ -472,7 +472,7 @@ class TestLiveIngestion:
     async def test_snapshot_carries_source_market_basis_payload_and_prices(
         self, pglite_async_session: Any, patch_live: FakeClient
     ) -> None:
-        pglite_async_session.add(make_epl_event("e1", KICKOFF, "Bournemouth", "Chelsea"))
+        pglite_async_session.add(make_epl_event(1, KICKOFF, "Bournemouth", "Chelsea"))
         await pglite_async_session.commit()
 
         await fetch_polymarket_odds.ingest_sport("soccer_epl", KICKOFF - timedelta(hours=5))
@@ -499,7 +499,7 @@ class TestLiveIngestion:
     async def test_records_the_polymarket_id_on_the_event(
         self, pglite_async_session: Any, patch_live: FakeClient
     ) -> None:
-        event = make_epl_event("e1", KICKOFF, "Bournemouth", "Chelsea")
+        event = make_epl_event(1, KICKOFF, "Bournemouth", "Chelsea")
         pglite_async_session.add(event)
         await pglite_async_session.commit()
 
@@ -507,18 +507,16 @@ class TestLiveIngestion:
 
         held = await pglite_async_session.get(EventExternalId, (Source.POLYMARKET, "900"))
         assert held is not None
-        assert held.event_id == event.surrogate_id
+        assert held.event_id == event.id
 
     async def test_a_recorded_id_attaches_across_a_moved_kickoff(
         self, pglite_async_session: Any, patch_live: FakeClient
     ) -> None:
-        event = make_epl_event("e1", KICKOFF + timedelta(hours=6), "Bournemouth", "Chelsea")
+        event = make_epl_event(1, KICKOFF + timedelta(hours=6), "Bournemouth", "Chelsea")
         pglite_async_session.add(event)
         await pglite_async_session.commit()
         pglite_async_session.add(
-            EventExternalId(
-                source=Source.POLYMARKET, external_id="900", event_id=event.surrogate_id
-            )
+            EventExternalId(source=Source.POLYMARKET, external_id="900", event_id=event.id)
         )
         await pglite_async_session.commit()
 
@@ -529,7 +527,7 @@ class TestLiveIngestion:
     async def test_a_second_match_for_a_fixture_is_refused_and_logged_once(
         self, pglite_async_session: Any, patch_live: FakeClient, gamma_event: Any
     ) -> None:
-        pglite_async_session.add(make_epl_event("e1", KICKOFF, "Bournemouth", "Chelsea"))
+        pglite_async_session.add(make_epl_event(1, KICKOFF, "Bournemouth", "Chelsea"))
         await pglite_async_session.commit()
         duplicate = gamma_event()
         duplicate["id"] = "901"
@@ -556,7 +554,7 @@ class TestLiveIngestion:
     async def test_second_run_at_the_same_time_stores_and_archives_nothing_new(
         self, pglite_async_session: Any, patch_live: FakeClient
     ) -> None:
-        pglite_async_session.add(make_epl_event("e1", KICKOFF, "Bournemouth", "Chelsea"))
+        pglite_async_session.add(make_epl_event(1, KICKOFF, "Bournemouth", "Chelsea"))
         await pglite_async_session.commit()
         now = KICKOFF - timedelta(hours=5)
 
@@ -573,7 +571,7 @@ class TestLiveIngestion:
     async def test_logs_a_successful_fetch(
         self, pglite_async_session: Any, patch_live: FakeClient
     ) -> None:
-        pglite_async_session.add(make_epl_event("e1", KICKOFF, "Bournemouth", "Chelsea"))
+        pglite_async_session.add(make_epl_event(1, KICKOFF, "Bournemouth", "Chelsea"))
         await pglite_async_session.commit()
 
         await fetch_polymarket_odds.ingest_sport("soccer_epl", KICKOFF - timedelta(hours=5))
@@ -584,7 +582,7 @@ class TestLiveIngestion:
     async def test_empty_listing_with_scheduled_events_fails_and_logs(
         self, pglite_async_session: Any, patch_live: FakeClient
     ) -> None:
-        pglite_async_session.add(make_epl_event("e1", KICKOFF, "Bournemouth", "Chelsea"))
+        pglite_async_session.add(make_epl_event(1, KICKOFF, "Bournemouth", "Chelsea"))
         await pglite_async_session.commit()
         patch_live.events = []
 
@@ -604,7 +602,7 @@ class TestLiveIngestion:
     ) -> None:
         now = KICKOFF - timedelta(days=days_out)
         pglite_async_session.add(
-            make_epl_event("e1", KICKOFF, "Bournemouth", "Chelsea", status=status)
+            make_epl_event(1, KICKOFF, "Bournemouth", "Chelsea", status=status)
         )
         await pglite_async_session.commit()
         patch_live.events = []

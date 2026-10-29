@@ -49,7 +49,7 @@ class TeamHistory:
     season_results: StandingsCache
     fixtures: pd.DataFrame | None
     form_window: int
-    _fixtures_by_event: dict[str, pd.DataFrame | None] = field(default_factory=dict, repr=False)
+    _fixtures_by_event: dict[int, pd.DataFrame | None] = field(default_factory=dict, repr=False)
 
     def _event_fixtures(self, event: Event) -> pd.DataFrame | None:
         if event.id not in self._fixtures_by_event:

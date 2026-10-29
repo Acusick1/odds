@@ -12,7 +12,7 @@ from odds_core.models import Event, EventStatus
 
 
 def _make_event(
-    event_id: str = "test_event",
+    event_id: int = 99,
     home_team: str = "Arsenal",
     away_team: str = "Chelsea",
     commence_time: datetime | None = None,
@@ -96,7 +96,7 @@ class TestExtractEplScheduleFeatures:
         base = datetime(2025, 1, 4, 15, 0, tzinfo=UTC)  # Saturday
         prior = [
             _make_event(
-                event_id="e1",
+                event_id=1,
                 home_team="Arsenal",
                 away_team="Chelsea",
                 commence_time=base,
@@ -105,7 +105,7 @@ class TestExtractEplScheduleFeatures:
             ),
         ]
         event = _make_event(
-            event_id="e2",
+            event_id=2,
             home_team="Chelsea",
             away_team="Arsenal",
             commence_time=base + timedelta(days=7),  # Next Saturday
@@ -121,7 +121,7 @@ class TestExtractEplScheduleFeatures:
         tuesday = datetime(2025, 1, 7, 19, 45, tzinfo=UTC)  # Tuesday evening
         prior = [
             _make_event(
-                event_id="e1",
+                event_id=1,
                 home_team="Arsenal",
                 away_team="Liverpool",
                 commence_time=saturday,
@@ -130,7 +130,7 @@ class TestExtractEplScheduleFeatures:
             ),
         ]
         event = _make_event(
-            event_id="e2",
+            event_id=2,
             home_team="Arsenal",
             away_team="Chelsea",
             commence_time=tuesday,
@@ -146,7 +146,7 @@ class TestExtractEplScheduleFeatures:
         base = datetime(2025, 1, 11, 15, 0, tzinfo=UTC)  # Saturday
         prior = [
             _make_event(
-                event_id="e1",
+                event_id=1,
                 home_team="Arsenal",
                 away_team="Liverpool",
                 commence_time=base - timedelta(days=7),
@@ -154,7 +154,7 @@ class TestExtractEplScheduleFeatures:
                 away_score=0,
             ),
             _make_event(
-                event_id="e2",
+                event_id=2,
                 home_team="Chelsea",
                 away_team="Tottenham",
                 commence_time=base - timedelta(days=3),
@@ -163,7 +163,7 @@ class TestExtractEplScheduleFeatures:
             ),
         ]
         event = _make_event(
-            event_id="e3",
+            event_id=3,
             home_team="Arsenal",
             away_team="Chelsea",
             commence_time=base,
@@ -178,7 +178,7 @@ class TestExtractEplScheduleFeatures:
         base = datetime(2025, 1, 11, 15, 0, tzinfo=UTC)
         prior = [
             _make_event(
-                event_id="e1",
+                event_id=1,
                 home_team="Liverpool",
                 away_team="Arsenal",  # Arsenal was away
                 commence_time=base - timedelta(days=4),
@@ -187,7 +187,7 @@ class TestExtractEplScheduleFeatures:
             ),
         ]
         event = _make_event(
-            event_id="e2",
+            event_id=2,
             home_team="Arsenal",
             away_team="Chelsea",
             commence_time=base,
@@ -256,7 +256,7 @@ class TestExtractEplScheduleFeatures:
         base = datetime(2025, 1, 18, 15, 0, tzinfo=UTC)
         prior = [
             _make_event(
-                event_id="e1",
+                event_id=1,
                 home_team="Arsenal",
                 away_team="Liverpool",
                 commence_time=base - timedelta(days=14),
@@ -264,7 +264,7 @@ class TestExtractEplScheduleFeatures:
                 away_score=0,
             ),
             _make_event(
-                event_id="e2",
+                event_id=2,
                 home_team="Man City",
                 away_team="Arsenal",
                 commence_time=base - timedelta(days=7),
@@ -272,7 +272,7 @@ class TestExtractEplScheduleFeatures:
                 away_score=0,
             ),
             _make_event(
-                event_id="e3",
+                event_id=3,
                 home_team="Arsenal",
                 away_team="Brighton",
                 commence_time=base - timedelta(days=3),
@@ -281,7 +281,7 @@ class TestExtractEplScheduleFeatures:
             ),
         ]
         event = _make_event(
-            event_id="e4",
+            event_id=4,
             home_team="Arsenal",
             away_team="Chelsea",
             commence_time=base,
@@ -294,7 +294,7 @@ class TestExtractEplScheduleFeatures:
         base = datetime(2025, 1, 11, 15, 0, tzinfo=UTC)
         prior = [
             _make_event(
-                event_id="e1",
+                event_id=1,
                 home_team="Arsenal",
                 away_team="Liverpool",
                 commence_time=base - timedelta(days=7),
@@ -304,7 +304,7 @@ class TestExtractEplScheduleFeatures:
         ]
         # Unknown FC not in prior events at all
         event = _make_event(
-            event_id="e2",
+            event_id=2,
             home_team="Arsenal",
             away_team="Unknown FC",
             commence_time=base,
@@ -319,7 +319,7 @@ class TestExtractEplScheduleFeatures:
         base = datetime(2025, 1, 11, 15, 0, tzinfo=UTC)  # Saturday 3pm
         prior = [
             _make_event(
-                event_id="e1",
+                event_id=1,
                 home_team="Arsenal",
                 away_team="Chelsea",
                 commence_time=base,
@@ -329,7 +329,7 @@ class TestExtractEplScheduleFeatures:
         ]
         # Next match on Tuesday at 7:45pm = 3 days + 4h45m
         event = _make_event(
-            event_id="e2",
+            event_id=2,
             home_team="Arsenal",
             away_team="Wolves",
             commence_time=datetime(2025, 1, 14, 19, 45, tzinfo=UTC),
@@ -350,7 +350,7 @@ class TestFixturesDfIntegration:
 
         prior_events = [
             _make_event(
-                event_id="e1",
+                event_id=1,
                 home_team="Arsenal",
                 away_team="Liverpool",
                 commence_time=saturday_epl,
@@ -359,7 +359,7 @@ class TestFixturesDfIntegration:
             ),
         ]
         event = _make_event(
-            event_id="e2",
+            event_id=2,
             home_team="Arsenal",
             away_team="Chelsea",
             commence_time=next_sunday,
@@ -402,7 +402,7 @@ class TestFixturesDfIntegration:
 
         prior_events = [
             _make_event(
-                event_id="e1",
+                event_id=1,
                 home_team="Arsenal",
                 away_team="Brighton",
                 commence_time=wednesday_epl,
@@ -411,7 +411,7 @@ class TestFixturesDfIntegration:
             ),
         ]
         event = _make_event(
-            event_id="e2",
+            event_id=2,
             home_team="Arsenal",
             away_team="Chelsea",
             commence_time=saturday,
@@ -445,7 +445,7 @@ class TestFixturesDfIntegration:
         saturday = datetime(2025, 1, 11, 15, 0, tzinfo=UTC)
 
         event = _make_event(
-            event_id="e1",
+            event_id=1,
             home_team="Arsenal",
             away_team="Chelsea",
             commence_time=saturday,
@@ -478,7 +478,7 @@ class TestFixturesDfIntegration:
 
         prior_events = [
             _make_event(
-                event_id="e1",
+                event_id=1,
                 home_team="Arsenal",
                 away_team="Chelsea",
                 commence_time=saturday_epl,
@@ -487,7 +487,7 @@ class TestFixturesDfIntegration:
             ),
         ]
         event = _make_event(
-            event_id="e2",
+            event_id=2,
             home_team="Arsenal",
             away_team="Chelsea",
             commence_time=next_saturday,
@@ -532,7 +532,7 @@ class TestFixturesDfIntegration:
         base = datetime(2025, 1, 11, 15, 0, tzinfo=UTC)
         prior = [
             _make_event(
-                event_id="e1",
+                event_id=1,
                 home_team="Arsenal",
                 away_team="Liverpool",
                 commence_time=base - timedelta(days=7),
@@ -541,7 +541,7 @@ class TestFixturesDfIntegration:
             ),
         ]
         event = _make_event(
-            event_id="e2",
+            event_id=2,
             home_team="Arsenal",
             away_team="Chelsea",
             commence_time=base,
@@ -560,7 +560,7 @@ class TestFixturesDfIntegration:
         """Teams appearing only as opponents are still found in fixture lookups."""
         saturday = datetime(2025, 1, 11, 15, 0, tzinfo=UTC)
         event = _make_event(
-            event_id="e1",
+            event_id=1,
             home_team="Arsenal",
             away_team="Ipswich",
             commence_time=saturday,

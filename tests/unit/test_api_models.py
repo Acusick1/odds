@@ -2,14 +2,7 @@
 
 from datetime import UTC
 
-import pytest
-from odds_core.api_models import (
-    api_dict_to_event,
-    create_completed_event,
-    create_scheduled_event,
-    parse_scores_from_api_dict,
-)
-from odds_core.models import EventStatus
+from odds_core.api_models import ApiEvent, parse_api_event, parse_scores_from_api_dict
 
 
 class TestParseScoresFromApiDict:
@@ -163,11 +156,11 @@ class TestParseScoresFromApiDict:
         assert away_score == 0
 
 
-class TestCreateScheduledEvent:
-    """Test scheduled event creation function."""
+class TestParseApiEvent:
+    """Test parsing a listed game."""
 
-    def test_creates_event_with_scheduled_status(self):
-        """Test that event is created with SCHEDULED status."""
+    def test_reads_the_listed_game(self):
+        """Test that the API's id and the game's fields are carried over."""
         event_data = {
             "id": "abc123",
             "sport_key": "basketball_nba",
@@ -177,16 +170,14 @@ class TestCreateScheduledEvent:
             "away_team": "Celtics",
         }
 
-        event = create_scheduled_event(event_data)
+        event = parse_api_event(event_data)
 
-        assert event.id == "abc123"
+        assert isinstance(event, ApiEvent)
+        assert event.odds_api_id == "abc123"
         assert event.sport_key == "basketball_nba"
         assert event.sport_title == "NBA"
         assert event.home_team == "Lakers"
         assert event.away_team == "Celtics"
-        assert event.status == EventStatus.SCHEDULED
-        assert event.home_score is None
-        assert event.away_score is None
 
     def test_parses_commence_time_as_utc(self):
         """Test that commence_time is parsed as timezone-aware UTC."""
@@ -198,7 +189,7 @@ class TestCreateScheduledEvent:
             "away_team": "Celtics",
         }
 
-        event = create_scheduled_event(event_data)
+        event = parse_api_event(event_data)
 
         assert event.commence_time.tzinfo == UTC
         assert event.commence_time.year == 2024
@@ -218,143 +209,20 @@ class TestCreateScheduledEvent:
             # No sport_title provided
         }
 
-        event = create_scheduled_event(event_data)
+        event = parse_api_event(event_data)
 
         assert event.sport_title == "basketball_nba"
 
-
-class TestCreateCompletedEvent:
-    """Test completed event creation function."""
-
-    def test_creates_event_with_final_status(self):
-        """Test that event is created with FINAL status and scores."""
+    def test_team_names_are_canonical(self):
+        """Test that the API's spelling of a team is normalized."""
         event_data = {
             "id": "abc123",
-            "sport_key": "basketball_nba",
-            "sport_title": "NBA",
+            "sport_key": "soccer_epl",
             "commence_time": "2024-10-20T00:00:00Z",
-            "home_team": "Lakers",
-            "away_team": "Celtics",
-            "scores": [
-                {"name": "Lakers", "score": "108"},
-                {"name": "Celtics", "score": "105"},
-            ],
+            "home_team": "Man City",
+            "away_team": "Tottenham Hotspur",
         }
 
-        event = create_completed_event(event_data)
+        event = parse_api_event(event_data)
 
-        assert event.id == "abc123"
-        assert event.sport_key == "basketball_nba"
-        assert event.sport_title == "NBA"
-        assert event.home_team == "Lakers"
-        assert event.away_team == "Celtics"
-        assert event.status == EventStatus.FINAL
-        assert event.home_score == 108
-        assert event.away_score == 105
-
-    def test_raises_error_when_home_score_missing(self):
-        """Test that ValueError is raised when home score is missing."""
-        event_data = {
-            "id": "abc123",
-            "sport_key": "basketball_nba",
-            "commence_time": "2024-10-20T00:00:00Z",
-            "home_team": "Lakers",
-            "away_team": "Celtics",
-            "scores": [
-                {"name": "Celtics", "score": "105"},
-                # No Lakers score
-            ],
-        }
-
-        with pytest.raises(ValueError, match="Missing or invalid scores"):
-            create_completed_event(event_data)
-
-    def test_raises_error_when_away_score_missing(self):
-        """Test that ValueError is raised when away score is missing."""
-        event_data = {
-            "id": "abc123",
-            "sport_key": "basketball_nba",
-            "commence_time": "2024-10-20T00:00:00Z",
-            "home_team": "Lakers",
-            "away_team": "Celtics",
-            "scores": [
-                {"name": "Lakers", "score": "108"},
-                # No Celtics score
-            ],
-        }
-
-        with pytest.raises(ValueError, match="Missing or invalid scores"):
-            create_completed_event(event_data)
-
-    def test_raises_error_when_scores_empty(self):
-        """Test that ValueError is raised when scores list is empty."""
-        event_data = {
-            "id": "abc123",
-            "sport_key": "basketball_nba",
-            "commence_time": "2024-10-20T00:00:00Z",
-            "home_team": "Lakers",
-            "away_team": "Celtics",
-            "scores": [],
-        }
-
-        with pytest.raises(ValueError, match="Missing or invalid scores"):
-            create_completed_event(event_data)
-
-    def test_raises_error_when_scores_invalid(self):
-        """Test that ValueError is raised when scores are invalid."""
-        event_data = {
-            "id": "abc123",
-            "sport_key": "basketball_nba",
-            "commence_time": "2024-10-20T00:00:00Z",
-            "home_team": "Lakers",
-            "away_team": "Celtics",
-            "scores": [
-                {"name": "Lakers", "score": "invalid"},
-                {"name": "Celtics", "score": "105"},
-            ],
-        }
-
-        with pytest.raises(ValueError, match="Missing or invalid scores"):
-            create_completed_event(event_data)
-
-    def test_handles_zero_scores(self):
-        """Test that zero scores are handled correctly (edge case)."""
-        event_data = {
-            "id": "abc123",
-            "sport_key": "basketball_nba",
-            "commence_time": "2024-10-20T00:00:00Z",
-            "home_team": "Lakers",
-            "away_team": "Celtics",
-            "scores": [
-                {"name": "Lakers", "score": "0"},
-                {"name": "Celtics", "score": "0"},
-            ],
-        }
-
-        event = create_completed_event(event_data)
-
-        assert event.home_score == 0
-        assert event.away_score == 0
-        assert event.status == EventStatus.FINAL
-
-
-class TestApiDictToEvent:
-    """Test backward compatibility of deprecated api_dict_to_event function."""
-
-    def test_delegates_to_create_scheduled_event(self):
-        """Test that api_dict_to_event delegates to create_scheduled_event."""
-        event_data = {
-            "id": "abc123",
-            "sport_key": "basketball_nba",
-            "commence_time": "2024-10-20T00:00:00Z",
-            "home_team": "Lakers",
-            "away_team": "Celtics",
-        }
-
-        event = api_dict_to_event(event_data)
-
-        # Should behave identically to create_scheduled_event
-        assert event.status == EventStatus.SCHEDULED
-        assert event.home_score is None
-        assert event.away_score is None
-        assert event.id == "abc123"
+        assert (event.home_team, event.away_team) == ("Manchester City", "Tottenham")

@@ -34,7 +34,7 @@ class TestPlaceTradeCandidate:
     @pytest.fixture
     async def event(self, test_session) -> Event:
         event = Event(
-            id="evt-c",
+            id=1,
             sport_key="soccer_epl",
             sport_title="EPL",
             commence_time=datetime(2026, 4, 15, 15, 0, tzinfo=UTC),
@@ -54,7 +54,7 @@ class TestPlaceTradeCandidate:
     async def _place(session, **candidate: object) -> PaperTrade:
         return await place_trade(
             session,
-            event_id="evt-c",
+            event_id=1,
             market="1x2",
             selection="home",
             bookmaker="bet365",
@@ -115,7 +115,7 @@ class TestPlaceTradeCandidate:
         with pytest.raises(ValueError, match="use '1x2'"):
             await place_trade(
                 test_session,
-                event_id="evt-c",
+                event_id=1,
                 market="h2h",
                 selection="home",
                 bookmaker="bet365",
@@ -153,7 +153,7 @@ class TestPlaceTradeCandidate:
         with pytest.raises(ValueError, match="exceed 1.0"):
             await place_trade(
                 test_session,
-                event_id="evt-c",
+                event_id=1,
                 market="1x2",
                 selection="home",
                 bookmaker="bet365",
@@ -167,7 +167,7 @@ class TestPlaceTrade:
     @pytest.mark.asyncio
     async def test_place_valid_trade(self, test_session) -> None:
         event = Event(
-            id="evt-001",
+            id=2,
             sport_key="soccer_epl",
             sport_title="EPL",
             commence_time=datetime(2026, 4, 15, 15, 0, tzinfo=UTC),
@@ -179,7 +179,7 @@ class TestPlaceTrade:
 
         trade = await place_trade(
             test_session,
-            event_id="evt-001",
+            event_id=2,
             market="h2h",
             selection="home",
             bookmaker="bet365",
@@ -191,7 +191,7 @@ class TestPlaceTrade:
         )
 
         assert trade.id is not None
-        assert trade.event_id == "evt-001"
+        assert trade.event_id == 2
         assert trade.selection == "home"
         assert trade.price_decimal == 1.6
         assert trade.stake == 50.0
@@ -203,7 +203,7 @@ class TestPlaceTrade:
         with pytest.raises(ValueError, match="exceeds available bankroll"):
             await place_trade(
                 test_session,
-                event_id="evt-001",
+                event_id=2,
                 market="h2h",
                 selection="home",
                 bookmaker="bet365",
@@ -217,7 +217,7 @@ class TestPlaceTrade:
         with pytest.raises(ValueError, match="Invalid selection"):
             await place_trade(
                 test_session,
-                event_id="evt-001",
+                event_id=2,
                 market="h2h",
                 selection="over",
                 bookmaker="bet365",
@@ -231,7 +231,7 @@ class TestPlaceTrade:
         with pytest.raises(ValueError, match="Stake must be positive"):
             await place_trade(
                 test_session,
-                event_id="evt-001",
+                event_id=2,
                 market="h2h",
                 selection="home",
                 bookmaker="bet365",
@@ -251,7 +251,7 @@ class TestPlaceTradeMarkets:
     ) -> None:
         test_session.add(
             Event(
-                id="evt-draw",
+                id=3,
                 sport_key=sport_key,
                 sport_title=sport_key,
                 commence_time=datetime(2026, 4, 15, 15, 0, tzinfo=UTC),
@@ -263,7 +263,7 @@ class TestPlaceTradeMarkets:
 
         placing = place_trade(
             test_session,
-            event_id="evt-draw",
+            event_id=3,
             market="h2h",
             selection="draw",
             bookmaker="bet365",
@@ -282,7 +282,7 @@ class TestPlaceTradeMarkets:
         with pytest.raises(ValueError, match="Unsupported market"):
             await place_trade(
                 test_session,
-                event_id="evt-001",
+                event_id=2,
                 market="spreads",
                 selection="home",
                 bookmaker="bet365",
@@ -293,12 +293,12 @@ class TestPlaceTradeMarkets:
 
     @pytest.mark.asyncio
     async def test_totals_trade_records_its_half_line(self, test_session) -> None:
-        test_session.add(_event("evt-ou", EventStatus.SCHEDULED))
+        test_session.add(_event(4, EventStatus.SCHEDULED))
         await test_session.flush()
 
         trade = await place_trade(
             test_session,
-            event_id="evt-ou",
+            event_id=4,
             market="totals",
             selection="over",
             line=2.5,
@@ -328,7 +328,7 @@ class TestPlaceTradeMarkets:
         with pytest.raises(ValueError, match=message):
             await place_trade(
                 test_session,
-                event_id="evt-001",
+                event_id=2,
                 market=market,
                 selection=selection,
                 line=line,
@@ -339,7 +339,7 @@ class TestPlaceTradeMarkets:
             )
 
 
-def _event(event_id: str, status: EventStatus, scores: tuple[int, int] | None = None) -> Event:
+def _event(event_id: int, status: EventStatus, scores: tuple[int, int] | None = None) -> Event:
     return Event(
         id=event_id,
         sport_key="soccer_epl",
@@ -353,7 +353,7 @@ def _event(event_id: str, status: EventStatus, scores: tuple[int, int] | None = 
     )
 
 
-def _trade(event_id: str, market: str, selection: str, line: float | None = None) -> PaperTrade:
+def _trade(event_id: int, market: str, selection: str, line: float | None = None) -> PaperTrade:
     return PaperTrade(
         event_id=event_id,
         market=market,
@@ -379,8 +379,8 @@ class TestSettleMarkets:
     async def test_three_way_market_grades_a_draw(
         self, test_session, selection: str, result: TradeResult, pnl: float
     ) -> None:
-        test_session.add(_event("evt-1x2", EventStatus.FINAL, (1, 1)))
-        test_session.add(_trade("evt-1x2", "1x2", selection))
+        test_session.add(_event(5, EventStatus.FINAL, (1, 1)))
+        test_session.add(_trade(5, "1x2", selection))
         await test_session.flush()
 
         [settled] = await settle_trades(test_session)
@@ -389,8 +389,8 @@ class TestSettleMarkets:
 
     @pytest.mark.asyncio
     async def test_trade_on_a_cancelled_event_is_voided(self, test_session) -> None:
-        test_session.add(_event("evt-off", EventStatus.CANCELLED))
-        test_session.add(_trade("evt-off", "1x2", "home"))
+        test_session.add(_event(6, EventStatus.CANCELLED))
+        test_session.add(_trade(6, "1x2", "home"))
         await test_session.flush()
 
         [settled] = await settle_trades(test_session)
@@ -405,8 +405,8 @@ class TestSettleMarkets:
 
     @pytest.mark.asyncio
     async def test_trade_on_a_postponed_event_stays_open(self, test_session) -> None:
-        test_session.add(_event("evt-late", EventStatus.POSTPONED))
-        test_session.add(_trade("evt-late", "1x2", "home"))
+        test_session.add(_event(7, EventStatus.POSTPONED))
+        test_session.add(_trade(7, "1x2", "home"))
         await test_session.flush()
 
         assert await settle_trades(test_session) == []
@@ -414,8 +414,8 @@ class TestSettleMarkets:
 
     @pytest.mark.asyncio
     async def test_unsupported_market_on_a_final_event_stays_open(self, test_session) -> None:
-        test_session.add(_event("evt-spreads", EventStatus.FINAL, (2, 0)))
-        test_session.add(_trade("evt-spreads", "spreads", "home"))
+        test_session.add(_event(8, EventStatus.FINAL, (2, 0)))
+        test_session.add(_trade(8, "spreads", "home"))
         await test_session.flush()
 
         assert await settle_trades(test_session) == []
@@ -439,8 +439,8 @@ class TestSettleMarkets:
         result: TradeResult,
         pnl: float,
     ) -> None:
-        test_session.add(_event("evt-ou", EventStatus.FINAL, scores))
-        test_session.add(_trade("evt-ou", "totals", selection, line=2.5))
+        test_session.add(_event(4, EventStatus.FINAL, scores))
+        test_session.add(_trade(4, "totals", selection, line=2.5))
         await test_session.flush()
 
         [settled] = await settle_trades(test_session)
@@ -452,8 +452,8 @@ class TestSettleMarkets:
     async def test_totals_trade_without_a_half_line_stays_open(
         self, test_session, line: float | None
     ) -> None:
-        test_session.add(_event("evt-ou", EventStatus.FINAL, (2, 1)))
-        test_session.add(_trade("evt-ou", "totals", "over", line=line))
+        test_session.add(_event(4, EventStatus.FINAL, (2, 1)))
+        test_session.add(_trade(4, "totals", "over", line=line))
         await test_session.flush()
 
         assert await settle_trades(test_session) == []
@@ -464,7 +464,7 @@ class TestSettleTrades:
     @pytest.mark.asyncio
     async def test_settle_winning_trade(self, test_session) -> None:
         event = Event(
-            id="evt-settle-1",
+            id=9,
             sport_key="soccer_epl",
             sport_title="EPL",
             commence_time=datetime(2026, 4, 10, 15, 0, tzinfo=UTC),
@@ -477,7 +477,7 @@ class TestSettleTrades:
         test_session.add(event)
 
         trade = PaperTrade(
-            event_id="evt-settle-1",
+            event_id=9,
             market="h2h",
             selection="home",
             bookmaker="bet365",
@@ -499,7 +499,7 @@ class TestSettleTrades:
     @pytest.mark.asyncio
     async def test_settle_losing_trade(self, test_session) -> None:
         event = Event(
-            id="evt-settle-2",
+            id=10,
             sport_key="soccer_epl",
             sport_title="EPL",
             commence_time=datetime(2026, 4, 10, 15, 0, tzinfo=UTC),
@@ -512,7 +512,7 @@ class TestSettleTrades:
         test_session.add(event)
 
         trade = PaperTrade(
-            event_id="evt-settle-2",
+            event_id=10,
             market="h2h",
             selection="home",
             bookmaker="bet365",
@@ -532,7 +532,7 @@ class TestSettleTrades:
     @pytest.mark.asyncio
     async def test_home_bet_on_draw_loses(self, test_session) -> None:
         event = Event(
-            id="evt-settle-draw-loss",
+            id=11,
             sport_key="soccer_epl",
             sport_title="EPL",
             commence_time=datetime(2026, 4, 10, 15, 0, tzinfo=UTC),
@@ -545,7 +545,7 @@ class TestSettleTrades:
         test_session.add(event)
 
         trade = PaperTrade(
-            event_id="evt-settle-draw-loss",
+            event_id=11,
             market="h2h",
             selection="home",
             bookmaker="bet365",
@@ -565,7 +565,7 @@ class TestSettleTrades:
     @pytest.mark.asyncio
     async def test_idempotent_settlement(self, test_session) -> None:
         event = Event(
-            id="evt-settle-3",
+            id=12,
             sport_key="soccer_epl",
             sport_title="EPL",
             commence_time=datetime(2026, 4, 10, 15, 0, tzinfo=UTC),
@@ -578,7 +578,7 @@ class TestSettleTrades:
         test_session.add(event)
 
         trade = PaperTrade(
-            event_id="evt-settle-3",
+            event_id=12,
             market="h2h",
             selection="draw",
             bookmaker="bet365",
@@ -598,7 +598,7 @@ class TestSettleTrades:
     @pytest.mark.asyncio
     async def test_skip_scheduled_events(self, test_session) -> None:
         event = Event(
-            id="evt-settle-4",
+            id=13,
             sport_key="soccer_epl",
             sport_title="EPL",
             commence_time=datetime(2026, 4, 20, 15, 0, tzinfo=UTC),
@@ -609,7 +609,7 @@ class TestSettleTrades:
         test_session.add(event)
 
         trade = PaperTrade(
-            event_id="evt-settle-4",
+            event_id=13,
             market="h2h",
             selection="home",
             bookmaker="bet365",
@@ -636,7 +636,7 @@ class TestPortfolioQueries:
     @pytest.mark.asyncio
     async def test_open_trades_query(self, test_session) -> None:
         event = Event(
-            id="evt-port-1",
+            id=14,
             sport_key="soccer_epl",
             sport_title="EPL",
             commence_time=datetime(2026, 4, 20, 15, 0, tzinfo=UTC),
@@ -646,7 +646,7 @@ class TestPortfolioQueries:
         test_session.add(event)
 
         trade = PaperTrade(
-            event_id="evt-port-1",
+            event_id=14,
             market="h2h",
             selection="away",
             bookmaker="betway",

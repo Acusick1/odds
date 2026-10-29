@@ -58,7 +58,7 @@ def _spec(**overrides: Any) -> EvaluationSpec:
 
 
 def _rows(kickoffs: list[datetime], rows_per_event: int = 2) -> pd.DataFrame:
-    event_ids = np.repeat([f"e{i:03d}" for i in range(len(kickoffs))], rows_per_event)
+    event_ids = np.repeat(list(range(len(kickoffs))), rows_per_event)
     times = np.repeat([k.replace(tzinfo=None) for k in kickoffs], rows_per_event)
     n = len(event_ids)
     return pd.DataFrame(
@@ -313,13 +313,13 @@ class TestReadiness:
     def test_flags_events_that_are_not_final_or_have_no_fduk_close(self) -> None:
         window = pd.DataFrame(
             {
-                "event_id": ["done", "scheduled", "no_close"],
+                "event_id": [1, 2, 3],
                 "status": ["final", "scheduled", "final"],
                 "has_fduk_closing": [True, True, False],
             }
         )
 
-        assert incomplete_events(window) == ["scheduled", "no_close"]
+        assert incomplete_events(window) == [2, 3]
 
 
 KICKOFF = datetime(2025, 10, 4, 14, 0, tzinfo=UTC)
@@ -332,8 +332,8 @@ def _stamp(
 
 
 def _flags(stamps: list[SnapshotStamp]) -> dict[str, Any]:
-    event = make_epl_event("evt", KICKOFF, status=EventStatus.FINAL)
-    frame = _window_event_frame([event], {"evt": stamps})
+    event = make_epl_event(1, KICKOFF, status=EventStatus.FINAL)
+    frame = _window_event_frame([event], {1: stamps})
     return frame.iloc[0].to_dict()
 
 
@@ -382,7 +382,7 @@ class TestSlices:
         rows["y"] = rng.normal(0.0, 0.05, len(rows))
         rows["baseline"] = rng.normal(0.0, 0.05, len(rows))
         rows["model"] = rows["y"] + rng.normal(0.0, 0.02, len(rows))
-        rows["retail_time_basis"] = np.where(rows["event_id"] < "e005", "upper_bound", "observed")
+        rows["retail_time_basis"] = np.where(rows["event_id"] < 5, "upper_bound", "observed")
         rows["block"] = 0
 
         table = slice_table(rows, BootstrapSpec(resamples=50, seed=0))

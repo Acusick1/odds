@@ -46,7 +46,7 @@ def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 async def seed(
-    session: Any, event_id: str, retail: tuple[float, float, float], away_team: str = "Chelsea"
+    session: Any, event_id: int, retail: tuple[float, float, float], away_team: str = "Chelsea"
 ) -> None:
     session.add(make_epl_event(event_id, KICKOFF, away_team=away_team))
     books = [three_way_bookmaker("bet365", retail), betfair(EXCHANGE)]
@@ -73,8 +73,8 @@ async def decide(session: Any) -> None:
 
 class TestRunnerThenParity:
     async def test_every_decision_matches(self, pglite_async_session, registry) -> None:
-        await seed(pglite_async_session, "bet", RETAIL)
-        await seed(pglite_async_session, "none", (1.9, 3.0, 3.0), away_team="Spurs")
+        await seed(pglite_async_session, 1, RETAIL)
+        await seed(pglite_async_session, 2, (1.9, 3.0, 3.0), away_team="Spurs")
         await decide(pglite_async_session)
 
         report = await check_parity(pglite_async_session, candidate())
@@ -88,7 +88,7 @@ class TestRunnerThenParity:
     async def test_recorded_input_is_the_snapshot_decided_from(
         self, pglite_async_session, registry
     ) -> None:
-        await seed(pglite_async_session, "bet", RETAIL)
+        await seed(pglite_async_session, 1, RETAIL)
         await decide(pglite_async_session)
 
         [decision] = (await pglite_async_session.execute(select(CandidateDecision))).scalars()
@@ -104,11 +104,11 @@ class TestRunnerThenParity:
     async def test_a_later_twin_merge_is_a_data_difference_not_a_mismatch(
         self, pglite_async_session, registry
     ) -> None:
-        await seed(pglite_async_session, "bet", RETAIL)
+        await seed(pglite_async_session, 1, RETAIL)
         await decide(pglite_async_session)
         # A twin's snapshot, stored before the run but moved onto the event after it.
         merged = make_tagged_snapshot(
-            "bet",
+            1,
             T - timedelta(minutes=2),
             [three_way_bookmaker("bet365", (2.5, 3.0, 3.0)), betfair(EXCHANGE)],
             "oddsportal_live",

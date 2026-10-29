@@ -25,7 +25,7 @@ Briefs are what the [betting agent](betting-agent.md) concluded about a match, w
 
 | Column | Notes |
 |---|---|
-| `id`, `event_id` | `event_id` is a foreign key to `events.id`, indexed ([events](../storage/events.md)) |
+| `id`, `event_id` | `event_id` is an integer foreign key to `events.id`, indexed ([events](../storage/events.md)) |
 | `decision` | `odds_core.match_brief_models.BriefDecision`: `watching`, `bet` or `skip` |
 | summary | One line for triage views (the tool docstring suggests under about 100 characters; not enforced) |
 | `brief_text` | Free-form; structure is set by the agent prompt |

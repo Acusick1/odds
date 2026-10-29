@@ -31,8 +31,8 @@ class ConflictingGamePks(ValueError):
 
 @dataclass(frozen=True)
 class MergeReport:
-    kept_id: str
-    merged_ids: tuple[str, ...]
+    kept_id: int
+    merged_ids: tuple[int, ...]
     rows_moved: dict[str, int] = field(default_factory=dict)
     rows_deleted: dict[str, int] = field(default_factory=dict)
 
@@ -70,7 +70,7 @@ async def find_match_id(
     away_team: str,
     commence_time: datetime,
     sport_key: str,
-) -> str | None:
+) -> int | None:
     """The event within ``EVENT_MATCH_WINDOW``; of several, the one a merge would keep
     (``kept_event``). Read-only."""
     events = await find_match_candidates(session, home_team, away_team, commence_time, sport_key)
@@ -78,8 +78,8 @@ async def find_match_id(
 
 
 def first_stored(events: Sequence[Event]) -> Event:
-    """The event stored first, by surrogate key."""
-    return min(events, key=lambda event: (event.surrogate_id is None, event.surrogate_id or 0))
+    """The event stored first, by id."""
+    return min(events, key=lambda event: (event.id is None, event.id or 0))
 
 
 async def kept_event(session: AsyncSession, events: Sequence[Event]) -> Event:
@@ -92,7 +92,7 @@ async def kept_event(session: AsyncSession, events: Sequence[Event]) -> Event:
     order = KICKOFF_AUTHORITY.get(events[0].sport_key, ())  # type: ignore[call-overload]
     rows = await session.execute(
         select(EventExternalId.event_id, EventExternalId.source).where(
-            EventExternalId.event_id.in_([e.surrogate_id for e in events])  # type: ignore[attr-defined]
+            EventExternalId.event_id.in_([e.id for e in events])  # type: ignore[attr-defined]
         )
     )
     rank: dict[int, int] = {}
@@ -101,7 +101,7 @@ async def kept_event(session: AsyncSession, events: Sequence[Event]) -> Event:
             rank[event_id] = min(rank.get(event_id, len(order)), order.index(source))
 
     def rank_of(event: Event) -> int:
-        return rank.get(event.surrogate_id, len(order)) if event.surrogate_id else len(order)
+        return rank.get(event.id, len(order)) if event.id else len(order)
 
     best = min(rank_of(e) for e in events)
     return first_stored([e for e in events if rank_of(e) == best])
@@ -294,14 +294,14 @@ class EventMerger:
 
     async def _id_sources(self, event: Event) -> set[Source]:
         rows = await self.session.execute(
-            select(EventExternalId.source).where(EventExternalId.event_id == event.surrogate_id)
+            select(EventExternalId.source).where(EventExternalId.event_id == event.id)
         )
         return set(rows.scalars())
 
     async def _ack_checks(self, event: Event) -> set[HealthCheck]:
         rows = await self.session.execute(
             select(HealthCheckAcknowledgement.check_name).where(
-                HealthCheckAcknowledgement.event_id == event.surrogate_id
+                HealthCheckAcknowledgement.event_id == event.id
             )
         )
         return set(rows.scalars())
@@ -364,15 +364,13 @@ class EventMerger:
         kept_sources = set(
             (
                 await self.session.execute(
-                    select(EventExternalId.source).where(
-                        EventExternalId.event_id == keep.surrogate_id
-                    )
+                    select(EventExternalId.source).where(EventExternalId.event_id == keep.id)
                 )
             ).scalars()
         )
         for row in (
             await self.session.execute(
-                select(EventExternalId).where(EventExternalId.event_id == duplicate.surrogate_id)
+                select(EventExternalId).where(EventExternalId.event_id == duplicate.id)
             )
         ).scalars():
             if row.source not in kept_sources:
@@ -395,7 +393,7 @@ class EventMerger:
             (
                 await self.session.execute(
                     select(HealthCheckAcknowledgement.check_name).where(
-                        HealthCheckAcknowledgement.event_id == keep.surrogate_id
+                        HealthCheckAcknowledgement.event_id == keep.id
                     )
                 )
             ).scalars()
@@ -403,7 +401,7 @@ class EventMerger:
         for ack in (
             await self.session.execute(
                 select(HealthCheckAcknowledgement).where(
-                    HealthCheckAcknowledgement.event_id == duplicate.surrogate_id
+                    HealthCheckAcknowledgement.event_id == duplicate.id
                 )
             )
         ).scalars():
@@ -467,7 +465,7 @@ class EventMerger:
         )
         return [(row[0], row[1], row[2], row[3]) for row in result.all()]
 
-    async def reference_counts(self, event_id: str) -> dict[str, int]:
+    async def reference_counts(self, event_id: int) -> dict[str, int]:
         """Rows referencing the event, per table, leaving out tables with none."""
         event = await self.session.get(Event, event_id)
         if event is None:

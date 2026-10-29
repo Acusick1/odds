@@ -22,7 +22,7 @@ SHAPE = SnapshotShape(Source.ODDS_API, TimeBasis.OBSERVED, None)
 
 
 async def _store(session: AsyncSession, event: Event, at: datetime) -> None:
-    envelope: dict[str, Any] = {**_listed(event.id, KICKOFF), "bookmakers": [_book("bet365")]}
+    envelope: dict[str, Any] = {**_listed("apihex1", KICKOFF), "bookmakers": [_book("bet365")]}
     await OddsWriter(session).store_envelope(
         event.id, envelope, snapshot_time=at, validate=False, shape=SHAPE
     )
@@ -32,7 +32,7 @@ async def _store(session: AsyncSession, event: Event, at: datetime) -> None:
 @pytest.fixture
 async def event_with_two_fetches(pglite_async_session: AsyncSession) -> Event:
     session = pglite_async_session
-    event = make_epl_event("apihex1", KICKOFF)
+    event = make_epl_event(1, KICKOFF)
     session.add(event)
     await session.flush()
     await _store(session, event, KICKOFF - timedelta(hours=30))
@@ -48,7 +48,7 @@ class TestSplitSnapshotReaders:
     ) -> None:
         reader = OddsReader(pglite_async_session)
 
-        assert await reader.get_snapshot_count_for_event("apihex1") == 2
+        assert await reader.get_snapshot_count_for_event(1) == 2
 
     async def test_min_snapshots_counts_fetches(
         self, pglite_async_session: AsyncSession, event_with_two_fetches: Event
@@ -66,7 +66,7 @@ class TestSplitSnapshotReaders:
 
         factory = async_sessionmaker(pglite_async_engine, expire_on_commit=False)
         with patch("odds_mcp.server.async_session_maker", factory):
-            result = await get_odds_history("apihex1", "totals")
+            result = await get_odds_history(1, "totals")
 
         assert result["snapshot_count"] == 2
         assert len(result["snapshots"]) == 2

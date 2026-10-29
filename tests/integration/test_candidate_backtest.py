@@ -61,7 +61,7 @@ def polymarket_candidate() -> MechanicalCandidate:
     return candidate(rule="polymarket_gap", rule_sha256=rule_sha256("polymarket_gap"))
 
 
-async def add_polymarket(session: Any, event_id: str, kickoff: datetime = KICKOFF) -> None:
+async def add_polymarket(session: Any, event_id: int, kickoff: datetime = KICKOFF) -> None:
     """A Polymarket snapshot of the event's 1x2 mids 5 minutes before the decision."""
     await store_tagged(
         session,
@@ -81,7 +81,7 @@ def betfair(prices: tuple[float, float, float], **teams: str) -> dict[str, Any]:
 
 async def add_event(
     session: Any,
-    event_id: str,
+    event_id: int,
     kickoff: datetime = KICKOFF,
     *,
     retail: tuple[float, float, float] | None = RETAIL,
@@ -142,7 +142,7 @@ class TestReplay:
     async def test_bets_are_scored_at_the_price_taken_against_the_close(
         self, pglite_async_session
     ) -> None:
-        await add_event(pglite_async_session, "e1", close=(2.5, 3.6, 3.6))
+        await add_event(pglite_async_session, 1, close=(2.5, 3.6, 3.6))
 
         result = await run(pglite_async_session)
 
@@ -154,7 +154,7 @@ class TestReplay:
     async def test_only_snapshots_stamped_at_or_before_the_decision_time_count(
         self, pglite_async_session
     ) -> None:
-        await add_event(pglite_async_session, "late", snapshot_offset=timedelta(minutes=20))
+        await add_event(pglite_async_session, 3, snapshot_offset=timedelta(minutes=20))
 
         result = await run(pglite_async_session)
 
@@ -163,7 +163,7 @@ class TestReplay:
     async def test_decision_time_uses_the_events_final_kickoff(self, pglite_async_session) -> None:
         # A snapshot 30 minutes before the 15:00 kick-off is invisible at 14:00 but would be
         # visible had the event been decided 60 minutes before 15:30.
-        await add_event(pglite_async_session, "moved", snapshot_offset=timedelta(minutes=30))
+        await add_event(pglite_async_session, 4, snapshot_offset=timedelta(minutes=30))
         later = candidate(
             params={"threshold": 0.02, "minutes_before_kickoff": [30], "max_input_age_minutes": 10}
         )
@@ -174,12 +174,12 @@ class TestReplay:
     async def test_each_decision_time_is_decided_and_an_outcome_is_bet_once(
         self, pglite_async_session
     ) -> None:
-        await add_event(pglite_async_session, "e1")
+        await add_event(pglite_async_session, 1)
         # Inputs at both decision times, each with the home edge.
         await store_tagged(
             pglite_async_session,
             make_tagged_snapshot(
-                "e1",
+                1,
                 KICKOFF - timedelta(minutes=95),
                 [three_way_bookmaker("bet365", RETAIL), betfair(EXCHANGE)],
                 "oddsportal_live",
@@ -202,9 +202,9 @@ class TestReplay:
     async def test_events_outside_the_range_or_not_final_are_excluded(
         self, pglite_async_session
     ) -> None:
-        await add_event(pglite_async_session, "before", datetime(2026, 3, 31, 23, 0, tzinfo=UTC))
-        await add_event(pglite_async_session, "last-day", datetime(2026, 4, 30, 23, 0, tzinfo=UTC))
-        await add_event(pglite_async_session, "scheduled", scores=None)
+        await add_event(pglite_async_session, 5, datetime(2026, 3, 31, 23, 0, tzinfo=UTC))
+        await add_event(pglite_async_session, 20, datetime(2026, 4, 30, 23, 0, tzinfo=UTC))
+        await add_event(pglite_async_session, 21, scores=None)
 
         result = await run(pglite_async_session)
 
@@ -212,14 +212,12 @@ class TestReplay:
 
     async def test_coverage_counts_each_stage(self, pglite_async_session) -> None:
         day = timedelta(days=1)
-        await add_event(pglite_async_session, "bet", KICKOFF)
-        await add_event(pglite_async_session, "no-exchange", KICKOFF + day, exchange=None)
-        await add_event(pglite_async_session, "no-edge", KICKOFF + 2 * day, retail=(1.9, 3.0, 3.0))
+        await add_event(pglite_async_session, 6, KICKOFF)
+        await add_event(pglite_async_session, 22, KICKOFF + day, exchange=None)
+        await add_event(pglite_async_session, 23, KICKOFF + 2 * day, retail=(1.9, 3.0, 3.0))
+        await add_event(pglite_async_session, 24, KICKOFF + 3 * day, retail=None, exchange=None)
         await add_event(
-            pglite_async_session, "nothing", KICKOFF + 3 * day, retail=None, exchange=None
-        )
-        await add_event(
-            pglite_async_session, "stale", KICKOFF + 4 * day, snapshot_offset=-timedelta(minutes=6)
+            pglite_async_session, 25, KICKOFF + 4 * day, snapshot_offset=-timedelta(minutes=6)
         )
 
         coverage = (await run(pglite_async_session)).coverage
@@ -239,9 +237,9 @@ class TestReplay:
         self, pglite_async_session
     ) -> None:
         day = timedelta(days=1)
-        await add_event(pglite_async_session, "priced", KICKOFF, exchange=None)
-        await add_polymarket(pglite_async_session, "priced")
-        await add_event(pglite_async_session, "unpriced", KICKOFF + day, exchange=None)
+        await add_event(pglite_async_session, 7, KICKOFF, exchange=None)
+        await add_polymarket(pglite_async_session, 7)
+        await add_event(pglite_async_session, 26, KICKOFF + day, exchange=None)
 
         coverage = (await run(pglite_async_session, polymarket_candidate())).coverage
 
@@ -258,21 +256,21 @@ class TestReplay:
     ) -> None:
         session = pglite_async_session
         session.add(
-            make_epl_event("e1", KICKOFF, status=EventStatus.FINAL, home_score=2, away_score=1)
+            make_epl_event(1, KICKOFF, status=EventStatus.FINAL, home_score=2, away_score=1)
         )
         retail = totals_book("bet365", {2.5: (2.3, 1.6), 3.5: (3.0, 1.6)})
         exchange = totals_book("betfair_exchange", {2.5: (2.0, 2.0), 3.5: (3.2, 1.45)})
         await store_tagged(
             session,
             make_tagged_snapshot(
-                "e1", T - timedelta(minutes=5), [retail, exchange], "oddsportal_live"
+                1, T - timedelta(minutes=5), [retail, exchange], "oddsportal_live"
             ),
         )
         # The close prices 2.5 only, so the bet on 3.5 has no close.
         close = totals_book("betfair_exchange", {2.5: (2.1, 1.9)})
         await store_tagged(
             session,
-            make_tagged_snapshot("e1", KICKOFF, [close], "football_data_uk", "kickoff"),
+            make_tagged_snapshot(1, KICKOFF, [close], "football_data_uk", "kickoff"),
         )
         await session.commit()
 
@@ -311,10 +309,10 @@ class TestSharedScoring:
         for i in range(100):
             kickoff = KICKOFF + timedelta(hours=3 * i)  # beyond the twin window
             close = (2.0, 4.0, 4.0) if i % 2 else (2.4, 3.6, 3.6)
-            await add_event(session, f"e{i}", kickoff, close=close)
+            await add_event(session, i + 1, kickoff, close=close)
             trades.append(
                 PaperTrade(
-                    event_id=f"e{i}",
+                    event_id=i + 1,
                     market="1x2",
                     selection="home",
                     bookmaker="bet365",
@@ -345,12 +343,12 @@ class TestFamilySize:
         self, pglite_async_session
     ) -> None:
         session = pglite_async_session
-        await add_event(session, "e1", KICKOFF)
-        await add_event(session, "e2", KICKOFF + timedelta(days=1))
+        await add_event(session, 1, KICKOFF)
+        await add_event(session, 2, KICKOFF + timedelta(days=1))
         for version, event_id, when in (
-            (1, "e1", KICKOFF),
-            (1, "e2", KICKOFF + timedelta(days=1)),
-            (2, "e2", KICKOFF + timedelta(days=1)),
+            (1, 1, KICKOFF),
+            (1, 2, KICKOFF + timedelta(days=1)),
+            (2, 2, KICKOFF + timedelta(days=1)),
         ):
             session.add(
                 CandidateDecision(
@@ -402,8 +400,8 @@ def model_candidate(**params: Any) -> MechanicalCandidate:
 WEEK = timedelta(days=8)
 
 
-async def add_weeks(session: Any, n: int) -> list[str]:
-    ids = [f"m{i}" for i in range(n)]
+async def add_weeks(session: Any, n: int) -> list[int]:
+    ids = [10 + i for i in range(n)]
     for i, event_id in enumerate(ids):
         await add_event(session, event_id, KICKOFF + i * WEEK, away_team=f"Team {i}")
     return ids
@@ -454,12 +452,12 @@ class TestModelReplay:
         self, pglite_async_session, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # m2 kicks off 30 minutes before m3 and after m3's KO-60 decision.
-        await add_event(pglite_async_session, "m0", KICKOFF, away_team="A")
-        await add_event(pglite_async_session, "m1", KICKOFF + WEEK, away_team="B")
+        await add_event(pglite_async_session, 10, KICKOFF, away_team="A")
+        await add_event(pglite_async_session, 11, KICKOFF + WEEK, away_team="B")
         await add_event(
-            pglite_async_session, "m2", KICKOFF + 2 * WEEK - timedelta(minutes=30), away_team="C"
+            pglite_async_session, 12, KICKOFF + 2 * WEEK - timedelta(minutes=30), away_team="C"
         )
-        await add_event(pglite_async_session, "m3", KICKOFF + 2 * WEEK, away_team="D")
+        await add_event(pglite_async_session, 13, KICKOFF + 2 * WEEK, away_team="D")
         from odds_analytics import candidate_model
 
         real = candidate_model.fit_model
@@ -473,7 +471,7 @@ class TestModelReplay:
 
         result = await run_model(pglite_async_session, model_candidate())
 
-        assert seen == [{"m0", "m1"}]
+        assert seen == [{10, 11}]
         assert result.refits[0].training_matches == 2
 
     async def test_scored_matches_never_reach_tuning(
@@ -514,29 +512,29 @@ class TestModelReplay:
         self, pglite_async_session, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         for i, kickoff in enumerate([KICKOFF, KICKOFF + WEEK, *[KICKOFF + 2 * WEEK] * 2]):
-            await add_event(pglite_async_session, f"m{i}", kickoff, away_team=f"T{i}")
-        await add_event(pglite_async_session, "m4", KICKOFF + 3 * WEEK, away_team="T4")
+            await add_event(pglite_async_session, 10 + i, kickoff, away_team=f"T{i}")
+        await add_event(pglite_async_session, 14, KICKOFF + 3 * WEEK, away_team="T4")
 
         seen, result = await self._tuned_on(pglite_async_session, monkeypatch)
 
-        assert result.decided_event_ids == ("m4",)
-        assert seen == {"m0", "m1", "m2", "m3"}
+        assert result.decided_event_ids == (14,)
+        assert seen == {10, 11, 12, 13}
 
     async def test_tuning_ends_before_the_first_scored_decision(
         self, pglite_async_session, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         # m2 kicks off after m3's KO-60 decision, so its close is not known then.
-        await add_event(pglite_async_session, "m0", KICKOFF, away_team="T0")
-        await add_event(pglite_async_session, "m1", KICKOFF + WEEK, away_team="T1")
-        await add_event(pglite_async_session, "m2", KICKOFF + 2 * WEEK, away_team="T2")
+        await add_event(pglite_async_session, 10, KICKOFF, away_team="T0")
+        await add_event(pglite_async_session, 11, KICKOFF + WEEK, away_team="T1")
+        await add_event(pglite_async_session, 12, KICKOFF + 2 * WEEK, away_team="T2")
         await add_event(
-            pglite_async_session, "m3", KICKOFF + 2 * WEEK + timedelta(minutes=30), away_team="T3"
+            pglite_async_session, 13, KICKOFF + 2 * WEEK + timedelta(minutes=30), away_team="T3"
         )
 
         seen, result = await self._tuned_on(pglite_async_session, monkeypatch)
 
-        assert result.decided_event_ids == ("m3",)
-        assert seen == {"m0", "m1"}
+        assert result.decided_event_ids == (13,)
+        assert seen == {10, 11}
         assert result.tuning is not None and result.tuning.tuning_matches == 2
         assert set(result.library_versions or {}) == {"xgboost", "optuna", "numpy"}
 
@@ -544,11 +542,11 @@ class TestModelReplay:
         # Closed only by FDUK, published after the refit, no training match has a label.
         for i in range(5):
             kickoff = KICKOFF + i * WEEK
-            await add_event(pglite_async_session, f"m{i}", kickoff, away_team=f"T{i}", close=None)
+            await add_event(pglite_async_session, 10 + i, kickoff, away_team=f"T{i}", close=None)
             await store_tagged(
                 pglite_async_session,
                 make_tagged_snapshot(
-                    f"m{i}",
+                    10 + i,
                     kickoff,
                     [betfair(EXCHANGE, home_team="Arsenal", away_team=f"T{i}")],
                     "football_data_uk",
@@ -562,4 +560,4 @@ class TestModelReplay:
 
     async def test_cannot_be_restricted_to_other_events(self, pglite_async_session) -> None:
         with pytest.raises(ValueError, match="model rule"):
-            await run(pglite_async_session, model_candidate(), only_events={"x"})
+            await run(pglite_async_session, model_candidate(), only_events={999})

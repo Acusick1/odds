@@ -16,7 +16,6 @@ from odds_core.vocabulary import HealthCheck, Source
 from odds_lambda.mlb_game_resolver import ResolutionRule, ResolvedGame
 from odds_lambda.storage import event_resolver
 from odds_lambda.storage.event_resolver import (
-    EventIdTaken,
     ListedGame,
     LockOrderError,
     MatchWindow,
@@ -46,7 +45,6 @@ def epl_listing(
     source: Source = Source.ODDSPORTAL,
     external_id: str | None = "op-1",
     commence_time: datetime = TWIN_KICKOFF,
-    legacy_id: str = "op_live_ARS_CHE",
 ) -> ListedGame:
     return ListedGame(
         source=source,
@@ -55,7 +53,6 @@ def epl_listing(
         home_team="Arsenal",
         away_team="Chelsea",
         commence_time=commence_time,
-        legacy_id=legacy_id,
         external_id=external_id,
     )
 
@@ -65,7 +62,6 @@ def mlb_listing(
     start: datetime,
     external_id: str | None = None,
     sibling_starts: tuple[datetime, ...] = (),
-    legacy_id: str = "op_live_NYY_BOS",
 ) -> ListedGame:
     return ListedGame(
         source=Source.BETFAIR,
@@ -74,7 +70,6 @@ def mlb_listing(
         home_team=YANKEES,
         away_team=RED_SOX,
         commence_time=start,
-        legacy_id=legacy_id,
         external_id=external_id,
         mlb_game=ResolvedGame(game_pk, ResolutionRule.GAME_NUMBER, start, sibling_starts),
     )
@@ -82,7 +77,7 @@ def mlb_listing(
 
 async def external_ids(session: AsyncSession, event: Event) -> dict[Source, str]:
     rows = await session.execute(
-        select(EventExternalId).where(EventExternalId.event_id == event.surrogate_id)
+        select(EventExternalId).where(EventExternalId.event_id == event.id)
     )
     return {row.source: row.external_id for row in rows.scalars()}
 
@@ -132,9 +127,8 @@ class TestResolveEvent:
         resolved = await resolve_event(pglite_async_session, listing)
 
         assert resolved.resolution is Resolution.CREATED
-        assert resolved.event.id == "op_live_ARS_CHE"
-        assert resolved.event.surrogate_id is not None
-        assert resolved.event.surrogate_id != stored_epl_event.surrogate_id
+        assert resolved.event.id is not None
+        assert resolved.event.id != stored_epl_event.id
         assert await external_ids(pglite_async_session, resolved.event) == {
             Source.ODDSPORTAL: "op-1"
         }
@@ -195,22 +189,9 @@ class TestResolveEvent:
         assert held.scalar_one() == 1
 
     @pytest.mark.asyncio
-    async def test_a_taken_legacy_id_without_a_suffix_raises(
-        self, pglite_async_session, stored_epl_event
-    ) -> None:
-        listing = epl_listing(
-            external_id=None,
-            commence_time=TWIN_KICKOFF + timedelta(days=7),
-            legacy_id=stored_epl_event.id,
-        )
-
-        with pytest.raises(EventIdTaken):
-            await resolve_event(pglite_async_session, listing)
-
-    @pytest.mark.asyncio
     async def test_ties_go_to_the_oldest_event(self, pglite_async_session) -> None:
-        first = make_epl_event("zz_first", TWIN_KICKOFF - timedelta(minutes=30))
-        second = make_epl_event("aa_second", TWIN_KICKOFF + timedelta(minutes=30))
+        first = make_epl_event(1, TWIN_KICKOFF - timedelta(minutes=30))
+        second = make_epl_event(2, TWIN_KICKOFF + timedelta(minutes=30))
         pglite_async_session.add(first)
         await pglite_async_session.flush()
         pglite_async_session.add(second)
@@ -218,23 +199,7 @@ class TestResolveEvent:
 
         resolved = await resolve_event(pglite_async_session, epl_listing())
 
-        assert resolved.event.id == "zz_first"
-
-    @pytest.mark.asyncio
-    async def test_a_taken_suffixed_id_raises_and_leaves_the_transaction_usable(
-        self, pglite_async_session
-    ) -> None:
-        far = TWIN_KICKOFF + timedelta(days=30)
-        pglite_async_session.add_all(
-            [make_epl_event("op_live_ARS_CHE", far), make_epl_event("op_live_ARS_CHE_op-1", far)]
-        )
-        await pglite_async_session.flush()
-
-        with pytest.raises(EventIdTaken):
-            await resolve_event(pglite_async_session, epl_listing())
-
-        count = await pglite_async_session.execute(select(func.count()).select_from(Event))
-        assert count.scalar_one() == 2
+        assert resolved.event.id == first.id
 
 
 class TestListedStartMovesTheEvent:
@@ -243,7 +208,7 @@ class TestListedStartMovesTheEvent:
         self, pglite_async_session
     ) -> None:
         kickoff = (datetime.now(UTC) + timedelta(days=2)).replace(microsecond=0)
-        event = make_epl_event("odds_api_hex_1", kickoff)
+        event = make_epl_event(1, kickoff)
         pglite_async_session.add(event)
         await pglite_async_session.flush()
 
@@ -258,7 +223,7 @@ class TestListedStartMovesTheEvent:
         self, pglite_async_session
     ) -> None:
         kickoff = (datetime.now(UTC) + timedelta(minutes=20)).replace(microsecond=0)
-        event = make_epl_event("odds_api_hex_1", kickoff)
+        event = make_epl_event(1, kickoff)
         pglite_async_session.add(event)
         await pglite_async_session.flush()
         brought_forward = kickoff - timedelta(minutes=40)
@@ -272,7 +237,7 @@ class TestListedStartMovesTheEvent:
         self, pglite_async_session
     ) -> None:
         kickoff = (datetime.now(UTC) - timedelta(minutes=20)).replace(microsecond=0)
-        event = make_epl_event("odds_api_hex_1", kickoff)
+        event = make_epl_event(1, kickoff)
         pglite_async_session.add(event)
         await pglite_async_session.flush()
 
@@ -293,7 +258,6 @@ class TestStaleListing:
             home_team="Arsenal",
             away_team="Chelsea",
             commence_time=TWIN_KICKOFF,
-            legacy_id="op_live_ARS_CHE",
             earliest_created_start=TWIN_KICKOFF + timedelta(hours=1),
         )
 
@@ -307,9 +271,7 @@ class TestStaleListing:
 class TestLockOrder:
     @staticmethod
     def listing(home: str, away: str) -> ListedGame:
-        return ListedGame(
-            Source.ODDSPORTAL, "soccer_epl", "EPL", home, away, TWIN_KICKOFF, f"{home}-{away}"
-        )
+        return ListedGame(Source.ODDSPORTAL, "soccer_epl", "EPL", home, away, TWIN_KICKOFF)
 
     def ordered(self) -> list[ListedGame]:
         games = [self.listing("Arsenal", "Chelsea"), self.listing("Liverpool", "Everton")]
@@ -342,7 +304,7 @@ class TestLockOrder:
 
         resolved = await resolve_events(pglite_async_session, [high, low])
 
-        assert [r.event.id for r in resolved] == [high.legacy_id, low.legacy_id]
+        assert [r.event.home_team for r in resolved] == [high.home_team, low.home_team]
 
 
 class TestEventLockKey:
@@ -357,7 +319,7 @@ class TestEventLockKey:
 class TestListedGame:
     def test_mlb_needs_a_game_pk(self) -> None:
         with pytest.raises(ValueError, match="gamePk"):
-            ListedGame(Source.BETFAIR, MLB, "MLB", YANKEES, RED_SOX, GAME_1_START, "id")
+            ListedGame(Source.BETFAIR, MLB, "MLB", YANKEES, RED_SOX, GAME_1_START)
 
     def test_a_source_that_issues_no_ids_takes_none(self) -> None:
         with pytest.raises(ValueError, match="issues no event ids"):
@@ -384,7 +346,6 @@ class TestResolveMlbEvent:
             home_team=YANKEES,
             away_team=RED_SOX,
             commence_time=GAME_1_START + timedelta(minutes=20),
-            legacy_id="g1",
             mlb_game=ResolvedGame(1001, ResolutionRule.SINGLE_GAME, GAME_1_START),
         )
 
@@ -396,33 +357,32 @@ class TestResolveMlbEvent:
     @pytest.mark.asyncio
     async def test_refuses_a_source_id_another_event_holds(self, pglite_async_session) -> None:
         await resolve_event(
-            pglite_async_session,
-            mlb_listing(1001, GAME_1_START, external_id="bf-1", legacy_id="g1"),
+            pglite_async_session, mlb_listing(1001, GAME_1_START, external_id="bf-1")
         )
-        await resolve_event(pglite_async_session, mlb_listing(1002, GAME_2_START, legacy_id="g2"))
+        game_2 = await resolve_event(pglite_async_session, mlb_listing(1002, GAME_2_START))
 
         # The schedule says game 2, but the source reuses game 1's id.
         resolved = await resolve_event(
             pglite_async_session, mlb_listing(1002, GAME_2_START, external_id="bf-1")
         )
 
-        assert resolved.event.id == "g2"
+        assert resolved.event.id == game_2.event.id
         assert await external_ids(pglite_async_session, resolved.event) == {
             Source.MLB_STATS_API: "1002"
         }
         [log] = await refusals(pglite_async_session)
-        assert log.event_id == "g2"
+        assert log.event_id == game_2.event.id
         assert log.raw_data is not None and "held by event" in log.raw_data["reason"]
 
     @pytest.mark.asyncio
     async def test_doubleheader_games_get_one_event_each(self, pglite_async_session) -> None:
         game_1 = await resolve_event(
             pglite_async_session,
-            mlb_listing(1001, GAME_1_START, sibling_starts=(GAME_2_START,), legacy_id="g1"),
+            mlb_listing(1001, GAME_1_START, sibling_starts=(GAME_2_START,)),
         )
         game_2 = await resolve_event(
             pglite_async_session,
-            mlb_listing(1002, GAME_2_START, sibling_starts=(GAME_1_START,), legacy_id="g2"),
+            mlb_listing(1002, GAME_2_START, sibling_starts=(GAME_1_START,)),
         )
 
         assert game_1.resolution is Resolution.CREATED
@@ -435,14 +395,14 @@ class TestResolveMlbEvent:
 
     @pytest.mark.asyncio
     async def test_finds_a_doubleheader_game_by_its_game_pk(self, pglite_async_session) -> None:
-        await resolve_event(pglite_async_session, mlb_listing(1001, GAME_1_START, legacy_id="g1"))
-        await resolve_event(pglite_async_session, mlb_listing(1002, GAME_2_START, legacy_id="g2"))
+        await resolve_event(pglite_async_session, mlb_listing(1001, GAME_1_START))
+        game_2 = await resolve_event(pglite_async_session, mlb_listing(1002, GAME_2_START))
 
-        listing = mlb_listing(1002, GAME_2_START, external_id="bf-2", legacy_id="x")
+        listing = mlb_listing(1002, GAME_2_START, external_id="bf-2")
         resolved = await resolve_event(pglite_async_session, listing)
 
         assert resolved.resolution is Resolution.BY_GAME_PK
-        assert resolved.event.id == "g2"
+        assert resolved.event.id == game_2.event.id
         assert await external_ids(pglite_async_session, resolved.event) == {
             Source.MLB_STATS_API: "1002",
             Source.BETFAIR: "bf-2",
@@ -451,7 +411,7 @@ class TestResolveMlbEvent:
     @pytest.mark.asyncio
     async def test_claims_a_nearby_event_holding_no_game_pk(self, pglite_async_session) -> None:
         stored = Event(
-            id="unkeyed",
+            id=1,
             sport_key=MLB,
             sport_title="MLB",
             commence_time=GAME_1_START + timedelta(minutes=1),
@@ -464,7 +424,7 @@ class TestResolveMlbEvent:
         resolved = await resolve_event(pglite_async_session, mlb_listing(1001, GAME_1_START))
 
         assert resolved.resolution is Resolution.MATCHED
-        assert resolved.event.id == "unkeyed"
+        assert resolved.event.id == stored.id
         assert await game_pk_of(pglite_async_session, resolved.event) == 1001
         assert resolved.event.commence_time == GAME_1_START
 
@@ -472,29 +432,14 @@ class TestResolveMlbEvent:
     async def test_never_claims_an_event_holding_another_game_pk(
         self, pglite_async_session
     ) -> None:
-        await resolve_event(pglite_async_session, mlb_listing(1001, GAME_1_START, legacy_id="g1"))
+        game_1 = await resolve_event(pglite_async_session, mlb_listing(1001, GAME_1_START))
 
         resolved = await resolve_event(
-            pglite_async_session,
-            mlb_listing(1002, GAME_1_START + timedelta(minutes=5), legacy_id="g2"),
+            pglite_async_session, mlb_listing(1002, GAME_1_START + timedelta(minutes=5))
         )
 
         assert resolved.resolution is Resolution.CREATED
-        assert resolved.event.id == "g2"
-
-    @pytest.mark.asyncio
-    async def test_a_taken_legacy_id_takes_the_game_pk_as_suffix(
-        self, pglite_async_session
-    ) -> None:
-        await resolve_event(pglite_async_session, mlb_listing(1001, GAME_1_START, legacy_id="g"))
-
-        resolved = await resolve_event(
-            pglite_async_session, mlb_listing(1002, GAME_2_START, legacy_id="g")
-        )
-
-        assert resolved.event.id == "g_1002"
-        count = await pglite_async_session.execute(select(func.count()).select_from(Event))
-        assert count.scalar_one() == 2
+        assert resolved.event.id != game_1.event.id
 
 
 def polymarket_listing(
@@ -582,9 +527,9 @@ class TestAttachEvent:
     async def test_a_held_id_wins_over_a_nearer_event_of_the_fixture(
         self, pglite_async_session
     ) -> None:
-        pglite_async_session.add(make_epl_event("e1", TWIN_KICKOFF, "Arsenal", "Chelsea"))
+        pglite_async_session.add(make_epl_event(1, TWIN_KICKOFF, "Arsenal", "Chelsea"))
         pglite_async_session.add(
-            make_epl_event("e2", TWIN_KICKOFF + timedelta(days=30), "Arsenal", "Chelsea")
+            make_epl_event(2, TWIN_KICKOFF + timedelta(days=30), "Arsenal", "Chelsea")
         )
         await pglite_async_session.commit()
         await attach_event(pglite_async_session, polymarket_listing("900"))
@@ -593,12 +538,7 @@ class TestAttachEvent:
         attached = await attach_event(pglite_async_session, later)
 
         assert attached is not None
-        assert attached.event.id == "e1"
-
-    @pytest.mark.asyncio
-    async def test_creating_an_event_needs_a_legacy_id(self, pglite_async_session) -> None:
-        with pytest.raises(ValueError, match="legacy_id"):
-            await resolve_event(pglite_async_session, polymarket_listing())
+        assert attached.event.id == 1
 
 
 class TestAttachEvents:
@@ -608,9 +548,9 @@ class TestAttachEvents:
     ) -> None:
         fixtures = [("Arsenal", "Chelsea"), ("Liverpool", "Everton"), ("Fulham", "Brentford")]
         for i, (home, away) in enumerate(fixtures):
-            pglite_async_session.add(make_epl_event(f"e{i}", TWIN_KICKOFF, home, away))
+            pglite_async_session.add(make_epl_event(i + 1, TWIN_KICKOFF, home, away))
         pglite_async_session.add(
-            make_epl_event("elsewhere", TWIN_KICKOFF + timedelta(days=9), "Spurs", "Wolves")
+            make_epl_event(4, TWIN_KICKOFF + timedelta(days=9), "Spurs", "Wolves")
         )
         await pglite_async_session.commit()
         games = [
@@ -623,7 +563,7 @@ class TestAttachEvents:
 
         attached = await attach_events(pglite_async_session, games)
 
-        assert [a.event.id if a else None for a in attached] == ["e0", "e1", "e2", None]
+        assert [a.event.id if a else None for a in attached] == [1, 2, 3, None]
 
 
 def historical_listing(
@@ -636,7 +576,6 @@ def historical_listing(
         home_team="Arsenal",
         away_team="Chelsea",
         commence_time=commence_time,
-        legacy_id="fduk_ARS_CHE",
         match_window=MatchWindow.HISTORICAL,
     )
 
@@ -677,22 +616,22 @@ class TestHistoricalWindow:
         self, pglite_async_session
     ) -> None:
         session = pglite_async_session
-        near = make_epl_event("near", TWIN_KICKOFF + timedelta(minutes=30))
-        next_day = make_epl_event("next_day", TWIN_KICKOFF + timedelta(hours=20))
+        near = make_epl_event(1, TWIN_KICKOFF + timedelta(minutes=30))
+        next_day = make_epl_event(2, TWIN_KICKOFF + timedelta(hours=20))
         session.add_all([near, next_day])
         await session.flush()
 
         resolved = await resolve_event(session, historical_listing())
 
-        assert resolved.event.id == "near"
+        assert resolved.event.id == near.id
 
     @pytest.mark.asyncio
     async def test_twins_at_one_distance_go_to_the_one_stored_first(
         self, pglite_async_session
     ) -> None:
         session = pglite_async_session
-        first = make_epl_event("first")
-        second = make_epl_event("second")
+        first = make_epl_event(1)
+        second = make_epl_event(2)
         session.add(first)
         await session.flush()
         session.add(second)
@@ -700,7 +639,7 @@ class TestHistoricalWindow:
 
         resolved = await resolve_event(session, historical_listing())
 
-        assert resolved.event.id == "first"
+        assert resolved.event.id == first.id
 
     @pytest.mark.asyncio
     async def test_back_to_back_fixtures_with_none_within_two_hours_are_ambiguous(
@@ -709,8 +648,8 @@ class TestHistoricalWindow:
         session = pglite_async_session
         session.add_all(
             [
-                make_epl_event("before", TWIN_KICKOFF - timedelta(hours=10)),
-                make_epl_event("after", TWIN_KICKOFF + timedelta(hours=10)),
+                make_epl_event(1, TWIN_KICKOFF - timedelta(hours=10)),
+                make_epl_event(2, TWIN_KICKOFF + timedelta(hours=10)),
             ]
         )
         await session.flush()
@@ -718,7 +657,7 @@ class TestHistoricalWindow:
         resolved = await resolve_event(session, historical_listing())
 
         assert resolved.resolution is Resolution.CREATED
-        assert resolved.event.id == "fduk_ARS_CHE"
+        assert resolved.event.id not in {1, 2}
 
     @pytest.mark.asyncio
     async def test_is_scoped_to_the_sport(self, pglite_async_session, stored_epl_event) -> None:
@@ -730,7 +669,6 @@ class TestHistoricalWindow:
             home_team=game.home_team,
             away_team=game.away_team,
             commence_time=game.commence_time,
-            legacy_id="nba_x",
             match_window=MatchWindow.HISTORICAL,
         )
 
@@ -758,7 +696,6 @@ class TestHistoricalWindow:
                 home_team=YANKEES,
                 away_team=RED_SOX,
                 commence_time=GAME_1_START,
-                legacy_id="x",
                 mlb_game=ResolvedGame(1, ResolutionRule.GAME_NUMBER, GAME_1_START, ()),
                 match_window=MatchWindow.HISTORICAL,
             )
@@ -767,9 +704,7 @@ class TestHistoricalWindow:
 async def acknowledgements(session: AsyncSession, event: Event) -> list[HealthCheckAcknowledgement]:
     await session.flush()
     rows = await session.execute(
-        select(HealthCheckAcknowledgement).where(
-            HealthCheckAcknowledgement.event_id == event.surrogate_id
-        )
+        select(HealthCheckAcknowledgement).where(HealthCheckAcknowledgement.event_id == event.id)
     )
     return list(rows.scalars())
 
@@ -781,7 +716,7 @@ class TestUnmatched:
         event = (await resolve_event(session, mlb_listing(1001, GAME_1_START))).event
         # An MLB event the schedule no longer lists holds no gamePk.
         await session.execute(
-            text("DELETE FROM event_external_ids WHERE event_id = :k"), {"k": event.surrogate_id}
+            text("DELETE FROM event_external_ids WHERE event_id = :k"), {"k": event.id}
         )
 
         await mark_unmatched(session, event, "  not in the MLB schedule ")
@@ -797,7 +732,7 @@ class TestUnmatched:
     async def test_marking_again_replaces_the_reason(self, pglite_async_session) -> None:
         session = pglite_async_session
         event = Event(
-            id="orphan",
+            id=1,
             sport_key=MLB,
             sport_title="MLB",
             commence_time=GAME_1_START,
@@ -817,7 +752,7 @@ class TestUnmatched:
     async def test_a_final_event_keeps_its_status(self, pglite_async_session) -> None:
         session = pglite_async_session
         event = Event(
-            id="done",
+            id=1,
             sport_key=MLB,
             sport_title="MLB",
             commence_time=GAME_1_START,
@@ -851,7 +786,7 @@ class TestUnmatched:
     async def test_finding_the_game_schedules_the_event_again(self, pglite_async_session) -> None:
         session = pglite_async_session
         event = Event(
-            id="orphan",
+            id=1,
             sport_key=MLB,
             sport_title="MLB",
             commence_time=GAME_1_START,
@@ -864,7 +799,7 @@ class TestUnmatched:
 
         resolved = await resolve_event(session, mlb_listing(1001, GAME_1_START))
 
-        assert resolved.event.id == "orphan"
+        assert resolved.event.id == event.id
         assert event.status is EventStatus.SCHEDULED
         assert await acknowledgements(session, event) == []
 

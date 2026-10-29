@@ -48,7 +48,7 @@ from tests.test_helpers import (
 
 KICKOFF = datetime(2026, 11, 7, 15, 0, tzinfo=UTC)
 T = KICKOFF - timedelta(hours=1)
-EVENT = make_epl_event("evt", KICKOFF)
+EVENT = make_epl_event(1, KICKOFF)
 HOME, DRAW, AWAY = Outcome.HOME, Outcome.DRAW, Outcome.AWAY
 OVER, UNDER = Outcome.OVER, Outcome.UNDER
 MAX_AGE = timedelta(minutes=10)
@@ -122,7 +122,7 @@ BET365_TOTALS = {
 class TestBuildMarketState:
     def test_uses_the_given_market_and_event_fields(self) -> None:
         state = _state([])
-        assert (state.event_id, state.sport_key, state.market) == ("evt", "soccer_epl", "1x2")
+        assert (state.event_id, state.sport_key, state.market) == (1, "soccer_epl", "1x2")
         assert (state.kickoff, state.decision_time) == (KICKOFF, T)
         assert not state.has_input
         assert state.retail == {} and state.exchange == {} and state.snapshot_id is None
@@ -450,7 +450,7 @@ def _rule_state(
     retail: dict[str, dict[Outcome, float]], exchange: ExchangePrice | None
 ) -> MarketState:
     return MarketState(
-        event_id="evt",
+        event_id=1,
         sport_key="soccer_epl",
         market="1x2",
         kickoff=KICKOFF,
@@ -689,7 +689,7 @@ class TestApplyRule:
         always = RuleSpec(
             lambda state, params: [BetIntent(HOME, "bet365", 2.0, 1.0)], GapParams, EXCHANGE
         )
-        empty = MarketState("evt", "soccer_epl", "1x2", KICKOFF, T)
+        empty = MarketState(1, "soccer_epl", "1x2", KICKOFF, T)
         assert apply_rule(always, PARAMS, empty)[1] == []
         assert apply_rule(always, PARAMS, _rule_state({}, None))[1] != []
 

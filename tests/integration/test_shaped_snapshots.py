@@ -60,7 +60,7 @@ def _odds_api_envelope(home_price: int = 120) -> dict[str, Any]:
 
 @pytest.fixture
 async def event(pglite_async_session: AsyncSession) -> Event:
-    stored = make_epl_event("e9a1", KICKOFF)
+    stored = make_epl_event(1, KICKOFF)
     pglite_async_session.add(stored)
     await pglite_async_session.flush()
     return stored
@@ -69,7 +69,7 @@ async def event(pglite_async_session: AsyncSession) -> Event:
 async def _store(session: AsyncSession, raw_data: dict[str, Any]) -> OddsSnapshot:
     payload_id = await store_payload(session, [raw_data])
     stored = await OddsWriter(session).store_envelope(
-        "e9a1",
+        1,
         raw_data,
         TAKEN,
         shape=SnapshotShape(Source.ODDS_API, TimeBasis.OBSERVED, payload_id),

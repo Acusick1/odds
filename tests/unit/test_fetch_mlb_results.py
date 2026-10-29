@@ -22,7 +22,7 @@ START = datetime.now(UTC).replace(hour=16, minute=5, second=0, microsecond=0) - 
 
 
 def _event(
-    event_id: str,
+    event_id: int,
     game_pk: int | None,
     start: datetime = START,
     status: EventStatus = EventStatus.SCHEDULED,
@@ -85,7 +85,7 @@ async def _run(session, fetcher):
         return await process_results(fetcher=fetcher)
 
 
-async def _stored(session, event_id: str) -> Event:
+async def _stored(session, event_id: int) -> Event:
     await session.rollback()
     return (await session.execute(select(Event).where(Event.id == event_id))).scalar_one()
 
@@ -93,13 +93,13 @@ async def _stored(session, event_id: str) -> Event:
 class TestProcessResults:
     @pytest.mark.asyncio
     async def test_final_game_settles_the_event_with_mlb_score(self, test_session) -> None:
-        test_session.add(_event("e", 823357, status=EventStatus.LIVE))
+        test_session.add(_event(1, 823357, status=EventStatus.LIVE))
         await hold_game_pks(test_session)
         await test_session.commit()
 
         stats = await _run(test_session, _fetcher([_slot(823357, score=(7, 6))]))
 
-        stored = await _stored(test_session, "e")
+        stored = await _stored(test_session, 1)
         assert (stored.status, stored.home_score, stored.away_score) == (EventStatus.FINAL, 7, 6)
         assert stored.completed_at is not None
         assert (stats.events_updated, stats.events_unresolved) == (1, 0)
@@ -108,7 +108,7 @@ class TestProcessResults:
     async def test_postponed_game_without_a_replay_marks_the_event_postponed(
         self, test_session
     ) -> None:
-        test_session.add(_event("e", 5))
+        test_session.add(_event(1, 5))
         await hold_game_pks(test_session)
         await test_session.commit()
         postponed = _slot(5, state=MlbGameState.POSTPONED, score=None)
@@ -116,7 +116,7 @@ class TestProcessResults:
 
         stats = await _run(test_session, fetcher)
 
-        assert (await _stored(test_session, "e")).status == EventStatus.POSTPONED
+        assert (await _stored(test_session, 1)).status == EventStatus.POSTPONED
         fetcher.fetch_game.assert_awaited_once_with(5)
         assert (stats.events_postponed, stats.events_unresolved) == (1, 0)
 
@@ -125,7 +125,7 @@ class TestProcessResults:
         self, test_session
     ) -> None:
         played = START + timedelta(days=1)
-        test_session.add(_event("slot", 823357, status=EventStatus.POSTPONED))
+        test_session.add(_event(1, 823357, status=EventStatus.POSTPONED))
         await hold_game_pks(test_session)
         await test_session.commit()
         schedule = [
@@ -135,7 +135,7 @@ class TestProcessResults:
 
         stats = await _run(test_session, _fetcher(schedule))
 
-        stored = await _stored(test_session, "slot")
+        stored = await _stored(test_session, 1)
         assert ensure_utc(stored.commence_time) == played
         assert (stored.status, stored.home_score, stored.away_score) == (EventStatus.FINAL, 7, 6)
         assert stats.events_updated == 1
@@ -143,7 +143,7 @@ class TestProcessResults:
     @pytest.mark.asyncio
     async def test_replay_booked_later_moves_the_event_there(self, test_session) -> None:
         replay = datetime.now(UTC).replace(microsecond=0) + timedelta(days=10)
-        test_session.add(_event("slot", 9, status=EventStatus.POSTPONED))
+        test_session.add(_event(1, 9, status=EventStatus.POSTPONED))
         await hold_game_pks(test_session)
         await test_session.commit()
         postponed = _slot(9, state=MlbGameState.POSTPONED, score=None)
@@ -154,33 +154,33 @@ class TestProcessResults:
 
         stats = await _run(test_session, fetcher)
 
-        stored = await _stored(test_session, "slot")
+        stored = await _stored(test_session, 1)
         assert (ensure_utc(stored.commence_time), stored.status) == (replay, EventStatus.SCHEDULED)
         assert (stats.events_moved, stats.events_unresolved) == (1, 0)
 
     @pytest.mark.asyncio
     async def test_cancelled_game_cancels_the_event(self, test_session) -> None:
-        test_session.add(_event("e", 6))
+        test_session.add(_event(1, 6))
         await hold_game_pks(test_session)
         await test_session.commit()
         cancelled = _slot(6, state=MlbGameState.CANCELLED, score=None)
 
         stats = await _run(test_session, _fetcher([cancelled], {6: [cancelled]}))
 
-        stored = await _stored(test_session, "e")
+        stored = await _stored(test_session, 1)
         assert (stored.status, stored.home_score) == (EventStatus.CANCELLED, None)
         assert stats.events_cancelled == 1
 
     @pytest.mark.asyncio
     async def test_event_without_a_game_pk_is_untouched(self, test_session) -> None:
-        test_session.add(_event("allstar", None))
+        test_session.add(_event(1, None))
         await hold_game_pks(test_session)
         await test_session.commit()
         fetcher = _fetcher([_slot(1)])
 
         stats = await _run(test_session, fetcher)
 
-        stored = await _stored(test_session, "allstar")
+        stored = await _stored(test_session, 1)
         assert (stored.status, stored.home_score) == (EventStatus.SCHEDULED, None)
         fetcher.fetch_results.assert_not_awaited()
         assert (stats.events_unresolved, stats.unresolved_kickoffs) == (1, [START])
@@ -188,7 +188,7 @@ class TestProcessResults:
     @pytest.mark.asyncio
     async def test_doubleheader_games_settle_their_own_events(self, test_session) -> None:
         game_two = START + timedelta(hours=4)
-        test_session.add_all([_event("g1", 101), _event("g2", 102, start=game_two)])
+        test_session.add_all([_event(1, 101), _event(2, 102, start=game_two)])
         await hold_game_pks(test_session)
         await test_session.commit()
         schedule = [
@@ -198,22 +198,22 @@ class TestProcessResults:
 
         stats = await _run(test_session, _fetcher(schedule))
 
-        g1 = await _stored(test_session, "g1")
+        g1 = await _stored(test_session, 1)
         assert (g1.home_score, g1.away_score) == (3, 2)
-        g2 = await _stored(test_session, "g2")
+        g2 = await _stored(test_session, 2)
         assert (g2.home_score, g2.away_score) == (7, 6)
         assert ensure_utc(g2.commence_time) == game_two
         assert stats.events_updated == 2
 
     @pytest.mark.asyncio
     async def test_game_in_progress_leaves_the_event_pending(self, test_session) -> None:
-        test_session.add(_event("e", 7, status=EventStatus.LIVE))
+        test_session.add(_event(1, 7, status=EventStatus.LIVE))
         await hold_game_pks(test_session)
         await test_session.commit()
 
         stats = await _run(test_session, _fetcher([_slot(7, state=MlbGameState.LIVE)]))
 
-        assert (await _stored(test_session, "e")).status == EventStatus.LIVE
+        assert (await _stored(test_session, 1)).status == EventStatus.LIVE
         assert (stats.events_updated, stats.events_unresolved) == (0, 1)
 
     @pytest.mark.asyncio

@@ -13,13 +13,13 @@ from sqlalchemy import select
 from tests.test_helpers import add_event
 
 
-def _api_dict_to_event(event_data: dict) -> Event:
+def _api_dict_to_event(event_id: int, event_data: dict) -> Event:
     """Convert API response dict to Event instance for testing."""
     # Parse commence_time with timezone awareness
     commence_time = parse_api_datetime(event_data["commence_time"])
 
     return Event(
-        id=event_data["id"],
+        id=event_id,
         sport_key=event_data["sport_key"],
         sport_title=event_data.get("sport_title", event_data["sport_key"]),
         commence_time=commence_time,
@@ -27,6 +27,26 @@ def _api_dict_to_event(event_data: dict) -> Event:
         away_team=event_data["away_team"],
         status=EventStatus.SCHEDULED,
     )
+
+
+async def _store_planned_event(session) -> Event:
+    event = _api_dict_to_event(
+        1,
+        {
+            "id": "integration_test_1",
+            "sport_key": "basketball_nba",
+            "sport_title": "NBA",
+            "commence_time": "2024-01-15T19:00:00Z",
+            "home_team": "Test Lakers",
+            "away_team": "Test Celtics",
+        },
+    )
+    await add_event(session, event)
+    session.add(
+        EventExternalId(source=Source.ODDS_API, external_id="integration_test_1", event_id=event.id)
+    )
+    await session.commit()
+    return event
 
 
 @pytest.fixture
@@ -38,7 +58,7 @@ def simple_backfill_plan():
         "estimated_quota_usage": 60,
         "games": [
             {
-                "event_id": "integration_test_1",
+                "event_id": 1,
                 "odds_api_id": "integration_test_1",
                 "home_team": "Test Lakers",
                 "away_team": "Test Celtics",
@@ -85,17 +105,14 @@ class TestBackfillIntegration:
             assert result.failed_snapshots == 0
 
         # Verify data was written to database
-        reader = OddsReader(test_session)
-
         # Check event was created
-        event = await reader.get_event_by_id("integration_test_1")
-        assert event is not None
+        event = (await test_session.execute(select(Event))).scalar_one()
         assert event.home_team == "Test Lakers"
         assert event.away_team == "Test Celtics"
 
         # Check snapshots were created
         result = await test_session.execute(
-            select(OddsSnapshot).where(OddsSnapshot.event_id == "integration_test_1")
+            select(OddsSnapshot).where(OddsSnapshot.event_id == event.id)
         )
         snapshots = list(result.scalars().all())
         # One snapshot per market (h2h and spreads) at each of the plan's two times
@@ -117,6 +134,7 @@ class TestBackfillIntegration:
         """Test that existing snapshots are skipped on subsequent runs."""
         from unittest.mock import AsyncMock
 
+        await _store_planned_event(test_session)
         mock_client = AsyncMock()
         mock_client.get_historical_odds = AsyncMock(
             return_value=mock_api_response_factory(
@@ -168,13 +186,13 @@ class TestBackfillIntegration:
             "home_team": "Old Lakers",
             "away_team": "Old Celtics",
         }
-        event = _api_dict_to_event(event_data)
+        event = _api_dict_to_event(1, event_data)
         await add_event(test_session, event)
         test_session.add(
             EventExternalId(
                 source=Source.ODDS_API,
                 external_id="integration_test_1",
-                event_id=event.surrogate_id,
+                event_id=event.id,
             )
         )
         await test_session.commit()
@@ -196,10 +214,10 @@ class TestBackfillIntegration:
             await executor.execute_plan(simple_backfill_plan)
 
         events = (await test_session.execute(select(Event))).scalars().all()
-        assert [e.id for e in events] == ["integration_test_1"]
+        assert [e.id for e in events] == [1]
         assert events[0].home_team == "Old Lakers"
         snapshots = (await test_session.execute(select(OddsSnapshot))).scalars().all()
-        assert {s.event_id for s in snapshots} == {"integration_test_1"}
+        assert {s.event_id for s in snapshots} == {1}
         assert {s.time_basis for s in snapshots} == {TimeBasis.UPPER_BOUND}
 
     @pytest.mark.asyncio
@@ -210,6 +228,7 @@ class TestBackfillIntegration:
         from datetime import datetime
         from unittest.mock import AsyncMock
 
+        event = await _store_planned_event(test_session)
         mock_client = AsyncMock()
         mock_client.get_historical_odds = AsyncMock(
             return_value=mock_api_response_factory(
@@ -230,15 +249,11 @@ class TestBackfillIntegration:
         reader = OddsReader(test_session)
 
         # Should find existing snapshots
-        exists1 = await reader.snapshot_exists(
-            "integration_test_1", datetime(2024, 1, 14, 19, 0, 0)
-        )
+        exists1 = await reader.snapshot_exists(event.id, datetime(2024, 1, 14, 19, 0, 0))
         assert exists1 is True
 
         # Should not find non-existent snapshot
-        exists2 = await reader.snapshot_exists(
-            "integration_test_1", datetime(2024, 1, 10, 19, 0, 0)
-        )
+        exists2 = await reader.snapshot_exists(event.id, datetime(2024, 1, 10, 19, 0, 0))
         assert exists2 is False
 
 
@@ -256,7 +271,7 @@ class TestBackfillPlanFromDatabase:
         # Insert test events into database
         test_events = [
             Event(
-                id="db_plan_test_1",
+                id=1,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 1, 15, 19, 0, 0, tzinfo=UTC),
@@ -267,7 +282,7 @@ class TestBackfillPlanFromDatabase:
                 away_score=105,
             ),
             Event(
-                id="db_plan_test_2",
+                id=2,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 1, 16, 20, 0, 0, tzinfo=UTC),
@@ -341,7 +356,7 @@ class TestBackfillPlanFromDatabase:
 
         # Insert test event
         event = Event(
-            id="structure_test_1",
+            id=1,
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=datetime(2024, 1, 15, 19, 0, 0, tzinfo=UTC),

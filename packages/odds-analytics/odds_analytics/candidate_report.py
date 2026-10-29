@@ -57,7 +57,7 @@ class ScoredBet:
 
     candidate_name: str
     candidate_version: int
-    event_id: str
+    event_id: int
     commence_time: datetime
     stake: float
     pnl: float | None
@@ -320,7 +320,7 @@ async def load_scored_trades(session: AsyncSession) -> list[ScoredBet]:
         .order_by(PaperTrade.placed_at, PaperTrade.id)  # type: ignore[arg-type]
     )
     rows = (await session.execute(stmt)).all()
-    events: dict[str, dict[str, Event]] = defaultdict(dict)
+    events: dict[str, dict[int, Event]] = defaultdict(dict)
     for trade, event in rows:
         if trade.market in CLOSE_MARKETS:
             events[trade.market][event.id] = event

@@ -24,7 +24,7 @@ def _quote(
     outcome: PriceOutcome,
     american_price: int,
     *,
-    event_id: str = "test_event",
+    event_id: int = 1,
 ) -> Quote:
     """A back quote of the h2h market in one snapshot, priced from American odds."""
     return Quote(
@@ -54,7 +54,7 @@ def _quote(
 def sample_event() -> FeatureEvent:
     """Create a sample FeatureEvent for testing."""
     return FeatureEvent(
-        id="test_event_1",
+        id=1,
         commence_time=datetime(2024, 11, 1, 19, 0, 0, tzinfo=UTC),
         home_team="Los Angeles Lakers",
         away_team="Boston Celtics",
@@ -208,7 +208,7 @@ class TestTabularFeatureExtractor:
 
         # Saturday game
         saturday_event = FeatureEvent(
-            id="sat_event",
+            id=10,
             commence_time=datetime(2024, 11, 2, 19, 0, 0, tzinfo=UTC),  # Saturday
             home_team="Los Angeles Lakers",
             away_team="Boston Celtics",
@@ -222,7 +222,7 @@ class TestTabularFeatureExtractor:
 
         # Sunday game
         sunday_event = FeatureEvent(
-            id="sun_event",
+            id=11,
             commence_time=datetime(2024, 11, 3, 19, 0, 0, tzinfo=UTC),  # Sunday
             home_team="Los Angeles Lakers",
             away_team="Boston Celtics",
@@ -238,7 +238,7 @@ class TestTabularFeatureExtractor:
         """Friday 8pm ET (Sat 1am UTC) should yield day_of_week=4, is_weekend=0."""
         extractor = TabularFeatureExtractor()
         event = FeatureEvent(
-            id="fri_utc_sat",
+            id=12,
             commence_time=datetime(2025, 1, 4, 1, 0, 0, tzinfo=UTC),  # Sat 1am UTC = Fri 8pm ET
             home_team="Los Angeles Lakers",
             away_team="Boston Celtics",
@@ -254,7 +254,7 @@ class TestTabularFeatureExtractor:
         """Saturday 10pm ET (Sun 3am UTC) should yield day_of_week=5, is_weekend=1."""
         extractor = TabularFeatureExtractor()
         event = FeatureEvent(
-            id="sat_utc_sun",
+            id=13,
             commence_time=datetime(2025, 1, 5, 3, 0, 0, tzinfo=UTC),  # Sun 3am UTC = Sat 10pm ET
             home_team="Los Angeles Lakers",
             away_team="Boston Celtics",
@@ -270,7 +270,7 @@ class TestTabularFeatureExtractor:
         """Sunday 3pm ET (Sun 8pm UTC) — no rollover, sanity check."""
         extractor = TabularFeatureExtractor()
         event = FeatureEvent(
-            id="sun_no_roll",
+            id=14,
             commence_time=datetime(2025, 1, 5, 20, 0, 0, tzinfo=UTC),  # Sun 8pm UTC = Sun 3pm ET
             home_team="Los Angeles Lakers",
             away_team="Boston Celtics",
@@ -608,7 +608,7 @@ class TestTabularExtractorPriorityFallback:
     @pytest.fixture
     def event(self) -> FeatureEvent:
         return FeatureEvent(
-            id="fallback_test",
+            id=15,
             commence_time=datetime(2025, 1, 15, 15, 0, 0, tzinfo=UTC),
             home_team="Arsenal",
             away_team="Chelsea",
@@ -665,7 +665,7 @@ class TestTabularExtractorOutcomeAwareSharpFallthrough:
     @pytest.fixture
     def event(self) -> FeatureEvent:
         return FeatureEvent(
-            id="fallthrough_test",
+            id=16,
             commence_time=datetime(2025, 1, 15, 15, 0, 0, tzinfo=UTC),
             home_team="A",
             away_team="B",

@@ -50,7 +50,7 @@ class ParityStatus(StrEnum):
 @dataclass(frozen=True)
 class DecisionParity:
     decision_id: int
-    event_id: str
+    event_id: int
     decision_time: datetime
     status: ParityStatus
     live: tuple[BetKey, ...]
@@ -207,8 +207,8 @@ async def check_parity(
 
     # Selections bet so far per event, live and by the database replay; decisions come in
     # live order.
-    live_selections: dict[str, set[Selection]] = defaultdict(set)
-    db_replayed_selections: dict[str, set[Selection]] = defaultdict(set)
+    live_selections: dict[int, set[Selection]] = defaultdict(set)
+    db_replayed_selections: dict[int, set[Selection]] = defaultdict(set)
     results: list[DecisionParity] = []
     for decision in decisions:
         assert decision.id is not None  # noqa: S101

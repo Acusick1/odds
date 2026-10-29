@@ -42,13 +42,16 @@ TRAINING_EVENTS = 6
 WINDOW_EVENTS = 4
 WINDOW_START = FIRST_KICKOFF + timedelta(days=7 * TRAINING_EVENTS)
 WINDOW_END = FIRST_KICKOFF + timedelta(days=7 * (TRAINING_EVENTS + WINDOW_EVENTS) - 1)
-LATE_EVENT = "fduk_after_window"
+LATE_EVENT = 200
+BARE_EVENT = 300
+INCOMPLETE_EVENT = 400
+OTHER_EVENT = 401
 NOW = datetime(2026, 10, 19, tzinfo=UTC)
 
 
 async def _add_event(
     session,
-    event_id: str,
+    event_id: int,
     kickoff: datetime,
     prices: tuple[float, ...],
     status: EventStatus = EventStatus.FINAL,
@@ -88,7 +91,7 @@ async def evaluation_events(pglite_async_session):
     for i in range(TRAINING_EVENTS + WINDOW_EVENTS):
         await _add_event(
             session,
-            f"fduk_eval_{i}",
+            100 + i,
             FIRST_KICKOFF + timedelta(days=7 * i),
             (2.0 + 0.01 * i, 2.1, 2.2 - 0.02 * i),
         )
@@ -146,14 +149,14 @@ class TestWindowEndGuard:
 
         loaded = {e.id for events in history.season_results.values() for e in events}
         assert LATE_EVENT not in loaded
-        assert "fduk_eval_0" in loaded
+        assert 100 in loaded
 
 
 class TestSnapshotStamps:
     async def test_events_are_stamped_with_source_time_basis_and_time(
         self, evaluation_events
     ) -> None:
-        event = await evaluation_events.get(Event, "fduk_eval_0")
+        event = await evaluation_events.get(Event, 100)
         assert event is not None
 
         stamps = await snapshot_stamps(evaluation_events, [event])
@@ -168,11 +171,11 @@ class TestSnapshotStamps:
         }
 
     async def test_an_event_without_snapshots_has_no_stamps(self, evaluation_events) -> None:
-        bare = make_epl_event("fduk_bare", WINDOW_START)
+        bare = make_epl_event(BARE_EVENT, WINDOW_START)
         evaluation_events.add(bare)
         await evaluation_events.flush()
 
-        assert await snapshot_stamps(evaluation_events, [bare]) == {"fduk_bare": []}
+        assert await snapshot_stamps(evaluation_events, [bare]) == {BARE_EVENT: []}
 
     async def test_rows_carry_the_retail_source_and_time_basis(self, evaluation_events) -> None:
         spec = EvaluationSpec.model_validate(_spec_fields())
@@ -194,7 +197,7 @@ class TestReadinessGuard:
     ) -> None:
         await _add_event(
             evaluation_events,
-            "fduk_incomplete",
+            INCOMPLETE_EVENT,
             WINDOW_START + timedelta(days=1),
             (2.0, 2.1, 2.2),
             status=status,
@@ -203,17 +206,15 @@ class TestReadinessGuard:
         await evaluation_events.commit()
         spec = EvaluationSpec.model_validate(_spec_fields())
 
-        with pytest.raises(IncompleteWindowError, match="fduk_incomplete"):
+        with pytest.raises(IncompleteWindowError, match=str(INCOMPLETE_EVENT)):
             await load_evaluation_data(evaluation_events, spec, NOW)
-        with pytest.raises(IncompleteWindowError, match="fduk_incomplete"):
-            await load_evaluation_data(
-                evaluation_events, spec, NOW, allow_incomplete=["fduk_other"]
-            )
+        with pytest.raises(IncompleteWindowError, match=str(INCOMPLETE_EVENT)):
+            await load_evaluation_data(evaluation_events, spec, NOW, allow_incomplete=[OTHER_EVENT])
         data = await load_evaluation_data(
-            evaluation_events, spec, NOW, allow_incomplete=["fduk_incomplete"]
+            evaluation_events, spec, NOW, allow_incomplete=[INCOMPLETE_EVENT]
         )
 
-        assert "fduk_incomplete" in set(data.window_events["event_id"])
+        assert INCOMPLETE_EVENT in set(data.window_events["event_id"])
 
     async def test_refuses_other_feature_columns(self, evaluation_events) -> None:
         fields = _spec_fields()

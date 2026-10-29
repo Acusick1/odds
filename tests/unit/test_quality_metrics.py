@@ -42,7 +42,7 @@ class TestQualityMetricsGameCounts:
         # Create test events
         events = [
             Event(
-                id="event1",
+                id=1,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 15, 19, 0, tzinfo=UTC),
@@ -50,7 +50,7 @@ class TestQualityMetricsGameCounts:
                 away_team="Celtics",
             ),
             Event(
-                id="event2",
+                id=2,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 20, 20, 0, tzinfo=UTC),
@@ -58,7 +58,7 @@ class TestQualityMetricsGameCounts:
                 away_team="Heat",
             ),
             Event(
-                id="event3",
+                id=3,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 25, 21, 0, tzinfo=UTC),
@@ -84,7 +84,7 @@ class TestQualityMetricsGameCounts:
         # Create events for different sports
         events = [
             Event(
-                id="event1",
+                id=1,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 15, 19, 0, tzinfo=UTC),
@@ -92,7 +92,7 @@ class TestQualityMetricsGameCounts:
                 away_team="Celtics",
             ),
             Event(
-                id="event2",
+                id=2,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 20, 20, 0, tzinfo=UTC),
@@ -100,7 +100,7 @@ class TestQualityMetricsGameCounts:
                 away_team="Heat",
             ),
             Event(
-                id="event3",
+                id=3,
                 sport_key="americanfootball_nfl",
                 sport_title="NFL",
                 commence_time=datetime(2024, 10, 25, 18, 0, tzinfo=UTC),
@@ -129,7 +129,7 @@ class TestQualityMetricsGameCounts:
         """Test game counts with events on date range boundaries."""
         events = [
             Event(
-                id="event1",
+                id=1,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 1, 0, 0, tzinfo=UTC),  # On start date
@@ -137,7 +137,7 @@ class TestQualityMetricsGameCounts:
                 away_team="Celtics",
             ),
             Event(
-                id="event2",
+                id=2,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 31, 23, 59, tzinfo=UTC),  # On end date
@@ -145,7 +145,7 @@ class TestQualityMetricsGameCounts:
                 away_team="Heat",
             ),
             Event(
-                id="event3",
+                id=3,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 11, 1, 0, 0, tzinfo=UTC),  # After end date
@@ -189,7 +189,7 @@ class TestQualityMetricsGamesWithOdds:
         # Create events
         events = [
             Event(
-                id="event1",
+                id=1,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 15, 19, 0, tzinfo=UTC),
@@ -197,7 +197,7 @@ class TestQualityMetricsGamesWithOdds:
                 away_team="Celtics",
             ),
             Event(
-                id="event2",
+                id=2,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 20, 20, 0, tzinfo=UTC),
@@ -205,7 +205,7 @@ class TestQualityMetricsGamesWithOdds:
                 away_team="Heat",
             ),
             Event(
-                id="event3",
+                id=3,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 25, 21, 0, tzinfo=UTC),
@@ -221,15 +221,15 @@ class TestQualityMetricsGamesWithOdds:
         # Create odds snapshots for event1 and event2 only
         snapshots = [
             OddsSnapshot(
-                event_id="event1",
+                event_id=1,
                 snapshot_time=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
             ),
             OddsSnapshot(
-                event_id="event1",
+                event_id=1,
                 snapshot_time=datetime(2024, 10, 15, 18, 30, tzinfo=UTC),
             ),
             OddsSnapshot(
-                event_id="event2",
+                event_id=2,
                 snapshot_time=datetime(2024, 10, 20, 19, 0, tzinfo=UTC),
             ),
         ]
@@ -249,13 +249,13 @@ class TestQualityMetricsGamesWithOdds:
         assert all(isinstance(r, GameWithOddsResult) for r in result)
 
         # Check that event1 has correct snapshot count
-        event1_result = next(r for r in result if r.event_id == "event1")
+        event1_result = next(r for r in result if r.event_id == 1)
         assert event1_result.snapshot_count == 2
         assert event1_result.home_team == "Lakers"
         assert event1_result.away_team == "Celtics"
 
         # Check that event2 has correct snapshot count
-        event2_result = next(r for r in result if r.event_id == "event2")
+        event2_result = next(r for r in result if r.event_id == 2)
         assert event2_result.snapshot_count == 1
 
     async def test_get_games_with_odds_sport_filter(self, test_session: AsyncSession):
@@ -263,7 +263,7 @@ class TestQualityMetricsGamesWithOdds:
         # Create events for different sports
         events = [
             Event(
-                id="event1",
+                id=1,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 15, 19, 0, tzinfo=UTC),
@@ -271,7 +271,7 @@ class TestQualityMetricsGamesWithOdds:
                 away_team="Celtics",
             ),
             Event(
-                id="event2",
+                id=2,
                 sport_key="americanfootball_nfl",
                 sport_title="NFL",
                 commence_time=datetime(2024, 10, 20, 18, 0, tzinfo=UTC),
@@ -287,11 +287,11 @@ class TestQualityMetricsGamesWithOdds:
         # Create snapshots for both events
         snapshots = [
             OddsSnapshot(
-                event_id="event1",
+                event_id=1,
                 snapshot_time=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
             ),
             OddsSnapshot(
-                event_id="event2",
+                event_id=2,
                 snapshot_time=datetime(2024, 10, 20, 17, 0, tzinfo=UTC),
             ),
         ]
@@ -310,7 +310,7 @@ class TestQualityMetricsGamesWithOdds:
         # Should only return NBA event
         assert len(result) == 1
         assert result[0].sport_key == "basketball_nba"
-        assert result[0].event_id == "event1"
+        assert result[0].event_id == 1
 
 
 @pytest.mark.asyncio
@@ -333,7 +333,7 @@ class TestQualityMetricsGamesWithScores:
         """Test retrieving games with final scores."""
         events = [
             Event(
-                id="event1",
+                id=1,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 15, 19, 0, tzinfo=UTC),
@@ -344,7 +344,7 @@ class TestQualityMetricsGamesWithScores:
                 away_score=108,
             ),
             Event(
-                id="event2",
+                id=2,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 20, 20, 0, tzinfo=UTC),
@@ -355,7 +355,7 @@ class TestQualityMetricsGamesWithScores:
                 away_score=98,
             ),
             Event(
-                id="event3",
+                id=3,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 25, 21, 0, tzinfo=UTC),
@@ -381,12 +381,12 @@ class TestQualityMetricsGamesWithScores:
         assert all(isinstance(r, GameWithScoresResult) for r in result)
 
         # Verify scores
-        event1_result = next(r for r in result if r.event_id == "event1")
+        event1_result = next(r for r in result if r.event_id == 1)
         assert event1_result.home_score == 112
         assert event1_result.away_score == 108
         assert event1_result.home_team == "Lakers"
 
-        event2_result = next(r for r in result if r.event_id == "event2")
+        event2_result = next(r for r in result if r.event_id == 2)
         assert event2_result.home_score == 105
         assert event2_result.away_score == 98
 
@@ -394,7 +394,7 @@ class TestQualityMetricsGamesWithScores:
         """Test that games with only one score are excluded."""
         events = [
             Event(
-                id="event1",
+                id=1,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 15, 19, 0, tzinfo=UTC),
@@ -404,7 +404,7 @@ class TestQualityMetricsGamesWithScores:
                 away_score=None,  # Missing away score
             ),
             Event(
-                id="event2",
+                id=2,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 20, 20, 0, tzinfo=UTC),
@@ -432,7 +432,7 @@ class TestQualityMetricsGamesWithScores:
         """Test games with scores filtered by sport."""
         events = [
             Event(
-                id="event1",
+                id=1,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 15, 19, 0, tzinfo=UTC),
@@ -442,7 +442,7 @@ class TestQualityMetricsGamesWithScores:
                 away_score=108,
             ),
             Event(
-                id="event2",
+                id=2,
                 sport_key="americanfootball_nfl",
                 sport_title="NFL",
                 commence_time=datetime(2024, 10, 20, 18, 0, tzinfo=UTC),
@@ -490,7 +490,7 @@ class TestQualityMetricsGamesMissingScores:
         """Test retrieving games without final scores."""
         events = [
             Event(
-                id="event1",
+                id=1,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 15, 19, 0, tzinfo=UTC),
@@ -501,7 +501,7 @@ class TestQualityMetricsGamesMissingScores:
                 away_score=108,
             ),
             Event(
-                id="event2",
+                id=2,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 20, 20, 0, tzinfo=UTC),
@@ -511,7 +511,7 @@ class TestQualityMetricsGamesMissingScores:
                 # No scores
             ),
             Event(
-                id="event3",
+                id=3,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 25, 21, 0, tzinfo=UTC),
@@ -537,10 +537,10 @@ class TestQualityMetricsGamesMissingScores:
         assert all(isinstance(r, GameMissingScoresResult) for r in result)
 
         event_ids = {r.event_id for r in result}
-        assert event_ids == {"event2", "event3"}
+        assert event_ids == {2, 3}
 
         # Verify status is included
-        event2_result = next(r for r in result if r.event_id == "event2")
+        event2_result = next(r for r in result if r.event_id == 2)
         assert event2_result.status == EventStatus.SCHEDULED.value
         assert event2_result.home_team == "Warriors"
 
@@ -548,7 +548,7 @@ class TestQualityMetricsGamesMissingScores:
         """Test that games with partial scores are included."""
         events = [
             Event(
-                id="event1",
+                id=1,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 15, 19, 0, tzinfo=UTC),
@@ -558,7 +558,7 @@ class TestQualityMetricsGamesMissingScores:
                 away_score=None,  # Missing away score
             ),
             Event(
-                id="event2",
+                id=2,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 20, 20, 0, tzinfo=UTC),
@@ -586,7 +586,7 @@ class TestQualityMetricsGamesMissingScores:
         """Test games missing scores filtered by sport."""
         events = [
             Event(
-                id="event1",
+                id=1,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 15, 19, 0, tzinfo=UTC),
@@ -595,7 +595,7 @@ class TestQualityMetricsGamesMissingScores:
                 status=EventStatus.SCHEDULED,
             ),
             Event(
-                id="event2",
+                id=2,
                 sport_key="americanfootball_nfl",
                 sport_title="NFL",
                 commence_time=datetime(2024, 10, 20, 18, 0, tzinfo=UTC),
@@ -619,7 +619,7 @@ class TestQualityMetricsGamesMissingScores:
         # Should only return NBA event
         assert len(result) == 1
         assert result[0].sport_key == "basketball_nba"
-        assert result[0].event_id == "event1"
+        assert result[0].event_id == 1
 
 
 @pytest.mark.asyncio
@@ -630,7 +630,7 @@ class TestQualityMetricsEdgeCases:
         """Test with events outside the date range."""
         events = [
             Event(
-                id="event1",
+                id=1,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 9, 30, 19, 0, tzinfo=UTC),  # Before range
@@ -638,7 +638,7 @@ class TestQualityMetricsEdgeCases:
                 away_team="Celtics",
             ),
             Event(
-                id="event2",
+                id=2,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 11, 1, 20, 0, tzinfo=UTC),  # After range
@@ -665,7 +665,7 @@ class TestQualityMetricsEdgeCases:
         """Test that results are ordered by commence_time."""
         events = [
             Event(
-                id="event1",
+                id=1,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 25, 19, 0, tzinfo=UTC),
@@ -675,7 +675,7 @@ class TestQualityMetricsEdgeCases:
                 away_score=105,
             ),
             Event(
-                id="event2",
+                id=2,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 10, 20, 0, tzinfo=UTC),
@@ -685,7 +685,7 @@ class TestQualityMetricsEdgeCases:
                 away_score=95,
             ),
             Event(
-                id="event3",
+                id=3,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 15, 21, 0, tzinfo=UTC),
@@ -708,9 +708,9 @@ class TestQualityMetricsEdgeCases:
 
         # Should be ordered by commence_time
         assert len(result) == 3
-        assert result[0].event_id == "event2"  # Oct 10
-        assert result[1].event_id == "event3"  # Oct 15
-        assert result[2].event_id == "event1"  # Oct 25
+        assert result[0].event_id == 2  # Oct 10
+        assert result[1].event_id == 3  # Oct 15
+        assert result[2].event_id == 1  # Oct 25
 
 
 @pytest.mark.asyncio
@@ -744,7 +744,7 @@ class TestQualityMetricsTierCoverage:
         # Create test events
         events = [
             Event(
-                id="event1",
+                id=1,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 15, 19, 0, tzinfo=UTC),
@@ -752,7 +752,7 @@ class TestQualityMetricsTierCoverage:
                 away_team="Celtics",
             ),
             Event(
-                id="event2",
+                id=2,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 20, 20, 0, tzinfo=UTC),
@@ -760,7 +760,7 @@ class TestQualityMetricsTierCoverage:
                 away_team="Heat",
             ),
             Event(
-                id="event3",
+                id=3,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 25, 21, 0, tzinfo=UTC),
@@ -777,29 +777,29 @@ class TestQualityMetricsTierCoverage:
         snapshots = [
             # Event 1: Has closing and pregame snapshots
             OddsSnapshot(
-                event_id="event1",
+                event_id=1,
                 snapshot_time=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
             ),
             OddsSnapshot(
-                event_id="event1",
+                event_id=1,
                 snapshot_time=datetime(2024, 10, 15, 18, 30, tzinfo=UTC),
             ),
             OddsSnapshot(
-                event_id="event1",
+                event_id=1,
                 snapshot_time=datetime(2024, 10, 15, 15, 0, tzinfo=UTC),
             ),
             # Event 2: Has only sharp tier snapshots
             OddsSnapshot(
-                event_id="event2",
+                event_id=2,
                 snapshot_time=datetime(2024, 10, 20, 7, 0, tzinfo=UTC),
             ),
             # Event 3: Has opening and early tier snapshots
             OddsSnapshot(
-                event_id="event3",
+                event_id=3,
                 snapshot_time=datetime(2024, 10, 22, 20, 0, tzinfo=UTC),
             ),
             OddsSnapshot(
-                event_id="event3",
+                event_id=3,
                 snapshot_time=datetime(2024, 10, 24, 20, 0, tzinfo=UTC),
             ),
         ]
@@ -876,7 +876,7 @@ class TestQualityMetricsTierCoverage:
         # Create events for different sports
         events = [
             Event(
-                id="event1",
+                id=1,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 15, 19, 0, tzinfo=UTC),
@@ -884,7 +884,7 @@ class TestQualityMetricsTierCoverage:
                 away_team="Celtics",
             ),
             Event(
-                id="event2",
+                id=2,
                 sport_key="americanfootball_nfl",
                 sport_title="NFL",
                 commence_time=datetime(2024, 10, 20, 18, 0, tzinfo=UTC),
@@ -900,11 +900,11 @@ class TestQualityMetricsTierCoverage:
         # Create snapshots for both sports
         snapshots = [
             OddsSnapshot(
-                event_id="event1",
+                event_id=1,
                 snapshot_time=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
             ),
             OddsSnapshot(
-                event_id="event2",
+                event_id=2,
                 snapshot_time=datetime(2024, 10, 20, 17, 0, tzinfo=UTC),
             ),
         ]
@@ -935,7 +935,7 @@ class TestQualityMetricsTierCoverage:
         # Create events without snapshots
         events = [
             Event(
-                id="event1",
+                id=1,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 15, 19, 0, tzinfo=UTC),
@@ -943,7 +943,7 @@ class TestQualityMetricsTierCoverage:
                 away_team="Celtics",
             ),
             Event(
-                id="event2",
+                id=2,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 20, 20, 0, tzinfo=UTC),
@@ -975,7 +975,7 @@ class TestQualityMetricsTierCoverage:
         """Test that tier coverage dynamically iterates through all FetchTier enum values."""
         # Create one event
         event = Event(
-            id="event1",
+            id=1,
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=datetime(2024, 10, 15, 19, 0, tzinfo=UTC),
@@ -1010,7 +1010,7 @@ class TestQualityMetricsTierCoverage:
         """Test avg_snapshots_per_game calculation with multiple snapshots."""
         # Create one event
         event = Event(
-            id="event1",
+            id=1,
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=datetime(2024, 10, 15, 19, 0, tzinfo=UTC),
@@ -1023,23 +1023,23 @@ class TestQualityMetricsTierCoverage:
         # Create 5 closing tier snapshots for the event
         snapshots = [
             OddsSnapshot(
-                event_id="event1",
+                event_id=1,
                 snapshot_time=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
             ),
             OddsSnapshot(
-                event_id="event1",
+                event_id=1,
                 snapshot_time=datetime(2024, 10, 15, 18, 30, tzinfo=UTC),
             ),
             OddsSnapshot(
-                event_id="event1",
+                event_id=1,
                 snapshot_time=datetime(2024, 10, 15, 17, 30, tzinfo=UTC),
             ),
             OddsSnapshot(
-                event_id="event1",
+                event_id=1,
                 snapshot_time=datetime(2024, 10, 15, 17, 0, tzinfo=UTC),
             ),
             OddsSnapshot(
-                event_id="event1",
+                event_id=1,
                 snapshot_time=datetime(2024, 10, 15, 16, 30, tzinfo=UTC),
             ),
         ]
@@ -1068,7 +1068,7 @@ class TestQualityMetricsTierCoverage:
         """Test tier coverage respects date range boundaries."""
         events = [
             Event(
-                id="event1",
+                id=1,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 9, 30, 19, 0, tzinfo=UTC),  # Before range
@@ -1076,7 +1076,7 @@ class TestQualityMetricsTierCoverage:
                 away_team="Celtics",
             ),
             Event(
-                id="event2",
+                id=2,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 10, 15, 20, 0, tzinfo=UTC),  # In range
@@ -1084,7 +1084,7 @@ class TestQualityMetricsTierCoverage:
                 away_team="Heat",
             ),
             Event(
-                id="event3",
+                id=3,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime(2024, 11, 1, 21, 0, tzinfo=UTC),  # After range
@@ -1100,15 +1100,15 @@ class TestQualityMetricsTierCoverage:
         # Create snapshots for all events
         snapshots = [
             OddsSnapshot(
-                event_id="event1",
+                event_id=1,
                 snapshot_time=datetime(2024, 9, 30, 18, 0, tzinfo=UTC),
             ),
             OddsSnapshot(
-                event_id="event2",
+                event_id=2,
                 snapshot_time=datetime(2024, 10, 15, 19, 0, tzinfo=UTC),
             ),
             OddsSnapshot(
-                event_id="event3",
+                event_id=3,
                 snapshot_time=datetime(2024, 11, 1, 20, 0, tzinfo=UTC),
             ),
         ]
@@ -1138,11 +1138,11 @@ class TestQualityMetricsTierCoverageDerivation:
     async def test_a_snapshot_an_hour_before_kickoff_is_closing(
         self, test_session: AsyncSession
     ) -> None:
-        test_session.add(_event("event1", datetime(2024, 10, 15, 19, 0, tzinfo=UTC)))
+        test_session.add(_event(1, datetime(2024, 10, 15, 19, 0, tzinfo=UTC)))
         await test_session.commit()
         test_session.add(
             OddsSnapshot(
-                event_id="event1",
+                event_id=1,
                 snapshot_time=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
             )
         )
@@ -1163,12 +1163,12 @@ class TestQualityMetricsTierCoverageDerivation:
         self, test_session: AsyncSession
     ) -> None:
         """Per-market snapshots taken at one time are one snapshot time in the tier."""
-        test_session.add(_event("event1", datetime(2024, 10, 15, 19, 0, tzinfo=UTC)))
+        test_session.add(_event(1, datetime(2024, 10, 15, 19, 0, tzinfo=UTC)))
         await test_session.commit()
         for market in (Market.H2H, Market.SPREADS, Market.TOTALS):
             test_session.add(
                 OddsSnapshot(
-                    event_id="event1",
+                    event_id=1,
                     snapshot_time=datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
                     source=Source.ODDS_API,
                     market=market,
@@ -1186,7 +1186,7 @@ class TestQualityMetricsTierCoverageDerivation:
         assert closing.total_snapshots_in_tier == 1
 
 
-def _event(event_id: str, commence_time: datetime, sport_key: str = "basketball_nba") -> Event:
+def _event(event_id: int, commence_time: datetime, sport_key: str = "basketball_nba") -> Event:
     return Event(
         id=event_id,
         sport_key=sport_key,
@@ -1198,7 +1198,7 @@ def _event(event_id: str, commence_time: datetime, sport_key: str = "basketball_
 
 
 async def _add_priced_snapshot(
-    session: AsyncSession, event_id: str, snapshot_time: datetime, bookmakers: list[str]
+    session: AsyncSession, event_id: int, snapshot_time: datetime, bookmakers: list[str]
 ) -> OddsSnapshot:
     """Store a snapshot with one price row per bookmaker, as the writers do."""
     snapshot = OddsSnapshot(
@@ -1243,17 +1243,17 @@ class TestQualityMetricsBookmakerCoverage:
 
     async def test_get_bookmaker_coverage_full_coverage(self, test_session: AsyncSession):
         """Test bookmaker coverage with 100% coverage."""
-        test_session.add(_event("event1", datetime(2024, 10, 15, 19, 0, tzinfo=UTC)))
-        test_session.add(_event("event2", datetime(2024, 10, 20, 20, 0, tzinfo=UTC)))
-        test_session.add(_event("event3", datetime(2024, 10, 25, 21, 0, tzinfo=UTC)))
+        test_session.add(_event(1, datetime(2024, 10, 15, 19, 0, tzinfo=UTC)))
+        test_session.add(_event(2, datetime(2024, 10, 20, 20, 0, tzinfo=UTC)))
+        test_session.add(_event(3, datetime(2024, 10, 25, 21, 0, tzinfo=UTC)))
         await test_session.commit()
 
         # FanDuel prices every game, event1 in two snapshots
         for event_id, snapshot_time in [
-            ("event1", datetime(2024, 10, 15, 18, 0, tzinfo=UTC)),
-            ("event1", datetime(2024, 10, 15, 17, 0, tzinfo=UTC)),
-            ("event2", datetime(2024, 10, 20, 19, 0, tzinfo=UTC)),
-            ("event3", datetime(2024, 10, 25, 20, 0, tzinfo=UTC)),
+            (1, datetime(2024, 10, 15, 18, 0, tzinfo=UTC)),
+            (1, datetime(2024, 10, 15, 17, 0, tzinfo=UTC)),
+            (2, datetime(2024, 10, 20, 19, 0, tzinfo=UTC)),
+            (3, datetime(2024, 10, 25, 20, 0, tzinfo=UTC)),
         ]:
             await _add_priced_snapshot(test_session, event_id, snapshot_time, ["fanduel"])
 
@@ -1276,17 +1276,17 @@ class TestQualityMetricsBookmakerCoverage:
 
     async def test_get_bookmaker_coverage_partial_coverage(self, test_session: AsyncSession):
         """Test bookmaker coverage with partial coverage (some games missing)."""
-        test_session.add(_event("event1", datetime(2024, 10, 15, 19, 0, tzinfo=UTC)))
-        test_session.add(_event("event2", datetime(2024, 10, 20, 20, 0, tzinfo=UTC)))
-        test_session.add(_event("event3", datetime(2024, 10, 25, 21, 0, tzinfo=UTC)))
+        test_session.add(_event(1, datetime(2024, 10, 15, 19, 0, tzinfo=UTC)))
+        test_session.add(_event(2, datetime(2024, 10, 20, 20, 0, tzinfo=UTC)))
+        test_session.add(_event(3, datetime(2024, 10, 25, 21, 0, tzinfo=UTC)))
         await test_session.commit()
 
         # DraftKings only prices event1 and event2 (66.67% coverage)
         await _add_priced_snapshot(
-            test_session, "event1", datetime(2024, 10, 15, 18, 0, tzinfo=UTC), ["draftkings"]
+            test_session, 1, datetime(2024, 10, 15, 18, 0, tzinfo=UTC), ["draftkings"]
         )
         await _add_priced_snapshot(
-            test_session, "event2", datetime(2024, 10, 20, 19, 0, tzinfo=UTC), ["draftkings"]
+            test_session, 2, datetime(2024, 10, 20, 19, 0, tzinfo=UTC), ["draftkings"]
         )
 
         metrics = QualityMetrics(test_session)
@@ -1306,26 +1306,26 @@ class TestQualityMetricsBookmakerCoverage:
 
     async def test_get_bookmaker_coverage_multiple_bookmakers(self, test_session: AsyncSession):
         """Test bookmaker coverage with multiple bookmakers at different coverage levels."""
-        test_session.add(_event("event1", datetime(2024, 10, 15, 19, 0, tzinfo=UTC)))
-        test_session.add(_event("event2", datetime(2024, 10, 20, 20, 0, tzinfo=UTC)))
-        test_session.add(_event("event3", datetime(2024, 10, 25, 21, 0, tzinfo=UTC)))
+        test_session.add(_event(1, datetime(2024, 10, 15, 19, 0, tzinfo=UTC)))
+        test_session.add(_event(2, datetime(2024, 10, 20, 20, 0, tzinfo=UTC)))
+        test_session.add(_event(3, datetime(2024, 10, 25, 21, 0, tzinfo=UTC)))
         await test_session.commit()
 
         # FanDuel: 3/3 games, DraftKings: 2/3, Pinnacle: 1/3
         await _add_priced_snapshot(
             test_session,
-            "event1",
+            1,
             datetime(2024, 10, 15, 18, 0, tzinfo=UTC),
             ["fanduel", "draftkings", "pinnacle"],
         )
         await _add_priced_snapshot(
             test_session,
-            "event2",
+            2,
             datetime(2024, 10, 20, 19, 0, tzinfo=UTC),
             ["fanduel", "draftkings"],
         )
         await _add_priced_snapshot(
-            test_session, "event3", datetime(2024, 10, 25, 20, 0, tzinfo=UTC), ["fanduel"]
+            test_session, 3, datetime(2024, 10, 25, 20, 0, tzinfo=UTC), ["fanduel"]
         )
 
         metrics = QualityMetrics(test_session)
@@ -1348,21 +1348,21 @@ class TestQualityMetricsBookmakerCoverage:
 
     async def test_get_bookmaker_coverage_sport_filter(self, test_session: AsyncSession):
         """Test bookmaker coverage with sport filter."""
-        test_session.add(_event("event1", datetime(2024, 10, 15, 19, 0, tzinfo=UTC)))
-        test_session.add(_event("event2", datetime(2024, 10, 20, 20, 0, tzinfo=UTC)))
+        test_session.add(_event(1, datetime(2024, 10, 15, 19, 0, tzinfo=UTC)))
+        test_session.add(_event(2, datetime(2024, 10, 20, 20, 0, tzinfo=UTC)))
         test_session.add(
-            _event("event3", datetime(2024, 10, 25, 18, 0, tzinfo=UTC), "americanfootball_nfl")
+            _event(3, datetime(2024, 10, 25, 18, 0, tzinfo=UTC), "americanfootball_nfl")
         )
         await test_session.commit()
 
         await _add_priced_snapshot(
-            test_session, "event1", datetime(2024, 10, 15, 18, 0, tzinfo=UTC), ["fanduel"]
+            test_session, 1, datetime(2024, 10, 15, 18, 0, tzinfo=UTC), ["fanduel"]
         )
         await _add_priced_snapshot(
-            test_session, "event2", datetime(2024, 10, 20, 19, 0, tzinfo=UTC), ["fanduel"]
+            test_session, 2, datetime(2024, 10, 20, 19, 0, tzinfo=UTC), ["fanduel"]
         )
         await _add_priced_snapshot(
-            test_session, "event3", datetime(2024, 10, 25, 17, 0, tzinfo=UTC), ["fanduel"]
+            test_session, 3, datetime(2024, 10, 25, 17, 0, tzinfo=UTC), ["fanduel"]
         )
 
         metrics = QualityMetrics(test_session)
@@ -1382,10 +1382,10 @@ class TestQualityMetricsBookmakerCoverage:
 
     async def test_get_bookmaker_coverage_zero_games(self, test_session: AsyncSession):
         """Test bookmaker coverage when total games is zero."""
-        test_session.add(_event("event1", datetime(2024, 9, 15, 19, 0, tzinfo=UTC)))  # Before range
+        test_session.add(_event(1, datetime(2024, 9, 15, 19, 0, tzinfo=UTC)))  # Before range
         await test_session.commit()
         await _add_priced_snapshot(
-            test_session, "event1", datetime(2024, 9, 15, 18, 0, tzinfo=UTC), ["fanduel"]
+            test_session, 1, datetime(2024, 9, 15, 18, 0, tzinfo=UTC), ["fanduel"]
         )
 
         metrics = QualityMetrics(test_session)
@@ -1401,14 +1401,14 @@ class TestQualityMetricsBookmakerCoverage:
         self, test_session: AsyncSession
     ):
         """The same book across two or more snapshots counts one game and one per snapshot."""
-        test_session.add(_event("event1", datetime(2024, 10, 15, 19, 0, tzinfo=UTC)))
+        test_session.add(_event(1, datetime(2024, 10, 15, 19, 0, tzinfo=UTC)))
         await test_session.commit()
 
         # Five snapshots with FanDuel
         for hour, minute in [(18, 0), (18, 30), (17, 0), (16, 0), (15, 0)]:
             await _add_priced_snapshot(
                 test_session,
-                "event1",
+                1,
                 datetime(2024, 10, 15, hour, minute, tzinfo=UTC),
                 ["fanduel"],
             )
@@ -1431,11 +1431,11 @@ class TestQualityMetricsBookmakerCoverage:
         self, test_session: AsyncSession
     ) -> None:
         """One book in two snapshots of one game counts two snapshots, not one."""
-        test_session.add(_event("event1", datetime(2024, 10, 15, 19, 0, tzinfo=UTC)))
+        test_session.add(_event(1, datetime(2024, 10, 15, 19, 0, tzinfo=UTC)))
         await test_session.commit()
         for hour in (17, 18):
             await _add_priced_snapshot(
-                test_session, "event1", datetime(2024, 10, 15, hour, 0, tzinfo=UTC), ["fanduel"]
+                test_session, 1, datetime(2024, 10, 15, hour, 0, tzinfo=UTC), ["fanduel"]
             )
 
         result = await QualityMetrics(test_session).get_bookmaker_coverage(
@@ -1450,10 +1450,10 @@ class TestQualityMetricsBookmakerCoverage:
         self, test_session: AsyncSession
     ) -> None:
         """Several price rows of one book in one snapshot are one snapshot."""
-        test_session.add(_event("event1", datetime(2024, 10, 15, 19, 0, tzinfo=UTC)))
+        test_session.add(_event(1, datetime(2024, 10, 15, 19, 0, tzinfo=UTC)))
         await test_session.commit()
         snapshot = await _add_priced_snapshot(
-            test_session, "event1", datetime(2024, 10, 15, 18, 0, tzinfo=UTC), ["fanduel"]
+            test_session, 1, datetime(2024, 10, 15, 18, 0, tzinfo=UTC), ["fanduel"]
         )
         for outcome in (PriceOutcome.DRAW, PriceOutcome.AWAY):
             test_session.add(
@@ -1478,19 +1478,19 @@ class TestQualityMetricsBookmakerCoverage:
         self, test_session: AsyncSession
     ) -> None:
         """Test bookmaker coverage respects date range boundaries."""
-        test_session.add(_event("event1", datetime(2024, 9, 30, 19, 0, tzinfo=UTC)))  # Before
-        test_session.add(_event("event2", datetime(2024, 10, 15, 20, 0, tzinfo=UTC)))  # In range
-        test_session.add(_event("event3", datetime(2024, 11, 1, 21, 0, tzinfo=UTC)))  # After
+        test_session.add(_event(1, datetime(2024, 9, 30, 19, 0, tzinfo=UTC)))  # Before
+        test_session.add(_event(2, datetime(2024, 10, 15, 20, 0, tzinfo=UTC)))  # In range
+        test_session.add(_event(3, datetime(2024, 11, 1, 21, 0, tzinfo=UTC)))  # After
         await test_session.commit()
 
         await _add_priced_snapshot(
-            test_session, "event1", datetime(2024, 9, 30, 18, 0, tzinfo=UTC), ["fanduel"]
+            test_session, 1, datetime(2024, 9, 30, 18, 0, tzinfo=UTC), ["fanduel"]
         )
         await _add_priced_snapshot(
-            test_session, "event2", datetime(2024, 10, 15, 19, 0, tzinfo=UTC), ["fanduel"]
+            test_session, 2, datetime(2024, 10, 15, 19, 0, tzinfo=UTC), ["fanduel"]
         )
         await _add_priced_snapshot(
-            test_session, "event3", datetime(2024, 11, 1, 20, 0, tzinfo=UTC), ["fanduel"]
+            test_session, 3, datetime(2024, 11, 1, 20, 0, tzinfo=UTC), ["fanduel"]
         )
 
         metrics = QualityMetrics(test_session)

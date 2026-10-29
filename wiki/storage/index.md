@@ -40,7 +40,7 @@ Every table is a SQLModel class in `packages/odds-core/odds_core/`; migrations a
 - [Event matching across sources](event-matching.md) — The matcher each ingest path uses to find its events row (window, team comparison, ambiguity rule) and the duplicates and NULL event ids that follow.
 - [Event merge](event-merge.md) — How events for one match are merged into one event, which event is kept, who merges, how twins and rescheduled duplicates are detected, how stored MLB events get their gamePk, and the odds events merge-twins, repair-names, assign-game-pks, set-game-pk and mark-unassignable commands.
 - [Event resolver](event-resolver.md) — How resolve_event finds or creates the one event of a listed game (lock, lookup order, ±2 h match, creation) and records the source's id, and which ids it refuses.
-- [Events table](events.md) — The events columns and statuses, id prefixes by source, team-name normalizers, and the writers that create and update events.
+- [Events table](events.md) — The events columns and statuses, the database-numbered event id, external ids, the legacy string ids kept for the downgrade, team-name normalizers, and the writers that create and update events.
 - [Fetch tier](fetch-tier.md) — The FetchTier enum and bounds, the one hours-to-tier rule, the tier a snapshot covers by its time basis, and where tiers are read.
 - [Kick-off authority](kickoff-authority.md) — Which source may move an event's commence_time for each sport, the move_kickoff function every move goes through, and what a move does to the event.
 - [Odds snapshots table](odds-tables.md) — The odds_snapshots columns, key and indexes, the envelope format writers build and archive as a snapshot's payload, and the tags producers put in it.

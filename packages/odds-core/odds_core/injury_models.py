@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from enum import Enum
 
-from sqlalchemy import Column, Date, DateTime, Index, UniqueConstraint
+from sqlalchemy import BigInteger, Column, Date, DateTime, Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from odds_core.models import utc_now
@@ -49,8 +49,9 @@ class InjuryReport(SQLModel, table=True):
     reason: str = Field(description="Injury/illness reason")
 
     # Event linking (auto-matched at write time via team + game_date)
-    event_id: str | None = Field(
+    event_id: int | None = Field(
         default=None,
+        sa_type=BigInteger,
         foreign_key="events.id",
         index=True,
         description="Linked sportsbook event",

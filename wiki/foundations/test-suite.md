@@ -23,7 +23,7 @@ How to run the tests is in [Set up and run locally](howto-develop-locally.md#run
 
 ```
 tests/unit/         ~110 flat files across all five packages; `conftest.py` holds the OddsPortal feed fixtures
-tests/integration/  shared fixtures in conftest.py (e.g. an `op_live_` event with child rows (a snapshot with price rows, a paper trade and a match brief), an EPL event with a Betfair `1x2` snapshot without prices, `mixed_source_event` (an EPL event kicking off 2026-04-18 with an Odds API snapshot 3 h out and a later Polymarket one carrying mid, ask and bid price rows), and `job_session`, the test session handed to the OddsPortal and Betfair jobs as their session factory)
+tests/integration/  shared fixtures in conftest.py (e.g. an event with child rows (a snapshot with price rows, a paper trade and a match brief), an EPL event with a Betfair `1x2` snapshot without prices, `mixed_source_event` (an EPL event kicking off 2026-04-18 with an Odds API snapshot 3 h out and a later Polymarket one carrying mid, ask and bid price rows), and `job_session`, the test session handed to the OddsPortal and Betfair jobs as their session factory)
 tests/migration/    schema and CLI checks against a real database
 tests/fixtures/     sample Odds API JSON
 ```
@@ -38,7 +38,7 @@ tests/fixtures/     sample Odds API JSON
 
 ## Unit and integration databases
 
-`tests/unit` and `tests/integration` use an in-process PostgreSQL (py-pglite) on TCP port 5434. `tests/conftest.py` forces TCP; the session fixture creates all SQLModel tables once; `pglite_async_session` truncates every table (`RESTART IDENTITY CASCADE`) before each test and yields an `AsyncSession` with `expire_on_commit=False`. Aliases `test_engine` and `test_session` exist for older tests, and `gamma_event` builds a Gamma EPL match event for Polymarket tests. Run one pytest process at a time, since the port is fixed ([AGENTS.md](../../AGENTS.md#tests)). Fixtures for Odds API payloads live under `tests/fixtures/`.
+`tests/unit` and `tests/integration` use an in-process PostgreSQL (py-pglite) on TCP port 5434. `tests/conftest.py` forces TCP; the session fixture creates all SQLModel tables once; `pglite_async_session` truncates every table (`RESTART IDENTITY CASCADE`) before each test and restarts the events identity at 1,000,001, so a test can give an event a small literal id, and yields an `AsyncSession` with `expire_on_commit=False`. Aliases `test_engine` and `test_session` exist for older tests, and `gamma_event` builds a Gamma EPL match event for Polymarket tests. Run one pytest process at a time, since the port is fixed ([AGENTS.md](../../AGENTS.md#tests)). Fixtures for Odds API payloads live under `tests/fixtures/`.
 
 ## Migration tests
 

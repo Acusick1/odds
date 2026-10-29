@@ -183,7 +183,7 @@ class TestDecideForward:
         await add_event(
             test_session,
             Event(
-                id="mlb_soon",
+                id=1,
                 sport_key="baseball_mlb",
                 sport_title="MLB",
                 commence_time=NOW + timedelta(hours=1),
@@ -195,7 +195,7 @@ class TestDecideForward:
         await add_event(
             test_session,
             Event(
-                id="epl_far",
+                id=2,
                 sport_key="soccer_epl",
                 sport_title="EPL",
                 commence_time=NOW + timedelta(hours=120),
@@ -459,7 +459,7 @@ class TestDecideBackward:
         await add_event(
             test_session,
             Event(
-                id="recent_live",
+                id=3,
                 sport_key="soccer_epl",
                 sport_title="EPL",
                 commence_time=NOW - timedelta(hours=1),
@@ -486,7 +486,7 @@ class TestDecideBackward:
         await add_event(
             test_session,
             Event(
-                id="recent_final",
+                id=4,
                 sport_key="soccer_epl",
                 sport_title="EPL",
                 commence_time=NOW - timedelta(hours=1),
@@ -518,7 +518,7 @@ class TestDecideBackward:
         await add_event(
             test_session,
             Event(
-                id="already_live",
+                id=5,
                 sport_key="soccer_epl",
                 sport_title="EPL",
                 commence_time=NOW - timedelta(hours=1),
@@ -546,7 +546,7 @@ class TestDecideBackward:
         await add_event(
             test_session,
             Event(
-                id="mlb_live",
+                id=6,
                 sport_key="baseball_mlb",
                 sport_title="MLB",
                 commence_time=NOW - timedelta(hours=1),

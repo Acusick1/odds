@@ -42,7 +42,7 @@ async def epl_event_with_odds(pglite_async_session):
     commence_time = datetime(2026, 4, 15, 15, 0, tzinfo=UTC)
 
     event = Event(
-        id="epl_test_001",
+        id=1,
         sport_key="soccer_epl",
         sport_title="EPL",
         commence_time=commence_time,
@@ -116,7 +116,7 @@ async def epl_event_with_odds(pglite_async_session):
 async def epl_event_no_odds(pglite_async_session):
     """Create an EPL event with no snapshots."""
     event = Event(
-        id="epl_test_002",
+        id=2,
         sport_key="soccer_epl",
         sport_title="EPL",
         commence_time=datetime(2026, 4, 16, 15, 0, tzinfo=UTC),
@@ -135,7 +135,7 @@ async def partial_sharp_event(pglite_async_session):
     """Event where pinnacle has only home odds, betfair_exchange has all three."""
     commence_time = datetime(2026, 4, 17, 15, 0, tzinfo=UTC)
     event = Event(
-        id="epl_test_003",
+        id=3,
         sport_key="soccer_epl",
         sport_title="EPL",
         commence_time=commence_time,
@@ -244,14 +244,14 @@ class TestSaveMatchBrief:
         from odds_mcp.server import save_match_brief
 
         result = await save_match_brief(
-            event_id="nonexistent_event",
+            event_id=999999,
             market="1x2",
             decision="watching",
             summary="Test",
             brief_text="Should fail",
         )
 
-        assert result == {"error": "Event 'nonexistent_event' not found"}
+        assert result == {"error": "Event '999999' not found"}
 
     @pytest.mark.asyncio
     async def test_no_snapshot_still_saves(self, patch_session_maker, epl_event_no_odds):
@@ -443,8 +443,8 @@ class TestGetMatchBrief:
         """get_match_brief returns error for nonexistent event."""
         from odds_mcp.server import get_match_brief
 
-        result = await get_match_brief(event_id="nonexistent_event")
-        assert result == {"error": "Event 'nonexistent_event' not found"}
+        result = await get_match_brief(event_id=999999)
+        assert result == {"error": "Event '999999' not found"}
 
 
 class TestGetSlateBriefs:
@@ -455,7 +455,7 @@ class TestGetSlateBriefs:
         """Two future EPL events for slate testing."""
         future = datetime.now(UTC) + timedelta(days=2)
         event_a = Event(
-            id="slate_test_001",
+            id=4,
             sport_key="soccer_epl",
             sport_title="EPL",
             commence_time=future,
@@ -464,7 +464,7 @@ class TestGetSlateBriefs:
             status=EventStatus.SCHEDULED,
         )
         event_b = Event(
-            id="slate_test_002",
+            id=5,
             sport_key="soccer_epl",
             sport_title="EPL",
             commence_time=future + timedelta(hours=3),
@@ -637,8 +637,8 @@ class TestFindRetailEdges:
         """find_retail_edges returns error for nonexistent event."""
         from odds_mcp.server import find_retail_edges
 
-        result = await find_retail_edges(event_id="nonexistent_event", market="1x2")
-        assert result == {"error": "Event 'nonexistent_event' not found"}
+        result = await find_retail_edges(event_id=999999, market="1x2")
+        assert result == {"error": "Event '999999' not found"}
 
     @pytest.mark.asyncio
     async def test_per_outcome_sharp_fallback(self, patch_session_maker, partial_sharp_event):
@@ -664,7 +664,7 @@ class TestFindRetailEdges:
 
         commence_time = datetime(2026, 4, 25, 15, 0, tzinfo=UTC)
         event = Event(
-            id="totals_test_001",
+            id=6,
             sport_key="baseball_mlb",
             sport_title="MLB",
             commence_time=commence_time,
@@ -769,7 +769,7 @@ class TestFindRetailEdges:
 
         commence_time = datetime(2026, 4, 22, 15, 0, tzinfo=UTC)
         event = Event(
-            id="cry_whu_test_001",
+            id=7,
             sport_key="soccer_epl",
             sport_title="EPL",
             commence_time=commence_time,
@@ -916,7 +916,7 @@ async def sharp_lookback_event(pglite_async_session):
     """
     commence_time = datetime(2026, 4, 20, 15, 0, tzinfo=UTC)
     event = Event(
-        id="epl_lookback_001",
+        id=8,
         sport_key="soccer_epl",
         sport_title="EPL",
         commence_time=commence_time,
@@ -1121,7 +1121,7 @@ async def bfe_newest_with_older_retail_event(pglite_async_session):
     """
     commence_time = datetime(2026, 4, 26, 15, 0, tzinfo=UTC)
     event = Event(
-        id="epl_bfe_newest_001",
+        id=9,
         sport_key="soccer_epl",
         sport_title="EPL",
         commence_time=commence_time,
@@ -1422,7 +1422,7 @@ class TestGetCurrentOddsPerBookmakerLookback:
 
         commence_time = datetime(2026, 4, 27, 15, 0, tzinfo=UTC)
         event = Event(
-            id="totals_points_test_001",
+            id=10,
             sport_key="baseball_mlb",
             sport_title="MLB",
             commence_time=commence_time,
@@ -1534,7 +1534,7 @@ class TestGetOddsHistory:
     async def test_event_not_found(self, patch_session_maker):
         from odds_mcp.server import get_odds_history
 
-        result = await get_odds_history(event_id="missing", market="1x2")
+        result = await get_odds_history(event_id=999999, market="1x2")
 
         assert "error" in result
 
@@ -1544,7 +1544,7 @@ async def two_sharp_lines_event(pglite_async_session):
     """Totals priced by Pinnacle at 2.5 and 3.5 and by bet365 at both lines."""
     session = pglite_async_session
     kickoff = datetime(2026, 4, 19, 15, 0, tzinfo=UTC)
-    event = make_epl_event("epl_test_lines", kickoff)
+    event = make_epl_event(11, kickoff)
     session.add(event)
 
     def book(key: str, over_25: float, over_35: float) -> dict:

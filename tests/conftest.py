@@ -93,6 +93,8 @@ async def pglite_async_session(
             await conn.execute(text("SET session_replication_role = replica;"))
             for table_name in table_names:
                 await conn.execute(text(f'TRUNCATE TABLE "{table_name}" RESTART IDENTITY CASCADE;'))
+            # Tests give events small literal ids; the ones the database numbers start above them.
+            await conn.execute(text("ALTER TABLE events ALTER COLUMN id RESTART WITH 1000001"))
             await conn.execute(text("SET session_replication_role = DEFAULT;"))
             await conn.commit()
 
@@ -148,7 +150,7 @@ def sample_backfill_plan() -> dict[str, Any]:
         "estimated_quota_usage": 120,
         "games": [
             {
-                "event_id": "test_event_1",
+                "event_id": 1,
                 "odds_api_id": "test_event_1",
                 "home_team": "Lakers",
                 "away_team": "Celtics",
@@ -160,7 +162,7 @@ def sample_backfill_plan() -> dict[str, Any]:
                 "snapshot_count": 2,
             },
             {
-                "event_id": "test_event_2",
+                "event_id": 2,
                 "odds_api_id": "test_event_2",
                 "home_team": "Warriors",
                 "away_team": "Heat",
@@ -180,7 +182,7 @@ def sample_backfill_plan() -> dict[str, Any]:
 @pytest.fixture
 def mock_api_response_factory() -> Callable[[str, str, str], Any]:
     """Factory to create mock API responses for different events."""
-    from odds_core.api_models import HistoricalOddsResponse, api_dict_to_event
+    from odds_core.api_models import HistoricalOddsResponse, parse_api_event
 
     def _create_response(
         event_id: str = "test_event_1", home_team: str = "Lakers", away_team: str = "Celtics"
@@ -232,8 +234,8 @@ def mock_api_response_factory() -> Callable[[str, str, str], Any]:
             ],
         }
 
-        # Convert to Event instance
-        event = api_dict_to_event(event_dict)
+        # Convert to ApiEvent instance
+        event = parse_api_event(event_dict)
 
         # Return HistoricalOddsResponse
         return HistoricalOddsResponse(

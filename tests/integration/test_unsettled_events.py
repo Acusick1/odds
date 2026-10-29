@@ -14,12 +14,12 @@ NOW = datetime(2026, 10, 20, 12, 0, tzinfo=UTC)
 
 
 def _event(
-    event_id: str,
+    event_id: int,
     kickoff: datetime,
     status: EventStatus = EventStatus.SCHEDULED,
     sport_key: str = "soccer_epl",
 ) -> Event:
-    event = make_epl_event(event_id, kickoff, home_team=event_id, status=status)
+    event = make_epl_event(event_id, kickoff, home_team=f"Team {event_id}", status=status)
     event.sport_key = sport_key
     return event
 
@@ -36,8 +36,8 @@ class TestUnsettledEvents:
         session = pglite_async_session
         session.add_all(
             [
-                _event("stuck-scheduled", NOW - timedelta(days=44)),
-                _event("stuck-live", NOW - timedelta(days=2), EventStatus.LIVE),
+                _event(1, NOW - timedelta(days=44)),
+                _event(2, NOW - timedelta(days=2), EventStatus.LIVE),
             ]
         )
         await session.flush()
@@ -45,13 +45,13 @@ class TestUnsettledEvents:
         issues, send = await _check(session)
 
         assert len(issues) == 1
-        assert "stuck-scheduled" in issues[0] and "stuck-live" in issues[0]
+        assert "1, 2" in issues[0]
         send.assert_awaited_once()
         kwargs = send.await_args.kwargs
         assert kwargs["alert_type"] == "unsettled_events:soccer_epl"
         assert kwargs["severity"] == "warning"
         assert kwargs["every"] == timedelta(minutes=UNSETTLED_ALERT_MINUTES) == timedelta(hours=24)
-        assert kwargs["context"]["event_ids"] == ["stuck-scheduled", "stuck-live"]
+        assert kwargs["context"]["event_ids"] == [1, 2]
 
     @pytest.mark.asyncio
     async def test_ignores_settled_recent_other_season_and_unchecked_sport_events(
@@ -60,12 +60,12 @@ class TestUnsettledEvents:
         session = pglite_async_session
         session.add_all(
             [
-                _event("final", NOW - timedelta(days=3), EventStatus.FINAL),
-                _event("postponed", NOW - timedelta(days=3), EventStatus.POSTPONED),
-                _event("cancelled", NOW - timedelta(days=3), EventStatus.CANCELLED),
-                _event("just-kicked-off", NOW - timedelta(hours=3)),
-                _event("last-season", NOW - timedelta(days=200)),
-                _event("nba", NOW - timedelta(days=3), sport_key="basketball_nba"),
+                _event(3, NOW - timedelta(days=3), EventStatus.FINAL),
+                _event(4, NOW - timedelta(days=3), EventStatus.POSTPONED),
+                _event(5, NOW - timedelta(days=3), EventStatus.CANCELLED),
+                _event(6, NOW - timedelta(hours=3)),
+                _event(7, NOW - timedelta(days=200)),
+                _event(8, NOW - timedelta(days=3), sport_key="basketball_nba"),
             ]
         )
         await session.flush()
@@ -80,29 +80,29 @@ class TestUnsettledEvents:
         self, pglite_async_session
     ) -> None:
         session = pglite_async_session
-        stuck = _event("mlb-april", datetime(2026, 4, 10, 23, 5, tzinfo=UTC), EventStatus.LIVE)
+        stuck = _event(9, datetime(2026, 4, 10, 23, 5, tzinfo=UTC), EventStatus.LIVE)
         stuck.sport_key = "baseball_mlb"
-        last_year = _event("mlb-2025", datetime(2025, 9, 10, 23, 5, tzinfo=UTC))
+        last_year = _event(10, datetime(2025, 9, 10, 23, 5, tzinfo=UTC))
         last_year.sport_key = "baseball_mlb"
         session.add_all([stuck, last_year])
         await session.flush()
 
         issues, send = await _check(session)
 
-        assert len(issues) == 1 and "mlb-april" in issues[0]
+        assert len(issues) == 1 and "9" in issues[0]
         assert send.await_args.kwargs["alert_type"] == "unsettled_events:baseball_mlb"
-        assert send.await_args.kwargs["context"]["event_ids"] == ["mlb-april"]
+        assert send.await_args.kwargs["context"]["event_ids"] == [9]
 
     @pytest.mark.asyncio
     async def test_ignores_unmatched_and_postponed_mlb_events(self, pglite_async_session) -> None:
         session = pglite_async_session
         unassignable = _event(
-            "op_live_BOSSOX_TAMRAY_2026-05-17T1735",
+            11,
             NOW - timedelta(days=150),
             EventStatus.UNMATCHED,
         )
         unassignable.sport_key = "baseball_mlb"
-        postponed = _event("mlb-postponed", NOW - timedelta(days=3), EventStatus.POSTPONED)
+        postponed = _event(12, NOW - timedelta(days=3), EventStatus.POSTPONED)
         postponed.sport_key = "baseball_mlb"
         session.add_all([unassignable, postponed])
         await session.flush()

@@ -51,7 +51,7 @@ class PendingEvent:
     session can be closed before the network fetch begins.
     """
 
-    id: str
+    id: int
     commence_time: datetime
     status: EventStatus
     game_pk: int | None = None
@@ -79,7 +79,7 @@ async def get_pending_events(
         .outerjoin(
             EventExternalId,
             and_(
-                EventExternalId.event_id == Event.surrogate_id,  # type: ignore[arg-type]
+                EventExternalId.event_id == Event.id,  # type: ignore[arg-type]
                 EventExternalId.source == Source.MLB_STATS_API,
             ),
         )

@@ -7,6 +7,7 @@ from enum import Enum
 
 from sqlalchemy import (
     ARRAY,
+    BigInteger,
     Boolean,
     CheckConstraint,
     Column,
@@ -49,7 +50,7 @@ class CandidateDecision(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     candidate_name: str = Field(index=True)
     candidate_version: int
-    event_id: str = Field(foreign_key="events.id", index=True)
+    event_id: int = Field(sa_type=BigInteger, foreign_key="events.id", index=True)
     minutes_before_kickoff: int = Field(
         sa_column=Column(Integer, nullable=False),
         description="The entry of the rule's minutes_before_kickoff this decision is for",
@@ -99,7 +100,7 @@ class PaperTrade(SQLModel, table=True):
     __tablename__ = "paper_trades"
 
     id: int | None = Field(default=None, primary_key=True)
-    event_id: str = Field(foreign_key="events.id", index=True)
+    event_id: int = Field(sa_type=BigInteger, foreign_key="events.id", index=True)
 
     # Bet details
     market: str = Field(description="Market type: 1x2, h2h or totals")

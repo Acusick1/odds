@@ -50,10 +50,8 @@ class ListedGame:
     """A game as one source lists it.
 
     ``external_id`` is the id the source issued for the game, if it issues one. An MLB game comes
-    resolved to its ``gamePk`` (``mlb_game``). ``legacy_id`` is the string id an event created for
-    the game takes while ``events.id`` is still a string; only a game that may create an event
-    needs it. ``match_window`` is how close an event's start must be to match the game
-    (``MatchWindow.HISTORICAL`` is not for MLB).
+    resolved to its ``gamePk`` (``mlb_game``). ``match_window`` is how close an event's start
+    must be to match the game (``MatchWindow.HISTORICAL`` is not for MLB).
     """
 
     source: Source
@@ -62,7 +60,6 @@ class ListedGame:
     home_team: str
     away_team: str
     commence_time: datetime
-    legacy_id: str | None = None
     external_id: str | None = None
     mlb_game: ResolvedGame | None = None
     earliest_created_start: datetime | None = None
@@ -88,10 +85,6 @@ class Resolution(StrEnum):
 class ResolvedEvent:
     event: Event
     resolution: Resolution
-
-
-class EventIdTaken(ValueError):
-    """Every string id a new event could take belongs to another event."""
 
 
 class StaleListing(ValueError):
@@ -141,7 +134,6 @@ async def resolve_event(session: AsyncSession, game: ListedGame) -> ResolvedEven
     Raises:
         StaleListing: when no event matches and the game starts before
             ``game.earliest_created_start``.
-        EventIdTaken: when no event matches and every id a new event could take is taken.
     """
     home_team = normalize_team_name(game.home_team)
     away_team = normalize_team_name(game.away_team)
@@ -305,7 +297,7 @@ async def _find(
 async def _by_external_id(session: AsyncSession, source: Source, external_id: str) -> Event | None:
     result = await session.execute(
         select(Event)
-        .join(EventExternalId, EventExternalId.event_id == Event.surrogate_id)  # type: ignore[arg-type]
+        .join(EventExternalId, EventExternalId.event_id == Event.id)  # type: ignore[arg-type]
         .where(EventExternalId.source == source, EventExternalId.external_id == external_id)
     )
     return result.scalar_one_or_none()
@@ -376,9 +368,9 @@ async def _match_historical(
 
 def _stored_key(event: Event) -> int:
     """The tie-break order of stored events: the one stored first has the lowest key."""
-    if event.surrogate_id is None:
-        raise ValueError(f"event {event.id} is not stored")
-    return event.surrogate_id
+    if event.id is None:
+        raise ValueError(f"event {event.home_team} v {event.away_team} is not stored")
+    return event.id
 
 
 def _anchor(game: ListedGame) -> datetime:
@@ -394,23 +386,7 @@ async def _create(session: AsyncSession, game: ListedGame, home_team: str, away_
             f"{game.source.value} lists {home_team} v {away_team} at {start.isoformat()}, which "
             "matches no event and is too far past to create one"
         )
-    if game.legacy_id is None:
-        raise ValueError(
-            f"a game that creates an event needs a legacy_id: {home_team} v {away_team}"
-        )
-    suffix = game.mlb_game.game_pk if game.mlb_game is not None else game.external_id
-    choices = [game.legacy_id] + ([f"{game.legacy_id}_{suffix}"] if suffix is not None else [])
-    event_id = None
-    for choice in choices:
-        if await session.get(Event, choice) is None:
-            event_id = choice
-            break
-    if event_id is None:
-        raise EventIdTaken(f"event ids {choices} are all taken by events the game did not match")
-    if event_id != game.legacy_id:
-        logger.warning("event_id_collision", event_id=game.legacy_id, used=event_id)
     event = Event(
-        id=event_id,
         sport_key=game.sport_key,
         sport_title=game.sport_title,
         commence_time=_anchor(game),
@@ -420,7 +396,7 @@ async def _create(session: AsyncSession, game: ListedGame, home_team: str, away_
     )
     session.add(event)
     await session.flush()
-    logger.info("event_created", event_id=event_id, source=game.source.value)
+    logger.info("event_created", event_id=event.id, source=game.source.value)
     return event
 
 
@@ -452,7 +428,7 @@ class IdDecision(StrEnum):
 
 @dataclass(frozen=True)
 class ExternalIdCheck:
-    """``decision``, with the other event's key (``HELD_ELSEWHERE``) or the event's current id
+    """``decision``, with the other event's id (``HELD_ELSEWHERE``) or the event's current id
     from the source (``REPLACES``, ``OTHER_ID``)."""
 
     decision: IdDecision
@@ -470,12 +446,12 @@ async def check_external_id(
     source per event (the Odds API's replaces the old) and one event per id. Read-only."""
     held = await session.get(EventExternalId, (source, external_id))
     if held is not None:
-        if held.event_id == event.surrogate_id:
+        if held.event_id == event.id:
             return ExternalIdCheck(IdDecision.HELD)
         return ExternalIdCheck(IdDecision.HELD_ELSEWHERE, held.event_id)
     result = await session.execute(
         select(EventExternalId.external_id).where(
-            EventExternalId.event_id == event.surrogate_id, EventExternalId.source == source
+            EventExternalId.event_id == event.id, EventExternalId.source == source
         )
     )
     current = result.scalar_one_or_none()
@@ -527,10 +503,8 @@ async def _record_external_id(
             f"{source.value} id {check.other} replaced by {external_id}",
             {"source": source.value, "old_external_id": check.other, "external_id": external_id},
         )
-    assert event.surrogate_id is not None
-    session.add(
-        EventExternalId(source=source, external_id=external_id, event_id=event.surrogate_id)
-    )
+    assert event.id is not None
+    session.add(EventExternalId(source=source, external_id=external_id, event_id=event.id))
     await session.flush()
     return True
 

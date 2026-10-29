@@ -19,7 +19,7 @@ IN_PLAY = TWIN_KICKOFF + timedelta(minutes=30)
 @pytest.fixture
 async def mlb_event(pglite_async_session) -> Event:
     event = Event(
-        id="mlb_1",
+        id=1,
         sport_key="baseball_mlb",
         sport_title="MLB",
         commence_time=TWIN_KICKOFF,
@@ -33,9 +33,7 @@ async def mlb_event(pglite_async_session) -> Event:
 
 
 async def _hold_oddsportal_id(session, event: Event) -> None:
-    session.add(
-        EventExternalId(source=Source.ODDSPORTAL, external_id="op-1", event_id=event.surrogate_id)
-    )
+    session.add(EventExternalId(source=Source.ODDSPORTAL, external_id="op-1", event_id=event.id))
     await session.flush()
 
 

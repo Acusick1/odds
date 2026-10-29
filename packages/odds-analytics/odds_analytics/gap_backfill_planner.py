@@ -30,7 +30,7 @@ logger = structlog.get_logger()
 class GameGapInfo:
     """Information about gaps in a single game."""
 
-    event_id: str
+    event_id: int
     home_team: str
     away_team: str
     commence_time: datetime
@@ -181,7 +181,7 @@ class GapBackfillPlanner:
             "estimated_quota_usage": int,
             "games": [
                 {
-                    "event_id": str,
+                    "event_id": int,
                     "home_team": str,
                     "away_team": str,
                     "commence_time": str (ISO format),
@@ -248,7 +248,7 @@ class GapBackfillPlanner:
 
     async def _calculate_missing_snapshots(
         self,
-        event_id: str,
+        event_id: int,
         commence_time: datetime,
         missing_tiers: frozenset[FetchTier],
     ) -> int:

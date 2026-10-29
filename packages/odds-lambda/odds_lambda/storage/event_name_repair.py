@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import structlog
-from odds_core.event_ids import LIVE_EVENT_ID_PREFIX
 from odds_core.models import (
     DataQualityLog,
     Event,
@@ -28,16 +27,16 @@ logger = structlog.get_logger()
 
 @dataclass(frozen=True)
 class NameRepairReport:
-    renamed_ids: tuple[str, ...]
+    renamed_ids: tuple[int, ...]
     merges: tuple[MergeReport, ...]
-    status_by_id: dict[str, EventStatus]
+    status_by_id: dict[int, EventStatus]
 
     @property
     def merged_count(self) -> int:
         return sum(len(m.merged_ids) for m in self.merges)
 
     @property
-    def renamed_in_place_ids(self) -> tuple[str, ...]:
+    def renamed_in_place_ids(self) -> tuple[int, ...]:
         merged = {merged_id for m in self.merges for merged_id in m.merged_ids}
         return tuple(i for i in self.renamed_ids if i not in merged)
 
@@ -66,14 +65,14 @@ def _event_envelope(payload: Any, betfair_ids: Sequence[str]) -> dict[str, Any] 
     return next((by_id[i] for i in betfair_ids if i in by_id), None)
 
 
-async def _betfair_ids(session: AsyncSession, sport_key: str) -> dict[str, list[str]]:
+async def _betfair_ids(session: AsyncSession, sport_key: str) -> dict[int, list[str]]:
     """Every Betfair id each event has held: its ``betfair`` external id first, then the ids
     the resolver or a merge refused, replaced or dropped for it (``data_quality_logs``), any
     of which a snapshot of the event may have been stored under."""
-    ids: dict[str, list[str]] = defaultdict(list)
+    ids: dict[int, list[str]] = defaultdict(list)
     current = await session.execute(
         select(Event.id, EventExternalId.external_id)
-        .join(EventExternalId, EventExternalId.event_id == Event.surrogate_id)  # type: ignore[arg-type]
+        .join(EventExternalId, EventExternalId.event_id == Event.id)  # type: ignore[arg-type]
         .where(Event.sport_key == sport_key, EventExternalId.source == Source.BETFAIR)
     )
     for event_id, external_id in current.all():
@@ -95,7 +94,7 @@ async def _betfair_ids(session: AsyncSession, sport_key: str) -> dict[str, list[
     return ids
 
 
-async def _betfair_runner_names(session: AsyncSession, sport_key: str) -> dict[str, list[str]]:
+async def _betfair_runner_names(session: AsyncSession, sport_key: str) -> dict[int, list[str]]:
     """Team runner names from the payload of each event's latest Betfair match odds snapshot,
     read from the envelope's match odds entry (the envelope also carries the event's other
     markets). An event whose envelope cannot be found in that payload is logged and resolves
@@ -114,7 +113,7 @@ async def _betfair_runner_names(session: AsyncSession, sport_key: str) -> dict[s
         .distinct(OddsSnapshot.event_id)
     )
     betfair_ids = await _betfair_ids(session, sport_key)
-    names: dict[str, list[str]] = {}
+    names: dict[int, list[str]] = {}
     for event_id, payload in rows:
         envelope = _event_envelope(payload, betfair_ids.get(event_id, []))
         if envelope is None:
@@ -137,9 +136,8 @@ async def find_misnamed_events(
 ) -> list[tuple[Event, tuple[str, str]]]:
     """Events whose stored team names differ from the canonical names, with those names.
 
-    Only live-scraped events are considered, since their names were canonicalised
-    when created. Those with Betfair snapshots resolve against the full runner
-    names; the rest only lose pitcher annotations and game suffixes.
+    Those with Betfair snapshots resolve against the full runner names; the rest only lose
+    pitcher annotations and game suffixes.
     """
     events = (
         (
@@ -155,8 +153,6 @@ async def find_misnamed_events(
     runner_names = await _betfair_runner_names(session, sport_key)
     misnamed: list[tuple[Event, tuple[str, str]]] = []
     for event in events:
-        if not event.id.startswith(LIVE_EVENT_ID_PREFIX):
-            continue
         teams = canonical_teams(event.home_team, event.away_team, runner_names.get(event.id, []))
         if teams != (event.home_team, event.away_team):
             misnamed.append((event, teams))
@@ -164,13 +160,12 @@ async def find_misnamed_events(
 
 
 async def repair_team_names(session: AsyncSession, sport_key: str) -> NameRepairReport:
-    """Give Betfair-created events their canonical team names and merge the twins that creates.
+    """Give every event of the sport its canonical team names and merge the twins that creates.
 
-    A merged group keeps an event that was never renamed, so the kept event has a
-    clean id, the best-sourced of them by ``kept_event``; only a group made solely of
-    renamed events keeps one of those. Doubleheader games stay apart: groups
-    are events of the same teams within ``EVENT_MATCH_WINDOW``. Runs in the
-    caller's transaction and is a no-op once every name is canonical.
+    A merged group keeps an event that was never renamed, the best-sourced of them by
+    ``kept_event``; only a group made solely of renamed events keeps one of those. Doubleheader
+    games stay apart: groups are events of the same teams within ``EVENT_MATCH_WINDOW``. Runs in
+    the caller's transaction and is a no-op once every name is canonical.
     """
     misnamed = await find_misnamed_events(session, sport_key)
     for event, (home, away) in misnamed:

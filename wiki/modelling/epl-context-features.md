@@ -15,7 +15,7 @@ status: stable
 
 # EPL standings and schedule features
 
-Two EPL-only extractors in `packages/odds-analytics/odds_analytics/*_features.py`. `odds_analytics.as_of_team_features.TeamHistory` calls them for the retail-EV `standings_as_of_t` and `schedule_as_of_t` groups, with the results and fixtures loaded once per build ([retail-EV features](clv-target-functions.md#retail-ev-features)). Column lists are in the [feature group table](clv-target-functions.md#retail-ev-features).
+Two EPL-only extractors in `packages/odds-analytics/odds_analytics/*_features.py`. `odds_analytics.as_of_team_features.TeamHistory` calls them for the retail-EV `standings_as_of_t` and `schedule_as_of_t` groups, with the results and fixtures (keyed by integer event id) loaded once per build ([retail-EV features](clv-target-functions.md#retail-ev-features)). Column lists are in the [feature group table](clv-target-functions.md#retail-ev-features).
 
 Data feeding the groups: `fetch-espn-fixtures` is a local-only daily cron, while FPL is a manual script ([EPL context data](../collection/epl-context-data.md)).
 

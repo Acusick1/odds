@@ -47,9 +47,10 @@ class TestDiscoverIntegration:
             assert len(events) == 2
 
             # Verify event details
-            event_ids = {e.id for e in events}
-            assert "event1" in event_ids
-            assert "event2" in event_ids
+            external_ids = (
+                await test_session.execute(select(EventExternalId.external_id))
+            ).scalars()
+            assert set(external_ids) == {"event1", "event2"}
 
             # Verify all events have SCHEDULED status (not FINAL)
             for event in events:
@@ -59,7 +60,7 @@ class TestDiscoverIntegration:
                 assert event.completed_at is None
 
             # Verify team names
-            lakers_event = next(e for e in events if e.id == "event1")
+            lakers_event = next(e for e in events if e.home_team == "Lakers")
             assert lakers_event.home_team == "Lakers"
             assert lakers_event.away_team == "Celtics"
 
@@ -74,7 +75,7 @@ class TestDiscoverIntegration:
 
         # First, create an existing event with different data
         existing_event = Event(
-            id="event1",
+            id=1,
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=datetime(2024, 10, 14, 19, 0, 0, tzinfo=UTC),  # Different time
@@ -88,7 +89,7 @@ class TestDiscoverIntegration:
             EventExternalId(
                 source=Source.ODDS_API,
                 external_id="event1",
-                event_id=existing_event.surrogate_id,
+                event_id=existing_event.id,
             )
         )
         await test_session.commit()
@@ -123,7 +124,7 @@ class TestDiscoverIntegration:
         assert len(events) == 2
 
         # The event the API's id names is found, not duplicated, and keeps its teams.
-        updated_event = next(e for e in events if e.id == "event1")
+        updated_event = next(e for e in events if e.id == 1)
         assert updated_event.home_team == "OldTeam1"
         assert updated_event.away_team == "OldTeam2"
         # A historical start is in the past, so it is not offered as a kick-off move.
@@ -198,9 +199,10 @@ class TestDiscoverIntegration:
             # Should have 2 events (1 per day)
             assert len(events) == 2
 
-            event_ids = {e.id for e in events}
-            assert "event_oct15_1" in event_ids
-            assert "event_oct16_1" in event_ids
+            external_ids = (
+                await test_session.execute(select(EventExternalId.external_id))
+            ).scalars()
+            assert set(external_ids) == {"event_oct15_1", "event_oct16_1"}
 
             # Verify API was called twice (once per day)
             assert mock_client.get_historical_events.call_count == 2
@@ -246,7 +248,7 @@ class TestDiscoverIntegration:
 
         # Create an existing event with final scores
         completed_event = Event(
-            id="event1",
+            id=1,
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=datetime(2024, 10, 15, 19, 0, 0, tzinfo=UTC),
@@ -295,7 +297,7 @@ class TestDiscoverIntegration:
                 )
 
             # Refresh the event from database
-            result = await test_session.execute(select(Event).where(Event.id == "event1"))
+            result = await test_session.execute(select(Event).where(Event.id == 1))
             event = result.scalar_one()
 
             assert event.status == EventStatus.FINAL

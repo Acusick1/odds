@@ -36,7 +36,7 @@ status: stable
 | `scrape` | [OddsPortal scraper](../collection/oddsportal-scraper.md) |
 | `odds_cli.commands.discover`, `odds_cli.commands.backfill` | [Odds API historical backfill](../collection/odds-api-backfill.md); `discover games` and `backfill execute` store events and snapshots through the [event resolver](../storage/event-resolver.md); `discover games` commits every 100 games and prints dropped counts, and `backfill gaps` and `plan` write `odds_api_id` into plan games |
 | `odds train` | [Training pipeline](../modelling/training-pipeline.md) (`tune` stores a new timestamped study in a local SQLite file unless `--in-memory`; both subcommands pass the split's sample weights and kick-off times on, [sample weights](../modelling/training-pipeline.md#sample-weights)), [Hyperparameter tuner](../modelling/hyperparameter-tuner.md) |
-| `odds evaluate` | [Retail-EV evaluation](../evaluation/retail-ev-evaluation.md) (`--allow-incomplete <event ID>`, repeatable, and `--force` are recorded in the manifest) |
+| `odds evaluate` | [Retail-EV evaluation](../evaluation/retail-ev-evaluation.md) (`--allow-incomplete <integer event id>`, repeatable, and `--force` are recorded in the manifest) |
 | `odds status` | [odds status](../operations/health-monitor.md#odds-status), [Odds API quota](../collection/odds-api-quota.md) |
 | `validate`, `quality` | [Coverage and completeness checks](../storage/coverage-checks.md) (`quality coverage` lists each book by its canonical key, from price rows) |
 | `copy` | [Copy production data locally](howto-copy-production-data.md) |

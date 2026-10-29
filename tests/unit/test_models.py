@@ -13,7 +13,7 @@ class TestEventModel:
     def test_event_creation(self):
         """Test creating an Event instance."""
         event = Event(
-            id="test123",
+            id=123,
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=datetime.now(UTC),
@@ -22,7 +22,7 @@ class TestEventModel:
             status=EventStatus.SCHEDULED,
         )
 
-        assert event.id == "test123"
+        assert event.id == 123
         assert event.sport_key == "basketball_nba"
         assert event.home_team == "Lakers"
         assert event.away_team == "Celtics"
@@ -41,7 +41,7 @@ class TestEventModel:
     def test_event_with_scores(self):
         """Test Event with final scores."""
         event = Event(
-            id="test123",
+            id=123,
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=datetime.now(UTC),
@@ -103,14 +103,14 @@ class TestOddsSnapshotModel:
     def test_odds_snapshot_creation(self):
         """Test creating an OddsSnapshot instance."""
         snapshot = OddsSnapshot(
-            event_id="test123",
+            event_id=123,
             snapshot_time=datetime.now(UTC),
             source=Source.ODDS_API,
             market=Market.H2H,
             time_basis=TimeBasis.OBSERVED,
         )
 
-        assert snapshot.event_id == "test123"
+        assert snapshot.event_id == 123
         assert snapshot.source is Source.ODDS_API
         assert snapshot.payload_id is None
 
@@ -121,14 +121,14 @@ class TestDataQualityLogModel:
     def test_data_quality_log_creation(self):
         """Test creating a DataQualityLog instance."""
         log = DataQualityLog(
-            event_id="test123",
+            event_id=123,
             severity="warning",
             issue_type="suspicious_odds",
             description="Vig too high",
             raw_data={"vig": 20.5},
         )
 
-        assert log.event_id == "test123"
+        assert log.event_id == 123
         assert log.severity == "warning"
         assert log.issue_type == "suspicious_odds"
         assert log.description == "Vig too high"

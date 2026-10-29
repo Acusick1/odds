@@ -61,7 +61,7 @@ async def _list_trades(settled: bool, limit: int) -> None:
             for trade in trades:
                 row = [
                     str(trade.id),
-                    trade.event_id[:12] + "...",
+                    str(trade.event_id),
                     _selection(trade),
                     trade.bookmaker,
                     f"{trade.price_decimal:.2f}",
@@ -124,7 +124,7 @@ async def _settle() -> None:
 
                 table.add_row(
                     str(trade.id),
-                    trade.event_id[:12] + "...",
+                    str(trade.event_id),
                     _selection(trade),
                     f"[{result_color}]{result_str}[/{result_color}]",
                     pnl_str,
@@ -190,7 +190,7 @@ async def _summary(initial_bankroll: float) -> None:
                 exp_table.add_column("Exposure", justify="right")
 
                 for event_id, amount in exposure:
-                    exp_table.add_row(event_id[:12] + "...", f"${amount:,.2f}")
+                    exp_table.add_row(str(event_id), f"${amount:,.2f}")
 
                 console.print(exp_table)
 

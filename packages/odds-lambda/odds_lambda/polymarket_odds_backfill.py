@@ -52,7 +52,7 @@ class BackfillReport:
     snapshots_written: int = 0
     points_missing: int = 0
     points_off_sum: int = 0
-    unmatched_event_ids: list[str] = field(default_factory=list)
+    unmatched_event_ids: list[int] = field(default_factory=list)
     unmatched_pm_tickers: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
@@ -73,7 +73,7 @@ async def _fetch_series(
     return dict(zip(SIDES, await asyncio.gather(*(one(side) for side in SIDES)), strict=True))
 
 
-async def _history_event_ids(session: AsyncSession) -> set[str]:
+async def _history_event_ids(session: AsyncSession) -> set[int]:
     """Events holding a Polymarket history snapshot: one whose payload is its own envelope with
     no quotes, where a live run's envelopes, listed in its payload, always carry the bid and ask
     keys (``build_envelope`` with ``include_quotes``)."""
@@ -127,7 +127,7 @@ async def backfill_sport(
         existing = await _history_event_ids(session)
         report.matches_considered = len(matches)
 
-        attached_ids: set[str] = set()
+        attached_ids: set[int] = set()
         written = 0
         for match in matches:
             try:

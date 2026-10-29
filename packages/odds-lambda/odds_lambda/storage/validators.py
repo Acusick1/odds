@@ -24,13 +24,13 @@ class OddsValidator:
     MAX_TOTAL_MOVEMENT = 20.0  # Maximum total points change
 
     @classmethod
-    def validate_odds_snapshot(cls, data: dict, event_id: str) -> tuple[bool, list[str]]:
+    def validate_odds_snapshot(cls, data: dict, event_id: int) -> tuple[bool, list[str]]:
         """
         Validate a complete odds snapshot.
 
         Args:
-            data: Raw API response data
-            event_id: Event identifier
+            data: One event's envelope
+            event_id: The event's id, for the log
 
         Returns:
             Tuple of (is_valid, list of warning messages)
@@ -42,27 +42,8 @@ class OddsValidator:
         errors: list[str] = []
         vig_warnings: list[str] = []
 
-        # Check if data is a list (multiple events) or dict (single event)
-        if isinstance(data, list):
-            if not data:
-                errors.append("Empty odds data received")
-                return False, errors
-
-            # Find the specific event
-            event_data = None
-            for event in data:
-                if event.get("id") == event_id:
-                    event_data = event
-                    break
-
-            if not event_data:
-                errors.append(f"Event {event_id} not found in response")
-                return False, errors
-        else:
-            event_data = data
-
         # Validate bookmakers exist
-        bookmakers = event_data.get("bookmakers", [])
+        bookmakers = data.get("bookmakers", [])
         if not bookmakers:
             errors.append("No bookmakers data found")
             return False, errors

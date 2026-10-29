@@ -49,7 +49,7 @@ def trade(
     index: int,
     ev: float | None = 0.5,
     *,
-    event_id: str | None = None,
+    event_id: int | None = None,
     stake: float = 1.0,
     pnl: float | None = 0.0,
     name: str = "cand",
@@ -60,7 +60,7 @@ def trade(
     return ScoredBet(
         candidate_name=name,
         candidate_version=version,
-        event_id=event_id or f"e{index}",
+        event_id=event_id or index + 1,
         commence_time=commence_time,
         stake=stake,
         pnl=pnl,
@@ -98,7 +98,7 @@ def registry_entry(name: str = "cand", version: int = 1) -> AgentCandidate:
 class TestEv:
     def test_ev_is_close_probability_times_price_minus_one(self) -> None:
         t = ScoredBet(
-            "c", 1, "e", LONG_AGO, 2.0, 0.0, price_decimal=2.5, p_close=0.5, placed_at=LONG_AGO
+            "c", 1, 1, LONG_AGO, 2.0, 0.0, price_decimal=2.5, p_close=0.5, placed_at=LONG_AGO
         )
         assert t.ev == pytest.approx(0.25)
 
@@ -128,8 +128,8 @@ class TestCheckpoint:
         assert checkpoint_at(sequence, 100, 1, N_BOOT, 0).mean_ev == pytest.approx(0.5)
 
     def test_events_are_resampled_as_clusters(self) -> None:
-        sequence = [trade(i, 1.0, event_id="a") for i in range(50)] + [
-            trade(50 + i, -1.0, event_id="b") for i in range(50)
+        sequence = [trade(i, 1.0, event_id=1) for i in range(50)] + [
+            trade(50 + i, -1.0, event_id=2) for i in range(50)
         ]
         checkpoint = checkpoint_at(sequence, 100, 1, N_BOOT, 0)
         assert checkpoint.mean_ev == pytest.approx(0.0)
@@ -301,7 +301,7 @@ class TestPromoteLevel:
 
     def test_a_higher_k_can_withhold_a_promotion(self) -> None:
         # 10 big winners in 100 events give a positive 99% lower bound but not a positive 99.999% one.
-        sequence = [trade(i, 5.0 if i < 10 else -0.2, event_id=f"e{i}") for i in range(100)]
+        sequence = [trade(i, 5.0 if i < 10 else -0.2, event_id=i + 1) for i in range(100)]
         assert judge(sequence, one, N_BOOT, 0)[0] is Verdict.PROMOTE
         assert judge(sequence, lambda _: 1000, N_BOOT, 0)[0] is not Verdict.PROMOTE
 
@@ -423,7 +423,7 @@ async def _store_close(session: AsyncSession, event: Event) -> None:
     )
 
 
-def _paper_trade(event_id: str, minutes: int, **fields) -> PaperTrade:
+def _paper_trade(event_id: int, minutes: int, **fields) -> PaperTrade:
     defaults = {
         "event_id": event_id,
         "market": "1x2",
@@ -446,12 +446,12 @@ class TestLoadScoredBets:
     @pytest.mark.asyncio
     async def test_report_from_database(self, test_session: AsyncSession) -> None:
         session = test_session
-        e1 = make_epl_event("e1", KICKOFF, status=EventStatus.FINAL)
+        e1 = make_epl_event(1, KICKOFF, status=EventStatus.FINAL)
         session.add(e1)
-        session.add(make_epl_event("e2", KICKOFF, status=EventStatus.FINAL))
+        session.add(make_epl_event(2, KICKOFF, status=EventStatus.FINAL))
         session.add(
             Event(
-                id="mlb1",
+                id=3,
                 sport_key="baseball_mlb",
                 sport_title="MLB",
                 commence_time=KICKOFF,
@@ -464,13 +464,13 @@ class TestLoadScoredBets:
         await _store_close(session, e1)
         session.add_all(
             [
-                _paper_trade("e1", 2),
-                _paper_trade("e1", 1, selection="away", result=TradeResult.LOSS, pnl=-10.0),
-                _paper_trade("e1", 3, result=TradeResult.VOID, pnl=0.0),
-                _paper_trade("e1", 4, settled_at=None, result=None, pnl=None),
-                _paper_trade("e1", 5, candidate_name=None, candidate_version=None),
-                _paper_trade("e2", 6),
-                _paper_trade("mlb1", 7, market="h2h"),
+                _paper_trade(1, 2),
+                _paper_trade(1, 1, selection="away", result=TradeResult.LOSS, pnl=-10.0),
+                _paper_trade(1, 3, result=TradeResult.VOID, pnl=0.0),
+                _paper_trade(1, 4, settled_at=None, result=None, pnl=None),
+                _paper_trade(1, 5, candidate_name=None, candidate_version=None),
+                _paper_trade(2, 6),
+                _paper_trade(3, 7, market="h2h"),
             ]
         )
         await session.flush()
@@ -494,12 +494,12 @@ class TestLoadScoredBets:
         from odds_analytics.candidate_report import load_scored_trades
 
         session = test_session
-        e1 = make_epl_event("e1", KICKOFF, status=EventStatus.FINAL)
+        e1 = make_epl_event(1, KICKOFF, status=EventStatus.FINAL)
         session.add(e1)
         await session.flush()
         await _store_close(session, e1)
-        session.add(_paper_trade("e1", 1))
-        session.add(_paper_trade("e1", 2, selection="draw", price_decimal=4.5))
+        session.add(_paper_trade(1, 1))
+        session.add(_paper_trade(1, 2, selection="draw", price_decimal=4.5))
         await session.flush()
 
         home, draw = await load_scored_trades(session)
@@ -517,7 +517,7 @@ class TestLoadScoredBets:
         from odds_analytics.candidate_report import load_scored_trades
 
         session = test_session
-        e1 = make_epl_event("e1", KICKOFF, status=EventStatus.FINAL)
+        e1 = make_epl_event(1, KICKOFF, status=EventStatus.FINAL)
         session.add(e1)
         await session.flush()
         await _store_close(session, e1)
@@ -531,12 +531,12 @@ class TestLoadScoredBets:
                 "betfair_api",
             ),
         )
-        session.add(_paper_trade("e1", 1))
+        session.add(_paper_trade(1, 1))
         session.add(
-            _paper_trade("e1", 2, market="totals", selection="over", line=2.5, price_decimal=2.3)
+            _paper_trade(1, 2, market="totals", selection="over", line=2.5, price_decimal=2.3)
         )
         session.add(
-            _paper_trade("e1", 3, market="totals", selection="under", line=3.5, price_decimal=1.6)
+            _paper_trade(1, 3, market="totals", selection="under", line=3.5, price_decimal=1.6)
         )
         await session.flush()
 
@@ -553,7 +553,7 @@ class TestLoadScoredBets:
         self, test_session: AsyncSession
     ) -> None:
         session = test_session
-        events = [make_epl_event(i, KICKOFF, status=EventStatus.FINAL) for i in ("e1", "e2")]
+        events = [make_epl_event(i, KICKOFF, status=EventStatus.FINAL) for i in (1, 2)]
         session.add_all(events)
         await session.flush()
         e1, e2 = events

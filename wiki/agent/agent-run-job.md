@@ -78,4 +78,4 @@ Each run writes its `stream-json` output to a JSONL file under `logs/agent_runs/
 - [The betting agent](betting-agent.md)
 - [Agent prompts](agent-prompts.md)
 - [Agent run traces](agent-run-traces.md)
-- [Match briefs](match-briefs.md) and [paper trading](paper-trading.md), what the agent writes
+- [Match briefs](match-briefs.md) and [paper trading](paper-trading.md), what the agent writes, each row keyed to an event by its integer id

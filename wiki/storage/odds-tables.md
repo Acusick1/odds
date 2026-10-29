@@ -25,7 +25,7 @@ status: stable
 | Column | Meaning |
 |---|---|
 | `id` | integer key |
-| `event_id` | FK `events.id` |
+| `event_id` | integer FK `events.id` |
 | `snapshot_time` | when the prices held, by `time_basis` |
 | `created_at` | when the row was stored; [as-of readers](price-tables.md#reading-quotes) read only rows stored by their `known_at` |
 | `source` | the provider (`odds_core.vocabulary.PRICE_SOURCES`) |

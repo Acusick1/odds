@@ -144,7 +144,7 @@ async def candidate_events(session: AsyncSession, sport: SportKey, now: datetime
 
 
 # An event id and the minutes before kick-off of one of the candidate's decision times.
-DecisionKey = tuple[str, int]
+DecisionKey = tuple[int, int]
 
 
 def due_decisions(
@@ -191,7 +191,7 @@ async def _alert_no_input(decision: CandidateDecision) -> None:
 
 
 async def _bet_selections(
-    session: AsyncSession, candidate: MechanicalCandidate, event_id: str
+    session: AsyncSession, candidate: MechanicalCandidate, event_id: int
 ) -> frozenset[Selection]:
     """Selections the candidate version has already bet on the event at a decision."""
     rows = await session.execute(
@@ -319,7 +319,7 @@ async def run_decisions(
         )
         # A failed decision leaves the event's later decisions to the retry, so each outcome is
         # still bet at the first time it qualifies.
-        failed: set[str] = set()
+        failed: set[int] = set()
         for key in due:
             event_id, minutes = key
             if key in decided or event_id in failed:

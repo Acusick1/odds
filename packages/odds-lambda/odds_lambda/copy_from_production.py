@@ -3,7 +3,7 @@ Copy data from production database to local database.
 
 Replicates events with their external ids and health-check acknowledgements, and their
 snapshots and price rows, for a given sport and date range. A production event is matched to its
-local event by its external ids, since surrogate ids are numbered per database.
+local event by its external ids, since event ids are numbered per database.
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ class CopyStats:
     prices_copied: int = 0
     external_ids_copied: int = 0
     local_twin_matches: int = 0
-    failed_event_ids: list[str] = field(default_factory=list)
+    failed_event_ids: list[int] = field(default_factory=list)
 
     @property
     def events_failed(self) -> int:
@@ -145,9 +145,7 @@ class ProductionDataCopier:
             prod_external_ids = list(
                 (
                     await prod_session.execute(
-                        select(EventExternalId).where(
-                            EventExternalId.event_id == event.surrogate_id
-                        )
+                        select(EventExternalId).where(EventExternalId.event_id == event.id)
                     )
                 )
                 .scalars()
@@ -194,7 +192,7 @@ class ProductionDataCopier:
                 (
                     await prod_session.execute(
                         select(HealthCheckAcknowledgement).where(
-                            HealthCheckAcknowledgement.event_id == event.surrogate_id
+                            HealthCheckAcknowledgement.event_id == event.id
                         )
                     )
                 )
@@ -202,17 +200,12 @@ class ProductionDataCopier:
                 .all()
             )
 
-            # Surrogate ids are numbered per database, so a copied event keeps the local one.
-            copied = Event(**event.model_dump(exclude={"surrogate_id"}))
+            # Event ids are numbered per database, so a copied event keeps the local one.
+            copied = Event(**event.model_dump(exclude={"id"}))
             if local_event is not None:
                 copied.id = local_event.id
-                copied.surrogate_id = local_event.surrogate_id
                 await local_session.execute(
                     delete(OddsSnapshot).where(OddsSnapshot.event_id == local_event.id)
-                )
-            elif await local_session.get(Event, event.id) is not None:
-                raise ValueError(
-                    f"a local event of another fixture holds production's event id {event.id}"
                 )
             local_event = await local_session.merge(copied)
             await local_session.flush()
@@ -258,9 +251,8 @@ class ProductionDataCopier:
         self, session: AsyncSession, event: Event, external_ids: list[EventExternalId]
     ) -> Event | None:
         """The local event a production event is: the one holding any of its external ids, else
-        the one under its event id when that has its sport and teams (an Odds API id replaced or a
-        kick-off moved since an earlier copy), else the one of its sport, teams and kick-off that
-        holds no other id from a source the production event has an id from. Raises
+        the one of its sport, teams and kick-off that holds no other id from a source the
+        production event has an id from. Raises
         ``ValueError`` when its ids are held by several local events, which are twins to merge
         first."""
         keys = set(
@@ -281,18 +273,8 @@ class ProductionDataCopier:
                 f"production event {event.id}'s external ids are held by {len(keys)} local "
                 "events; run `odds events merge-twins --apply` first"
             )
-        if not keys:
-            same_id = await session.get(Event, event.id)
-            if same_id is not None and (
-                same_id.sport_key,
-                same_id.home_team,
-                same_id.away_team,
-            ) == (event.sport_key, event.home_team, event.away_team):
-                return same_id
         if keys:
-            return (
-                await session.execute(select(Event).where(Event.surrogate_id == keys.pop()))
-            ).scalar_one()
+            return (await session.execute(select(Event).where(Event.id == keys.pop()))).scalar_one()
         fixture = (
             await session.execute(
                 select(Event)
@@ -302,16 +284,14 @@ class ProductionDataCopier:
                     Event.away_team == event.away_team,
                     Event.commence_time == event.commence_time,
                 )
-                .order_by(Event.surrogate_id)
+                .order_by(Event.id)
             )
         ).scalars()
         ids = {row.source: row.external_id for row in external_ids}
         for candidate in fixture:
             held = (
                 await session.execute(
-                    select(EventExternalId).where(
-                        EventExternalId.event_id == candidate.surrogate_id
-                    )
+                    select(EventExternalId).where(EventExternalId.event_id == candidate.id)
                 )
             ).scalars()
             # A different id from one source is another production event: matching it would
@@ -328,15 +308,15 @@ class ProductionDataCopier:
         acknowledgements: list[HealthCheckAcknowledgement],
     ) -> None:
         """Replace the local event's external ids and acknowledgements with production's,
-        keyed to its local surrogate id. No other local event holds one of the ids, since the
+        keyed to its local id. No other local event holds one of the ids, since the
         event was found by them (``_local_event``)."""
-        assert event.surrogate_id is not None
+        assert event.id is not None
         await session.execute(
-            delete(EventExternalId).where(EventExternalId.event_id == event.surrogate_id)  # type: ignore[arg-type]
+            delete(EventExternalId).where(EventExternalId.event_id == event.id)  # type: ignore[arg-type]
         )
         await session.execute(
             delete(HealthCheckAcknowledgement).where(
-                HealthCheckAcknowledgement.event_id == event.surrogate_id  # type: ignore[arg-type]
+                HealthCheckAcknowledgement.event_id == event.id  # type: ignore[arg-type]
             )
         )
         for row in external_ids:
@@ -344,7 +324,7 @@ class ProductionDataCopier:
                 EventExternalId(
                     source=row.source,
                     external_id=row.external_id,
-                    event_id=event.surrogate_id,
+                    event_id=event.id,
                     created_at=row.created_at,
                 )
             )
@@ -352,7 +332,7 @@ class ProductionDataCopier:
         for ack in acknowledgements:
             session.add(
                 HealthCheckAcknowledgement(
-                    event_id=event.surrogate_id,
+                    event_id=event.id,
                     check_name=ack.check_name,
                     reason=ack.reason,
                     acknowledged_at=ack.acknowledged_at,
@@ -379,7 +359,7 @@ class ProductionDataCopier:
 
         if self.stats.failed_event_ids:
             console.print(f"  Events failed: [red]{self.stats.events_failed}[/red]")
-            console.print(f"  Failed event ids: {', '.join(self.stats.failed_event_ids)}")
+            console.print(f"  Failed event ids: {', '.join(map(str, self.stats.failed_event_ids))}")
 
         if self.stats.failed_event_ids:
             console.print("\n[bold red]✗ Copy finished with failed events[/bold red]")

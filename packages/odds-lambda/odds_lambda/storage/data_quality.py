@@ -13,7 +13,7 @@ logger = structlog.get_logger()
 
 def record_issue(
     session: AsyncSession,
-    event_id: str,
+    event_id: int,
     issue_type: str,
     description: str,
     context: dict[str, Any],

@@ -14,7 +14,7 @@ from odds_core.models import Event, EventStatus
 
 
 def _make_event(
-    event_id: str = "test_event",
+    event_id: int = 99,
     home_team: str = "Arsenal",
     away_team: str = "Chelsea",
     commence_time: datetime | None = None,
@@ -38,7 +38,7 @@ def _make_event(
 
 
 def _make_completed_event(
-    event_id: str,
+    event_id: int,
     home_team: str,
     away_team: str,
     home_score: int,
@@ -182,7 +182,7 @@ class TestBuildLeagueTable:
     def test_simple_table(self) -> None:
         events = [
             _make_completed_event(
-                "e1",
+                1,
                 "Arsenal",
                 "Chelsea",
                 2,
@@ -190,7 +190,7 @@ class TestBuildLeagueTable:
                 datetime(2024, 8, 17, 15, 0, tzinfo=UTC),
             ),
             _make_completed_event(
-                "e2",
+                2,
                 "Liverpool",
                 "Arsenal",
                 1,
@@ -206,7 +206,7 @@ class TestBuildLeagueTable:
     def test_skips_non_final(self) -> None:
         events = [
             _make_event(
-                event_id="e1",
+                event_id=1,
                 home_team="Arsenal",
                 away_team="Chelsea",
                 home_score=2,
@@ -220,10 +220,10 @@ class TestBuildLeagueTable:
     def test_custom_form_window(self) -> None:
         events = [
             _make_completed_event(
-                "e1", "Arsenal", "Chelsea", 2, 0, datetime(2024, 8, 17, 15, 0, tzinfo=UTC)
+                1, "Arsenal", "Chelsea", 2, 0, datetime(2024, 8, 17, 15, 0, tzinfo=UTC)
             ),
             _make_completed_event(
-                "e2", "Chelsea", "Arsenal", 1, 1, datetime(2024, 8, 24, 15, 0, tzinfo=UTC)
+                2, "Chelsea", "Arsenal", 1, 1, datetime(2024, 8, 24, 15, 0, tzinfo=UTC)
             ),
         ]
         table = build_league_table(events, form_window=3)
@@ -232,7 +232,7 @@ class TestBuildLeagueTable:
     def test_skips_null_scores(self) -> None:
         events = [
             _make_event(
-                event_id="e1",
+                event_id=1,
                 home_team="Arsenal",
                 away_team="Chelsea",
                 home_score=None,
@@ -255,7 +255,7 @@ class TestExtractStandingsFeatures:
         prior = [
             # Matchday 1
             _make_completed_event(
-                "e1",
+                1,
                 "Arsenal",
                 "Chelsea",
                 2,
@@ -263,7 +263,7 @@ class TestExtractStandingsFeatures:
                 datetime(2024, 8, 17, 15, 0, tzinfo=UTC),
             ),
             _make_completed_event(
-                "e2",
+                2,
                 "Liverpool",
                 "Man City",
                 1,
@@ -272,7 +272,7 @@ class TestExtractStandingsFeatures:
             ),
             # Matchday 2
             _make_completed_event(
-                "e3",
+                3,
                 "Chelsea",
                 "Liverpool",
                 0,
@@ -280,7 +280,7 @@ class TestExtractStandingsFeatures:
                 datetime(2024, 8, 24, 15, 0, tzinfo=UTC),
             ),
             _make_completed_event(
-                "e4",
+                4,
                 "Man City",
                 "Arsenal",
                 1,
@@ -295,7 +295,7 @@ class TestExtractStandingsFeatures:
 
         # Matchday 3 event: Liverpool vs Arsenal
         event = _make_event(
-            event_id="e5",
+            event_id=5,
             home_team="Liverpool",
             away_team="Arsenal",
             commence_time=datetime(2024, 8, 31, 15, 0, tzinfo=UTC),
@@ -323,7 +323,7 @@ class TestExtractStandingsFeatures:
         """Newly promoted team not in prior events gets None features."""
         prior = [
             _make_completed_event(
-                "e1",
+                1,
                 "Arsenal",
                 "Chelsea",
                 2,
@@ -333,7 +333,7 @@ class TestExtractStandingsFeatures:
         ]
         # Ipswich is promoted, not in prior events
         event = _make_event(
-            event_id="e2",
+            event_id=2,
             home_team="Ipswich Town",
             away_team="Arsenal",
             commence_time=datetime(2024, 8, 24, 15, 0, tzinfo=UTC),
@@ -368,7 +368,7 @@ class TestExtractStandingsFeatures:
             )
 
         event = _make_event(
-            event_id="e_target",
+            event_id=50,
             home_team="Arsenal",
             away_team="Wolves",
             commence_time=base + timedelta(days=7 * 6),
@@ -394,7 +394,7 @@ class TestExtractStandingsFeatures:
             )
 
         event = _make_event(
-            event_id="e_target",
+            event_id=50,
             home_team="Arsenal",
             away_team="Wolves",
             commence_time=base + timedelta(days=7 * 4),
@@ -407,7 +407,7 @@ class TestExtractStandingsFeatures:
         """Both teams not in prior events returns all None."""
         prior = [
             _make_completed_event(
-                "e1",
+                1,
                 "Arsenal",
                 "Chelsea",
                 2,
@@ -416,7 +416,7 @@ class TestExtractStandingsFeatures:
             ),
         ]
         event = _make_event(
-            event_id="e2",
+            event_id=2,
             home_team="Ipswich Town",
             away_team="Leicester City",
             commence_time=datetime(2024, 8, 24, 15, 0, tzinfo=UTC),
@@ -427,7 +427,7 @@ class TestExtractStandingsFeatures:
     def test_draw_awards_correct_points(self) -> None:
         prior = [
             _make_completed_event(
-                "e1",
+                1,
                 "Arsenal",
                 "Chelsea",
                 1,

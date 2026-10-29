@@ -52,7 +52,7 @@ The repo also holds:
 The workflow for a mechanical rule exists end to end, from idea to verdict ([From idea to verdict](../evaluation/howto-take-an-idea-to-a-verdict.md), #608):
 
 - The [candidate registry](../evaluation/candidate-registry.md), with no candidate in it yet.
-- The candidate, its version and the git commit on each paper trade (`odds_core.paper_trade_models.PaperTrade`, with its selection's line and the decision that placed it), with the candidate checked against the registry when the bet is placed through `odds_mcp.server.paper_bet` ([paper trading](../agent/paper-trading.md#candidate-fields)).
+- The candidate, its version and the git commit on each paper trade (`odds_core.paper_trade_models.PaperTrade`, with its selection's line and the decision that placed it), with the candidate checked against the registry when the bet is placed through `odds_mcp.server.paper_bet` on an integer event id ([paper trading](../agent/paper-trading.md#candidate-fields)).
 - The close, computed from stored price rows when a report runs, so a trade stores none. MLB has no close defined, so its trades are reported without EV.
 - `odds candidates report`, which gives the checkpoint verdict ([Candidate registry](../evaluation/candidate-registry.md#odds-candidates-report)).
 - The [mechanical rule interface](../evaluation/candidate-rules.md) and its first rule, the exchange gap, with the market state at decision time and a code hash that each mechanical candidate records.

@@ -23,9 +23,9 @@ status: stable
 
 ## Checks
 
-`odds_lambda.storage.validators.OddsValidator.validate_odds_snapshot(data, event_id)` returns `(is_valid, warnings)`:
+`odds_lambda.storage.validators.OddsValidator.validate_odds_snapshot(data, event_id)` validates one event's envelope (`event_id`, the event's integer id, only labels the log) and returns `(is_valid, warnings)`:
 
-- Empty list, event missing from a list payload, or no bookmakers: returns invalid immediately.
+- No bookmakers: returns invalid immediately.
 - Bookmaker `last_update` in the future or unparseable.
 - Markets with no outcomes.
 - Each outcome price, read as a decimal through `odds_core.odds_math.outcome_price_decimal`: missing or unparseable is an error; outside `MIN_DECIMAL_ODDS`..`MAX_DECIMAL_ODDS` (1.01 to 101.0) is an error via `odds_lambda.storage.validators.OddsValidator.validate_odds_value` (the OddsPortal ingest skips prices at or below 1.0 before they reach it).
@@ -35,7 +35,7 @@ status: stable
 
 ## What gets logged
 
-If an envelope has any warnings, `odds_lambda.storage.writers.OddsWriter.store_envelope` writes one `odds_core.models.DataQualityLog`: `issue_type="validation_warnings"`, `severity` `"warning"` when `is_valid` else `"error"`, `description` with the count, and `raw_data={"warnings": first 10}`. Columns: `event_id` (FK, nullable), `severity`, `issue_type`, `description`, JSON `raw_data`, indexed `created_at`. No other severity or issue type is written, so `critical` never occurs.
+If an envelope has any warnings, `odds_lambda.storage.writers.OddsWriter.store_envelope` writes one `odds_core.models.DataQualityLog`: `issue_type="validation_warnings"`, `severity` `"warning"` when `is_valid` else `"error"`, `description` with the count, and `raw_data={"warnings": first 10}`. Columns: `event_id` (integer FK to `events.id`, nullable), `severity`, `issue_type`, `description`, JSON `raw_data`, indexed `created_at`. No other severity or issue type is written, so `critical` never occurs.
 
 `odds_lambda.storage.readers.OddsReader.get_data_quality_logs` feeds `odds status` and the [health monitor](../operations/health-monitor.md), which alerts when `error` plus `critical` rows in 24 h reach `odds_core.config.AlertConfig.data_quality_error_threshold` (10). Validation results are not attached to snapshots or price rows.
 

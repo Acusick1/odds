@@ -28,7 +28,7 @@ def make_sb_event(
     final: bool = True,
 ) -> Event:
     return Event(
-        id=f"test_event_{idx}",
+        id=idx,
         sport_key="basketball_nba",
         sport_title="NBA",
         commence_time=commence_time,
@@ -42,7 +42,7 @@ def make_sb_event(
 
 
 def make_odds_snapshots(
-    event_id: str,
+    event_id: int,
     commence_time: datetime,
     home_team: str,
     away_team: str,

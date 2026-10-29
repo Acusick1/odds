@@ -39,7 +39,7 @@ status: stable
 - the window ends after the time the run starts;
 - any event or row it reads kicks off after `window.end` (`odds_analytics.retail_ev_evaluation.check_window_end`).
 
-It raises `odds_analytics.retail_ev_evaluation.IncompleteWindowError` when a window event is not FINAL or has no FDUK closing snapshot (`odds_analytics.retail_ev_evaluation.incomplete_events`), unless `allow_incomplete` names that event. Which sources an event's snapshots hold comes from their `source`, `time_basis` and time (`odds_analytics.retail_ev_evaluation.snapshot_stamps`, every market): an FDUK closing snapshot is FDUK with time basis `close`, and a live OddsPortal snapshot is OddsPortal `observed`. The run time is passed to `odds_analytics.retail_ev.load_retail_ev_dataset` as `now`.
+It raises `odds_analytics.retail_ev_evaluation.IncompleteWindowError` when a window event is not FINAL or has no FDUK closing snapshot (`odds_analytics.retail_ev_evaluation.incomplete_events`), unless `allow_incomplete` names that event by its integer id. Which sources an event's snapshots hold comes from their `source`, `time_basis` and time (`odds_analytics.retail_ev_evaluation.snapshot_stamps`, every market): an FDUK closing snapshot is FDUK with time basis `close`, and a live OddsPortal snapshot is OddsPortal `observed`. The run time is passed to `odds_analytics.retail_ev.load_retail_ev_dataset` as `now`.
 
 It reads the sport's events whose kick-off falls between `training_start` and `window.end`, in kick-off order, and builds their rows with `odds_analytics.retail_ev.load_retail_ev_dataset`. Team history for the schedule and standings groups is read only up to `window.end` (`odds_analytics.as_of_team_features.load_team_history`).
 

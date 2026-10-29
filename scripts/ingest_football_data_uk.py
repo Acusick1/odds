@@ -39,7 +39,6 @@ from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot, Price, SnapshotPayload
 from odds_core.odds_math import PRICE_DECIMAL_KEY
 from odds_core.paper_trade_models import CandidateDecision
-from odds_core.team import team_abbrev
 from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.oddsportal_common import IngestionStats
 from odds_lambda.price_rows import PriceSpec, expand_envelope
@@ -63,7 +62,6 @@ BASE_URL = "https://www.football-data.co.uk/mmz4281"
 SOURCE_TAG = "football_data_uk"
 SPORT_KEY = "soccer_epl"
 SPORT_TITLE = "EPL"
-EVENT_ID_PREFIX = "fduk"
 MARKET_KEY = "1x2"
 KICKOFF_MISMATCH_TOLERANCE = timedelta(minutes=15)
 
@@ -365,20 +363,6 @@ def _build_envelope(
     return envelope
 
 
-def build_event_id(
-    season: str,
-    home_team: str,
-    away_team: str,
-    commence_time: datetime,
-) -> str:
-    """Generate deterministic event ID for football-data.co.uk events."""
-    home_abbrev = team_abbrev(home_team)
-    away_abbrev = team_abbrev(away_team)
-    return (
-        f"{EVENT_ID_PREFIX}_{season}_{home_abbrev}_{away_abbrev}_{commence_time.date().isoformat()}"
-    )
-
-
 async def ingest_season(
     season: str,
     *,
@@ -415,7 +399,7 @@ async def ingest_season(
 
     async with async_session_maker() as session:
         for row in rows:
-            await ingest_row(session, row, season, stats)
+            await ingest_row(session, row, stats)
             # One commit per match releases the fixture lock the resolver took.
             await session.commit()
 
@@ -425,13 +409,12 @@ async def ingest_season(
 async def ingest_row(
     session: AsyncSession,
     row: dict[str, str],
-    season: str,
     stats: FdukStats,
 ) -> None:
     """Ingest one CSV row in a savepoint so a failure leaves the event's rows untouched."""
     try:
         async with session.begin_nested():
-            await _ingest_one_match(session, row, season, stats)
+            await _ingest_one_match(session, row, stats)
     except Exception as e:
         home = row.get("HomeTeam", "?")
         away = row.get("AwayTeam", "?")
@@ -458,7 +441,6 @@ def _report_dry_run(season: str, rows: list[dict[str, str]]) -> None:
 async def _ingest_one_match(
     session: AsyncSession,
     row: dict[str, str],
-    season: str,
     stats: FdukStats,
 ) -> None:
     """Ingest a single CSV row as Event + OddsSnapshots."""
@@ -481,7 +463,6 @@ async def _ingest_one_match(
             home_team=home_team,
             away_team=away_team,
             commence_time=kickoff.commence_time,
-            legacy_id=build_event_id(season, home_team, away_team, kickoff.commence_time),
             match_window=MatchWindow.HISTORICAL,
         ),
     )

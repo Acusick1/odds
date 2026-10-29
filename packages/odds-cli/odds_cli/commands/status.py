@@ -266,7 +266,7 @@ async def _show_events(days: int, team: str | None):
                     score = f"{event.away_score} - {event.home_score}"
 
                 table.add_row(
-                    event.id[:8] + "...",
+                    str(event.id),
                     time_str,
                     matchup,
                     f"[{status_color}]{event.status.value}[/{status_color}]",

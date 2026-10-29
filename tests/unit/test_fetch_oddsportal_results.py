@@ -23,7 +23,7 @@ KICKOFF = datetime.now(UTC).replace(minute=0, second=0, microsecond=0) - timedel
 
 def _make_event(
     *,
-    event_id: str = "test_event_1",
+    event_id: int = 1,
     home_team: str = "Arsenal",
     away_team: str = "Chelsea",
     commence_time: datetime = KICKOFF,
@@ -124,7 +124,7 @@ def _fetched(
     )
 
 
-async def _stored(session, event_id: str) -> Event:
+async def _stored(session, event_id: int) -> Event:
     await session.rollback()
     result = await session.execute(select(Event).where(Event.id == event_id))
     return result.scalar_one()
@@ -133,11 +133,11 @@ async def _stored(session, event_id: str) -> Event:
 class TestProcessResults:
     @pytest.mark.asyncio
     async def test_settles_matched_events_and_counts_the_rest(self, test_session) -> None:
-        test_session.add(_make_event(event_id="matched"))
-        test_session.add(_make_event(event_id="no_result", home_team="Fulham", away_team="Burnley"))
+        test_session.add(_make_event(event_id=1))
+        test_session.add(_make_event(event_id=2, home_team="Fulham", away_team="Burnley"))
         test_session.add(
             _make_event(
-                event_id="scoreless_final",
+                event_id=3,
                 home_team="Leeds",
                 away_team="Everton",
                 status=EventStatus.FINAL,
@@ -156,21 +156,21 @@ class TestProcessResults:
             stats = await process_results(fetched=_fetched(*matches))
 
         assert (stats.matches_fetched, stats.events_updated, stats.events_unresolved) == (2, 2, 1)
-        matched = await _stored(test_session, "matched")
+        matched = await _stored(test_session, 1)
         assert (matched.status, matched.home_score, matched.away_score) == (
             EventStatus.FINAL,
             2,
             1,
         )
         assert matched.completed_at is not None
-        scoreless = await _stored(test_session, "scoreless_final")
+        scoreless = await _stored(test_session, 3)
         assert (scoreless.home_score, scoreless.away_score) == (0, 0)
-        unresolved = await _stored(test_session, "no_result")
+        unresolved = await _stored(test_session, 2)
         assert (unresolved.status, unresolved.home_score) == (EventStatus.SCHEDULED, None)
 
     @pytest.mark.asyncio
     async def test_postponed_event_that_is_played_reaches_final(self, test_session) -> None:
-        test_session.add(_make_event(event_id="late", status=EventStatus.POSTPONED))
+        test_session.add(_make_event(event_id=1, status=EventStatus.POSTPONED))
         await test_session.commit()
 
         with patch(
@@ -180,13 +180,13 @@ class TestProcessResults:
             stats = await process_results(fetched=_fetched(_make_match()))
 
         assert stats.events_updated == 1
-        stored = await _stored(test_session, "late")
+        stored = await _stored(test_session, 1)
         assert (stored.status, stored.home_score) == (EventStatus.FINAL, 2)
 
     @pytest.mark.asyncio
     async def test_cancelled_match_cancels_the_pending_event(self, test_session) -> None:
-        test_session.add(_make_event(event_id="called_off"))
-        test_session.add(_make_event(event_id="other", home_team="Fulham", away_team="Burnley"))
+        test_session.add(_make_event(event_id=1))
+        test_session.add(_make_event(event_id=2, home_team="Fulham", away_team="Burnley"))
         await test_session.commit()
 
         cancelled = CancelledMatch(home_team="Arsenal", away_team="Chelsea", start_time=KICKOFF)
@@ -197,17 +197,17 @@ class TestProcessResults:
             stats = await process_results(fetched=_fetched(cancelled=[cancelled]))
 
         assert (stats.events_cancelled, stats.events_updated, stats.events_unresolved) == (1, 0, 1)
-        stored = await _stored(test_session, "called_off")
+        stored = await _stored(test_session, 1)
         assert (stored.status, stored.home_score, stored.completed_at) == (
             EventStatus.CANCELLED,
             None,
             None,
         )
-        assert (await _stored(test_session, "other")).status == EventStatus.SCHEDULED
+        assert (await _stored(test_session, 2)).status == EventStatus.SCHEDULED
 
     @pytest.mark.asyncio
     async def test_cancelled_match_leaves_a_scoreless_final_event_final(self, test_session) -> None:
-        test_session.add(_make_event(event_id="played", status=EventStatus.FINAL))
+        test_session.add(_make_event(event_id=1, status=EventStatus.FINAL))
         await test_session.commit()
 
         cancelled = CancelledMatch(home_team="Arsenal", away_team="Chelsea", start_time=KICKOFF)
@@ -218,7 +218,7 @@ class TestProcessResults:
             stats = await process_results(fetched=_fetched(cancelled=[cancelled]))
 
         assert (stats.events_cancelled, stats.errors) == (0, [])
-        assert (await _stored(test_session, "played")).status == EventStatus.FINAL
+        assert (await _stored(test_session, 1)).status == EventStatus.FINAL
 
     @pytest.mark.asyncio
     async def test_fetches_results_back_to_the_oldest_pending_kickoff(self, test_session) -> None:
@@ -261,8 +261,8 @@ class TestProcessResults:
 
     @pytest.mark.asyncio
     async def test_a_failed_update_is_recorded_and_the_rest_continue(self, test_session) -> None:
-        test_session.add(_make_event(event_id="first", home_team="Fulham", away_team="Burnley"))
-        test_session.add(_make_event(event_id="second"))
+        test_session.add(_make_event(event_id=1, home_team="Fulham", away_team="Burnley"))
+        test_session.add(_make_event(event_id=2))
         await test_session.commit()
 
         real_update = __import__(
@@ -270,7 +270,7 @@ class TestProcessResults:
         ).OddsWriter.update_event_status
 
         async def flaky(self, event_id, **kwargs):
-            if event_id == "first":
+            if event_id == 1:
                 raise RuntimeError("simulated update failure")
             return await real_update(self, event_id, **kwargs)
 
@@ -289,7 +289,7 @@ class TestProcessResults:
 
         assert len(stats.errors) == 1
         assert stats.events_updated == 1
-        assert (await _stored(test_session, "second")).status == EventStatus.FINAL
+        assert (await _stored(test_session, 2)).status == EventStatus.FINAL
 
     @pytest.mark.asyncio
     async def test_a_result_more_than_the_match_window_away_is_not_applied(

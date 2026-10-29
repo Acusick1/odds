@@ -464,7 +464,7 @@ def _save_to_json(report, output_path: str, check_scores=True, check_discovery=F
 
 @app.command("game")
 def validate_game(
-    event_id: str = typer.Argument(..., help="Event ID to validate"),
+    event_id: int = typer.Argument(..., help="Event ID to validate"),
     show_snapshots: bool = typer.Option(False, "--show-snapshots", help="Show all snapshots"),
 ):
     """
@@ -476,7 +476,7 @@ def validate_game(
     asyncio.run(_validate_game(event_id, show_snapshots))
 
 
-async def _validate_game(event_id: str, show_snapshots: bool):
+async def _validate_game(event_id: int, show_snapshots: bool):
     """Async implementation of game validation."""
     console.print(f"\n[bold blue]Tier Coverage for Event {event_id}[/bold blue]\n")
 

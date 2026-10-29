@@ -23,7 +23,7 @@ def _make_event(
     if commence_time is None:
         commence_time = datetime(2025, 1, 15, 0, 30, tzinfo=UTC)
     return Event(
-        id="test_event_1",
+        id=1,
         sport_key="basketball_nba",
         sport_title="NBA",
         home_team=home_team,
@@ -37,7 +37,7 @@ def _make_report(
     player_name: str = "James, LeBron",
     status: InjuryStatus = InjuryStatus.OUT,
     report_time: datetime | None = None,
-    event_id: str = "test_event_1",
+    event_id: int = 1,
     reason: str = "Left Ankle; Sprain",
 ) -> InjuryReport:
     if report_time is None:

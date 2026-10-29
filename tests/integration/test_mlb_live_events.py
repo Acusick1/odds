@@ -24,7 +24,7 @@ from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.health_monitor import HealthMonitor
 from odds_lambda.jobs import fetch_betfair_exchange, fetch_oddsportal
 from odds_lambda.jobs.fetch_oddsportal import LEAGUE_SPEC_BY_NAME, LeagueScrape, ingest_league
-from odds_lambda.live_events import DroppedGame, SkipReason, alert_dropped_games, live_event_id
+from odds_lambda.live_events import DroppedGame, SkipReason, alert_dropped_games
 from odds_lambda.mlb_game_resolver import GameRow
 from odds_lambda.mlb_stats_fetcher import MlbGameResult, MlbGameState
 from odds_lambda.oddsportal_adapter import MatchOdds
@@ -179,7 +179,7 @@ async def _mlb_events_with_pks(session: AsyncSession) -> list[tuple[Event, int |
     return [(e, await game_pk_of(session, e)) for e in await _mlb_events(session)]
 
 
-async def _snapshot_event_ids(session: AsyncSession) -> list[str]:
+async def _snapshot_event_ids(session: AsyncSession) -> list[int]:
     return list((await session.execute(select(OddsSnapshot.event_id))).scalars().all())
 
 
@@ -271,7 +271,7 @@ class TestLiveMlbEventsCarryGamePk:
     ) -> None:
         job_session.add(
             Event(
-                id="op_live_NEWYAN_BOSRED_existing",
+                id=1,
                 sport_key=MLB,
                 sport_title="MLB",
                 commence_time=EVENING,
@@ -288,8 +288,8 @@ class TestLiveMlbEventsCarryGamePk:
             _op_match(CUBS, CARDINALS, EVENING),
         )
 
-        assert [e.id for e in await _mlb_events(job_session)] == ["op_live_NEWYAN_BOSRED_existing"]
-        assert await _snapshot_event_ids(job_session) == ["op_live_NEWYAN_BOSRED_existing"]
+        assert [e.id for e in await _mlb_events(job_session)] == [1]
+        assert await _snapshot_event_ids(job_session) == [1]
         assert stats.games_skipped_schedule_unavailable == 1
         assert stats.errors == ["MLB schedule unavailable: no new events created"]
 
@@ -319,7 +319,7 @@ class TestLiveMlbEventsCarryGamePk:
         assert mlb_schedule.requests == 0
 
 
-def _mlb_event(event_id: str, commence: datetime, game_pk: int | None, **fields: Any) -> Event:
+def _mlb_event(event_id: int, commence: datetime, game_pk: int | None, **fields: Any) -> Event:
     return with_game_pk(
         Event(
             id=event_id,
@@ -339,8 +339,8 @@ class TestMergeGuard:
         self, pglite_async_session: AsyncSession
     ) -> None:
         session = pglite_async_session
-        keep = _mlb_event("g1", AFTERNOON, 824101)
-        other = _mlb_event("g2", AFTERNOON + timedelta(minutes=30), 824102)
+        keep = _mlb_event(1, AFTERNOON, 824101)
+        other = _mlb_event(2, AFTERNOON + timedelta(minutes=30), 824102)
         session.add_all([keep, other])
         await hold_game_pks(session)
         await session.flush()
@@ -352,8 +352,8 @@ class TestMergeGuard:
         self, pglite_async_session: AsyncSession
     ) -> None:
         session = pglite_async_session
-        keep = _mlb_event("zz9hexapi", AFTERNOON, None)
-        duplicate = _mlb_event("op_live_x", AFTERNOON, 824101)
+        keep = _mlb_event(1, AFTERNOON, None)
+        duplicate = _mlb_event(2, AFTERNOON, 824101)
         session.add_all([keep, duplicate])
         await hold_game_pks(session)
         await session.flush()
@@ -361,17 +361,17 @@ class TestMergeGuard:
         await EventMerger(session).merge(keep, [duplicate])
         await session.flush()
 
-        assert await game_pk_of(session, await session.get(Event, "zz9hexapi")) == 824101
-        assert await session.get(Event, "op_live_x") is None
+        assert await game_pk_of(session, await session.get(Event, 1)) == 824101
+        assert await session.get(Event, 2) is None
 
     async def test_merge_refuses_twins_of_different_games(
         self, pglite_async_session: AsyncSession
     ) -> None:
         session = pglite_async_session
-        api_event = _mlb_event("zz9hexapi", AFTERNOON, None)
+        api_event = _mlb_event(1, AFTERNOON, None)
         twins = [
-            _mlb_event("op_live_a", AFTERNOON, 824101),
-            _mlb_event("op_live_b", AFTERNOON + timedelta(minutes=40), 824102),
+            _mlb_event(2, AFTERNOON, 824101),
+            _mlb_event(3, AFTERNOON + timedelta(minutes=40), 824102),
         ]
         session.add_all([api_event, *twins])
         await hold_game_pks(session)
@@ -386,10 +386,10 @@ class TestMergeGuard:
         session = pglite_async_session
         session.add_all(
             [
-                _mlb_event("g1", AFTERNOON, 824101),
-                _mlb_event("g2", AFTERNOON + timedelta(minutes=40), 824102),
-                make_epl_event("op_live_ARS_CHE"),
-                make_epl_event("zz9hexapi"),
+                _mlb_event(1, AFTERNOON, 824101),
+                _mlb_event(2, AFTERNOON + timedelta(minutes=40), 824102),
+                make_epl_event(3),
+                make_epl_event(4),
             ]
         )
         await hold_game_pks(session)
@@ -397,7 +397,7 @@ class TestMergeGuard:
 
         groups = await EventMerger(session).find_twin_groups()
 
-        assert [[e.id for e in g] for g in groups] == [["op_live_ARS_CHE", "zz9hexapi"]]
+        assert [[e.id for e in g] for g in groups] == [[3, 4]]
 
 
 class TestMissingGamePkCheck:
@@ -409,23 +409,19 @@ class TestMissingGamePkCheck:
         session.add_all(
             [
                 _mlb_event(
-                    "before_assignment",
+                    1,
                     now - timedelta(days=9),
                     None,
                     created_at=now - timedelta(days=10),
                 ),
                 _mlb_event(
-                    "first_assigned",
+                    2,
                     now - timedelta(days=4),
                     824101,
                     created_at=now - timedelta(days=5),
                 ),
-                _mlb_event(
-                    "missing", now - timedelta(days=2), None, created_at=now - timedelta(days=3)
-                ),
-                _mlb_event(
-                    "too_new", now + timedelta(hours=6), None, created_at=now - timedelta(hours=2)
-                ),
+                _mlb_event(3, now - timedelta(days=2), None, created_at=now - timedelta(days=3)),
+                _mlb_event(4, now + timedelta(hours=6), None, created_at=now - timedelta(hours=2)),
             ]
         )
         await hold_game_pks(session)
@@ -433,14 +429,14 @@ class TestMissingGamePkCheck:
 
         issues = await HealthMonitor(session, get_settings()).check_event_identity(now)
 
-        assert issues == ["1 baseball_mlb events have no gamePk: missing"]
+        assert issues == ["1 baseball_mlb events have no gamePk: 3"]
 
     async def test_silent_before_any_event_holds_a_game_pk(
         self, pglite_async_session: AsyncSession
     ) -> None:
         session = pglite_async_session
         old = datetime.now(UTC) - timedelta(days=3)
-        session.add(_mlb_event("legacy", old, None, created_at=old))
+        session.add(_mlb_event(1, old, None, created_at=old))
         await hold_game_pks(session)
         await session.flush()
 
@@ -448,7 +444,7 @@ class TestMissingGamePkCheck:
 
 
 def _null_event(
-    event_id: str,
+    event_id: int,
     commence: datetime,
     home: str = CUBS,
     away: str = CARDINALS,
@@ -470,7 +466,7 @@ def _null_event(
     )
 
 
-async def _snapshots(session: AsyncSession) -> list[tuple[str, datetime]]:
+async def _snapshots(session: AsyncSession) -> list[tuple[int, datetime]]:
     rows = await session.execute(
         select(OddsSnapshot.event_id, OddsSnapshot.snapshot_time).order_by(OddsSnapshot.id)
     )
@@ -481,8 +477,7 @@ class TestDoubleheaderClaims:
     async def test_tbd_game_two_listed_first_leaves_game_ones_event_to_game_one(
         self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
     ) -> None:
-        game_one_id = live_event_id(CUBS, CARDINALS, AFTERNOON)
-        job_session.add(_null_event(game_one_id, AFTERNOON))
+        job_session.add(_null_event(1, AFTERNOON))
         await job_session.commit()
         placeholder = AFTERNOON + timedelta(minutes=6)
         mlb_schedule.schedule = [
@@ -496,8 +491,8 @@ class TestDoubleheaderClaims:
         )
 
         events = {pk: e.id for e, pk in await _mlb_events_with_pks(job_session)}
-        assert events[901] == game_one_id
-        assert events[902] == live_event_id(CUBS, CARDINALS, placeholder)
+        assert events[901] == 1
+        assert events[902] != 1
         assert [event_id for event_id, _ in await _snapshots(job_session)] == [
             events[902],
             events[901],
@@ -510,8 +505,8 @@ class TestDoubleheaderClaims:
         game_two_listed = AFTERNOON + timedelta(hours=3, minutes=31)
         job_session.add_all(
             [
-                _null_event(live_event_id(CUBS, CARDINALS, AFTERNOON), AFTERNOON),
-                _null_event(live_event_id(CUBS, CARDINALS, game_two_listed), game_two_listed),
+                _null_event(1, AFTERNOON),
+                _null_event(2, game_two_listed),
             ]
         )
         await job_session.commit()
@@ -526,21 +521,6 @@ class TestDoubleheaderClaims:
 
         assert [pk for _, pk in await _mlb_events_with_pks(job_session)] == [901, 902]
         assert stats.events_created == 0
-
-    async def test_id_taken_by_another_game_creates_the_event_under_a_suffixed_id(
-        self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
-    ) -> None:
-        taken_id = live_event_id(CUBS, CARDINALS, AFTERNOON)
-        job_session.add(_null_event(taken_id, AFTERNOON + timedelta(hours=5), game_pk=999))
-        await hold_game_pks(job_session)
-        await job_session.commit()
-        mlb_schedule.schedule = [_game(901, AFTERNOON, CUBS, CARDINALS)]
-
-        stats = await _ingest_op(_op_match(CUBS, CARDINALS, AFTERNOON))
-
-        game = next(e for e, pk in await _mlb_events_with_pks(job_session) if pk == 901)
-        assert game.id == f"{taken_id}_901"
-        assert (stats.events_created, stats.errors) == (1, [])
 
     async def test_savepoint_keeps_the_runs_earlier_writes(
         self,
@@ -579,7 +559,7 @@ class TestRescheduledGame:
         postponed_slot = EVENING - timedelta(days=1)
         job_session.add(
             _null_event(
-                "old_slot",
+                1,
                 postponed_slot,
                 YANKEES,
                 RED_SOX,
@@ -598,12 +578,12 @@ class TestRescheduledGame:
 
         [event] = await _mlb_events(job_session)
         assert (event.id, event.commence_time, event.status) == (
-            "old_slot",
+            1,
             EVENING,
             EventStatus.SCHEDULED,
         )
         [(snapshot_event_id, taken_at)] = await _snapshots(job_session)
-        assert snapshot_event_id == "old_slot"
+        assert snapshot_event_id == 1
         assert abs((taken_at - datetime.now(UTC)).total_seconds()) < 60
 
     async def test_tbd_start_leaves_the_listed_commence_time(
@@ -627,8 +607,8 @@ class TestScheduleOutage:
     ) -> None:
         job_session.add_all(
             [
-                _null_event("game_one", AFTERNOON, game_pk=901),
-                _null_event("game_two", EVENING, game_pk=902),
+                _null_event(1, AFTERNOON, game_pk=901),
+                _null_event(2, EVENING, game_pk=902),
             ]
         )
         await hold_game_pks(job_session)
@@ -647,14 +627,14 @@ class TestScheduleOutage:
         assert betfair.games_skipped_schedule_unavailable == 2
         assert oddsportal.games_skipped_schedule_unavailable == 0
         assert [event_id for event_id, _ in await _snapshots(job_session)] == [
-            "game_one",
-            "game_two",
+            1,
+            2,
         ]
 
     async def test_an_attached_game_records_the_sources_id(
         self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
     ) -> None:
-        job_session.add(_null_event("game_one", AFTERNOON, game_pk=901))
+        job_session.add(_null_event(1, AFTERNOON, game_pk=901))
         await hold_game_pks(job_session)
         await job_session.commit()
         mlb_schedule.down = True
@@ -675,8 +655,8 @@ class TestScheduleOutage:
     ) -> None:
         job_session.add_all(
             [
-                _null_event("a", AFTERNOON),
-                _null_event("b", AFTERNOON + timedelta(minutes=50)),
+                _null_event(1, AFTERNOON),
+                _null_event(2, AFTERNOON + timedelta(minutes=50)),
             ]
         )
         await job_session.commit()

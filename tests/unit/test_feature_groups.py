@@ -25,7 +25,7 @@ KICKOFF = datetime(2025, 12, 1, 15, 0, tzinfo=UTC)
 
 def _make_event() -> Event:
     return Event(
-        id="evt_1",
+        id=1,
         sport_key="soccer_epl",
         sport_title="EPL",
         commence_time=KICKOFF,
@@ -53,7 +53,7 @@ def _snapshot(
         tuple(
             Quote(
                 snapshot_id=snapshot_id,
-                event_id="evt_1",
+                event_id=1,
                 snapshot_time=snapshot_time,
                 created_at=snapshot_time,
                 source=source,

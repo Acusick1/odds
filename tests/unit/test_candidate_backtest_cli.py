@@ -82,7 +82,7 @@ def fake_replay(monkeypatch: pytest.MonkeyPatch) -> list[MechanicalCandidate]:
                 folds=2,
                 trials=5,
             ),
-            refits=(Refit(0, NOW, 2, 40, ("e3", "e4")),),
+            refits=(Refit(0, NOW, 2, 40, (3, 4)),),
         )
 
     monkeypatch.setattr("odds_cli.commands.candidates.replay", replay)
@@ -183,7 +183,7 @@ class TestBacktestCommand:
         )
 
         assert result.exit_code == 0, result.stdout
-        assert fake_replay.only_events == [None, ("e3", "e4")]  # type: ignore[attr-defined]
+        assert fake_replay.only_events == [None, (3, 4)]  # type: ignore[attr-defined]
         assert "learning_rate" in result.stdout and "0.007200" in result.stdout
         assert "12 matches in range" in result.stdout
 
@@ -297,9 +297,7 @@ def parity_report(*statuses: ParityStatus, db_replayed: tuple = (("home", "bet36
         "back-longest",
         1,
         [
-            DecisionParity(
-                i, f"e{i}", NOW, status, (), (("home", "bet365", 2.2, 1.0),), db_replayed
-            )
+            DecisionParity(i, i + 1, NOW, status, (), (("home", "bet365", 2.2, 1.0),), db_replayed)
             for i, status in enumerate(statuses)
         ],
     )

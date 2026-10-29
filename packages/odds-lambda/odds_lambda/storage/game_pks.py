@@ -10,21 +10,21 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
-async def game_pks_of(session: AsyncSession, events: Sequence[Event]) -> dict[str, int]:
+async def game_pks_of(session: AsyncSession, events: Sequence[Event]) -> dict[int, int]:
     """The ``gamePk`` of each of ``events`` that holds one, by event id."""
-    by_key = {e.surrogate_id: e.id for e in events if e.surrogate_id is not None}
-    if not by_key:
+    ids = [e.id for e in events if e.id is not None]
+    if not ids:
         return {}
     rows = await session.execute(
         select(EventExternalId.event_id, EventExternalId.external_id).where(
             EventExternalId.source == Source.MLB_STATS_API,
-            EventExternalId.event_id.in_(list(by_key)),  # type: ignore[attr-defined]
+            EventExternalId.event_id.in_(ids),  # type: ignore[attr-defined]
         )
     )
-    return {by_key[key]: int(external_id) for key, external_id in rows.all()}
+    return {event_id: int(external_id) for event_id, external_id in rows.all()}
 
 
-async def events_holding_game_pks(session: AsyncSession, events: Sequence[Event]) -> set[str]:
+async def events_holding_game_pks(session: AsyncSession, events: Sequence[Event]) -> set[int]:
     """The ids of ``events`` that hold a ``gamePk``."""
     return set(await game_pks_of(session, events))
 
@@ -42,7 +42,7 @@ async def events_holding_game_pks_by_pk(
         return {}
     rows = await session.execute(
         select(EventExternalId.external_id, Event)
-        .join(Event, EventExternalId.event_id == Event.surrogate_id)  # type: ignore[arg-type]
+        .join(Event, EventExternalId.event_id == Event.id)  # type: ignore[arg-type]
         .where(
             EventExternalId.source == Source.MLB_STATS_API,
             EventExternalId.external_id.in_([str(pk) for pk in game_pks]),  # type: ignore[attr-defined]

@@ -67,7 +67,7 @@ async def _create_recent_heartbeats(session) -> None:
 async def _create_recent_snapshot(session, *, minutes_ago: int = 30) -> None:
     """Insert an Event + OddsSnapshot so the health check finds recent data."""
     event = Event(
-        id=f"health_test_{minutes_ago}",
+        id=minutes_ago,
         sport_key="basketball_nba",
         sport_title="NBA",
         commence_time=datetime.now(UTC) + timedelta(hours=24),
@@ -92,7 +92,7 @@ async def _create_stale_oddsportal_source(session, *, hours_ago: float = 40) -> 
     """An EPL fixture inside the horizon whose OddsPortal feed last wrote hours ago."""
     now = datetime.now(UTC)
     event = Event(
-        id="health_stale_epl",
+        id=9001,
         sport_key="soccer_epl",
         sport_title="EPL",
         commence_time=now + timedelta(hours=6),
@@ -218,7 +218,7 @@ class TestHealthCheckIntegration:
 
         # Create test event for foreign key constraint
         test_event = Event(
-            id="test_event",
+            id=1,
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=datetime.now(UTC),
@@ -243,7 +243,7 @@ class TestHealthCheckIntegration:
         # Create 12 data quality errors in last 24h (threshold is 10)
         for i in range(12):
             quality_log = DataQualityLog(
-                event_id="test_event",
+                event_id=1,
                 severity="error",
                 issue_type="suspicious_odds",
                 description=f"Test error {i}",
@@ -322,7 +322,7 @@ class TestHealthCheckIntegration:
         await _create_recent_heartbeats(test_session)
         test_session.add(
             Event(
-                id="test_event",
+                id=1,
                 sport_key="basketball_nba",
                 sport_title="NBA",
                 commence_time=datetime.now(UTC),
@@ -336,7 +336,7 @@ class TestHealthCheckIntegration:
             for i in range(12):
                 test_session.add(
                     DataQualityLog(
-                        event_id="test_event",
+                        event_id=1,
                         severity="error",
                         issue_type="suspicious_odds",
                         description=f"Test error {i}",
@@ -399,7 +399,7 @@ class TestHealthCheckIntegration:
 
         # Create test event for foreign key constraint
         test_event = Event(
-            id="test_event",
+            id=1,
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=datetime.now(UTC),
@@ -424,7 +424,7 @@ class TestHealthCheckIntegration:
         # Create 5 data quality errors (default threshold is 10)
         for i in range(5):
             quality_log = DataQualityLog(
-                event_id="test_event",
+                event_id=1,
                 severity="error",
                 issue_type="suspicious_odds",
                 description=f"Test error {i}",

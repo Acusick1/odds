@@ -43,7 +43,7 @@ These filters apply only to Odds API requests ([configuration](../foundations/co
 ## OddsPortal and FDUK coverage
 
 - OddsPortal names map through `odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP` (32 entries; unmapped names fall back to `odds_lambda.oddsportal_common.slugify`). The map holds Pinnacle, BetMGM, DraftKings, FanDuel, Betfair Exchange, William Hill, Ladbrokes and others.
-- FDUK issues no event id. Its snapshots carry source `football_data_uk` (the envelope's `source` is the same string), and FDUK maps its column prefixes in `BOOKMAKER_PREFIXES` (`scripts/ingest_football_data_uk.py`): pinnacle, bet365, bwin, betfair_exchange (`BFE`), betfair_sportsbook (`BF`), interwetten, williamhill, betvictor (`VC`, `BV`), betfred (`BFD`), paddypower (`PP`), skybet (`SKB`), betmgm (`BMGM`), coral (`CL`), ladbrokes, onexbet, plus pseudo-books `market_max` / `market_avg` (`AGGREGATE_PREFIXES`).
+- FDUK issues no id of its own for an event ([events](../storage/events.md#external-ids)). Its snapshots carry source `football_data_uk` (the envelope's `source` is the same string), and FDUK maps its column prefixes in `BOOKMAKER_PREFIXES` (`scripts/ingest_football_data_uk.py`): pinnacle, bet365, bwin, betfair_exchange (`BFE`), betfair_sportsbook (`BF`), interwetten, williamhill, betvictor (`VC`, `BV`), betfred (`BFD`), paddypower (`PP`), skybet (`SKB`), betmgm (`BMGM`), coral (`CL`), ladbrokes, onexbet, plus pseudo-books `market_max` / `market_avg` (`AGGREGATE_PREFIXES`).
 - Betfair Exchange covers EPL and MLB (`odds_lambda.betfair.constants.SPORT_CONFIG`): match odds for both, and over/under 2.5 goals for EPL (the line is on `odds_lambda.betfair.constants.BetfairMarketSpec`).
 
 ## Sport keys
@@ -58,7 +58,7 @@ CLI `--sport` defaults differ by command ([odds-cli](../foundations/odds-cli.md#
 
 ## Market-key dialects
 
-A market key is whatever string sits in an envelope's `bookmakers[].markets[].key`; the writers store it as the snapshot's `market`, which readers match exactly (`odds_core.quotes.quotes`). Writers use different keys for the same two-way bet, and one key for the football three-way bet:
+A market key is whatever string sits in an envelope's `bookmakers[].markets[].key`; the writers store it as the snapshot's `market`, which readers match exactly (`odds_core.quotes.quotes`, which selects events by their integer ids). Writers use different keys for the same two-way bet, and one key for the football three-way bet:
 
 | Writer | Football 3-way | Two-way moneyline | Totals |
 |---|---|---|---|

@@ -3,8 +3,8 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from odds_core.api_models import EventsResponse, OddsResponse
-from odds_core.models import Event, EventStatus
+from odds_core.api_models import ApiEvent, EventsResponse, OddsResponse
+from odds_core.models import Event, EventExternalId, EventStatus
 from odds_lambda.event_sync import EventSyncResult, EventSyncService
 from sqlalchemy import select
 
@@ -22,23 +22,22 @@ def _make_odds_response() -> OddsResponse:
 
 
 def _make_event(
-    event_id: str,
+    odds_api_id: str,
     hours_from_now: float = 24.0,
     home_team: str = "Lakers",
     away_team: str = "Celtics",
-) -> Event:
-    return Event(
-        id=event_id,
+) -> ApiEvent:
+    return ApiEvent(
+        odds_api_id=odds_api_id,
         sport_key="basketball_nba",
         sport_title="NBA",
         commence_time=datetime.now(UTC) + timedelta(hours=hours_from_now),
         home_team=home_team,
         away_team=away_team,
-        status=EventStatus.SCHEDULED,
     )
 
 
-def _make_events_response(events: list[Event]) -> EventsResponse:
+def _make_events_response(events: list[ApiEvent]) -> EventsResponse:
     return EventsResponse(
         events=events,
         response_time_ms=50,
@@ -66,16 +65,10 @@ class TestEventSyncService:
         assert result.total == 2
 
         await test_session.rollback()
-        db_events = (
-            (
-                await test_session.execute(
-                    select(Event).where(Event.id.in_(["sync_event_1", "sync_event_2"]))
-                )
-            )
-            .scalars()
-            .all()
-        )
+        db_events = (await test_session.execute(select(Event))).scalars().all()
         assert len(db_events) == 2
+        recorded = (await test_session.execute(select(EventExternalId.external_id))).scalars()
+        assert set(recorded) == {"sync_event_1", "sync_event_2"}
 
     @pytest.mark.asyncio
     async def test_sync_sport_updates_existing_events(self, test_session, mock_session_factory):
@@ -83,7 +76,16 @@ class TestEventSyncService:
 
         # Pre-insert one event
         existing = _make_event("sync_existing_event")
-        await add_event(test_session, existing)
+        stored = Event(
+            id=1,
+            sport_key=existing.sport_key,
+            sport_title=existing.sport_title,
+            commence_time=existing.commence_time,
+            home_team=existing.home_team,
+            away_team=existing.away_team,
+            status=EventStatus.SCHEDULED,
+        )
+        await add_event(test_session, stored)
         await test_session.commit()
 
         # Sync returns the same event + one new one

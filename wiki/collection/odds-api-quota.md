@@ -28,7 +28,7 @@ Quota is a per-key monthly balance that only [the client](odds-api-client.md#cos
 
 | Place | What it reads | Reminded | Recorded in `alert_history` |
 |---|---|---|---|
-| `odds_core.models.FetchLog.api_quota_remaining` | written once per sport and run by `odds_lambda.ingestion.OddsIngestionService.ingest_sport`, after its events are stored (each resolved through the event resolver; [fetch logs](odds-ingestion-service.md#fetch-logs)) | n/a | n/a |
+| `odds_core.models.FetchLog.api_quota_remaining` | written once per sport and run by `odds_lambda.ingestion.OddsIngestionService.ingest_sport`, after its listed games are stored (each resolved to its event through the event resolver; [fetch logs](odds-ingestion-service.md#fetch-logs)) | n/a | n/a |
 | `odds_lambda.health_monitor.HealthMonitor.check_api_quota` | newest `fetch_logs` row with a non-null quota, same fraction | yes | yes |
 | `odds status quota` (`odds_cli.commands.status._show_quota`) | newest 10 `fetch_logs` rows with a non-null quota; the per-fetch Used column is the next-older row's remaining minus this row's, `reset` when negative, blank for the oldest | n/a | n/a |
 
@@ -55,7 +55,7 @@ The quota alerts fire below 100 units (warning) and 50 units (critical) remainin
 ## Where the views disagree
 
 - **Failed calls.** A failed `/odds` call writes no `fetch_logs` row, so it leaves no quota trace (#472; [fetch logs](odds-ingestion-service.md#fetch-logs)).
-- **Historical estimates.** The backfill planner plans one fetch per missing tier at the times that tier's `upper_bound` fetch covers, and estimates historical cost from a literal, not from the configured regions or markets, so its estimates drift if those change (#441; [odds-api-backfill](odds-api-backfill.md)).
+- **Historical estimates.** The backfill planner plans, per event id, one fetch per missing tier at the times that tier's `upper_bound` fetch covers, and estimates historical cost from a literal, not from the configured regions or markets, so its estimates drift if those change (#441; [odds-api-backfill](odds-api-backfill.md)).
 - **Scores.** `fetch-scores` spends more than the minimum per call because the client always sends `daysFrom` ([results-jobs](results-jobs.md)).
 
 ## Related

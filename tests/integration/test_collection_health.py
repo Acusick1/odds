@@ -78,7 +78,7 @@ def seed(pglite_async_session: Any) -> Callable[..., Any]:
         counter += 1
         pglite_async_session.add(
             Event(
-                id=f"event_{counter}",
+                id=counter,
                 sport_key=sport_key,
                 sport_title=sport_key,
                 commence_time=kickoff,
@@ -91,7 +91,7 @@ def seed(pglite_async_session: Any) -> Callable[..., Any]:
         for source, taken in snapshots:
             pglite_async_session.add(
                 OddsSnapshot(
-                    event_id=f"event_{counter}",
+                    event_id=counter,
                     snapshot_time=taken,
                     source=source,
                     time_basis=time_basis,
@@ -217,7 +217,7 @@ class TestRequireRowsForFixtures:
         await require_rows_for_fixtures(
             fetch_betfair_exchange.SOURCE,
             {"soccer_epl": 0},
-            accounted_by_sport={"soccer_epl": {EventKey("event_1")}},
+            accounted_by_sport={"soccer_epl": {EventKey(1)}},
             now=NOW,
         )
 
@@ -231,7 +231,7 @@ class TestRequireRowsForFixtures:
             await require_rows_for_fixtures(
                 fetch_betfair_exchange.SOURCE,
                 {"soccer_epl": 0},
-                accounted_by_sport={"soccer_epl": {EventKey("event_1")}},
+                accounted_by_sport={"soccer_epl": {EventKey(1)}},
                 now=NOW,
             )
 
@@ -624,10 +624,10 @@ class TestCheckMissingBetfairCloses:
             kickoff: datetime,
             snapshots: tuple[tuple[datetime, dict[str, Any]], ...],
             status: EventStatus = EventStatus.FINAL,
-        ) -> str:
+        ) -> int:
             nonlocal counter
             counter += 1
-            event_id = f"close_{counter}"
+            event_id = counter
             pglite_async_session.add(
                 Event(
                     id=event_id,
@@ -775,7 +775,7 @@ class TestCheckMissingBetfairCloses:
         assert len(missing) == 1
 
     @staticmethod
-    def _totals_trade(event_id: str, line: float) -> PaperTrade:
+    def _totals_trade(event_id: int, line: float) -> PaperTrade:
         return PaperTrade(
             event_id=event_id,
             market="totals",
@@ -948,7 +948,7 @@ class TestCheckMissingBetfairCloses:
             message for message in sent if "Betfair" in message and "snapshot" in message
         ]
         assert len(close_alerts) == 1
-        assert all(event_id in close_alerts[0] for event_id in ids)
+        assert all(str(event_id) in close_alerts[0] for event_id in ids)
         assert "missing_betfair_close" in first.alerts_sent
         assert "missing_betfair_close" not in second.alerts_sent
 
@@ -962,7 +962,7 @@ class TestCheckMissingBetfairCloses:
             alert_type="missing_betfair_close",
             severity="critical",
             message="other event",
-            context={"event_ids": ["other"]},
+            context={"event_ids": [0]},
             sent_at=datetime.now(UTC) - timedelta(minutes=5),
         )
         pglite_async_session.add(recent)
@@ -977,11 +977,11 @@ class TestCheckMissingBetfairCloses:
             retried = await monitor.check_system_health(NOW)
             repeated = await monitor.check_system_health(NOW)
 
-        listing = [i for i in limited.issues_detected if event_id in i]
+        listing = [i for i in limited.issues_detected if str(event_id) in i]
         assert len(listing) == 1
         assert "missing_betfair_close" not in limited.alerts_sent
         assert "missing_betfair_close" in retried.alerts_sent
-        assert not any(event_id in issue for issue in repeated.issues_detected)
+        assert not any(str(event_id) in issue for issue in repeated.issues_detected)
 
     async def test_new_event_is_alerted_after_an_earlier_alert(
         self, pglite_async_session: Any, seed_event: Callable[..., Any]
@@ -1218,7 +1218,7 @@ class TestBetfairJob:
         assert alerts.heartbeats == []
 
     @staticmethod
-    def _ingest_accounted(monkeypatch: pytest.MonkeyPatch, *event_ids: str) -> None:
+    def _ingest_accounted(monkeypatch: pytest.MonkeyPatch, *event_ids: int) -> None:
         stats = fetch_betfair_exchange.IngestionStats(
             sport="soccer_epl",
             events_seen=len(event_ids),
@@ -1232,7 +1232,7 @@ class TestBetfairJob:
         self, monkeypatch: pytest.MonkeyPatch, seed: Callable[..., Any], alerts: _AlertRecorder
     ) -> None:
         await seed(datetime.now(UTC) + timedelta(hours=1))
-        self._ingest_accounted(monkeypatch, "event_1")
+        self._ingest_accounted(monkeypatch, 1)
 
         await fetch_betfair_exchange.main(JobContext(sport="soccer_epl"))
 
@@ -1244,7 +1244,7 @@ class TestBetfairJob:
         now = datetime.now(UTC)
         await seed(now + timedelta(hours=1))
         await seed(now + timedelta(hours=4))
-        self._ingest_accounted(monkeypatch, "event_1")
+        self._ingest_accounted(monkeypatch, 1)
 
         with pytest.raises(EmptyCollectionError, match="with 1 fixture"):
             await fetch_betfair_exchange.main(JobContext(sport="soccer_epl"))
@@ -1272,7 +1272,7 @@ class TestBetfairEplAccounting:
         )
 
     @staticmethod
-    def _event(event_id: str, home: str, away: str, kickoff: datetime) -> Event:
+    def _event(event_id: int, home: str, away: str, kickoff: datetime) -> Event:
         return Event(
             id=event_id,
             sport_key="soccer_epl",
@@ -1310,12 +1310,12 @@ class TestBetfairEplAccounting:
         self, pglite_async_session: Any
     ) -> None:
         kickoff = NOW + timedelta(hours=1)
-        pglite_async_session.add(self._event("arsenal_chelsea", "Arsenal", "Chelsea", kickoff))
+        pglite_async_session.add(self._event(1, "Arsenal", "Chelsea", kickoff))
         await pglite_async_session.commit()
 
         stats = await self._ingest(kickoff)
 
-        assert stats.accounted_fixtures == {EventKey("arsenal_chelsea")}
+        assert stats.accounted_fixtures == {EventKey(1)}
         await require_rows_for_fixtures(
             fetch_betfair_exchange.SOURCE,
             {"soccer_epl": stats.snapshots_stored},
@@ -1329,8 +1329,8 @@ class TestBetfairEplAccounting:
         kickoff = NOW + timedelta(hours=1)
         pglite_async_session.add_all(
             [
-                self._event("arsenal_chelsea", "Arsenal", "Chelsea", kickoff),
-                self._event("spurs_everton", "Tottenham", "Everton", kickoff + timedelta(hours=2)),
+                self._event(1, "Arsenal", "Chelsea", kickoff),
+                self._event(2, "Tottenham", "Everton", kickoff + timedelta(hours=2)),
             ]
         )
         await pglite_async_session.commit()

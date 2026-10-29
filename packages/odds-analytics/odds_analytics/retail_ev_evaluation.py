@@ -259,9 +259,9 @@ class SnapshotStamp:
 
 async def snapshot_stamps(
     session: AsyncSession, events: Sequence[Event]
-) -> dict[str, list[SnapshotStamp]]:
+) -> dict[int, list[SnapshotStamp]]:
     """The stamps of every snapshot of ``events``, of any market, per event id."""
-    stamps: dict[str, list[SnapshotStamp]] = {e.id: [] for e in events}
+    stamps: dict[int, list[SnapshotStamp]] = {e.id: [] for e in events}
     if not stamps:
         return stamps
     rows = await session.execute(
@@ -279,7 +279,7 @@ async def snapshot_stamps(
 
 
 def _window_event_frame(
-    events: Sequence[Event], stamps: Mapping[str, Sequence[SnapshotStamp]]
+    events: Sequence[Event], stamps: Mapping[int, Sequence[SnapshotStamp]]
 ) -> pd.DataFrame:
     records: list[dict[str, Any]] = []
     for event in events:
@@ -317,7 +317,7 @@ def _window_event_frame(
     )
 
 
-def incomplete_events(window_events: pd.DataFrame) -> list[str]:
+def incomplete_events(window_events: pd.DataFrame) -> list[int]:
     """Window events that are not FINAL or have no FDUK closing snapshot."""
     incomplete = (window_events["status"] != EventStatus.FINAL.value) | ~window_events[
         "has_fduk_closing"
@@ -329,7 +329,7 @@ async def load_evaluation_data(
     session: AsyncSession,
     spec: EvaluationSpec,
     now: datetime,
-    allow_incomplete: Sequence[str] = (),
+    allow_incomplete: Sequence[int] = (),
 ) -> EvaluationData:
     """Rows of every event kicking off from the training start to the window end.
 
@@ -768,7 +768,7 @@ async def run_evaluation(
     output_dir: Path,
     now: datetime,
     force: bool = False,
-    allow_incomplete: Sequence[str] = (),
+    allow_incomplete: Sequence[int] = (),
     results_root: Path | None = None,
 ) -> EvaluationReport:
     """Load, refit, score and write the report, manifest and predictions to ``output_dir``.

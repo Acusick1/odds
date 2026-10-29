@@ -27,7 +27,7 @@ def _make_record(**overrides) -> InjuryRecord:
 
 
 def _make_event(
-    event_id: str,
+    event_id: int,
     home: str,
     away: str,
     commence: datetime,
@@ -110,7 +110,7 @@ class TestInjuryWriter:
         """Injury records auto-match to sportsbook events at write time."""
         # Create an event for BOS at ORL on Jan 16 (7:10 PM ET = Jan 17 00:10 UTC)
         event = _make_event(
-            "evt_bos_orl",
+            1,
             home="Orlando Magic",
             away="Boston Celtics",
             commence=datetime(2026, 1, 17, 0, 10, tzinfo=UTC),
@@ -127,7 +127,7 @@ class TestInjuryWriter:
 
         result = await pglite_async_session.execute(select(InjuryReport))
         row = result.scalar_one()
-        assert row.event_id == "evt_bos_orl"
+        assert row.event_id == 1
 
     @pytest.mark.asyncio
     async def test_event_matching_no_match(self, pglite_async_session):
@@ -149,7 +149,7 @@ class TestInjuryWriter:
         # Two events for Boston on the same date (hypothetical)
         for i in range(2):
             event = _make_event(
-                f"evt_bos_{i}",
+                i + 1,
                 home="Orlando Magic",
                 away="Boston Celtics",
                 commence=datetime(2026, 1, 16, 20 + i, 0, tzinfo=UTC),
@@ -173,14 +173,14 @@ class TestInjuryWriter:
         """Back-to-back games on adjacent ET dates match the correct event only."""
         # Jan 15 game: 7 PM ET = Jan 16 00:00 UTC
         evt_jan15 = _make_event(
-            "evt_jan15",
+            1,
             home="Orlando Magic",
             away="Boston Celtics",
             commence=datetime(2026, 1, 16, 0, 0, tzinfo=UTC),
         )
         # Jan 16 game: 7:30 PM ET = Jan 17 00:30 UTC
         evt_jan16 = _make_event(
-            "evt_jan16",
+            2,
             home="Boston Celtics",
             away="Miami Heat",
             commence=datetime(2026, 1, 17, 0, 30, tzinfo=UTC),
@@ -198,7 +198,7 @@ class TestInjuryWriter:
 
         result = await pglite_async_session.execute(select(InjuryReport))
         row = result.scalar_one()
-        assert row.event_id == "evt_jan16"
+        assert row.event_id == 2
 
     @pytest.mark.asyncio
     async def test_empty_records(self, pglite_async_session):
@@ -210,7 +210,7 @@ class TestInjuryWriter:
 class TestInjuryReader:
     """Tests for InjuryReader."""
 
-    async def _seed_reports(self, session, event_id: str | None = "evt_1") -> list[InjuryReport]:
+    async def _seed_reports(self, session, event_id: int | None = 1) -> list[InjuryReport]:
         """Seed the DB with injury reports for testing reads."""
         # Create event if needed
         if event_id:
@@ -262,32 +262,32 @@ class TestInjuryReader:
     @pytest.mark.asyncio
     async def test_get_injuries_for_event(self, pglite_async_session):
         """Returns all injury reports linked to a specific event."""
-        await self._seed_reports(pglite_async_session, event_id="evt_1")
+        await self._seed_reports(pglite_async_session, event_id=1)
         reader = InjuryReader(pglite_async_session)
 
-        reports = await reader.get_injuries_for_event("evt_1")
+        reports = await reader.get_injuries_for_event(1)
         assert len(reports) == 3  # 1 early + 2 late
 
     @pytest.mark.asyncio
     async def test_get_injuries_before_time_prevents_lookahead(self, pglite_async_session):
         """before_time filter prevents look-ahead bias."""
-        await self._seed_reports(pglite_async_session, event_id="evt_1")
+        await self._seed_reports(pglite_async_session, event_id=1)
         reader = InjuryReader(pglite_async_session)
 
         # Only see the early report
         cutoff = datetime(2026, 1, 15, 18, 0, tzinfo=UTC)
-        reports = await reader.get_injuries_for_event("evt_1", before_time=cutoff)
+        reports = await reader.get_injuries_for_event(1, before_time=cutoff)
         assert len(reports) == 1
         assert reports[0].status == InjuryStatus.QUESTIONABLE
 
     @pytest.mark.asyncio
     async def test_get_latest_report_for_event(self, pglite_async_session):
         """Returns all rows from the most recent report_time <= as_of."""
-        await self._seed_reports(pglite_async_session, event_id="evt_1")
+        await self._seed_reports(pglite_async_session, event_id=1)
         reader = InjuryReader(pglite_async_session)
 
         as_of = datetime(2026, 1, 16, 0, 0, tzinfo=UTC)
-        reports = await reader.get_latest_report_for_event("evt_1", as_of)
+        reports = await reader.get_latest_report_for_event(1, as_of)
 
         # Should get the 2 late-report rows (Tatum OUT, Brown PROBABLE)
         assert len(reports) == 2
@@ -297,11 +297,11 @@ class TestInjuryReader:
     @pytest.mark.asyncio
     async def test_get_latest_report_early_cutoff(self, pglite_async_session):
         """With early cutoff, returns only the early report snapshot."""
-        await self._seed_reports(pglite_async_session, event_id="evt_1")
+        await self._seed_reports(pglite_async_session, event_id=1)
         reader = InjuryReader(pglite_async_session)
 
         as_of = datetime(2026, 1, 15, 18, 0, tzinfo=UTC)
-        reports = await reader.get_latest_report_for_event("evt_1", as_of)
+        reports = await reader.get_latest_report_for_event(1, as_of)
 
         assert len(reports) == 1
         assert reports[0].player_name == "Tatum, Jayson"
@@ -311,13 +311,13 @@ class TestInjuryReader:
     async def test_get_latest_report_no_data(self, pglite_async_session):
         """Returns empty list when no reports exist for the event."""
         reader = InjuryReader(pglite_async_session)
-        reports = await reader.get_latest_report_for_event("nonexistent", datetime.now(UTC))
+        reports = await reader.get_latest_report_for_event(999, datetime.now(UTC))
         assert reports == []
 
     @pytest.mark.asyncio
     async def test_get_pipeline_stats(self, pglite_async_session):
         """Pipeline stats return correct counts."""
-        await self._seed_reports(pglite_async_session, event_id="evt_1")
+        await self._seed_reports(pglite_async_session, event_id=1)
         reader = InjuryReader(pglite_async_session)
 
         stats = await reader.get_pipeline_stats()

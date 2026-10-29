@@ -73,7 +73,7 @@ def _check_candidate(name: str, version: int, event: Event, market: str) -> None
 async def place_trade(
     session: AsyncSession,
     *,
-    event_id: str,
+    event_id: int,
     market: str,
     selection: str,
     bookmaker: str,

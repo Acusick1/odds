@@ -3,12 +3,12 @@ description: Back the longest UK retail price when the Polymarket fair probabili
 kind: mechanical
 market: 1x2
 sport: soccer_epl
-version: 1
+version: 2
 issue: 655
-start_date: 2026-10-29
+start_date: 2026-10-31
 status: active
 rule: polymarket_gap
-rule_sha256: b59812a8dcd4f75599c75bed0a2f371bdabf0623b561f40d6393795fd1290a6e
+rule_sha256: d59fef612cd50f467835b60379934dabbc94bd9ff89d38efb6f302ac96d22820
 params:
   threshold: 0.01
   minutes_before_kickoff: [60, 30]

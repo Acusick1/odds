@@ -38,7 +38,7 @@ from tests.test_helpers import (
 CHILD_MODELS = (OddsSnapshot, PaperTrade, MatchBrief)
 
 
-async def _event_ids(session, model) -> set[str]:
+async def _event_ids(session, model) -> set[int]:
     return set((await session.execute(select(model.event_id))).scalars().all())
 
 
@@ -56,11 +56,11 @@ def _session_maker(session):
     return _Maker()
 
 
-async def _stored_event_ids(session) -> set[str]:
+async def _stored_event_ids(session) -> set[int]:
     return set((await session.execute(select(Event.id))).scalars().all())
 
 
-def _decision(event_id: str, candidate: str) -> CandidateDecision:
+def _decision(event_id: int, candidate: str) -> CandidateDecision:
     return CandidateDecision(
         candidate_name=candidate,
         candidate_version=1,
@@ -73,7 +73,7 @@ def _decision(event_id: str, candidate: str) -> CandidateDecision:
     )
 
 
-def _trade(event_id: str, candidate: str, decision_id: int | None) -> PaperTrade:
+def _trade(event_id: int, candidate: str, decision_id: int | None) -> PaperTrade:
     return PaperTrade(
         event_id=event_id,
         market="1x2",
@@ -183,13 +183,14 @@ class TestMerge:
         assert (stored.home_score, stored.away_score) == (3, 0)
 
 
-FDUK_EVENT_ID = "fduk_2025-2026_ARS_CHE_2026-04-15"
-HISTORICAL_EVENT_ID = "op_2025-2026_ARS_CHE_2026-04-15"
+FDUK_EVENT_ID = 3
+HISTORICAL_EVENT_ID = 4
+LIVE_EVENT_ID = 5
 
 
 class TestMergeGroup:
     @pytest.mark.asyncio
-    async def test_keeps_the_first_stored_event(self, pglite_async_session) -> None:
+    async def test_keeps_the_event_with_the_lowest_id(self, pglite_async_session) -> None:
         session = pglite_async_session
         for event_id in (FDUK_EVENT_ID, TWIN_EVENT_ID, HISTORICAL_EVENT_ID, API_EVENT_ID):
             session.add(make_epl_event(event_id))
@@ -199,9 +200,9 @@ class TestMergeGroup:
         report = await EventMerger(session).merge_group(groups[0])
         await session.flush()
 
-        assert report.kept_id == FDUK_EVENT_ID
-        assert set(report.merged_ids) == {API_EVENT_ID, TWIN_EVENT_ID, HISTORICAL_EVENT_ID}
-        assert await _stored_event_ids(session) == {FDUK_EVENT_ID}
+        assert report.kept_id == TWIN_EVENT_ID
+        assert set(report.merged_ids) == {API_EVENT_ID, FDUK_EVENT_ID, HISTORICAL_EVENT_ID}
+        assert await _stored_event_ids(session) == {TWIN_EVENT_ID}
 
     @pytest.mark.asyncio
     async def test_keeps_the_event_of_the_highest_ranked_kickoff_source(
@@ -210,18 +211,14 @@ class TestMergeGroup:
         session = pglite_async_session
         fduk = make_epl_event(FDUK_EVENT_ID)
         api = make_epl_event(API_EVENT_ID, TWIN_KICKOFF + timedelta(minutes=30))
-        live = make_epl_event(TWIN_EVENT_ID, TWIN_KICKOFF + timedelta(minutes=15))
+        live = make_epl_event(LIVE_EVENT_ID, TWIN_KICKOFF + timedelta(minutes=15))
         for event in (fduk, api, live):
             session.add(event)
             await session.flush()
         session.add_all(
             [
-                EventExternalId(
-                    source=Source.ODDS_API, external_id="apihex", event_id=api.surrogate_id
-                ),
-                EventExternalId(
-                    source=Source.ODDSPORTAL, external_id="Kl1AOZN9", event_id=live.surrogate_id
-                ),
+                EventExternalId(source=Source.ODDS_API, external_id="apihex", event_id=api.id),
+                EventExternalId(source=Source.ODDSPORTAL, external_id="Kl1AOZN9", event_id=live.id),
             ]
         )
         await session.flush()
@@ -229,8 +226,8 @@ class TestMergeGroup:
         [group] = await EventMerger(session).find_twin_groups("soccer_epl")
         report = await EventMerger(session).merge_group(group)
 
-        assert report.kept_id == TWIN_EVENT_ID
-        kept = await session.get(Event, TWIN_EVENT_ID)
+        assert report.kept_id == LIVE_EVENT_ID
+        kept = await session.get(Event, LIVE_EVENT_ID)
         assert kept is not None and kept.commence_time == TWIN_KICKOFF + timedelta(minutes=15)
 
     @pytest.mark.asyncio
@@ -279,16 +276,16 @@ class TestFindTwinGroups:
         session = pglite_async_session
         session.add_all(
             [
-                make_epl_event("a", TWIN_KICKOFF),
-                make_epl_event("b", TWIN_KICKOFF + timedelta(hours=1.5)),
-                make_epl_event("c", TWIN_KICKOFF + timedelta(hours=3)),
+                make_epl_event(1, TWIN_KICKOFF),
+                make_epl_event(2, TWIN_KICKOFF + timedelta(hours=1.5)),
+                make_epl_event(3, TWIN_KICKOFF + timedelta(hours=3)),
             ]
         )
         await session.flush()
 
         groups = await EventMerger(session).find_twin_groups()
 
-        assert [[e.id for e in g] for g in groups] == [["a", "b"]]
+        assert [[e.id for e in g] for g in groups] == [[1, 2]]
 
 
 class TestIdentityChecks:
@@ -423,7 +420,7 @@ class TestMergeCommandSameId:
         assert await session.get(Event, API_EVENT_ID) is not None
 
 
-def _mlb_event(event_id: str, home: str, away: str, **fields) -> Event:
+def _mlb_event(event_id: int, home: str, away: str, **fields) -> Event:
     fields.setdefault("status", EventStatus.SCHEDULED)
     return Event(
         id=event_id,
@@ -438,15 +435,13 @@ def _mlb_event(event_id: str, home: str, away: str, **fields) -> Event:
 
 class TestRepairAnnotatedNames:
     @pytest.mark.asyncio
-    async def test_merges_into_the_clean_event_whose_id_sorts_later(
-        self, pglite_async_session
-    ) -> None:
+    async def test_merges_into_the_clean_twin(self, pglite_async_session) -> None:
         session = pglite_async_session
         session.add_all(
             [
-                _mlb_event("op_live_CLE(S_TAMMAR", "Cleveland Guardians (S", "Tampa Bay Rays (N"),
+                _mlb_event(1, "Cleveland Guardians (S", "Tampa Bay Rays (N"),
                 _mlb_event(
-                    "op_live_CLEGUA_TAMRAY",
+                    2,
                     "Cleveland Guardians",
                     "Tampa Bay Rays",
                     commence_time=TWIN_KICKOFF + timedelta(minutes=8),
@@ -461,10 +456,10 @@ class TestRepairAnnotatedNames:
         report = await repair_team_names(session, "baseball_mlb")
         await session.commit()
 
-        assert report.renamed_ids == ("op_live_CLE(S_TAMMAR",)
+        assert report.renamed_ids == (1,)
         assert report.merged_count == 1
-        assert await _stored_event_ids(session) == {"op_live_CLEGUA_TAMRAY"}
-        kept = await session.get(Event, "op_live_CLEGUA_TAMRAY")
+        assert await _stored_event_ids(session) == {2}
+        kept = await session.get(Event, 2)
         assert kept.commence_time == TWIN_KICKOFF + timedelta(minutes=8)
         assert kept.status is EventStatus.FINAL
 
@@ -473,23 +468,23 @@ class TestRepairAnnotatedNames:
         self, pglite_async_session
     ) -> None:
         session = pglite_async_session
-        session.add(_mlb_event("op_live_A", "Chicago White Sox (TBD", "Cleveland Guardians"))
+        session.add(_mlb_event(1, "Chicago White Sox (TBD", "Cleveland Guardians"))
         await session.commit()
 
         report = await repair_team_names(session, "baseball_mlb")
 
         assert report.merged_count == 0
-        assert report.renamed_in_place_ids == ("op_live_A",)
+        assert report.renamed_in_place_ids == (1,)
         assert report.renamed_in_place_statuses == {EventStatus.SCHEDULED: 1}
-        assert (await session.get(Event, "op_live_A")).home_team == "Chicago White Sox"
+        assert (await session.get(Event, 1)).home_team == "Chicago White Sox"
 
     @pytest.mark.asyncio
     async def test_renamed_event_takes_the_canonical_team_name(self, pglite_async_session) -> None:
         session = pglite_async_session
         session.add_all(
             [
-                _mlb_event("op_live_ST.(A_X", "St. Louis Cardinals (A", "Milwaukee Brewers"),
-                _mlb_event("op_live_ST.CAR_X", "St.Louis Cardinals", "Milwaukee Brewers"),
+                _mlb_event(1, "St. Louis Cardinals (A", "Milwaukee Brewers"),
+                _mlb_event(2, "St.Louis Cardinals", "Milwaukee Brewers"),
             ]
         )
         await session.commit()
@@ -497,7 +492,7 @@ class TestRepairAnnotatedNames:
         report = await repair_team_names(session, "baseball_mlb")
 
         assert report.merged_count == 1
-        assert await _stored_event_ids(session) == {"op_live_ST.CAR_X"}
+        assert await _stored_event_ids(session) == {2}
 
     @pytest.mark.asyncio
     async def test_annotated_twins_of_each_other_collapse_to_one(
@@ -506,9 +501,9 @@ class TestRepairAnnotatedNames:
         session = pglite_async_session
         session.add_all(
             [
-                _mlb_event("op_live_A", "New York Yankees (M Fri", "Tampa Bay Rays (N Marti"),
+                _mlb_event(1, "New York Yankees (M Fri", "Tampa Bay Rays (N Marti"),
                 _mlb_event(
-                    "op_live_B",
+                    2,
                     "New York Yankees (M",
                     "Tampa Bay Rays",
                     commence_time=TWIN_KICKOFF + timedelta(minutes=8),
@@ -520,7 +515,7 @@ class TestRepairAnnotatedNames:
         report = await repair_team_names(session, "baseball_mlb")
 
         assert report.merged_count == 1
-        assert await _stored_event_ids(session) == {"op_live_A"}
+        assert await _stored_event_ids(session) == {1}
 
     @pytest.mark.asyncio
     async def test_second_run_changes_nothing_and_other_sports_are_untouched(
@@ -529,8 +524,8 @@ class TestRepairAnnotatedNames:
         session = pglite_async_session
         session.add_all(
             [
-                _mlb_event("op_live_A", "Chicago White Sox (TBD", "Cleveland Guardians"),
-                make_epl_event("op_live_E", home_team="Arsenal (W)"),
+                _mlb_event(1, "Chicago White Sox (TBD", "Cleveland Guardians"),
+                make_epl_event(2, home_team="Arsenal (W)"),
             ]
         )
         await session.commit()
@@ -540,7 +535,7 @@ class TestRepairAnnotatedNames:
 
         assert again.renamed_ids == ()
         assert again.merges == ()
-        assert (await session.get(Event, "op_live_E")).home_team == "Arsenal (W)"
+        assert (await session.get(Event, 2)).home_team == "Arsenal (W)"
 
     @pytest.mark.asyncio
     async def test_command_dry_run_writes_nothing_and_apply_merges(
@@ -549,20 +544,20 @@ class TestRepairAnnotatedNames:
         session = pglite_async_session
         session.add_all(
             [
-                _mlb_event("op_live_A", "Chicago White Sox (TBD", "Cleveland Guardians"),
-                _mlb_event("op_live_B", "Chicago White Sox", "Cleveland Guardians"),
+                _mlb_event(1, "Chicago White Sox (TBD", "Cleveland Guardians"),
+                _mlb_event(2, "Chicago White Sox", "Cleveland Guardians"),
             ]
         )
         await session.commit()
         monkeypatch.setattr(events_cli, "async_session_maker", _session_maker(session))
 
         await events_cli._repair_names("baseball_mlb", apply=False)
-        assert await _stored_event_ids(session) == {"op_live_A", "op_live_B"}
-        assert (await session.get(Event, "op_live_A")).home_team == "Chicago White Sox (TBD"
+        assert await _stored_event_ids(session) == {1, 2}
+        assert (await session.get(Event, 1)).home_team == "Chicago White Sox (TBD"
         assert "merged into a real event: 1" in capsys.readouterr().out
 
         await events_cli._repair_names("baseball_mlb", apply=True)
-        assert await _stored_event_ids(session) == {"op_live_B"}
+        assert await _stored_event_ids(session) == {2}
 
 
 class TestBetfairRunnerNames:
@@ -571,7 +566,7 @@ class TestBetfairRunnerNames:
         self, pglite_async_session
     ) -> None:
         session = pglite_async_session
-        session.add(make_epl_event("e1"))
+        session.add(make_epl_event(1))
         await session.flush()
         envelope = {
             "source": "betfair_api",
@@ -598,7 +593,7 @@ class TestBetfairRunnerNames:
 
         def snapshot(market: Market) -> OddsSnapshot:
             return OddsSnapshot(
-                event_id="e1",
+                event_id=1,
                 snapshot_time=TWIN_KICKOFF,
                 source=Source.BETFAIR,
                 market=market,
@@ -610,7 +605,7 @@ class TestBetfairRunnerNames:
         await session.flush()
 
         assert await _betfair_runner_names(session, "soccer_epl") == {
-            "e1": ["Arsenal", "Chelsea", "The Draw"]
+            1: ["Arsenal", "Chelsea", "The Draw"]
         }
 
 
@@ -622,18 +617,15 @@ class TestRepairGhostsFromRunnerNames:
         from odds_core.match_brief_models import BriefDecision, MatchBrief
 
         session = pglite_async_session
-        ghost = _mlb_event("op_live_ST.CAR_ARIDIA", "St. Louis Cardin", "Arizona Diamondbacks")
+        ghost = _mlb_event(1, "St. Louis Cardin", "Arizona Diamondbacks")
         session.add_all(
             [
                 ghost,
-                _mlb_event("op_live_ARIDIA_ST.CAR", "St.Louis Cardinals", "Arizona Diamondbacks"),
+                _mlb_event(2, "St.Louis Cardinals", "Arizona Diamondbacks"),
             ]
         )
         await session.flush()
-        assert ghost.surrogate_id is not None
-        session.add(
-            EventExternalId(source=Source.BETFAIR, external_id="35001", event_id=ghost.surrogate_id)
-        )
+        session.add(EventExternalId(source=Source.BETFAIR, external_id="35001", event_id=ghost.id))
 
         def envelope(betfair_event_id: str, runners: list[str]) -> dict:
             return {
@@ -680,12 +672,10 @@ class TestRepairGhostsFromRunnerNames:
         await session.commit()
 
         assert report.merged_count == 1
-        assert await _stored_event_ids(session) == {"op_live_ARIDIA_ST.CAR"}
+        assert await _stored_event_ids(session) == {2}
         for model in (OddsSnapshot, MatchBrief):
-            assert await _event_ids(session, model) == {"op_live_ARIDIA_ST.CAR"}
-        assert report.describe_merges() == [
-            "op_live_ARIDIA_ST.CAR [scheduled] <- op_live_ST.CAR_ARIDIA [scheduled]"
-        ]
+            assert await _event_ids(session, model) == {2}
+        assert report.describe_merges() == ["2 [scheduled] <- 1 [scheduled]"]
 
     @pytest.mark.asyncio
     async def test_doubleheader_games_are_renamed_but_never_merged(
@@ -694,9 +684,9 @@ class TestRepairGhostsFromRunnerNames:
         session = pglite_async_session
         session.add_all(
             [
-                _mlb_event("op_live_PIT1", "Pittsburgh Pirates - Game 1", "Milwaukee Brewers"),
+                _mlb_event(1, "Pittsburgh Pirates - Game 1", "Milwaukee Brewers"),
                 _mlb_event(
-                    "op_live_PIT2",
+                    2,
                     "Pittsburgh Pirates - Game 2",
                     "Milwaukee Brewers",
                     commence_time=TWIN_KICKOFF + timedelta(hours=4),
@@ -708,8 +698,8 @@ class TestRepairGhostsFromRunnerNames:
         report = await repair_team_names(session, "baseball_mlb")
 
         assert report.merges == ()
-        assert await _stored_event_ids(session) == {"op_live_PIT1", "op_live_PIT2"}
-        assert (await session.get(Event, "op_live_PIT2")).home_team == "Pittsburgh Pirates"
+        assert await _stored_event_ids(session) == {1, 2}
+        assert (await session.get(Event, 2)).home_team == "Pittsburgh Pirates"
 
     @pytest.mark.asyncio
     async def test_clean_doubleheader_is_not_conflated_by_a_repair(
@@ -718,26 +708,26 @@ class TestRepairGhostsFromRunnerNames:
         session = pglite_async_session
         session.add_all(
             [
-                _mlb_event("op_live_G1", "Pittsburgh Pirates", "Milwaukee Brewers"),
+                _mlb_event(1, "Pittsburgh Pirates", "Milwaukee Brewers"),
                 _mlb_event(
-                    "op_live_G2",
+                    2,
                     "Pittsburgh Pirates",
                     "Milwaukee Brewers",
                     commence_time=TWIN_KICKOFF + timedelta(hours=3),
                 ),
-                _mlb_event("op_live_X", "Pittsburgh Pirates (A", "Milwaukee Brewers"),
+                _mlb_event(3, "Pittsburgh Pirates (A", "Milwaukee Brewers"),
             ]
         )
         await session.commit()
 
         await repair_team_names(session, "baseball_mlb")
 
-        assert await _stored_event_ids(session) == {"op_live_G1", "op_live_G2"}
+        assert await _stored_event_ids(session) == {1, 2}
 
 
 class TestMergeClearsUnmatched:
     @staticmethod
-    def _mlb(event_id: str, game_pk: int | None = None) -> Event:
+    def _mlb(event_id: int, game_pk: int | None = None) -> Event:
         return with_game_pk(
             Event(
                 id=event_id,
@@ -755,7 +745,7 @@ class TestMergeClearsUnmatched:
     async def _acknowledgements(session, event: Event) -> list[str]:
         rows = await session.execute(
             select(HealthCheckAcknowledgement.reason).where(
-                HealthCheckAcknowledgement.event_id == event.surrogate_id
+                HealthCheckAcknowledgement.event_id == event.id
             )
         )
         return list(rows.scalars())
@@ -765,7 +755,7 @@ class TestMergeClearsUnmatched:
         self, pglite_async_session
     ) -> None:
         session = pglite_async_session
-        keep, duplicate = self._mlb("holder", 777), self._mlb("orphan")
+        keep, duplicate = self._mlb(1, 777), self._mlb(2)
         session.add_all([keep, duplicate])
         await hold_game_pks(session)
         await mark_unmatched(session, duplicate, "not in the schedule")
@@ -781,7 +771,7 @@ class TestMergeClearsUnmatched:
         self, pglite_async_session
     ) -> None:
         session = pglite_async_session
-        keep, duplicate = self._mlb("orphan"), self._mlb("holder", 777)
+        keep, duplicate = self._mlb(1), self._mlb(2, 777)
         session.add_all([keep, duplicate])
         await hold_game_pks(session)
         await mark_unmatched(session, keep, "not in the schedule")
@@ -796,7 +786,7 @@ class TestMergeClearsUnmatched:
 class TestBetfairEnvelopeLookup:
     @staticmethod
     async def _event_with_run_payload(session, envelope_id: str) -> Event:
-        event = _mlb_event("op_live_ST.CAR_ARIDIA", "St. Louis Cardin", "Arizona Diamondbacks")
+        event = _mlb_event(1, "St. Louis Cardin", "Arizona Diamondbacks")
         session.add(event)
         await session.flush()
         envelope = {

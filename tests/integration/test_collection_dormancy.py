@@ -50,7 +50,6 @@ def _event(
     kickoff: datetime, *, sport_key: str, status: EventStatus = EventStatus.SCHEDULED
 ) -> Event:
     return Event(
-        id=f"{sport_key}-{kickoff.isoformat()}",
         sport_key=sport_key,
         sport_title=sport_key,
         commence_time=kickoff,
@@ -211,6 +210,7 @@ class TestBetfairKickoff:
     ) -> None:
         event = _event(self.FIRST_PITCH, sport_key=sport_key)
         session.add(event)
+        await session.flush()
         if sport_key == "baseball_mlb":
             session.add(_mlb_game(849802, self.FIRST_PITCH, self.LAST_RUN - timedelta(hours=6)))
         match_odds = SPORT_CONFIG[sport_key].match_odds.market  # type: ignore[index]
