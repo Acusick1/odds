@@ -67,7 +67,7 @@ Then `odds_lambda.health_monitor.HealthMonitor.purge_old_heartbeats` runs on eve
 - jobs that return before booking a run while disabled (Betfair while `odds_core.config.BetfairConfig.enabled` is false, `fetch-polymarket-odds` while Polymarket is disabled);
 - jobs with a released, unfinished APScheduler job under their schedule id (`odds_lambda.scheduling.backends.local.LocalSchedulerBackend.get_outstanding_job_names`). A job that books its next run only after its work, such as check-health itself, has no schedule while it runs. A run cannot stay outstanding past `odds_lambda.scheduling.runner.JOB_TIMEOUT`, so a hung run is cancelled instead of hiding its chain here. A chain that keeps failing is re-booked every 15 minutes and so stays booked; the `job_chain_rebooked:<job>` warning is what shows it ([Alerts](alerts.md#alert-history)).
 
-A covered job is dead when it has no stored schedule, or when its next run is more than `odds_lambda.health_monitor.SCHEDULE_OVERDUE_GRACE` (15 min) in the past. Restarting the scheduler with `deploy.sh` restarts a dead chain; its smoke step skips jobs that spend Odds API quota ([bootstrap](../scheduling/local-scheduler.md#bootstrap-jobs-and-cron-table)).
+A covered job is dead when it has no stored schedule, or when its next run is more than `odds_lambda.health_monitor.SCHEDULE_OVERDUE_GRACE` (15 min) in the past. A run of `deploy.sh` always restarts the scheduler, which restarts a dead chain; its smoke step skips jobs that spend Odds API quota ([bootstrap](../scheduling/local-scheduler.md#bootstrap-jobs-and-cron-table)).
 
 ## Stale-data check
 

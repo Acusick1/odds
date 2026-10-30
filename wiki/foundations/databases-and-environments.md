@@ -49,7 +49,8 @@ The `postgres` service sets `shm_size: 1g` (`docker-compose.yml`). Docker's defa
 `.env.example` defines `LOCAL_DATABASE_URL`, `DEV_DATABASE_URL`, `PROD_DATABASE_URL` and sets `DATABASE_URL=${DEV_DATABASE_URL}`, so a fresh copy of it points at the shared dev database (#429; the full variable list is in the template; other variables: [Configuration](configuration.md#sections)). On existing machines `PROD_DATABASE_URL` names the Neon archive, not the production database. The Lambda function gets `DATABASE_URL` from Terraform, which takes the dev or production Neon connection string per environment (`deployment/aws/terraform/terraform.tfvars.example`; the provider is not verifiable from the repo beyond that template).
 
 - Production migrates only through [deploy.sh](../scheduling/howto-run-scheduler-service.md#redeploy) on the production host, which runs `alembic upgrade head` before restarting the scheduler ([migrations](howto-database-migration.md)). `.github/workflows/deploy-prod.yml` applies Terraform and migrates the Neon archive, and must not be run ([Where each job runs](../scheduling/job-deployment-matrix.md#dormant-aws-rules)).
-- No backup of the production database is configured in the repo. Data gaps are filled with [historical loads](../collection/odds-api-backfill.md).
+- No scheduled backup of the production database exists. `deploy.sh` dumps it before every pending migration, and `scripts/backup-prod-db.sh` dumps it before any other write ([Back up and restore](howto-back-up-production-database.md)). Data gaps are filled with [historical loads](../collection/odds-api-backfill.md).
+- On the production host `DATABASE_URL` is the production database, because its local Compose Postgres is production.
 - `tests/migration` connects to whatever `DATABASE_URL` points at and is run only by the deploy workflows ([Test suite](test-suite.md#migration-tests)).
 
 ### The agent database role

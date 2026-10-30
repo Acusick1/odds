@@ -16,8 +16,9 @@ A PR that replaces code deletes what it replaces, with its tests and wiki pages;
 
 ## Constraints
 
-- **The production host is currently the mini-PC**: Tailscale host `nucboxg10pro`, repo checkout at `~/odds`.
-- **Never point `DATABASE_URL` at production** from a development machine. Production is the Postgres on the production host, and only `deploy.sh` on that host migrates it. That rules out migrations, fetches, test runs and `odds copy from-prod` without an explicit production URL. See [databases](wiki/foundations/databases-and-environments.md#environments).
+- **The production host is currently the mini-PC**: Tailscale host `nucboxg10pro`, repo checkout at `~/odds`. Agents also run on it, so check `hostname` before touching a database.
+- **On the production host, `DATABASE_URL` is production.** Its `localhost:5433` is the production Postgres. Read it freely. Before any write to it (a data fix, backfill, re-key, manual SQL), run `./scripts/backup-prod-db.sh <label>`. Change code on a branch, merge it, then run `./deploy.sh`, which dumps the database before any migration. Never run `alembic` or `tests/migration` by hand there. See [back up production](wiki/foundations/howto-back-up-production-database.md).
+- **Never point `DATABASE_URL` at production** from a development machine. Only `deploy.sh` on the production host migrates it. That rules out migrations, fetches, test runs and `odds copy from-prod` without an explicit production URL. See [databases](wiki/foundations/databases-and-environments.md#environments).
 - **AWS is dormant, and its deployed state is not in the repo.** Every scheduled job runs on the production host; the EventBridge rules and the Deploy to Production workflow are disabled; re-enabling the workflow and running it re-enables every rule. `odds scheduler list-jobs --backend aws` is the only record of the AWS state. See [jobs and deployment](wiki/scheduling/job-deployment-matrix.md#dormant-aws-rules) and [ADR-0008](docs/adr/0008-mini-pc-is-production.md).
 - **The Odds API costs quota units.** Check `odds status quota` before bulk or historical fetches. See [quota](wiki/collection/odds-api-quota.md).
 - **Pass `--sport` and the sport's market key.** Several CLI defaults are NBA. EPL odds use `1x2` and MLB uses `h2h`. See [sources and keys](wiki/collection/sport-and-market-keys.md).
