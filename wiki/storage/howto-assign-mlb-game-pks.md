@@ -31,7 +31,7 @@ MLB events stored before the live jobs assigned MLB Stats API `gamePk`s hold no 
    - `score=` and `settled=` show where the kept event's result comes from. `settled=mlb` settles it from MLB's Final score; any `conflict` is left as stored for `repair-scores` (step 6).
    - `UNRESOLVED` events are left as they are; settle them in step 5.
    - `GHOST` events have no MLB game and nothing references them.
-3. **Stop the scheduler, apply, start it again.** A live MLB run writing to an event while it is merged makes that game `FAILED` or that run's write fail, so stop the jobs for the few minutes the apply takes, as `deploy.sh` does for migrations ([scheduler service](../scheduling/howto-run-scheduler-service.md)). Each game commits in its own transaction; one that fails is printed as `FAILED` and the rest go ahead. Add `--delete-ghosts` to delete the ghosts too.
+3. **Stop the scheduler, back up, apply, start it again.** On the production host, run `./scripts/backup-prod-db.sh pre-game-pks` after the stop, since the apply merges and deletes events ([Back up and restore](../foundations/howto-back-up-production-database.md)). A live MLB run writing to an event while it is merged makes that game `FAILED` or that run's write fail, so stop the jobs for the few minutes the apply takes, as `deploy.sh` does for migrations ([scheduler service](../scheduling/howto-run-scheduler-service.md)). Each game commits in its own transaction; one that fails is printed as `FAILED` and the rest go ahead. Add `--delete-ghosts` to delete the ghosts too.
 
    ```bash
    sudo systemctl stop odds-scheduler

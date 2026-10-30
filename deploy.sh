@@ -10,7 +10,8 @@
 #
 # When the database is not at the migration head, the scheduler is stopped before
 # the migration runs, because a migration may drop or rewrite what the running code
-# reads. Every failure after that stop says the scheduler is down.
+# reads, and the database is dumped (scripts/backup-prod-db.sh) before migrating.
+# Every failure after that stop says the scheduler is down.
 #
 # After the restart it checks that the service is active, started after this
 # deploy began, and is not crash-looping, and exits non-zero otherwise.
@@ -62,7 +63,7 @@ report_scheduler_down() {
             echo "To bring the OLD code back (do not just start the service: the checkout holds the new code):"
             if (( migration_committed == 1 )); then
                 echo "  uv run alembic downgrade $previous_revision   # run first: the downgrade lives in the new code"
-                echo "  (rows the migration deleted do not come back)"
+                echo "  (rows the migration deleted do not come back; restore the pre-deploy dump in \${ODDS_BACKUP_DIR:-~/backups} for those)"
             fi
             echo "  git checkout $previous_head && uv sync && sudo $SYSTEMCTL start $SERVICE"
             echo "Or fix the failure and rerun ./deploy.sh."
@@ -92,6 +93,10 @@ if ! grep -q "(head)" <<<"$current_output"; then
     echo "==> migration pending (database at '${previous_revision:-no revision}'): stopping $SERVICE"
     sudo "$SYSTEMCTL" stop "$SERVICE"
     scheduler_down=1
+    # Dump with the scheduler stopped, so the archive is the exact state the
+    # migration starts from. A failed dump aborts before the migration.
+    echo "==> backing up the database"
+    ./scripts/backup-prod-db.sh "pre-deploy-$(git rev-parse --short HEAD)"
 fi
 echo "==> alembic upgrade head"
 uv run alembic upgrade head

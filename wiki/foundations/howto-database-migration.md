@@ -23,7 +23,7 @@ Every change to a model under `packages/odds-core/odds_core/` needs an Alembic m
 4. **Review the generated file.** Autogenerate misses renames and custom types (Alembic's autogenerate limits; see the Alembic documentation). Data fixes are hand-written migrations in the same directory. Keep migrations backward-compatible with the previous release's code (additive columns, no drops in the same release) `(inferred)`, because the deploy workflows run `terraform apply` before `alembic upgrade head`, so new code can briefly run against the old schema (#443).
 
    > [!WARNING]
-   > A migration that drops or rewrites data runs unchanged on production when [deploy.sh](../scheduling/howto-run-scheduler-service.md#redeploy) applies it. Production data cannot be recreated from the repo, and nothing in the repo backs it up.
+   > A migration that drops or rewrites data runs unchanged on production when [deploy.sh](../scheduling/howto-run-scheduler-service.md#redeploy) applies it. Production data cannot be recreated from the repo. deploy.sh dumps the database before migrating, and restoring that dump is the only way back ([Back up and restore](howto-back-up-production-database.md)).
 5. **Apply locally.** `uv run alembic upgrade head`. Roll back one with `uv run alembic downgrade -1`; inspect with `alembic history` and `alembic current`.
 6. **Update affected queries** in the storage layer ([Storage layer](../storage/storage-layer.md)) and run the tests ([Run the tests](howto-develop-locally.md#run-the-tests)).
 7. **Run migration tests locally.** `uv run pytest tests/migration/ -v`. These connect to `DATABASE_URL` and include write tests, so only do this against local ([Test suite](test-suite.md#migration-tests)).
