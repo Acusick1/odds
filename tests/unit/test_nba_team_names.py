@@ -1,5 +1,6 @@
 """Unit tests for NBA team-name normalization."""
 
+from odds_core.team import normalize_team_name
 from odds_lambda.polymarket_matching import NBA_ABBREV_MAP, TEAM_ALIASES, normalize_team
 
 
@@ -75,3 +76,20 @@ class TestNormalizeTeam:
         """Every canonical team name normalizes to itself."""
         for canonical in TEAM_ALIASES:
             assert normalize_team(canonical) == canonical
+
+
+class TestSharedTeamNormalization:
+    """Tests for odds_core.team.normalize_team_name on NBA names."""
+
+    def test_every_canonical_name_passes_through(self):
+        for canonical in TEAM_ALIASES:
+            assert normalize_team_name(canonical) == canonical
+
+    def test_los_angeles_spellings(self):
+        assert normalize_team_name("LA Clippers") == "Los Angeles Clippers"
+        assert normalize_team_name("Los Angeles Clippers") == "Los Angeles Clippers"
+        assert normalize_team_name("LA Lakers") == "Los Angeles Lakers"
+        assert normalize_team_name("L.A. Lakers") == "Los Angeles Lakers"
+
+    def test_a_shared_nickname_stays_the_epl_team(self):
+        assert normalize_team_name("Wolves") == "Wolves"

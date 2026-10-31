@@ -168,10 +168,10 @@ class TestOvernightWindowPerSport:
 
     @pytest.mark.asyncio
     async def test_unknown_sport_raises_valueerror(self) -> None:
-        ctx = JobContext(sport="basketball_nba")
+        ctx = JobContext(sport="tennis_atp")  # type: ignore[arg-type]
         with (
             patch("odds_core.config.get_settings"),
-            pytest.raises(ValueError, match="No overnight window configured for basketball_nba"),
+            pytest.raises(ValueError, match="No overnight window configured for tennis_atp"),
         ):
             await main(ctx)
 
@@ -258,6 +258,7 @@ class TestOvernightWindowPerSport:
         assert isinstance(OVERNIGHT_WINDOWS, dict)
         assert "soccer_epl" in OVERNIGHT_WINDOWS
         assert "baseball_mlb" in OVERNIGHT_WINDOWS
+        assert "basketball_nba" in OVERNIGHT_WINDOWS
 
 
 class TestScheduleNext:
@@ -297,8 +298,8 @@ class TestScheduleNext:
 
     @pytest.mark.asyncio
     async def test_unknown_sport_raises_valueerror(self) -> None:
-        with pytest.raises(ValueError, match="No overnight window configured for basketball_nba"):
-            await schedule_next("basketball_nba")
+        with pytest.raises(ValueError, match="No overnight window configured for tennis_atp"):
+            await schedule_next("tennis_atp")  # type: ignore[arg-type]
 
 
 class TestPreviewToolInput:

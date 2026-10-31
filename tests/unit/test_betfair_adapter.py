@@ -182,6 +182,62 @@ class TestResolveTeamsBaseball:
         assert resolve_teams(book, cfg) == ("New York Mets", "Colorado Rockies")
 
 
+class TestBasketball:
+    @pytest.fixture
+    def book(self) -> BetfairBook:
+        return _book(
+            market_id="1.264820157",
+            event_id="36253910",
+            event_name="Portland Trail Blazers @ Utah Jazz",
+            runners=[
+                _runner(237480, "Portland Trail Blazers", back=1.39, lay=1.4),
+                _runner(237484, "Utah Jazz", back=3.5, lay=3.55),
+            ],
+        )
+
+    def test_config(self) -> None:
+        cfg = SPORT_CONFIG["basketball_nba"]
+        assert (cfg.event_type_id, cfg.competition_id) == ("7522", "10547864")
+        assert (cfg.name_separator, cfg.name_order) == (" @ ", "away_first")
+        assert cfg.match_odds.market is Market.H2H
+        assert cfg.markets == (cfg.match_odds,)
+
+    def test_away_first_event_name(self, book: BetfairBook) -> None:
+        assert resolve_teams(book, SPORT_CONFIG["basketball_nba"]) == (
+            "Utah Jazz",
+            "Portland Trail Blazers",
+        )
+
+    def test_los_angeles_teams_keep_their_full_names(self) -> None:
+        book = _book(
+            market_id="1.1",
+            event_id="x",
+            event_name="Los Angeles Clippers @ Los Angeles Lakers",
+            runners=[
+                _runner(1, "Los Angeles Clippers", back=2.0),
+                _runner(2, "Los Angeles Lakers", back=1.9),
+            ],
+        )
+        assert resolve_teams(book, SPORT_CONFIG["basketball_nba"]) == (
+            "Los Angeles Lakers",
+            "Los Angeles Clippers",
+        )
+
+    def test_h2h_entry_names_canonical_teams(self, book: BetfairBook) -> None:
+        cfg = SPORT_CONFIG["basketball_nba"]
+        entry = betfair_book_to_bookmaker_entry(
+            book,
+            cfg.match_odds,
+            home_team="Utah Jazz",
+            away_team="Portland Trail Blazers",
+            snapshot_time=datetime(2026, 10, 31, 12, tzinfo=UTC),
+        )
+        assert entry is not None
+        market = entry["markets"][0]
+        assert market["key"] == "h2h"
+        assert [o["name"] for o in market["outcomes"]] == ["Portland Trail Blazers", "Utah Jazz"]
+
+
 class TestBookToBookmakerEntry:
     @pytest.fixture
     def epl_book(self) -> BetfairBook:

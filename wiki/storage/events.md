@@ -52,7 +52,7 @@ The table `legacy_event_ids` (`event_id`, `legacy_id`) holds the string key each
 
 ## Team-name normalizers
 
-1. `odds_core.team.normalize_team_name`: whitespace collapse plus a lowercase alias map to the pipeline's canonical short names (EPL and MLB). Unknown names pass through unchanged.
+1. `odds_core.team.normalize_team_name`: whitespace collapse plus a lowercase alias map to the pipeline's canonical names (EPL short names, MLB and NBA Odds API names). Unknown names pass through unchanged.
 2. `odds_lambda.polymarket_matching.normalize_team`: NBA only (`odds_lambda.polymarket_matching.TEAM_ALIASES`), returns `None` for unknown names. The injury and game-log writers and injury features use it, not the core one.
 
 The two share no data.

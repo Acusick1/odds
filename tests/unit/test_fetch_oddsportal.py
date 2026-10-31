@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 import pytest
 from odds_lambda.jobs.fetch_oddsportal import (
+    LEAGUE_SPEC_BY_NAME,
     LEAGUE_SPECS,
     LeagueScrape,
     LeagueSpec,
@@ -20,6 +21,7 @@ from odds_lambda.oddsportal_client import (
     ListingEvent,
     OddsPortalError,
 )
+from odds_lambda.scheduling.decision import OVERNIGHT_WINDOWS
 from odds_lambda.scheduling.helpers import apply_overnight_skip
 
 
@@ -86,7 +88,19 @@ class TestLeagueSpecs:
         assert paths == {
             "england-premier-league": "/football/england/premier-league/",
             "mlb": "/baseball/usa/mlb/",
+            "nba": "/basketball/usa/nba/",
         }
+
+    def test_nba_spec_is_two_way_h2h_with_a_daytime_overnight_window(self) -> None:
+        spec = LEAGUE_SPEC_BY_NAME["nba"]
+
+        assert (spec.sport_key, spec.markets, spec.primary_market, spec.num_outcomes) == (
+            "basketball_nba",
+            ["home_away"],
+            "home_away",
+            2,
+        )
+        assert OVERNIGHT_WINDOWS["basketball_nba"] == (7, 15)
 
 
 class TestScrapeLeague:

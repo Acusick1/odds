@@ -51,9 +51,12 @@ OvernightWindow = tuple[int, int]
 # during which no forward job should fire because no relevant games are live.
 # EPL: last KO ~20:00 UTC → suppress 22:00-06:00.
 # MLB: last first-pitch ~02:00 UTC, games run to ~05:00 UTC → suppress 05:00-14:00.
+# NBA: last tip-off ~03:30 UTC, games run to ~06:00 UTC; the earliest tip-offs are ~16:00 UTC
+# → suppress 07:00-15:00, so the first run is an hour before the earliest tip-off.
 OVERNIGHT_WINDOWS: dict[str, OvernightWindow] = {
     "soccer_epl": (22, 6),
     "baseball_mlb": (5, 14),
+    "basketball_nba": (7, 15),
 }
 
 # A collector that discovers its own events goes dormant when its sport has no

@@ -23,10 +23,16 @@ from __future__ import annotations
 #   Philadelphia Phillies, Pittsburgh Pirates, San Diego Padres,
 #   San Francisco Giants, Seattle Mariners, St.Louis Cardinals, Tampa Bay Rays,
 #   Texas Rangers, Toronto Blue Jays, Washington Nationals.
+#
+# Pipeline canonical NBA names are The Odds API's full names ("Boston Celtics"); the
+# 30 are the keys of odds_lambda.polymarket_matching.TEAM_ALIASES. OddsPortal and
+# Betfair already use them, so only the "LA" spellings of the two Los Angeles
+# teams need an alias. A bare nickname ("Wolves") is not an alias here: this map is
+# shared across sports and "Wolves" is the canonical EPL name.
 
 # Alias -> canonical. Keys are lowercased for case-insensitive lookup.
 # Cross-sport aliases share one map; lowercased keys do not collide between
-# the EPL and MLB canonical sets above.
+# the canonical sets above.
 _TEAM_ALIASES: dict[str, str] = {
     # ---- EPL: OddsPortal / football-data.co.uk / ESPN / FBref / Betfair variants
     "afc bournemouth": "Bournemouth",
@@ -68,6 +74,11 @@ _TEAM_ALIASES: dict[str, str] = {
     "oakland athletics": "Athletics",
     "st louis cardinals": "St.Louis Cardinals",
     "st. louis cardinals": "St.Louis Cardinals",
+    # ---- NBA: "LA" spellings of the Los Angeles teams
+    "la clippers": "Los Angeles Clippers",
+    "la lakers": "Los Angeles Lakers",
+    "l.a. clippers": "Los Angeles Clippers",
+    "l.a. lakers": "Los Angeles Lakers",
 }
 
 
