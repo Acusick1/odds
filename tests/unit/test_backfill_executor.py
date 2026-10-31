@@ -65,6 +65,7 @@ def response(*api_ids: str, units: int | None = 20, quota: int | None = 1000) ->
         raw_events_data=raws,
         response_time_ms=5,
         quota_remaining=quota,
+        quota_used=4000,
         snapshot_time=T0 - timedelta(minutes=5),
         units_used=units,
     )
@@ -72,6 +73,7 @@ def response(*api_ids: str, units: int | None = 20, quota: int | None = 1000) ->
 
 class FakeClient:
     quota_remaining: int | None = 950
+    quota_used: int | None = 4050
 
     def __init__(self, *outcomes: Any) -> None:
         self.outcomes = list(outcomes)
@@ -205,9 +207,9 @@ class TestBackfillExecutor:
         assert {(s["shape"].source, s["shape"].time_basis) for s in writer.stored} == {
             (Source.ODDS_API, TimeBasis.OBSERVED)
         }
-        assert [(f.sport_key, f.api_quota_remaining) for f in writer.fetch_logs] == [
-            ("soccer_epl", 900)
-        ]
+        assert [
+            (f.sport_key, f.api_quota_remaining, f.api_quota_used) for f in writer.fetch_logs
+        ] == [("soccer_epl", 900, 4000)]
         assert (result.fixtures_stored, result.snapshots_stored) == (2, 4)
         assert progress == [CallProgress(T0, "fetched", 2, 20, 900)]
 
@@ -309,9 +311,9 @@ class TestBackfillExecutor:
                 await ex.execute([call(T0, 1), call(T0 + timedelta(minutes=10), 1)])
 
         assert len(client.requests) == 1
-        assert [(log.success, log.api_quota_remaining) for log in writer.fetch_logs] == [
-            (False, 950)
-        ]
+        assert [
+            (log.success, log.api_quota_remaining, log.api_quota_used) for log in writer.fetch_logs
+        ] == [(False, 950, 4050)]
         assert "429" in writer.fetch_logs[0].error_message
 
     async def test_a_failed_store_records_the_quota_and_stops(self, test_session, writer) -> None:

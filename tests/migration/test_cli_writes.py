@@ -38,6 +38,7 @@ class TestWriteCLI:
             raw_events_data=[event_data],
             response_time_ms=100,
             quota_remaining=19900,
+            quota_used=100,
             timestamp=datetime.now(UTC),
         )
 

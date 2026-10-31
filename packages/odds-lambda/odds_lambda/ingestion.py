@@ -198,6 +198,7 @@ class OddsIngestionService:
                 success=len(failures) == 0,
                 error_message="; ".join(f"{f.odds_api_id}: {f.error}" for f in failures) or None,
                 api_quota_remaining=response.quota_remaining,
+                api_quota_used=response.quota_used,
                 response_time_ms=response.response_time_ms,
             )
             await writer.log_fetch(fetch_log)

@@ -168,6 +168,7 @@ class QuotaReading(NamedTuple):
     key_index: int
     sports: tuple[str, ...]
     remaining: int
+    limit: int
     fraction: float
 
 
@@ -447,7 +448,8 @@ class HealthMonitor:
 
     async def check_api_quota(self) -> list[QuotaReading]:
         """
-        Each key's balance as a fraction of ``settings.api.quota``, lowest first.
+        Each key's balance as a fraction of the key's plan (used plus remaining from the newest
+        reading), lowest first.
 
         A key no sport has recorded a quota for in the last month has no reading, and two sports
         sharing a key give one reading.
@@ -456,9 +458,7 @@ class HealthMonitor:
 
         quotas = await OddsReader(self.session).get_latest_quota_by_key(self.settings.api)
         readings = [
-            QuotaReading(
-                index, quota.sports, quota.remaining, quota.remaining / self.settings.api.quota
-            )
+            QuotaReading(index, quota.sports, quota.remaining, quota.limit, quota.fraction)
             for index, quota in quotas.items()
         ]
         return sorted(readings, key=lambda reading: reading.fraction)
@@ -796,13 +796,14 @@ class HealthMonitor:
                 percentage_remaining = round(reading.fraction * 100, 1)
                 detail = (
                     f"key {reading.key_index} ({', '.join(reading.sports)}): "
-                    f"{reading.remaining} requests "
+                    f"{reading.remaining} of {reading.limit} requests "
                     f"({percentage_remaining}%)"
                 )
                 context = {
                     "key_index": reading.key_index,
                     "sports": list(reading.sports),
                     "quota_remaining": reading.remaining,
+                    "quota_limit": reading.limit,
                     "quota_fraction": reading.fraction,
                 }
 

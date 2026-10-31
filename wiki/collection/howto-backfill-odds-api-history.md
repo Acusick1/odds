@@ -24,12 +24,12 @@ Costs a historical purchase before it is bought, buys it, and fills scores. Exec
    ```
    - It makes no API call. Add `--season 2024-25` to cost one season, and drop `--cost` to list the planned calls.
    - A band's row is what that band adds to the others, so dropping it saves that many calls.
-   - The caption is the sport's key balance left after the whole plan.
+   - The caption is the sport's key balance left after the whole plan, or says the balance is unknown when no recent fetch recorded a quota.
 4. Dry-run the execution.
    ```bash
    uv run odds backfill execute --manifest backfills/odds-api-epl-2020-26.yaml --season 2024-25 --dry-run
    ```
-   - It makes no API call. It prints the calls, the units they would cost and the key's balance, and counts the calls already stored as skipped.
+   - It makes no API call. It prints the calls, the units they would cost and the key's balance (unknown when no recent fetch recorded a quota), and counts the calls already stored as skipped.
 5. Execute.
    ```bash
    uv run odds backfill execute --manifest backfills/odds-api-epl-2020-26.yaml --season 2024-25
@@ -38,7 +38,7 @@ Costs a historical purchase before it is bought, buys it, and fills scores. Exec
    > `odds backfill execute` spends paid historical quota on the manifest's sport key, 10 units per region per market per call. Confirm the prompt only when the estimated units fit the key's balance.
 
    - A call that fails stops the run. Rerun the same command: calls whose fixtures already have their snapshot are skipped, unless you pass `--no-skip-existing`.
-   - Each call logs its real cost and the key's remaining quota; `odds status quota` shows the balance afterwards.
+   - Each call logs its real cost and the key's remaining and used quota; `odds status quota` shows the balance afterwards.
 
 ## Fill scores
 

@@ -33,14 +33,14 @@ Quota is a per-key monthly balance that only [the client](odds-api-client.md#cos
 
 | Place | What it reads | Reminded | Recorded in `alert_history` |
 |---|---|---|---|
-| `odds_core.models.FetchLog.api_quota_remaining` | written once per sport and run by `odds_lambda.ingestion.OddsIngestionService.ingest_sport`, after its listed games are stored (each resolved to its event through the event resolver; [fetch logs](odds-ingestion-service.md#fetch-logs)) | n/a | n/a |
-| `odds_lambda.health_monitor.HealthMonitor.check_api_quota` | per key, the newest `fetch_logs` row with a non-null quota of the sports that spend it, ignoring rows over 31 days old (`odds_lambda.storage.readers.OddsReader.get_latest_quota_by_key`), same fraction | yes | yes |
-| `odds status quota` (`odds_cli.commands.status._show_quota`) | per key, the newest 10 `fetch_logs` rows with a non-null quota of its sports, for each key with a reading under 31 days old; the per-fetch Used column is the next-older row's remaining minus this row's, `reset` when negative, blank for the oldest | n/a | n/a |
+| `odds_core.models.FetchLog.api_quota_remaining` and `odds_core.models.FetchLog.api_quota_used` | the `x-requests-remaining` and `x-requests-used` headers, written once per sport and run by `odds_lambda.ingestion.OddsIngestionService.ingest_sport`, after its listed games are stored (each resolved to its event through the event resolver; [fetch logs](odds-ingestion-service.md#fetch-logs)) | n/a | n/a |
+| `odds_lambda.health_monitor.HealthMonitor.check_api_quota` | per key, the newest `fetch_logs` row with a non-null remaining and used count of the sports that spend it, ignoring rows over 31 days old (`odds_lambda.storage.readers.OddsReader.get_latest_quota_by_key`), same fraction | yes | yes |
+| `odds status quota` (`odds_cli.commands.status._show_quota`) | per key, the newest 10 `fetch_logs` rows with a non-null remaining quota of its sports, for each key with a reading under 31 days old, headed by the key's plan size, used plus remaining from its newest reading; the per-fetch Used column is the next-older row's remaining minus this row's, `reset` when negative, blank for the oldest | n/a | n/a |
 
-- Quota views skip rows with a null quota, such as Betfair rows ([betfair-exchange](betfair-exchange.md)): `odds_lambda.storage.readers.OddsReader.get_fetch_logs` with `with_quota=True` and `odds_lambda.storage.readers.OddsReader.get_database_stats` both filter in the query; the latter also counts price rows, and snapshots as distinct event and snapshot-time pairs. `fetch_logs` has no source column, so Odds API rows are inferred from the nullable quota (#441).
+- Quota views skip rows with a null quota, such as Betfair rows ([betfair-exchange](betfair-exchange.md)): `odds_lambda.storage.readers.OddsReader.get_fetch_logs` with `with_quota=True` and `odds_lambda.storage.readers.OddsReader.get_database_stats` both filter in the query; the latter also counts price rows, and snapshots as distinct event and snapshot-time pairs. `fetch_logs` has no source column, so Odds API rows are inferred from the nullable quota.
 - `fetch-odds` sends no quota alert; a failed run or a failed booking alerts as in [fetch-odds-job](fetch-odds-job.md).
 - The health monitor applies the thresholds as `quota_low:key<N>` and `quota_critical:key<N>` (N is the key's index), sent once per condition and reminded every `stale_reminder_minutes` through `alert_history` ([health-monitor](../operations/health-monitor.md)), so EPL's nearly spent key alerts without NBA's fresh one hiding it, and the alert names the sports that spend the key. A key whose sports recorded no quota in 31 days (an off-season) has no reading and no alert.
-- Both thresholds divide a key's balance by `odds_core.config.APIConfig.quota`, the same value for every key, so with a larger paid key they are meaningless until it is set (#441). `odds status` lists one `API Quota` row per key.
+- Both thresholds divide a key's balance by its plan size, the used plus remaining counts of its newest reading, so each key is judged against its own plan and no setting holds the size. Rows logged before `api_quota_used` existed carry no plan size and are skipped. `odds status` lists one `API Quota` row per key with the same plan size.
 
 ## Scheduled spend
 
@@ -55,7 +55,7 @@ The vendor bills `/odds` at markets x regions, and every group of 10 bookmakers 
 
 `fetch-scores` adds 2 units per call (the vendor charges 2 when `daysFrom` is sent); the fetch logs of 17-20 Oct 2026 show about 27 units beyond the odds fetches over one weekend round, so a month adds roughly 110-150 `(inferred)`. The free `/events` sync costs nothing.
 
-The quota alerts fire below 100 units (warning) and 50 units (critical) remaining on a sport's key. With 161 units left on EPL's key on 20 Oct, the 23-26 Oct and 31 Oct rounds need about 90 units of `fetch-odds` and about 40 of `fetch-scores` before the reset on 1 Nov, leaving about 30, so that cycle crosses the critical threshold around 31 Oct. In a normal month the thresholds trip only late.
+On a 500-unit key the quota alerts fire below 100 units (warning) and 50 units (critical) remaining. With 161 units left on EPL's key on 20 Oct, the 23-26 Oct and 31 Oct rounds need about 90 units of `fetch-odds` and about 40 of `fetch-scores` before the reset on 1 Nov, leaving about 30, so that cycle crosses the critical threshold around 31 Oct. In a normal month the thresholds trip only late.
 
 ### NBA spend
 

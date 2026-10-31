@@ -89,7 +89,7 @@ Python 3.12+ (`pyproject.toml`), a uv workspace. Per package dependencies are in
 | `odds_core.as_of` | `odds_core.as_of.latest_snapshot`: which stored quotes count as known at a decision time ([candidate rules](../evaluation/candidate-rules.md#market-state)) |
 | `utils.py` | `odds_core.utils.relabel_three_way_markets` |
 | `odds_core.sports`, `odds_core.team`, `odds_core.time`, `odds_core.logging_setup` | [Sport keys](../collection/sport-and-market-keys.md), [team-name normalization](../storage/event-matching.md) (EPL, MLB and NBA, one alias map), [timezone helpers](timezones.md), structlog setup |
-| `odds_core.api_models` | The Odds API response models and event factories; a historical response carries the snapshot's own time and the call's cost |
+| `odds_core.api_models` | The Odds API response models and event factories; every response carries the key's remaining and used quota, and a historical response the snapshot's own time and the call's cost |
 
 Importing any `odds_core` submodule runs `odds_core.database`, which builds the engine from `odds_core.config.get_settings()`. Every `odds` command therefore needs `ODDS_API_KEY` and `DATABASE_URL` to resolve, even commands that never touch the API or database ([Engine creation](databases-and-environments.md#engine-creation), [Configuration](configuration.md)).
 
@@ -99,7 +99,7 @@ Importing any `odds_core` submodule runs `odds_core.database`, which builds the 
 
 | Area | Modules | Page |
 |---|---|---|
-| Odds API | `odds_lambda.data_fetcher` (also relabels soccer three-way `h2h` to `1x2`, takes a historical request's markets and bookmakers or regions from its caller, and renames bookmaker keys to pipeline keys through `odds_core.bookmakers.ODDS_API_BOOKMAKER_KEY_MAP`), (the key each sport spends comes from `odds_core.config.APIConfig`), `odds_lambda.event_sync` (event discovery, resolved through `odds_lambda.odds_api_events`) | [Odds API client](../collection/odds-api-client.md) |
+| Odds API | `odds_lambda.data_fetcher` (also relabels soccer three-way `h2h` to `1x2`, takes a historical request's markets and bookmakers or regions from its caller, and renames bookmaker keys to pipeline keys through `odds_core.bookmakers.ODDS_API_BOOKMAKER_KEY_MAP`, and reads each key's remaining and used quota from the response headers), (the key each sport spends comes from `odds_core.config.APIConfig`), `odds_lambda.event_sync` (event discovery, resolved through `odds_lambda.odds_api_events`) | [Odds API client](../collection/odds-api-client.md) |
 | Ingestion (event resolution, decimal price validation of each envelope, `fetch_logs` rows) | `odds_lambda.ingestion`, `odds_lambda.storage.validators` | [Odds API ingestion service](../collection/odds-ingestion-service.md) |
 | OddsPortal scrapers (decimal prices) and historical record helpers (bookmaker keys, match-link ids) | `odds_lambda.oddsportal_common`, `odds_lambda.oddsportal_adapter`, `odds_lambda.oddsportal_client` (listings, the odds feed with its fixed-line and ladder markets (each ladder line read from the feed's `handicapValue`), and the results archive with its finished and cancelled matches; retries transient HTTP and proxy-wrapped upstream errors) | [OddsPortal scraper](../collection/oddsportal-scraper.md) |
 | Exchange | `betfair/` | [Betfair Exchange](../collection/betfair-exchange.md) |

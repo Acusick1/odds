@@ -29,7 +29,7 @@ status: stable
 
 ## Odds API scope
 
-`odds_core.config.DataCollectionConfig` defaults: sports `soccer_epl`, `baseball_mlb`, `basketball_nba`; markets `h2h`, `spreads`, `totals`; region `us`. A call spends the key of its sport (`odds_core.config.APIConfig.key_for`, [keys](odds-api-client.md#retry-and-keys)). `odds_core.config.DataCollectionConfig.bookmakers` maps each sport to the Odds API bookmaker keys it requests, read through `odds_core.config.DataCollectionConfig.bookmakers_for`, which raises `ValueError` for a sport with no entry:
+`odds_core.config.DataCollectionConfig` defaults: sports `soccer_epl`, `baseball_mlb`, `basketball_nba`; markets `h2h`, `spreads`, `totals`; region `us`. A call spends the key of its sport; the key's plan size is read from the API's response headers, not configured (`odds_core.config.APIConfig.key_for`, [keys](odds-api-client.md#retry-and-keys)). `odds_core.config.DataCollectionConfig.bookmakers` maps each sport to the Odds API bookmaker keys it requests, read through `odds_core.config.DataCollectionConfig.bookmakers_for`, which raises `ValueError` for a sport with no entry:
 
 - `soccer_epl`: pinnacle, betfair_ex_uk, williamhill, paddypower, skybet, ladbrokes_uk, coral, betfred_uk, betvictor, sport888.
 - `baseball_mlb`: pinnacle, circasports, draftkings, fanduel, betmgm, williamhill_us, betrivers, bovada.

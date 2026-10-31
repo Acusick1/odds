@@ -1424,6 +1424,7 @@ class TestFetchOddsJob:
             processed_events=processed,
             total_events=processed,
             quota_remaining=None,
+            quota_used=None,
             failures=[],
             dropped_games=[],
         )

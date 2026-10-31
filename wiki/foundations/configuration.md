@@ -22,7 +22,7 @@ status: stable
 
 `odds_core.config` is authoritative for every setting and default (including the per-job heartbeat hours and the reminder interval of job-failure and health-check alerts, which cover fetch-odds and fetch-scores and allow for each job's overnight pause or daily cadence, and the default bootstrap job list, which includes `fetch-polymarket-odds`, `fetch-espn-fixtures`, `fetch-injuries` and `run-candidates`; no setting names a season or its months, because collectors go dormant from the fixture calendar, [dormancy](../scheduling/decision-engine.md#dormancy)), apart from the per-sport Polymarket identifiers in `odds_lambda.polymarket_sports.POLYMARKET_SPORTS`. `odds_core.config.Settings` composes one `BaseSettings` class per concern; `odds_core.config.get_settings()` returns a cached instance and `odds_core.config.reset_settings_cache()` clears it. `odds_core.config.Settings.alerts_deliverable` is the one switch the alert paths read: `alert_enabled` and not `SCHEDULER_DRY_RUN`. `.env.example` is the variable template. The `project_root` field of `odds_core.config.Settings` is the repo root derived from the file location. To add a field, see [Set up and run locally](howto-add-setting.md).
 
-`ODDS_API_KEYS` and `ODDS_API_KEY` are both optional; settings import without either of them, and `odds_lambda.data_fetcher.TheOddsAPIClient` raises when neither is set, or when a sport's key index (`ODDS_API_KEY_INDEX_BY_SPORT`, a JSON object; NBA is 1, every other sport 0) has no key ([keys](../collection/odds-api-client.md#retry-and-keys)).
+`ODDS_API_KEYS` and `ODDS_API_KEY` are both optional; settings import without either of them, and `odds_lambda.data_fetcher.TheOddsAPIClient` raises when neither is set, or when a sport's key index (`ODDS_API_KEY_INDEX_BY_SPORT`, a JSON object; NBA is 1, every other sport 0) has no key ([keys](../collection/odds-api-client.md#retry-and-keys)). No setting holds a key's plan size; the client reads it from each response's quota headers ([cost per call](../collection/odds-api-client.md#cost-per-call)).
 
 Model and feature settings (`target_type`, `sharp_bookmakers`) are not here: they live in the training YAML ([Training config](../modelling/training-config.md)).
 
@@ -30,7 +30,7 @@ Model and feature settings (`target_type`, `sharp_bookmakers`) are not here: the
 
 | Attribute | Class | Env names | Owning page |
 |---|---|---|---|
-| `api` | `odds_core.config.APIConfig` | `ODDS_API_KEY`, `ODDS_API_KEYS`, `ODDS_API_KEY_INDEX_BY_SPORT`, `ODDS_API_BASE_URL`, `ODDS_API_QUOTA` | [Odds API client](../collection/odds-api-client.md) |
+| `api` | `odds_core.config.APIConfig` | `ODDS_API_KEY`, `ODDS_API_KEYS`, `ODDS_API_KEY_INDEX_BY_SPORT`, `ODDS_API_BASE_URL` | [Odds API client](../collection/odds-api-client.md) |
 | `database` | `odds_core.config.DatabaseConfig` | `DATABASE_URL`, `DATABASE_POOL_SIZE` | [Databases and environments](databases-and-environments.md) |
 | `data_collection` | `odds_core.config.DataCollectionConfig` | `SPORTS` (default: EPL, MLB and NBA), `BOOKMAKERS`, `MARKETS`, `REGIONS` (bare) | [Sport, market and bookmaker keys](../collection/sport-and-market-keys.md) |
 | `scheduler` | `odds_core.config.SchedulerConfig` | `SCHEDULER_BACKEND`, `_DRY_RUN`, `_LOOKAHEAD_DAYS`, `_BOOTSTRAP_JOBS` | [Local scheduler](../scheduling/local-scheduler.md) |

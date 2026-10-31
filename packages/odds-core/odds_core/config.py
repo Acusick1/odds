@@ -29,7 +29,6 @@ class APIConfig(BaseSettings):
     base_url: str = Field(
         default="https://api.the-odds-api.com/v4", description="Base URL for The Odds API"
     )
-    quota: int = Field(default=500, description="Monthly API request quota per key")
 
     @property
     def key_list(self) -> list[str]:

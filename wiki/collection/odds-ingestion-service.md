@@ -38,7 +38,7 @@ status: stable
 
 ## Fetch logs
 
-`odds_core.models.FetchLog` (`fetch_logs`) is one row per fetch operation: `fetch_time` (indexed, UTC), `sport_key`, `events_count`, `bookmakers_count`, `success`, `error_message`, `api_quota_remaining`, `response_time_ms`.
+`odds_core.models.FetchLog` (`fetch_logs`) is one row per fetch operation: `fetch_time` (indexed, UTC), `sport_key`, `events_count`, `bookmakers_count`, `success`, `error_message`, `api_quota_remaining`, `api_quota_used` (credits spent since the key's last quota reset, from `x-requests-used`), `response_time_ms`.
 
 **Writers.**
 - `odds_lambda.ingestion.OddsIngestionService.ingest_sport` adds one row per sport after the events are processed. `success` is true when no event failed ingest, and `error_message` then joins each failed game's Odds API id (`odds_lambda.ingestion.EventIngestionFailure.odds_api_id`) and error with `; `. Quota and response time come from the API response, and `bookmakers_count` is the number of distinct bookmaker keys in the response.
@@ -49,7 +49,7 @@ status: stable
 
 **Readers.**
 - `odds status show` takes the latest row; `odds status quota` the latest 10 ([odds status](../operations/health-monitor.md#odds-status)).
-- `odds_lambda.storage.readers.OddsReader.get_database_stats`: the newest non-null `api_quota_remaining` of each Odds API key, ignoring rows over 31 days old (`api_quota_by_key`), beside its event, price-row and snapshot counts.
+- `odds_lambda.storage.readers.OddsReader.get_database_stats`: the newest `api_quota_remaining` and `api_quota_used` (both non-null) of each Odds API key, ignoring rows over 31 days old (`api_quota_by_key`), beside its event, price-row and snapshot counts.
 - `odds_lambda.health_monitor.HealthMonitor.check_api_quota` reads the quota ([health-monitor](../operations/health-monitor.md)).
 
 ## Manual event discovery

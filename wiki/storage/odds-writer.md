@@ -37,7 +37,7 @@ It returns an `odds_lambda.storage.writers.StoredEnvelope`: the stored snapshot 
 
 ## Log helpers
 
-`odds_lambda.storage.writers.OddsWriter.log_fetch` adds an `odds_core.models.FetchLog` ([fetch_logs](../collection/odds-ingestion-service.md#fetch-logs)) and `odds_lambda.storage.writers.OddsWriter.log_data_quality_issue` adds an `odds_core.models.DataQualityLog`.
+`odds_lambda.storage.writers.OddsWriter.log_fetch` adds an `odds_core.models.FetchLog` (with its remaining and used quota; [fetch_logs](../collection/odds-ingestion-service.md#fetch-logs)) and `odds_lambda.storage.writers.OddsWriter.log_data_quality_issue` adds an `odds_core.models.DataQualityLog`.
 
 ## Related
 

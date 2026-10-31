@@ -110,8 +110,8 @@ def _book(key: str, home: str = "Arsenal", away: str = "Chelsea") -> dict[str, A
 def _sync(session: AsyncSession, listed: list[dict[str, Any]], sport_key: str = "soccer_epl"):
     events = [parse_api_event(item) for item in listed]
     client = StubOddsClient(
-        OddsResponse([], [], 0, None, datetime.now(UTC)),
-        EventsResponse(events, 0, None, datetime.now(UTC)),
+        OddsResponse([], [], 0, None, None, datetime.now(UTC)),
+        EventsResponse(events, 0, None, None, datetime.now(UTC)),
     )
     service = EventSyncService(client=client, session_factory=_Factory(session))  # type: ignore[arg-type]
     return service.sync_sport(sport_key)
@@ -360,6 +360,7 @@ class TestIngestion:
             raw_events_data=[payload],
             response_time_ms=10,
             quota_remaining=100,
+            quota_used=400,
             timestamp=datetime.now(UTC),
         )
         mock_settings.data_collection.bookmakers["soccer_epl"] = ["bet365", "williamhill"]
@@ -431,6 +432,7 @@ class TestIngestion:
             raw_events_data=[{**listed, "bookmakers": [_book("bet365")]}],
             response_time_ms=10,
             quota_remaining=100,
+            quota_used=400,
             timestamp=datetime.now(UTC),
         )
         service = OddsIngestionService(
@@ -464,6 +466,7 @@ class TestIngestion:
             ],
             response_time_ms=10,
             quota_remaining=100,
+            quota_used=400,
             timestamp=datetime.now(UTC),
         )
         mock_settings.data_collection.bookmakers["soccer_epl"] = ["bet365"]
@@ -490,6 +493,7 @@ class TestIngestion:
             raw_events_data=[{**listed, "bookmakers": [_book("bet365")]}],
             response_time_ms=10,
             quota_remaining=100,
+            quota_used=400,
             timestamp=datetime.now(UTC),
         )
         mock_settings.data_collection.bookmakers["soccer_epl"] = ["bet365", "williamhill"]
@@ -679,7 +683,10 @@ class TestBackfill:
         )
         # The fixtures' lock order must not depend on the order the API lists them in.
         served = recorded | {"data": recorded["data"][::-1] if reverse else recorded["data"]}
-        http = _RecordedSession(served, {"x-requests-last": "20", "x-requests-remaining": "12345"})
+        http = _RecordedSession(
+            served,
+            {"x-requests-last": "20", "x-requests-remaining": "12345", "x-requests-used": "655"},
+        )
         client = TheOddsAPIClient(api_key="k", base_url="http://example.invalid")
         client.session = http  # type: ignore[assignment]
 
@@ -705,9 +712,10 @@ class TestBackfill:
         }
         assert {s.market for s in snapshots} == {Market.ONE_X_TWO, Market.TOTALS}
         logs = (await session.execute(select(FetchLog))).scalars().all()
-        assert [(log.sport_key, log.events_count, log.api_quota_remaining) for log in logs] == [
-            ("soccer_epl", 2, 12345)
-        ]
+        assert [
+            (log.sport_key, log.events_count, log.api_quota_remaining, log.api_quota_used)
+            for log in logs
+        ] == [("soccer_epl", 2, 12345, 655)]
         assert (result.calls_made, result.units_used, result.fixtures_stored) == (1, 20, 2)
         assert result.quota_remaining == 12345
 
