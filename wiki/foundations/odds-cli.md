@@ -34,7 +34,7 @@ status: stable
 |---|---|
 | `odds fetch` | [Odds API ingestion service](../collection/odds-ingestion-service.md), [Results and status jobs](../collection/results-jobs.md) |
 | `scrape` | [OddsPortal scraper](../collection/oddsportal-scraper.md) |
-| `odds_cli.commands.discover`, `odds_cli.commands.backfill` | [Odds API historical backfill](../collection/odds-api-backfill.md); `discover games` and `backfill execute` store events and snapshots through the [event resolver](../storage/event-resolver.md); `discover games` commits every 100 games and prints dropped counts, and `backfill gaps` and `plan` write `odds_api_id` into plan games |
+| `odds_cli.commands.discover`, `odds_cli.commands.backfill` | [Odds API historical backfill](../collection/odds-api-backfill.md); `discover games` and `backfill execute` store events and snapshots through the [event resolver](../storage/event-resolver.md); `discover games` commits every 100 games and prints dropped counts, `backfill gaps` writes `odds_api_id` into plan games, and `backfill plan` costs an acquisition manifest without an API call |
 | `odds train` | [Training pipeline](../modelling/training-pipeline.md) (`tune` stores a new timestamped study in a local SQLite file unless `--in-memory`; both subcommands pass the split's sample weights and kick-off times on, [sample weights](../modelling/training-pipeline.md#sample-weights)), [Hyperparameter tuner](../modelling/hyperparameter-tuner.md) |
 | `odds evaluate` | [Retail-EV evaluation](../evaluation/retail-ev-evaluation.md) (`--allow-incomplete <integer event id>`, repeatable, and `--force` are recorded in the manifest) |
 | `odds status` | [odds status](../operations/health-monitor.md#odds-status), [Odds API quota](../collection/odds-api-quota.md) |
@@ -55,7 +55,7 @@ status: stable
 |---|---|
 | `odds_cli.commands.fetch` (`current`, `scores`; `scores` finds each event by its Odds API id and logs `score_event_not_found` for an unknown one) | required, since each sport spends its own Odds API key; `results` defaults to `soccer_epl`, settles `baseball_mlb` from the MLB Stats API and prints the settled, cancelled, postponed, moved and unresolved counts ([results jobs](../collection/results-jobs.md#fetch-oddsportal-results)) |
 | `odds_cli.commands.discover` (`odds_cli.commands.discover.games` spends units) | it is required by `odds_cli.commands.discover.games`; `odds_cli.commands.discover.upcoming` (free) defaults to `basketball_nba` |
-| `odds_cli.commands.backfill` (`plan`, `execute`) | required; `execute` spends the sport's key |
+| `odds_cli.commands.backfill.execute_backfill` | required; it spends the sport's key. `odds_cli.commands.backfill.plan_backfill` takes the manifest's sport |
 | `odds_cli.commands.quality` | `basketball_nba` |
 | `odds_cli.commands.polymarket.discover` | `basketball_nba` |
 | `odds_cli.commands.copy_from_prod` | `soccer_epl` |

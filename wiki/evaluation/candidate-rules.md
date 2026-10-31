@@ -99,7 +99,7 @@ An `odds_lambda.candidate_rules.ModelRuleSpec` is a rule whose function also tak
 
 Only the [replay backtest](candidate-backtest.md#model-rules) fits and binds a model. The [run-candidates job](run-candidates-job.md#one-run) skips a model-rule candidate with a `candidate_invalid` alert, and the [parity check](candidate-parity.md#command) refuses one. Pinning a fitted model for a live forward test does not exist yet: it waits on the model passing its re-test ([#657](https://github.com/Acusick1/odds/issues/657)).
 
-`model_modules` names the modules that build, tune, fit and query the model, including `odds_core.betfair_close`, which defines the close every training target is measured against. The `odds_lambda` package does not depend on `odds_analytics`, so `odds_lambda.candidate_rules.rules.rule_sha256` imports them by name and hashes their source ([rule pinning](#rule-pinning)).
+`model_modules` names the modules that build, tune, fit and query the model, including `odds_core.betfair_close`, which defines the close every training target is measured against. The odds-lambda package does not depend on odds-analytics, so `odds_lambda.candidate_rules.rules.rule_sha256` imports them by name and hashes their source ([rule pinning](#rule-pinning)).
 
 ### The retail-EV model rule
 

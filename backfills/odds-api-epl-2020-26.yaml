@@ -1,0 +1,46 @@
+# Odds API historical backfill of EPL 2020-21 to 2025-26 (#527). Never edit once frozen; a
+# top-up is a new manifest. Granularity and billing are unconfirmed until the probe (#729).
+sport: soccer_epl
+# 2020-21 starts 1 Aug so the 2019-20 restart (to 2020-07-26) is excluded.
+seasons:
+  2020-21: {start: 2020-08-01T00:00:00Z, end: 2021-07-01T00:00:00Z}
+  2021-22: {start: 2021-07-01T00:00:00Z, end: 2022-07-01T00:00:00Z}
+  2022-23: {start: 2022-07-01T00:00:00Z, end: 2023-07-01T00:00:00Z}
+  2023-24: {start: 2023-07-01T00:00:00Z, end: 2024-07-01T00:00:00Z}
+  2024-25: {start: 2024-07-01T00:00:00Z, end: 2025-07-01T00:00:00Z}
+  2025-26: {start: 2025-07-01T00:00:00Z, end: 2026-07-01T00:00:00Z}
+markets:
+  - key: h2h
+  - key: totals
+    line: 2.5
+bookmakers:
+  - pinnacle
+  - betfair_ex_uk
+  - williamhill
+  - paddypower
+  - skybet
+  - ladbrokes_uk
+  - coral
+  - betfred_uk
+  - betvictor
+  - sport888
+# A decision at any whole minute in a band finds a snapshot at most its max age old.
+# Provisional until #740 chooses the envelope.
+coverage:
+  - {min_lead_minutes: 1, max_lead_minutes: 120, max_input_age_minutes: 10}
+  - {min_lead_minutes: 121, max_lead_minutes: 1440, max_input_age_minutes: 60}
+  - {min_lead_minutes: 1441, max_lead_minutes: 10080, max_input_age_minutes: 360}
+snapshot_grid:
+  - {start: 2020-06-06T00:00:00Z, step_minutes: 10}
+  - {start: 2022-09-01T00:00:00Z, step_minutes: 5}
+probe:
+  snapshots:
+    - 2020-09-19T10:00:00Z
+    - 2025-09-13T10:00:00Z
+  # Call sharing needs fixtures as far ahead as the earliest coverage, 7 d plus its 6 h max age.
+  min_fixture_lead_hours: 174
+  # The exchange-gap candidates need the exchange; Pinnacle is the sharp reference.
+  required_bookmakers:
+    h2h: [pinnacle, betfair_ex_uk]
+    totals: [pinnacle, betfair_ex_uk]
+  units_per_call: 20

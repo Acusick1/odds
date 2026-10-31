@@ -9,10 +9,10 @@ ensure all-or-nothing coverage (all missing tiers filled per selected game).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import structlog
-from odds_core.time import utc_isoformat
+from odds_core.time import ensure_utc, utc_isoformat
 from odds_core.vocabulary import TimeBasis
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.odds_api_events import odds_api_id_of
@@ -21,9 +21,21 @@ from odds_lambda.storage.tier_validator import TierCoverageValidator
 from odds_lambda.tier_utils import snapshot_tier
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_analytics.game_selector import GameSelector
-
 logger = structlog.get_logger()
+
+# How long before kick-off a planned snapshot fills each tier, earliest first.
+TIER_SNAPSHOT_LEADS: dict[FetchTier, timedelta] = {
+    FetchTier.OPENING: timedelta(days=3),
+    FetchTier.EARLY: timedelta(hours=24),
+    FetchTier.SHARP: timedelta(hours=12),
+    FetchTier.PREGAME: timedelta(hours=3),
+    FetchTier.CLOSING: timedelta(minutes=30),
+}
+
+
+def tier_snapshot_times(commence_time: datetime) -> list[datetime]:
+    kickoff = ensure_utc(commence_time)
+    return [kickoff - lead for lead in TIER_SNAPSHOT_LEADS.values()]
 
 
 @dataclass
@@ -263,13 +275,7 @@ class GapBackfillPlanner:
         Returns:
             Total count of missing snapshots
         """
-        # Use GameSelector to calculate expected snapshot times
-        selector = GameSelector(
-            start_date=commence_time,
-            end_date=commence_time,
-        )
-
-        expected_snapshots = selector.calculate_snapshot_times(commence_time)
+        expected_snapshots = tier_snapshot_times(commence_time)
 
         # Check which snapshots are actually missing
         missing_count = 0
@@ -431,18 +437,9 @@ class GapBackfillPlanner:
         games_list = []
         total_snapshots = 0
 
-        selector = GameSelector(
-            start_date=start_date
-            if isinstance(start_date, datetime)
-            else datetime.combine(start_date, datetime.min.time()),
-            end_date=end_date
-            if isinstance(end_date, datetime)
-            else datetime.combine(end_date, datetime.min.time()),
-        )
-
         for game in selected_games:
             # Calculate all expected snapshot times
-            expected_snapshots = selector.calculate_snapshot_times(game.commence_time)
+            expected_snapshots = tier_snapshot_times(game.commence_time)
 
             # Only include snapshots for tiers that are actually missing. The backfill stores
             # each fetch as upper_bound at the requested time, so the planned time covers what

@@ -1,7 +1,7 @@
 """
 Analytics and ML functionality for betting odds pipeline.
 
-Provides candidate scoring and replay, feature extraction, model training, and game selection.
+Provides candidate scoring and replay, feature extraction, model training and backfill.
 
 Heavy dependencies (mlflow, scikit-learn, etc.) are optional —
 install with ``pip install odds-analytics[training]`` for full functionality.
@@ -19,7 +19,6 @@ def __getattr__(name: str) -> object:
             "XGBoostLineMovementStrategy",
         ),
         "BackfillExecutor": ("odds_analytics.backfill_executor", "BackfillExecutor"),
-        "GameSelector": ("odds_analytics.game_selector", "GameSelector"),
         "MLTrainingConfig": ("odds_analytics.training", "MLTrainingConfig"),
         "TrainingConfig": ("odds_analytics.training", "TrainingConfig"),
         "ExperimentConfig": ("odds_analytics.training", "ExperimentConfig"),
@@ -44,7 +43,6 @@ __all__ = [
     "XGBoostLineMovementStrategy",
     # Backfill
     "BackfillExecutor",
-    "GameSelector",
     # Utils
     "calculate_ev",
     # Training Configuration
