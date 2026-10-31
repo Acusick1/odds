@@ -418,64 +418,7 @@ class TestGapDetectionWorkflow:
 
 
 class TestGapPlanCompatibility:
-    """Test compatibility between gap plans and regular backfill plans."""
-
-    @pytest.mark.asyncio
-    async def test_gap_plan_structure_matches_regular_plan(self, test_session, events_with_gaps):
-        """Test that gap plans have identical structure to regular backfill plans."""
-        from odds_analytics.game_selector import GameSelector
-
-        # Generate gap plan
-        planner = GapBackfillPlanner(test_session)
-
-        gap_plan = await planner.generate_plan(
-            start_date=datetime(2024, 1, 15).date(),
-            end_date=datetime(2024, 1, 16).date(),
-        )
-
-        # Generate regular backfill plan using GameSelector
-        from odds_core.time import utc_isoformat
-        from odds_lambda.storage.readers import OddsReader
-
-        reader = OddsReader(test_session)
-        events = await reader.get_events_by_date_range(
-            start_date=datetime(2024, 1, 15, tzinfo=UTC),
-            end_date=datetime(2024, 1, 17, tzinfo=UTC),
-            sport_key="basketball_nba",
-        )
-
-        events_by_date = {}
-        for event in events:
-            date_str = utc_isoformat(event.commence_time)
-            event_dict = {
-                "id": event.id,
-                "sport_key": event.sport_key,
-                "sport_title": event.sport_title,
-                "commence_time": event.commence_time.isoformat(),
-                "home_team": event.home_team,
-                "away_team": event.away_team,
-                "bookmakers": [],
-            }
-            if date_str not in events_by_date:
-                events_by_date[date_str] = []
-            events_by_date[date_str].append(event_dict)
-
-        selector = GameSelector(
-            start_date=datetime(2024, 1, 15, tzinfo=UTC),
-            end_date=datetime(2024, 1, 17, tzinfo=UTC),
-            target_games=10,
-        )
-
-        regular_plan = selector.generate_backfill_plan(events_by_date)
-
-        # Verify both plans have same top-level keys
-        assert set(gap_plan.keys()) == set(regular_plan.keys())
-
-        # Verify game entries have same structure
-        if gap_plan["games"]:
-            gap_game = gap_plan["games"][0]
-            regular_game = regular_plan["games"][0]
-            assert set(gap_game.keys()) == set(regular_game.keys())
+    """Gap plans run through the backfill executor."""
 
     @pytest.mark.asyncio
     async def test_gap_plan_executable_by_backfill_executor(

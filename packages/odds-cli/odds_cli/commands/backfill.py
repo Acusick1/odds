@@ -2,16 +2,20 @@
 
 import asyncio
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import typer
 from odds_analytics.backfill_executor import BackfillExecutor, BackfillProgress
-from odds_analytics.game_selector import GameSelector
-from odds_core.config import get_settings
+from odds_analytics.backfill_plan import (
+    Fixture,
+    Manifest,
+    Season,
+    load_fixtures,
+    plan,
+)
 from odds_core.database import async_session_maker
 from odds_core.time import utc_isoformat
-from odds_lambda.odds_api_events import odds_api_id_of
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 from rich.table import Table
@@ -21,156 +25,82 @@ console = Console()
 
 
 @app.command("plan")
-def create_backfill_plan(
-    start_date: str = typer.Option(..., "--start", "-s", help="Start date (YYYY-MM-DD)"),
-    end_date: str = typer.Option(..., "--end", "-e", help="End date (YYYY-MM-DD)"),
-    target_games: int | None = typer.Option(
-        None,
-        "--games",
-        "-g",
-        help="Target number of games to backfill (default: all discovered games)",
+def plan_backfill(
+    manifest_file: str = typer.Option(..., "--manifest", "-m", help="Acquisition manifest YAML"),
+    season: list[str] | None = typer.Option(  # noqa: B008 — typer option idiom
+        None, "--season", help="Plan only this manifest season (repeatable)"
     ),
-    output_file: str = typer.Option(
-        "backfill_plan.json", "--output", "-o", help="Output file for backfill plan"
+    cost: bool = typer.Option(
+        False, "--cost", help="Print calls and units per season and window instead of the calls"
     ),
 ):
     """
-    Create a backfill plan from games already in the database.
+    Plan the Odds API historical calls an acquisition manifest needs, from stored FINAL events.
 
-    This queries the local database to find completed games in the date range
-    and generates an execution plan for fetching historical odds. Events must
-    already exist in the database before creating a plan.
+    Makes no API calls. Without --cost it prints each call's time and how many fixture windows
+    it serves.
 
-    Workflow:
-        1. Discover events: odds discover games --start DATE --end DATE
-        2. Plan backfill: odds backfill plan --start DATE --end DATE [--games N]
-        3. Execute plan: odds backfill execute --plan backfill_plan.json
-
-    Examples:
-        # Backfill all discovered games in date range
-        odds backfill plan --start 2023-10-01 --end 2024-04-30
-
-        # Backfill specific number of games (balanced selection)
-        odds backfill plan --start 2023-10-01 --end 2024-04-30 --games 166
+    Example:
+        odds backfill plan --manifest backfills/odds-api-epl-2020-26.yaml --cost
     """
-    console.print("\n[bold cyan]Creating Historical Backfill Plan[/bold cyan]\n")
+    manifest = Manifest.load(Path(manifest_file))
+    unknown = sorted(set(season or ()) - manifest.seasons.keys())
+    if unknown:
+        console.print(f"[red]Not a manifest season: {', '.join(unknown)}[/red]")
+        raise typer.Exit(1)
+    seasons = {name: s for name, s in manifest.seasons.items() if not season or name in season}
+    fixtures = asyncio.run(_load_season_fixtures(manifest, seasons))
+    if cost:
+        console.print(_cost_table(manifest, fixtures))
+        return
+    for name, season_fixtures in fixtures.items():
+        console.print(f"[bold]{name}[/bold]")
+        for call in plan(manifest, season_fixtures):
+            console.print(f"  {utc_isoformat(call.time)}  {len(call.serves)}")
 
-    asyncio.run(_create_plan_async(start_date, end_date, target_games, output_file))
 
-
-async def _create_plan_async(
-    start_date_str: str,
-    end_date_str: str,
-    target_games: int | None,
-    output_file: str,
-):
-    """Async implementation of plan creation."""
-    try:
-        start_date = datetime.fromisoformat(start_date_str)
-        end_date = datetime.fromisoformat(end_date_str)
-    except ValueError as e:
-        console.print(f"[red]Error parsing dates: {e}[/red]")
-        raise typer.Exit(1) from e
-
-    # Initialize selector
-    # If target_games is None, we'll select all games (set high limit)
-    # Otherwise use specified target with team distribution
-    selector = GameSelector(
-        start_date=start_date,
-        end_date=end_date,
-        target_games=target_games or 10000,  # High default for "select all"
-        games_per_team=max(1, (target_games // 30) if target_games else 10000),
-    )
-
-    # Query database for events (SCHEDULED or FINAL) with past commence times
-    console.print("[cyan]Querying local database for events...[/cyan]")
-    console.print(f"Date range: {start_date_str} to {end_date_str}")
-
-    from datetime import UTC
-
-    from odds_lambda.storage.readers import OddsReader
-
-    events_by_date = {}
-
+async def _load_season_fixtures(
+    manifest: Manifest, seasons: dict[str, Season]
+) -> dict[str, list[Fixture]]:
     async with async_session_maker() as session:
-        reader = OddsReader(session)
+        return {
+            name: await load_fixtures(session, manifest.sport, s) for name, s in seasons.items()
+        }
 
-        # Query all events in date range (don't filter by status yet)
-        all_events = await reader.get_events_by_date_range(
-            start_date=start_date,
-            end_date=end_date,
-            sport_key="basketball_nba",
-        )
 
-        # Filter to events with past commence times (eligible for historical backfill)
-        now = datetime.now(UTC)
-        events = [e for e in all_events if e.commence_time < now]
+def _duration(delta: timedelta) -> str:
+    minutes = int(delta.total_seconds() // 60)
+    for size, unit in ((1440, "d"), (60, "h")):
+        if minutes % size == 0:
+            return f"{minutes // size}{unit}"
+    return f"{minutes}m"
 
-        if not events:
-            console.print(
-                f"[red]No events found in database for date range {start_date_str} to {end_date_str}[/red]"
-            )
-            console.print("\n[yellow]Run event discovery first:[/yellow]")
-            console.print(f"  odds discover games --start {start_date_str} --end {end_date_str}")
-            console.print("\n[yellow]Then create your plan:[/yellow]")
-            games_param = f" --games {target_games}" if target_games else ""
-            console.print(
-                f"  odds backfill plan --start {start_date_str} --end {end_date_str}{games_param}\n"
-            )
-            raise typer.Exit(1)
 
-        console.print(f"Found {len(events)} completed games in database")
+def _cost_table(manifest: Manifest, fixtures: dict[str, list[Fixture]]) -> Table:
+    """Calls and units per season for all windows, then the calls each window adds to the
+    others."""
+    table = Table(
+        title=f"Calls / units, {manifest.units_per_call} units per call. A window's row is "
+        "what it adds to all the others."
+    )
+    table.add_column("Window")
+    for name, season_fixtures in fixtures.items():
+        table.add_column(f"{name} ({len(season_fixtures)} fixtures)", justify="right")
+    table.add_column("Total", justify="right")
 
-        # Group events by date (similar to API response structure)
-        for event in events:
-            date_str = utc_isoformat(event.commence_time)
-            # Convert Event model to dict format expected by GameSelector
-            event_dict = {
-                "id": event.id,
-                "odds_api_id": await odds_api_id_of(session, event.id),
-                "sport_key": event.sport_key,
-                "sport_title": event.sport_title,
-                "commence_time": event.commence_time.isoformat(),
-                "home_team": event.home_team,
-                "away_team": event.away_team,
-                "bookmakers": [],  # Not needed for plan generation
-            }
+    def counts(cut: Manifest | None) -> list[int]:
+        calls = [len(plan(cut, f)) if cut else 0 for f in fixtures.values()]
+        return [*calls, sum(calls)]
 
-            if date_str not in events_by_date:
-                events_by_date[date_str] = []
-            events_by_date[date_str].append(event_dict)
+    def cells(calls: list[int]) -> list[str]:
+        return [f"{n:,} / {n * manifest.units_per_call:,}" for n in calls]
 
-        # Display date distribution
-        dates_with_games = len(events_by_date)
-        console.print(f"Events span {dates_with_games} unique dates")
-
-    # Generate execution plan
-    console.print("\n[cyan]Generating backfill plan...[/cyan]")
-    plan = selector.generate_backfill_plan(events_by_date)
-
-    # Display summary
-    table = Table(title="Backfill Plan Summary")
-    table.add_column("Metric", style="cyan")
-    table.add_column("Value", style="green")
-
-    table.add_row("Total Games", str(plan["total_games"]))
-    table.add_row("Total Snapshots", str(plan["total_snapshots"]))
-    table.add_row("Estimated Quota Usage", f"{plan['estimated_quota_usage']:,}")
-    app_settings = get_settings()
-    table.add_row("Quota Remaining", f"{app_settings.api.quota - plan['estimated_quota_usage']:,}")
-    table.add_row("Date Range", f"{start_date_str} to {end_date_str}")
-
-    console.print("\n")
-    console.print(table)
-
-    # Save plan
-    output_path = Path(output_file)
-    with open(output_path, "w") as f:
-        json.dump(plan, f, indent=2, default=str)
-
-    console.print(f"\n[green]✓ Plan saved to {output_file}[/green]")
-    console.print("\n[yellow]Review the plan, then execute with:[/yellow]")
-    console.print(f"[bold]  odds backfill execute --plan {output_file}[/bold]\n")
+    full = counts(manifest)
+    table.add_row("all", *cells(full))
+    for window, rest in manifest.window_cuts():
+        label = f"KO-{_duration(window.lead)} (max age {_duration(window.max_age)})"
+        table.add_row(label, *cells([a - b for a, b in zip(full, counts(rest), strict=True)]))
+    return table
 
 
 @app.command("execute")
@@ -192,8 +122,8 @@ def execute_backfill(
     to validate the plan.
 
     Example:
-        odds backfill execute --plan backfill_plan.json
-        odds backfill execute --plan backfill_plan.json --dry-run
+        odds backfill execute --plan gap_plan.json
+        odds backfill execute --plan gap_plan.json --dry-run
     """
     console.print("\n[bold cyan]Executing Historical Backfill[/bold cyan]\n")
 

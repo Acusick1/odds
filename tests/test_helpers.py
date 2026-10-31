@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 # Hours before kick-off that odds_lambda.tier_utils.calculate_tier puts in each fetch tier, at the
 # Odds API backfill's snapshot time where one lies in the tier
-# (odds_analytics.game_selector.GameSelector.calculate_snapshot_times); IN_PLAY is after kick-off.
+# (odds_analytics.gap_backfill_planner.TIER_SNAPSHOT_LEADS); IN_PLAY is after kick-off.
 TIER_HOURS_BEFORE: dict[FetchTier, float] = {
     FetchTier.OPENING: 100,
     FetchTier.EARLY: 72,
