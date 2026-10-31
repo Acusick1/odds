@@ -192,6 +192,7 @@ async def test_scheduler_end_to_end(
         raw_events_data=[odds_data],
         response_time_ms=100,
         quota_remaining=19900,
+        quota_used=100,
         timestamp=datetime.now(UTC),
     )
     _e2e_stub_client = StubOddsClient(response)
@@ -287,6 +288,7 @@ async def test_job_self_scheduling_chain(test_session, mock_session_factory):
             raw_events_data=[],
             response_time_ms=100,
             quota_remaining=19900,
+            quota_used=100,
             timestamp=test_time,
         )
         stub_client = StubOddsClient(response)

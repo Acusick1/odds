@@ -206,6 +206,7 @@ class BackfillExecutor:
                     ),
                     success=True,
                     api_quota_remaining=response.quota_remaining,
+                    api_quota_used=response.quota_used,
                     response_time_ms=response.response_time_ms,
                 )
             )
@@ -234,6 +235,7 @@ class BackfillExecutor:
                     success=False,
                     error_message=f"{type(error).__name__}: {error}",
                     api_quota_remaining=client.quota_remaining,
+                    api_quota_used=client.quota_used,
                 )
             )
             await session.commit()

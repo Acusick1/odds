@@ -86,7 +86,10 @@ def _response_error(status: int) -> aiohttp.ClientResponseError:
 class _StubResponse:
     def __init__(self, status: int, payload: Any = None) -> None:
         self.status = status
-        self.headers: dict[str, str] = {"x-requests-remaining": "100"}
+        self.headers: dict[str, str] = {
+            "x-requests-remaining": "100",
+            "x-requests-used": "400",
+        }
         self._payload = payload if payload is not None else []
 
     def raise_for_status(self) -> None:
@@ -293,3 +296,20 @@ class TestQuotaOnErrors:
             await client._make_request("sports", "soccer_epl")
 
         assert client.quota_remaining == 100
+        assert client.quota_used == 400
+
+    @pytest.mark.asyncio
+    async def test_the_plan_size_is_used_plus_remaining(self):
+        client, _ = _client([200])
+
+        data, _ = await client._make_request("sports", "soccer_epl")
+
+        assert (client.quota_used, client.quota_remaining) == (400, 100)
+
+    @pytest.mark.asyncio
+    async def test_responses_carry_quota_used(self):
+        client, _ = _client([200])
+
+        response = await client.get_events("soccer_epl")
+
+        assert (response.quota_remaining, response.quota_used) == (100, 400)

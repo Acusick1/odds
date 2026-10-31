@@ -103,6 +103,7 @@ class StubOddsClient:
             events=[],
             response_time_ms=0,
             quota_remaining=None,
+            quota_used=None,
             timestamp=datetime.now(UTC),
         )
 

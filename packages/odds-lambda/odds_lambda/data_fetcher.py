@@ -63,6 +63,7 @@ class TheOddsAPIClient:
         self.base_url = base_url or app_settings.api.base_url
         self.session: aiohttp.ClientSession | None = None
         self._quota_remaining: int | None = None
+        self._quota_used: int | None = None
         self._units_used: int | None = None
 
     async def __aenter__(self):
@@ -79,6 +80,11 @@ class TheOddsAPIClient:
     def quota_remaining(self) -> int | None:
         """Get remaining API quota from last request."""
         return self._quota_remaining
+
+    @property
+    def quota_used(self) -> int | None:
+        """Credits used since the last quota reset, from the last ``x-requests-used`` header."""
+        return self._quota_used
 
     @property
     def units_used(self) -> int | None:
@@ -136,6 +142,8 @@ class TheOddsAPIClient:
         async with self.session.get(url, params=params, timeout=timeout) as response:
             if "x-requests-remaining" in response.headers:
                 self._quota_remaining = int(float(response.headers["x-requests-remaining"]))
+            if "x-requests-used" in response.headers:
+                self._quota_used = int(float(response.headers["x-requests-used"]))
             self._units_used = (
                 int(float(response.headers["x-requests-last"]))
                 if "x-requests-last" in response.headers
@@ -219,6 +227,7 @@ class TheOddsAPIClient:
             raw_events_data=raw_events_data,
             response_time_ms=response_time,
             quota_remaining=self._quota_remaining,
+            quota_used=self._quota_used,
             timestamp=datetime.now(UTC),
         )
 
@@ -252,6 +261,7 @@ class TheOddsAPIClient:
             events=events,
             response_time_ms=response_time,
             quota_remaining=self._quota_remaining,
+            quota_used=self._quota_used,
             timestamp=datetime.now(UTC),
         )
 
@@ -288,6 +298,7 @@ class TheOddsAPIClient:
             scores_data=scores_data,
             response_time_ms=response_time,
             quota_remaining=self._quota_remaining,
+            quota_used=self._quota_used,
             timestamp=datetime.now(UTC),
         )
 
@@ -361,6 +372,7 @@ class TheOddsAPIClient:
             raw_events_data=raw_events_data,
             response_time_ms=response_time,
             quota_remaining=self._quota_remaining,
+            quota_used=self._quota_used,
             snapshot_time=snapshot_time,
             units_used=self._units_used,
         )
@@ -402,5 +414,6 @@ class TheOddsAPIClient:
             "data": data,
             "response_time_ms": response_time,
             "quota_remaining": self._quota_remaining,
+            "quota_used": self._quota_used,
             "timestamp": datetime.now(UTC),
         }

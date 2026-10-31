@@ -29,7 +29,7 @@ def mock_settings():
             quota_critical_threshold=0.1,
             stale_data_hours=2,
         ),
-        api=APIConfig(key="test-key", quota=500),
+        api=APIConfig(key="test-key"),
     )
 
 
@@ -83,13 +83,13 @@ class TestHealthMonitor:
         with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_class:
             mock_reader = AsyncMock()
             mock_reader.get_latest_quota_by_key.return_value = {
-                0: KeyQuota(("soccer_epl",), 125),  # 25% of 500
+                0: KeyQuota(("soccer_epl",), 125, 375),  # 25% of 500
             }
             mock_reader_class.return_value = mock_reader
 
             readings = await monitor.check_api_quota()
 
-            assert readings == [QuotaReading(0, ("soccer_epl",), 125, 0.25)]
+            assert readings == [QuotaReading(0, ("soccer_epl",), 125, 500, 0.25)]
 
     @pytest.mark.asyncio
     async def test_check_api_quota_low_warning(self, mock_session, mock_settings):
@@ -99,17 +99,36 @@ class TestHealthMonitor:
         with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_class:
             mock_reader = AsyncMock()
             mock_reader.get_latest_quota_by_key.return_value = {
-                1: KeyQuota(("basketball_nba",), 450),
-                0: KeyQuota(("soccer_epl",), 75),  # 15% of 500 (below 20% warning)
+                1: KeyQuota(("basketball_nba",), 450, 50),
+                0: KeyQuota(("soccer_epl",), 75, 425),  # 15% of 500 (below 20% warning)
             }
             mock_reader_class.return_value = mock_reader
 
             readings = await monitor.check_api_quota()
 
             assert readings == [
-                QuotaReading(0, ("soccer_epl",), 75, 0.15),
-                QuotaReading(1, ("basketball_nba",), 450, 0.9),
+                QuotaReading(0, ("soccer_epl",), 75, 500, 0.15),
+                QuotaReading(1, ("basketball_nba",), 450, 500, 0.9),
             ]
+
+    @pytest.mark.asyncio
+    async def test_check_api_quota_uses_the_keys_plan_not_a_setting(
+        self, mock_session, mock_settings
+    ):
+        """900 left of a 20000-credit plan is 4.5%, well under the 10% critical threshold."""
+        monitor = HealthMonitor(mock_session, mock_settings)
+
+        with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_class:
+            mock_reader = AsyncMock()
+            mock_reader.get_latest_quota_by_key.return_value = {
+                0: KeyQuota(("soccer_epl",), 900, 19100),
+            }
+            mock_reader_class.return_value = mock_reader
+
+            readings = await monitor.check_api_quota()
+
+        assert readings == [QuotaReading(0, ("soccer_epl",), 900, 20000, 0.045)]
+        assert readings[0].fraction < mock_settings.alerts.quota_critical_threshold
 
     @pytest.mark.asyncio
     async def test_collect_metrics_returns_full_metrics(self, mock_session, mock_settings):
@@ -119,7 +138,7 @@ class TestHealthMonitor:
         with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_class:
             mock_reader = AsyncMock()
             mock_reader.get_database_stats.return_value = {
-                "api_quota_by_key": {0: KeyQuota(("soccer_epl",), 15000)},
+                "api_quota_by_key": {0: KeyQuota(("soccer_epl",), 15000, 5000)},
                 "events_by_status": {
                     "scheduled": 10,
                     "live": 2,
@@ -164,7 +183,7 @@ class TestHealthMonitor:
                 with patch.object(
                     monitor,
                     "check_api_quota",
-                    return_value=[QuotaReading(0, ("soccer_epl",), 15000, 0.75)],
+                    return_value=[QuotaReading(0, ("soccer_epl",), 15000, 20000, 0.75)],
                 ):
                     with patch.object(monitor, "check_data_quality", return_value=(True, 2)):
                         with (
@@ -215,7 +234,7 @@ class TestHealthMonitor:
                 with patch.object(
                     monitor,
                     "check_api_quota",
-                    return_value=[QuotaReading(0, ("soccer_epl",), 1000, 0.05)],
+                    return_value=[QuotaReading(0, ("soccer_epl",), 1000, 20000, 0.05)],
                 ):
                     with patch.object(monitor, "check_data_quality", return_value=(False, 15)):
                         with (
@@ -442,8 +461,8 @@ class TestQuotaAlerts:
     ):
         monitor = HealthMonitor(mock_session, mock_settings)
         readings = [
-            QuotaReading(0, ("soccer_epl", "baseball_mlb"), 30, 0.06),
-            QuotaReading(1, ("basketball_nba",), 450, 0.9),
+            QuotaReading(0, ("soccer_epl", "baseball_mlb"), 30, 500, 0.06),
+            QuotaReading(1, ("basketball_nba",), 450, 500, 0.9),
         ]
         quiet = [
             patch.object(monitor, name, return_value=value)

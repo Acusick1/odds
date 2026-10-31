@@ -130,6 +130,7 @@ class TestHealthCheckIntegration:
                 bookmakers_count=8,
                 success=True,
                 api_quota_remaining=15000,
+                api_quota_used=5000,
             )
             test_session.add(fetch_log)
 
@@ -180,7 +181,7 @@ class TestHealthCheckIntegration:
         # Create recent snapshot so stale data check passes
         await _create_recent_snapshot(test_session, minutes_ago=10)
 
-        # Create fetch log with low quota (25 out of 500 = 5%, below 10% critical)
+        # Create fetch log with low quota (25 of a 500 plan = 5%, below 10% critical)
         fetch_log = FetchLog(
             fetch_time=datetime.now(UTC) - timedelta(minutes=30),
             sport_key="basketball_nba",
@@ -188,6 +189,7 @@ class TestHealthCheckIntegration:
             bookmakers_count=8,
             success=True,
             api_quota_remaining=25,
+            api_quota_used=475,
         )
         test_session.add(fetch_log)
         await test_session.commit()
@@ -197,7 +199,6 @@ class TestHealthCheckIntegration:
             with patch("odds_lambda.health_monitor.get_settings") as mock_get_settings:
                 mock_settings = get_settings()
                 mock_settings.alerts.alert_enabled = False
-                mock_settings.api.quota = 500  # Set explicit quota for test (25/500 = 5%)
                 mock_get_settings.return_value = mock_settings
 
                 from odds_lambda.health_monitor import HealthMonitor
@@ -209,6 +210,41 @@ class TestHealthCheckIntegration:
         assert len(health_status.issues_detected) > 0
         assert any("quota" in issue.lower() for issue in health_status.issues_detected)
         assert health_status.metrics.api_quota_by_key == {1: 25}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("remaining", "used", "alert_prefix"),
+        [(900, 19100, "quota_critical"), (3000, 17000, "quota_low"), (3000, 7000, None)],
+    )
+    async def test_quota_fraction_comes_from_the_keys_plan_size(
+        self, test_session, remaining, used, alert_prefix
+    ):
+        """A 20000-credit plan with 900 left is 4.5%, critical; the plan is not a setting."""
+        await _create_recent_snapshot(test_session, minutes_ago=10)
+        test_session.add(
+            FetchLog(
+                fetch_time=datetime.now(UTC) - timedelta(minutes=30),
+                sport_key="basketball_nba",
+                events_count=10,
+                bookmakers_count=8,
+                success=True,
+                api_quota_remaining=remaining,
+                api_quota_used=used,
+            )
+        )
+        await test_session.commit()
+
+        from odds_lambda.health_monitor import HealthMonitor
+
+        with patch("odds_core.alerts.alert_manager.alert", new_callable=AsyncMock):
+            settings = get_settings()
+            settings.alerts.alert_enabled = False
+            readings = await HealthMonitor(test_session, settings).check_api_quota()
+            status = await HealthMonitor(test_session, settings).check_system_health()
+
+        assert [(r.remaining, r.limit) for r in readings] == [(remaining, remaining + used)]
+        quota_issues = [i for i in status.issues_detected if "quota" in i.lower()]
+        assert bool(quota_issues) is (alert_prefix is not None)
 
     @pytest.mark.asyncio
     async def test_health_check_detects_data_quality_issues(self, test_session):
@@ -237,6 +273,7 @@ class TestHealthCheckIntegration:
             bookmakers_count=8,
             success=True,
             api_quota_remaining=15000,
+            api_quota_used=5000,
         )
         test_session.add(fetch_log)
 
@@ -352,6 +389,7 @@ class TestHealthCheckIntegration:
                     bookmakers_count=8,
                     success=True,
                     api_quota_remaining=25,
+                    api_quota_used=475,
                 )
             )
         await test_session.commit()
@@ -361,7 +399,6 @@ class TestHealthCheckIntegration:
         with patch("odds_core.alerts.alert_manager.alert", new_callable=AsyncMock) as mock_alert:
             settings = get_settings()
             settings.alerts.alert_enabled = True
-            settings.api.quota = 500
             reminder = timedelta(minutes=settings.alerts.stale_reminder_minutes)
 
             async def run_check() -> list[str]:
@@ -418,6 +455,7 @@ class TestHealthCheckIntegration:
             bookmakers_count=8,
             success=True,
             api_quota_remaining=15000,
+            api_quota_used=5000,
         )
         test_session.add(fetch_log)
 

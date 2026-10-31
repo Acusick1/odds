@@ -30,7 +30,7 @@ Model and feature settings (`target_type`, `sharp_bookmakers`) are not here: the
 
 | Attribute | Class | Env names | Owning page |
 |---|---|---|---|
-| `api` | `odds_core.config.APIConfig` | `ODDS_API_KEY`, `ODDS_API_KEYS`, `ODDS_API_KEY_INDEX_BY_SPORT`, `ODDS_API_BASE_URL`, `ODDS_API_QUOTA` | [Odds API client](../collection/odds-api-client.md) |
+| `api` | `odds_core.config.APIConfig` | `ODDS_API_KEY`, `ODDS_API_KEYS`, `ODDS_API_KEY_INDEX_BY_SPORT`, `ODDS_API_BASE_URL` | [Odds API client](../collection/odds-api-client.md) |
 | `database` | `odds_core.config.DatabaseConfig` | `DATABASE_URL`, `DATABASE_POOL_SIZE` | [Databases and environments](databases-and-environments.md) |
 | `data_collection` | `odds_core.config.DataCollectionConfig` | `SPORTS` (default: EPL, MLB and NBA), `BOOKMAKERS`, `MARKETS`, `REGIONS` (bare) | [Sport, market and bookmaker keys](../collection/sport-and-market-keys.md) |
 | `scheduler` | `odds_core.config.SchedulerConfig` | `SCHEDULER_BACKEND`, `_DRY_RUN`, `_LOOKAHEAD_DAYS`, `_BOOTSTRAP_JOBS` | [Local scheduler](../scheduling/local-scheduler.md) |

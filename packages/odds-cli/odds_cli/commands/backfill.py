@@ -66,9 +66,9 @@ def _select_seasons(manifest: Manifest, season: list[str] | None) -> dict[str, S
 
 async def _load_season_fixtures(
     manifest: Manifest, seasons: dict[str, Season]
-) -> tuple[dict[str, list[Fixture]], int]:
+) -> tuple[dict[str, list[Fixture]], int | None]:
     """The seasons' fixtures, and the balance of the key the manifest's sport spends (its newest
-    recorded quota, else ``ODDS_API_QUOTA``)."""
+    recorded quota), or None when no recent fetch recorded one."""
     api = get_settings().api
     async with async_session_maker() as session:
         fixtures = {
@@ -77,7 +77,7 @@ async def _load_season_fixtures(
         quota = (await OddsReader(session).get_latest_quota_by_key(api)).get(
             api.key_index_for(manifest.sport)
         )
-    return fixtures, quota.remaining if quota else api.quota
+    return fixtures, quota.remaining if quota else None
 
 
 def _duration(delta: timedelta) -> str:
@@ -88,7 +88,9 @@ def _duration(delta: timedelta) -> str:
     return f"{minutes}m"
 
 
-def _cost_table(manifest: Manifest, fixtures: dict[str, list[Fixture]], balance: int) -> Table:
+def _cost_table(
+    manifest: Manifest, fixtures: dict[str, list[Fixture]], balance: int | None
+) -> Table:
     """Calls and units per season for all bands, then the calls each band adds to the
     others."""
     table = Table(
@@ -117,10 +119,13 @@ def _cost_table(manifest: Manifest, fixtures: dict[str, list[Fixture]], balance:
         )
         table.add_row(label, *cells([a - b for a, b in zip(full, counts(rest), strict=True)]))
     key = get_settings().api.key_index_for(manifest.sport)
-    table.caption = (
-        f"Key {key} remaining after the plan: "
-        f"{balance - full[-1] * manifest.units_per_call:,} of {balance:,}"
-    )
+    if balance is None:
+        table.caption = f"Key {key} balance unknown: no recent fetch recorded a quota"
+    else:
+        table.caption = (
+            f"Key {key} remaining after the plan: "
+            f"{balance - full[-1] * manifest.units_per_call:,} of {balance:,}"
+        )
     return table
 
 
@@ -166,7 +171,10 @@ async def _execute_backfill_async(
     units = len(calls) * manifest.units_per_call
     console.print(f"[bold]Calls:[/bold] {len(calls):,}")
     console.print(f"[bold]Estimated units:[/bold] {units:,}")
-    console.print(f"[bold]Key balance:[/bold] {balance:,}")
+    console.print(
+        f"[bold]Key balance:[/bold] "
+        f"{f'{balance:,}' if balance is not None else 'unknown (no recent fetch recorded a quota)'}"
+    )
     if dry_run:
         console.print("\n[yellow]DRY RUN - No API calls will be made[/yellow]")
     else:

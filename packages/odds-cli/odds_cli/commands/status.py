@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 import typer
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
-from odds_lambda.storage.readers import OddsReader
+from odds_lambda.storage.readers import KeyQuota, OddsReader
 from rich.console import Console
 from rich.table import Table
 
@@ -25,7 +25,6 @@ def show_status(
 async def _show_status(verbose: bool):
     """Async implementation of show status."""
     console.print("\n[bold blue]Odds Pipeline Status[/bold blue]\n")
-    app_settings = get_settings()
 
     try:
         async with async_session_maker() as session:
@@ -68,13 +67,13 @@ async def _show_status(verbose: bool):
             # API quota, one row per key
             for index, key_quota in stats["api_quota_by_key"].items():
                 quota_remaining = key_quota.remaining
-                quota_percent = (quota_remaining / app_settings.api.quota) * 100
+                quota_percent = key_quota.fraction * 100
                 quota_color = (
                     "green" if quota_percent > 50 else ("yellow" if quota_percent > 20 else "red")
                 )
                 table.add_row(
                     f"API Quota (key {index}: {', '.join(key_quota.sports)})",
-                    f"[{quota_color}]{quota_remaining:,} / {app_settings.api.quota:,} "
+                    f"[{quota_color}]{quota_remaining:,} / {key_quota.limit:,} "
                     f"({quota_percent:.1f}%)[/{quota_color}]",
                 )
 
@@ -132,11 +131,10 @@ async def _show_status(verbose: bool):
         raise typer.Exit(code=1) from e
 
 
-def _print_quota(label: str, readings: list[tuple[datetime, int]], total_quota: int) -> None:
+def _print_quota(label: str, key_quota: KeyQuota, readings: list[tuple[datetime, int]]) -> None:
     """Print one key's balance and its recent usage; ``readings`` are newest first."""
-    quota_remaining = readings[0][1]
-    quota_used = total_quota - quota_remaining
-    quota_percent = (quota_remaining / total_quota) * 100
+    quota_remaining = key_quota.remaining
+    quota_percent = key_quota.fraction * 100
 
     console.print(f"[bold]{label}[/bold]")
     table = Table(show_header=False, box=None)
@@ -145,8 +143,8 @@ def _print_quota(label: str, readings: list[tuple[datetime, int]], total_quota: 
 
     quota_color = "green" if quota_percent > 50 else ("yellow" if quota_percent > 20 else "red")
 
-    table.add_row("Total Quota", f"{total_quota:,}")
-    table.add_row("Used", f"{quota_used:,}")
+    table.add_row("Total Quota", f"{key_quota.limit:,}")
+    table.add_row("Used", f"{key_quota.used:,}")
     table.add_row(
         "Remaining",
         f"[{quota_color}]{quota_remaining:,} ({quota_percent:.1f}%)[/{quota_color}]",
@@ -202,9 +200,7 @@ async def _show_quota():
                     for log in fetch_logs
                     if log.api_quota_remaining is not None
                 ]
-                _print_quota(
-                    f"key {index}: {', '.join(key_quota.sports)}", readings, app_settings.api.quota
-                )
+                _print_quota(f"key {index}: {', '.join(key_quota.sports)}", key_quota, readings)
 
             console.print()
 

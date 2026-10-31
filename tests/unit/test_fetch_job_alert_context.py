@@ -26,7 +26,6 @@ def _settings() -> MagicMock:
     settings.scheduler.dry_run = False
     settings.scheduler.lookahead_days = 7
     settings.data_collection.sports = [EPL]
-    settings.api.quota = 500
     settings.alerts.quota_critical_threshold = 0.1
     settings.alerts.quota_warning_threshold = 0.2
     return settings

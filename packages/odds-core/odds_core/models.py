@@ -322,6 +322,10 @@ class FetchLog(SQLModel, table=True):
     api_quota_remaining: int | None = Field(
         default=None, description="Remaining API quota after request"
     )
+    api_quota_used: int | None = Field(
+        default=None,
+        description="API quota used since the last reset, from x-requests-used",
+    )
     response_time_ms: int | None = Field(default=None, description="API response time")
 
 

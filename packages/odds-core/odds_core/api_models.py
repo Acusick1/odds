@@ -30,6 +30,7 @@ class OddsResponse:
     raw_events_data: list[dict]  # Original API dicts for snapshot storage
     response_time_ms: int
     quota_remaining: int | None
+    quota_used: int | None
     timestamp: datetime
 
 
@@ -40,6 +41,7 @@ class ScoresResponse:
     scores_data: list[dict]  # Keep as dict since we just extract scores
     response_time_ms: int
     quota_remaining: int | None
+    quota_used: int | None
     timestamp: datetime
 
 
@@ -50,6 +52,7 @@ class EventsResponse:
     events: list[ApiEvent]
     response_time_ms: int
     quota_remaining: int | None
+    quota_used: int | None
     timestamp: datetime
 
 
@@ -65,6 +68,7 @@ class HistoricalOddsResponse:
     raw_events_data: list[dict]
     response_time_ms: int
     quota_remaining: int | None
+    quota_used: int | None
     snapshot_time: datetime
     units_used: int | None = None
 

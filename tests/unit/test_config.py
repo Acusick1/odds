@@ -28,7 +28,6 @@ class TestSettings:
             settings = Settings(_env_file=None)  # Don't load .env file
 
             assert settings.api.base_url == "https://api.the-odds-api.com/v4"
-            assert settings.api.quota == 500
             assert settings.api.keys is None
             assert settings.database.pool_size == 5
             assert settings.data_collection.sports == [

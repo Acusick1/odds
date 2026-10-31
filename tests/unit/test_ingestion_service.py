@@ -57,6 +57,7 @@ class TestOddsIngestionService:
             raw_events_data=[event_payload],
             response_time_ms=150,
             quota_remaining=12345,
+            quota_used=655,
             timestamp=datetime.now(UTC),
         )
 
@@ -126,6 +127,7 @@ class TestOddsIngestionService:
         assert fetch_log.error_message is None
         assert fetch_log.bookmakers_count == 1
         assert fetch_log.api_quota_remaining == 12345
+        assert fetch_log.api_quota_used == 655
 
     @pytest.mark.asyncio
     async def test_ingest_sport_records_failures_when_snapshot_storage_fails(
@@ -152,6 +154,7 @@ class TestOddsIngestionService:
             raw_events_data=[event_payload],
             response_time_ms=75,
             quota_remaining=9999,
+            quota_used=1,
             timestamp=datetime.now(UTC),
         )
 

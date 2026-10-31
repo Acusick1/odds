@@ -27,10 +27,21 @@ QUOTA_MAX_AGE = timedelta(days=31)
 
 
 class KeyQuota(NamedTuple):
-    """The newest remaining quota of an Odds API key and the sports that spend it."""
+    """The newest remaining and used quota of an Odds API key and the sports that spend it."""
 
     sports: tuple[str, ...]
     remaining: int
+    used: int
+
+    @property
+    def limit(self) -> int:
+        """The key's plan size: credits used since the last reset plus credits remaining."""
+        return self.remaining + self.used
+
+    @property
+    def fraction(self) -> float:
+        """Remaining credits as a fraction of the plan; 0.0 for a plan of zero."""
+        return self.remaining / self.limit if self.limit else 0.0
 
 
 class OddsReader:
@@ -182,31 +193,39 @@ class OddsReader:
         return list(result.scalars().all())
 
     async def get_latest_quota_by_key(self, api: APIConfig) -> dict[int, KeyQuota]:
-        """The newest recorded remaining quota of each Odds API key, by key index.
+        """The newest recorded remaining and used quota of each Odds API key, by key index.
 
         A key spends for the sports ``APIConfig.key_index_by_sport`` gives its index, so its
         balance is the newest reading of any of them. A reading older than ``QUOTA_MAX_AGE`` is a
         key no sport has spent for a month (an off-season, or a key left behind) and is ignored.
+        A row needs both ``api_quota_remaining`` and ``api_quota_used``, which give the key's plan
+        size; rows logged before ``api_quota_used`` existed are skipped.
         """
         result = await self.session.execute(
-            select(FetchLog.sport_key, FetchLog.fetch_time, FetchLog.api_quota_remaining)
+            select(
+                FetchLog.sport_key,
+                FetchLog.fetch_time,
+                FetchLog.api_quota_remaining,
+                FetchLog.api_quota_used,
+            )
             .where(
                 FetchLog.api_quota_remaining.is_not(None),
+                FetchLog.api_quota_used.is_not(None),
                 FetchLog.fetch_time >= datetime.now(UTC) - QUOTA_MAX_AGE,
             )
             .distinct(FetchLog.sport_key)
             .order_by(FetchLog.sport_key, FetchLog.fetch_time.desc())
         )
-        readings: dict[int, tuple[datetime, int]] = {}
+        readings: dict[int, tuple[datetime, int, int]] = {}
         sports: dict[int, list[str]] = {}
-        for sport_key, fetch_time, remaining in result.all():
+        for sport_key, fetch_time, remaining, used in result.all():
             index = api.key_index_for(sport_key)
             sports.setdefault(index, []).append(sport_key)
             if index not in readings or fetch_time > readings[index][0]:
-                readings[index] = (fetch_time, remaining)
+                readings[index] = (fetch_time, remaining, used)
         return {
-            index: KeyQuota(tuple(sports[index]), remaining)
-            for index, (_, remaining) in sorted(readings.items())
+            index: KeyQuota(tuple(sports[index]), remaining, used)
+            for index, (_, remaining, used) in sorted(readings.items())
         }
 
     async def get_data_quality_logs(

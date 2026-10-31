@@ -14,7 +14,13 @@ from rich.console import Console
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
-def _log(minutes_ago: int, quota: int | None, sport_key: str = "soccer_epl") -> FetchLog:
+def _log(
+    minutes_ago: int,
+    quota: int | None,
+    sport_key: str = "soccer_epl",
+    plan: int | None = 500,
+) -> FetchLog:
+    """A fetch log whose key has a ``plan``-credit plan; ``plan=None`` is a pre-migration row."""
     return FetchLog(
         fetch_time=datetime.now(UTC) - timedelta(minutes=minutes_ago),
         sport_key=sport_key,
@@ -22,6 +28,7 @@ def _log(minutes_ago: int, quota: int | None, sport_key: str = "soccer_epl") -> 
         bookmakers_count=1,
         success=True,
         api_quota_remaining=quota,
+        api_quota_used=None if quota is None or plan is None else plan - quota,
     )
 
 
@@ -68,7 +75,10 @@ class TestLatestQuotaByKey:
 
         quotas = await OddsReader(pglite_async_session).get_latest_quota_by_key(self.API)
 
-        assert quotas == {0: KeyQuota(("soccer_epl",), 70), 1: KeyQuota(("basketball_nba",), 497)}
+        assert quotas == {
+            0: KeyQuota(("soccer_epl",), 70, 430),
+            1: KeyQuota(("basketball_nba",), 497, 3),
+        }
 
     @pytest.mark.asyncio
     async def test_sports_sharing_a_key_give_one_reading_from_the_newest_row(
@@ -79,7 +89,7 @@ class TestLatestQuotaByKey:
 
         quotas = await OddsReader(pglite_async_session).get_latest_quota_by_key(self.API)
 
-        assert quotas == {0: KeyQuota(("baseball_mlb", "soccer_epl"), 60)}
+        assert quotas == {0: KeyQuota(("baseball_mlb", "soccer_epl"), 60, 440)}
 
     @pytest.mark.asyncio
     async def test_a_reading_over_a_month_old_is_ignored(self, pglite_async_session):
@@ -88,7 +98,34 @@ class TestLatestQuotaByKey:
 
         quotas = await OddsReader(pglite_async_session).get_latest_quota_by_key(self.API)
 
-        assert quotas == {0: KeyQuota(("soccer_epl",), 70)}
+        assert quotas == {0: KeyQuota(("soccer_epl",), 70, 430)}
+
+    @pytest.mark.asyncio
+    async def test_the_plan_is_used_plus_remaining_from_the_newest_reading(
+        self, pglite_async_session
+    ):
+        pglite_async_session.add_all([_log(30, 18000, plan=20000), _log(5, 17900, plan=20000)])
+        await pglite_async_session.commit()
+
+        quotas = await OddsReader(pglite_async_session).get_latest_quota_by_key(self.API)
+
+        quota = quotas[0]
+        assert (quota.remaining, quota.used, quota.limit) == (17900, 2100, 20000)
+        assert quota.fraction == pytest.approx(0.895)
+
+    @pytest.mark.asyncio
+    async def test_rows_without_a_used_count_are_skipped(self, pglite_async_session):
+        pglite_async_session.add_all(
+            [_log(30, 70), _log(5, 60, plan=None), _log(5, 400, "basketball_nba", plan=None)]
+        )
+        await pglite_async_session.commit()
+
+        quotas = await OddsReader(pglite_async_session).get_latest_quota_by_key(self.API)
+
+        assert quotas == {0: KeyQuota(("soccer_epl",), 70, 430)}
+
+    def test_a_zero_plan_has_a_zero_fraction(self):
+        assert KeyQuota(("soccer_epl",), 0, 0).fraction == 0.0
 
 
 class TestShowQuota:
@@ -102,6 +139,16 @@ class TestShowQuota:
         assert output.index("key 0: soccer_epl") < output.index("key 1: basketball_nba")
         assert "497 (99.4%)" in output
         assert "70 (14.0%)" in output
+
+    @pytest.mark.asyncio
+    async def test_the_total_is_the_keys_plan_not_a_setting(self, pglite_async_session):
+        pglite_async_session.add(_log(5, 17900, plan=20000))
+        await pglite_async_session.commit()
+
+        output = await _run_show_quota(pglite_async_session)
+
+        assert "20,000" in output
+        assert "17,900 (89.5%)" in output
 
     @pytest.mark.asyncio
     async def test_reads_newest_row_with_quota(self, pglite_async_session):
