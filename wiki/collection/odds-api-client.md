@@ -37,10 +37,9 @@ status: stable
 | `/historical/events` | `odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_events` | 1 (`odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_events` docstring) |
 
 - `odds_lambda.data_fetcher.TheOddsAPIClient.get_scores` always sends `daysFrom`, so each call costs 2 and the 1-unit case is unreachable through the client (#441).
-- Bookmakers are a server-side filter and do not change cost.
 - The default quota is 500 requests per key per month (`odds_core.config.APIConfig.quota`, `ODDS_API_QUOTA`); historical endpoints are paid-tier only (inferred from vendor docs, not checked here). Each key in `ODDS_API_KEYS` has its own quota, spent by the sports that use its index. A manual `odds fetch current` therefore costs 3 units by default.
 - `x-requests-remaining` is the balance of the key the call used, and the alert percentages divide it by `ODDS_API_QUOTA` (default 500, the same for every key). On a larger plan the thresholds never fire until it is set (#441).
-- The backfill planner's historical cost estimate is a separate constant ([odds-api-backfill](odds-api-backfill.md)).
+- The gap backfill planner's historical cost estimate is a separate constant; the manifest planner derives a call's cost from its markets and bookmakers ([odds-api-backfill](odds-api-backfill.md#planning-calls)).
 
 ## Related
 

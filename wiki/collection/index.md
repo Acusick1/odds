@@ -15,7 +15,7 @@ Each external source has a fetcher, a job (or manual script) that runs it, and a
 - [Historical ingest scripts](historical-ingest-scripts.md) — scripts/scrape_oddsportal.py, ingest_oddsportal.py, ingest_football_data_uk.py: inputs, matching, ids, snapshot shape, idempotency.
 - [MLB probable pitchers](mlb-probable-pitchers.md) — The MLB Stats API fetcher, the fetch-mlb-probables job, the append-only mlb_probable_pitchers table and its reader, and how the MCP tool reads it.
 - [NBA injury reports, game logs and player stats](nba-injuries-and-stats.md) — The NBA injury-report job and the manual feeds (stats.nba.com game logs, PBPStats player stats): sources, CLIs, writers and event matching.
-- [Odds API historical backfill](odds-api-backfill.md) — odds discover, odds backfill and the GameSelector, GapBackfillPlanner, BackfillExecutor modules.
+- [Odds API historical backfill](odds-api-backfill.md) — Acquisition manifests and the causal call planner, odds discover, odds backfill, GapBackfillPlanner and BackfillExecutor.
 - [Odds API ingestion service](odds-ingestion-service.md) — OddsIngestionService steps and callbacks, the fetch_logs table, and odds fetch current / odds discover upcoming.
 - [OddsPortal scraper](oddsportal-scraper.md) — The OddsPortal HTTP feed client, the adapter that converts its prices, the shared oddsportal_common helpers, the results page archive reader, and odds scrape upcoming.
 - [Polymarket match prices as odds snapshots](polymarket-odds-snapshots.md) — The Polymarket client and settings, how Polymarket's match markets (EPL three-way, NBA two-way) become polymarket odds snapshots, the history grid and its drop rules, attaching matches to events, the backfill command and the fetch-polymarket-odds job.
@@ -35,6 +35,6 @@ Each external source has a fetcher, a job (or manual script) that runs it, and a
 ### How-to guides
 
 - [Add a sport](howto-add-sport.md) — Steps to add a sport: SportKey, suffix, overnight window, league spec, Betfair config, team aliases, job sport allowlists, Terraform rules, heartbeat keys.
-- [Backfill Odds API history (NBA)](howto-backfill-odds-api-history.md) — Steps for discover, plan, execute, scores and status, and the tier-gap route.
+- [Backfill Odds API history](howto-backfill-odds-api-history.md) — Steps to cost an acquisition manifest, and the NBA tier-gap route through discover, gaps, execute, scores and status.
 - [Load historical EPL odds](howto-load-historical-epl-odds.md) — Steps to scrape OddsPortal, ingest it, then ingest football-data.co.uk.
 <!-- pages:end -->

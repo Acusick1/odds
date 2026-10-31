@@ -79,7 +79,7 @@ Both writers link rows to `events` with the same ET window rule: events whose `c
 
 ## Scope and known gaps
 
-- NBA-only: `odds backfill scores` and the stats lookup use `Event.sport_key == "basketball_nba"` in the CLI, and `odds_lambda.polymarket_matching.CANONICAL_TO_ABBREV` in `odds_analytics.feature_groups.collect_event_data`, which loads the NBA-only data beside the market's quotes and each source's raw-target close (the `injuries` and `rest` groups are NBA-only but valid names for any sport's delta targets). `odds backfill plan` and `odds backfill scores` hardcode `sport_key="basketball_nba"` with no `--sport` option (#448; [odds-api-backfill](odds-api-backfill.md)).
+- NBA-only: `odds backfill scores` and the stats lookup use `Event.sport_key == "basketball_nba"` in the CLI, and `odds_lambda.polymarket_matching.CANONICAL_TO_ABBREV` in `odds_analytics.feature_groups.collect_event_data`, which loads the NBA-only data beside the market's quotes and each source's raw-target close (the `injuries` and `rest` groups are NBA-only but valid names for any sport's delta targets). `odds backfill scores` hardcodes `sport_key="basketball_nba"` with no `--sport` option (#448; [odds-api-backfill](odds-api-backfill.md)).
 - `odds_cli.commands.nba_stats.ALL_SEASONS` ends at 2025-26 and `odds_cli.commands.pbpstats.ALL_SEASONS` at 2024-25, and `odds pbpstats backfill` is `fetch --all` over that shorter list. 2025-26 player stats need `--season` (#463). Both `--all` help strings say "2021-22 through current", which is false for PBPStats (#466).
 - An alias gap leaves `event_id` NULL, as a team with no event does; the job warns about those pairs ([event-matching](../storage/event-matching.md)).
 
