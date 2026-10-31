@@ -55,7 +55,7 @@ The quota alerts fire below 100 units (warning) and 50 units (critical) remainin
 ## Where the views disagree
 
 - **Failed calls.** A failed `/odds` call writes no `fetch_logs` row, so it leaves no quota trace (#472; [fetch logs](odds-ingestion-service.md#fetch-logs)).
-- **Historical estimates.** The backfill planner plans, per event id, one fetch per missing tier at the times that tier's `upper_bound` fetch covers, and estimates historical cost from a literal, not from the configured regions or markets, so its estimates drift if those change (#441; [odds-api-backfill](odds-api-backfill.md)).
+- **Historical estimates.** The gap backfill planner plans, per event id, one fetch per missing tier at the times that tier's `upper_bound` fetch covers, and estimates historical cost from a literal, not from the configured regions or markets, so its estimates drift if those change (#441; [odds-api-backfill](odds-api-backfill.md)).
 - **Scores.** `fetch-scores` spends more than the minimum per call because the client always sends `daysFrom` ([results-jobs](results-jobs.md)).
 
 ## Related
