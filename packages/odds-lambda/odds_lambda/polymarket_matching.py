@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from odds_core.team import normalize_team_name
+
 # Polymarket ticker abbreviation → canonical team name
 NBA_ABBREV_MAP: dict[str, str] = {
     "atl": "Atlanta Hawks",
@@ -38,3 +40,12 @@ NBA_ABBREV_MAP: dict[str, str] = {
 
 # Canonical team name → standard NBA abbreviation (used by PBPStats, nba_api)
 CANONICAL_TO_ABBREV: dict[str, str] = {v: k.upper() for k, v in NBA_ABBREV_MAP.items()}
+
+NBA_TEAMS: frozenset[str] = frozenset(NBA_ABBREV_MAP.values())
+
+
+def canonical_nba_team(name: str) -> str | None:
+    """The shared team normalizer's name for ``name`` when it is one of the 30 NBA teams, else
+    ``None``: ESPN's NBA Cup placeholders and All-Star teams, or an unknown spelling."""
+    canonical = normalize_team_name(name)
+    return canonical if canonical in NBA_TEAMS else None

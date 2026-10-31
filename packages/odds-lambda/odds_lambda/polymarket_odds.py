@@ -51,14 +51,6 @@ class Prices:
 
     values: Mapping[Side, float]
 
-    @classmethod
-    def three_way(cls, home: float, draw: float, away: float) -> Prices:
-        return cls({"home": home, "draw": draw, "away": away})
-
-    @classmethod
-    def two_way(cls, home: float, away: float) -> Prices:
-        return cls({"home": home, "away": away})
-
     @property
     def total(self) -> float:
         return sum(self.values.values())
@@ -157,9 +149,9 @@ def _three_way_outcomes(
     """Home, draw and away Yes markets, classified by slug suffix (``-{home3}``, ``-draw``,
     ``-{away3}``)."""
     slug_suffix: dict[str, Side] = {
-        slug_match["home"]: "home",
+        slug_match["first"]: "home",
         DRAW_SLUG_SUFFIX: "draw",
-        slug_match["away"]: "away",
+        slug_match["second"]: "away",
     }
     by_side: dict[Side, dict[str, Any]] = {}
     for market in event.get("markets", []):
@@ -210,12 +202,17 @@ def parse_match_event(
     if outcomes is None:
         return None
 
+    home_team, away_team = sport.team_name(teams["home"]), sport.team_name(teams["away"])
+    if home_team is None or away_team is None:
+        logger.warning("polymarket_unknown_team", ticker=event["slug"])
+        return None
+
     return PolymarketMatch(
         pm_event_id=str(event["id"]),
         ticker=event["slug"],
         start_time=datetime.fromisoformat(event["startTime"]),
-        home_team=sport.team_name(teams["home"]),
-        away_team=sport.team_name(teams["away"]),
+        home_team=home_team,
+        away_team=away_team,
         outcomes=outcomes,
     )
 

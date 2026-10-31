@@ -20,9 +20,9 @@ import httpx
 import structlog
 from odds_core.database import async_session_maker
 from odds_core.models import EventStatus
-from odds_core.team import normalize_team_name
 from odds_core.vocabulary import Source
 
+from odds_lambda.polymarket_matching import canonical_nba_team
 from odds_lambda.storage.event_resolver import ListedGame, Resolution, resolve_event
 from odds_lambda.storage.writers import OddsWriter
 
@@ -34,7 +34,13 @@ SCOREBOARD_URL = "http://site.api.espn.com/apis/site/v2/sports/basketball/nba/sc
 REQUEST_DELAY_SECONDS = 0.5
 _MAX_ATTEMPTS = 3
 _REQUEST_TIMEOUT_SECONDS = 15.0
-_FINAL = "STATUS_FINAL"
+# ESPN's ``season.type`` of preseason games, which no collector prices.
+_PRESEASON = 1
+_STATUSES: dict[str, EventStatus] = {
+    "STATUS_FINAL": EventStatus.FINAL,
+    "STATUS_POSTPONED": EventStatus.POSTPONED,
+    "STATUS_CANCELED": EventStatus.CANCELLED,
+}
 
 
 @dataclass(frozen=True)
@@ -43,7 +49,8 @@ class EspnNbaGame:
     commence_time: datetime
     home_team: str
     away_team: str
-    final: bool
+    # FINAL, POSTPONED or CANCELLED when ESPN says so, else None (scheduled or in play).
+    status: EventStatus | None
     home_score: int | None
     away_score: int | None
 
@@ -65,34 +72,48 @@ class SyncReport:
     created: int = 0
     matched: int = 0
     finalised: int = 0
+    rescheduled: int = 0
     errors: list[str] = field(default_factory=list)
 
 
-def _team_name(competitor: dict[str, Any]) -> str:
-    return normalize_team_name(competitor["team"]["displayName"])
-
-
 def parse_scoreboard(data: dict[str, Any]) -> list[EspnNbaGame]:
-    """The games of one scoreboard response; an event without two competitors is skipped."""
+    """The regular-season and playoff games of one scoreboard response between two NBA teams.
+
+    Skipped: events without two competitors, preseason games, games whose start ESPN marks
+    invalid (NBA Cup "TBD @ TBD" placeholders) and games with a side that is not one of the 30
+    teams (placeholders, All-Star teams). A placeholder would otherwise take the real game's
+    ESPN id and keep the event it created.
+    """
     games: list[EspnNbaGame] = []
     for event in data.get("events", []):
         competition = (event.get("competitions") or [{}])[0]
         sides = {c.get("homeAway"): c for c in competition.get("competitors", [])}
         if "home" not in sides or "away" not in sides or not event.get("date"):
             continue
-        final = competition.get("status", {}).get("type", {}).get("name") == _FINAL
+        if event.get("season", {}).get("type") == _PRESEASON:
+            continue
+        if competition.get("timeValid") is False or event.get("timeValid") is False:
+            continue
+        home = canonical_nba_team(sides["home"]["team"].get("displayName", ""))
+        away = canonical_nba_team(sides["away"]["team"].get("displayName", ""))
+        if home is None or away is None:
+            continue
+        status = _STATUSES.get(competition.get("status", {}).get("type", {}).get("name", ""))
         scores = (sides["home"].get("score"), sides["away"].get("score"))
+        if status is EventStatus.FINAL and None in scores:
+            status = None
+        scored = status is EventStatus.FINAL
         games.append(
             EspnNbaGame(
                 espn_id=str(event["id"]),
                 commence_time=datetime.fromisoformat(
                     event["date"].replace("Z", "+00:00")
                 ).astimezone(UTC),
-                home_team=_team_name(sides["home"]),
-                away_team=_team_name(sides["away"]),
-                final=final and None not in scores,
-                home_score=int(scores[0]) if final and scores[0] is not None else None,
-                away_score=int(scores[1]) if final and scores[1] is not None else None,
+                home_team=home,
+                away_team=away,
+                status=status,
+                home_score=int(scores[0]) if scored else None,
+                away_score=int(scores[1]) if scored else None,
             )
         )
     return games
@@ -119,8 +140,8 @@ async def fetch_games(day: date, client: httpx.AsyncClient) -> list[EspnNbaGame]
 
 
 async def sync_games(games: list[EspnNbaGame], report: SyncReport, *, apply: bool) -> None:
-    """Resolve each game to its event (creating it when none matches) and set a finished game's
-    event FINAL with its score. One transaction per game, rolled back unless ``apply``."""
+    """Resolve each game to its event (creating it when none matches) and set the event of a finished game
+    FINAL with its score, and of a postponed or cancelled one POSTPONED or CANCELLED. One transaction per game, rolled back unless ``apply``."""
     for game in games:
         report.games += 1
         try:
@@ -131,14 +152,15 @@ async def sync_games(games: list[EspnNbaGame], report: SyncReport, *, apply: boo
                 report.created += int(created)
                 report.matched += int(not created)
                 if (
-                    game.final
-                    and event.status is not EventStatus.FINAL
-                    and event.status.can_become(EventStatus.FINAL)
+                    game.status is not None
+                    and event.status is not game.status
+                    and event.status.can_become(game.status)
                 ):
                     await OddsWriter(session).update_event_status(
-                        event.id, EventStatus.FINAL, game.home_score, game.away_score
+                        event.id, game.status, game.home_score, game.away_score
                     )
-                    report.finalised += 1
+                    report.finalised += int(game.status is EventStatus.FINAL)
+                    report.rescheduled += int(game.status is not EventStatus.FINAL)
                 if apply:
                     await session.commit()
                 else:

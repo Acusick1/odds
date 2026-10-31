@@ -93,6 +93,23 @@ async def main(ctx: JobContext) -> None:
         logger.info("fetch_espn_fixtures_postponed_marked", events=postponed)
 
 
+async def _warn_if_nba_listing_unexpectedly_empty() -> None:
+    """Warn when ESPN lists no NBA game although events are scheduled in the window; the
+    off-season is silent."""
+    from odds_lambda.espn_nba_schedule import UPCOMING_DAYS
+
+    async with async_session_maker() as session:
+        calendar = await event_calendar(
+            session, NBA_SPORT_KEY, now=datetime.now(UTC), horizon=timedelta(days=UPCOMING_DAYS)
+        )
+    if calendar.kickoffs_in_horizon:
+        await send_job_warning(
+            "espn_nba_empty:fetch-espn-fixtures",
+            f"fetch-espn-fixtures-nba: ESPN listed no NBA game with "
+            f"{calendar.kickoffs_in_horizon} event(s) scheduled in the next {UPCOMING_DAYS} days",
+        )
+
+
 async def _sync_nba_schedule() -> None:
     """Create the NBA events of the next weeks and settle the finished ones; raises when any
     game failed, after the others are stored."""
@@ -109,6 +126,7 @@ async def _sync_nba_schedule() -> None:
             created=report.created,
             matched=report.matched,
             finalised=report.finalised,
+            rescheduled=report.rescheduled,
             errors=len(report.errors),
         )
         if report.errors:
@@ -116,10 +134,7 @@ async def _sync_nba_schedule() -> None:
                 f"{len(report.errors)} NBA games failed to sync: " + "; ".join(report.errors[:3])
             )
         if report.games == 0:
-            await send_job_warning(
-                "espn_nba_empty:fetch-espn-fixtures",
-                "fetch-espn-fixtures-nba: ESPN listed no NBA game in the window",
-            )
+            await _warn_if_nba_listing_unexpectedly_empty()
 
 
 # How many days ahead the upcoming fetch reaches. 30 days covers the agent's

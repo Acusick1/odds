@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from re import Pattern, compile, escape
 from typing import Any, Literal
 
@@ -23,11 +22,11 @@ def epl_team_name(team: Mapping[str, Any]) -> str:
     return normalize_team_name(_CLUB_SUFFIX.sub("", team["name"]))
 
 
-def nba_team_name(team: Mapping[str, Any]) -> str:
-    """The full name of a Polymarket NBA team, which Polymarket lists by nickname ("Lakers")
-    with a ticker abbreviation ("lal") that identifies it."""
-    abbreviation = str(team.get("abbreviation", "")).lower()
-    return NBA_ABBREV_MAP.get(abbreviation) or normalize_team_name(team["name"])
+def nba_team_name(team: Mapping[str, Any]) -> str | None:
+    """The full name of a Polymarket NBA team, identified by its ticker abbreviation ("lal"); the
+    nickname ("Lakers", "Spurs") is ambiguous across sports, so a team with an unknown
+    abbreviation has no name and its match is dropped."""
+    return NBA_ABBREV_MAP.get(str(team.get("abbreviation", "")).lower())
 
 
 @dataclass(frozen=True)
@@ -40,21 +39,12 @@ class PolymarketSportConfig:
     has_draw: bool
     market_key: str
     # The events-table name of a team entry of a Gamma event.
-    team_name: Callable[[Mapping[str, Any]], str]
-    # US sports list the away team first in a ticker (nba-den-phx is Denver at Phoenix).
-    away_first_in_slug: bool
-    # Where the backfill starts by default: the first EPL market, and the 2026-27 NBA season opener.
-    backfill_since: datetime
-
-    @property
-    def sides(self) -> tuple[Side, ...]:
-        return ("home", "draw", "away") if self.has_draw else ("home", "away")
+    team_name: Callable[[Mapping[str, Any]], str | None]
 
     @property
     def match_slug(self) -> Pattern[str]:
-        first, second = ("away", "home") if self.away_first_in_slug else ("home", "away")
         return compile(
-            rf"^{escape(self.ticker_prefix)}-(?P<{first}>[a-z0-9]+)-(?P<{second}>[a-z0-9]+)-\d{{4}}-\d{{2}}-\d{{2}}$"
+            rf"^{escape(self.ticker_prefix)}-(?P<first>[a-z0-9]+)-(?P<second>[a-z0-9]+)-\d{{4}}-\d{{2}}-\d{{2}}$"
         )
 
 
@@ -68,8 +58,6 @@ POLYMARKET_SPORTS: dict[SportKey, PolymarketSportConfig] = {
         has_draw=False,
         market_key="h2h",
         team_name=nba_team_name,
-        away_first_in_slug=True,
-        backfill_since=datetime(2026, 10, 21, tzinfo=UTC),
     ),
     "soccer_epl": PolymarketSportConfig(
         sport_key="soccer_epl",
@@ -80,7 +68,5 @@ POLYMARKET_SPORTS: dict[SportKey, PolymarketSportConfig] = {
         has_draw=True,
         market_key="1x2",
         team_name=epl_team_name,
-        away_first_in_slug=False,
-        backfill_since=datetime(2025, 8, 1, tzinfo=UTC),
     ),
 }

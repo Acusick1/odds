@@ -65,7 +65,7 @@ class TestUnsettledEvents:
                 _event(5, NOW - timedelta(days=3), EventStatus.CANCELLED),
                 _event(6, NOW - timedelta(hours=3)),
                 _event(7, NOW - timedelta(days=200)),
-                _event(8, NOW - timedelta(days=3), sport_key="basketball_nba"),
+                _event(8, NOW - timedelta(days=3), sport_key="americanfootball_nfl"),
             ]
         )
         await session.flush()
@@ -74,6 +74,19 @@ class TestUnsettledEvents:
 
         assert issues == []
         send.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_alerts_on_a_stuck_nba_event_of_the_current_season(
+        self, pglite_async_session
+    ) -> None:
+        session = pglite_async_session
+        session.add(_event(8, NOW - timedelta(days=3), sport_key="basketball_nba"))
+        await session.flush()
+
+        issues, send = await _check(session)
+
+        assert len(issues) == 1 and "basketball_nba" in issues[0]
+        send.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_alerts_on_stuck_mlb_events_of_the_calendar_year(

@@ -410,13 +410,6 @@ class TestNbaBackfill:
         away = {round(1 / float(p.price), 4) for p in prices if p.outcome is PriceOutcome.AWAY}
         assert (home, away) == ({0.69}, {0.31})
 
-    async def test_default_since_of_the_sport_is_the_season_opener(self) -> None:
-        from odds_lambda.polymarket_sports import POLYMARKET_SPORTS
-
-        assert POLYMARKET_SPORTS["basketball_nba"].backfill_since == datetime(
-            2026, 10, 21, tzinfo=UTC
-        )
-
     async def test_rerun_adds_nothing(
         self, pglite_async_session: Any, patch_nba: FakeClient
     ) -> None:

@@ -32,8 +32,8 @@ The Odds API bookmakers and markets are config (`bookmakers`, a per-sport map, a
    - The job reads its overnight window from step 3 ([fetch-oddsportal-job](fetch-oddsportal-job.md#leagues)).
 5. If Betfair lists it, add an entry to `odds_lambda.betfair.constants.SPORT_CONFIG`, with its match odds market and any other market types to collect (a totals market carries its line).
    - The Betfair allowlist in `odds_lambda.scheduling.jobs._JOB_SPORTS` is derived from that map, so no allowlist edit is needed ([betfair-exchange](betfair-exchange.md)).
-6. If Polymarket lists its match markets, add an entry to `odds_lambda.polymarket_sports.POLYMARKET_SPORTS` (`has_draw` for a three-way sport); the `fetch-polymarket-odds` allowlist follows that dict ([Polymarket odds snapshots](polymarket-odds-snapshots.md#sport-config-and-discovery)).
-7. Add team aliases in `odds_core.team`.
+6. If Polymarket lists its match markets, add an entry to `odds_lambda.polymarket_sports.POLYMARKET_SPORTS` (`has_draw` for a three-way sport, and a `team_name` function); the `fetch-polymarket-odds` allowlist follows that dict ([Polymarket odds snapshots](polymarket-odds-snapshots.md#sport-config-and-discovery)).
+7. Add team aliases in `odds_core.team`, the one alias map (`odds_lambda.polymarket_sports.PolymarketSportConfig.team_name` only picks the Polymarket spelling).
    - Event matching compares normalised names; unknown names pass through unchanged and surface as duplicate events or NULL `event_id` ([event-matching](../storage/event-matching.md)).
 8. Add the sport to each allowlist in `odds_lambda.scheduling.jobs._JOB_SPORTS` whose job should run for it.
    - A job with an allowlist skips every sport not on it, so a new sport gets none of those jobs until added; `fetch-oddsportal-results` is EPL-only there, so a sport settled from OddsPortal results is added to it; per-sport jobs without an allowlist run for every sport in `data_collection.sports` ([local-scheduler](../scheduling/local-scheduler.md#bootstrap-jobs-and-cron-table)).

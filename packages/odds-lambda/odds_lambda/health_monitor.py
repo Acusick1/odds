@@ -60,7 +60,7 @@ from odds_lambda.tier_utils import calculate_tier
 logger = structlog.get_logger()
 
 LEAGUE_SPORTS: tuple[str, ...] = ("soccer_epl",)
-UNSETTLED_SPORTS: tuple[str, ...] = ("soccer_epl", "baseball_mlb")
+UNSETTLED_SPORTS: tuple[str, ...] = ("soccer_epl", "baseball_mlb", "basketball_nba")
 UNSETTLED_AGE = timedelta(hours=24)
 EVENT_IDS_SHOWN = 10
 UNSETTLED_ALERT_MINUTES = 24 * 60

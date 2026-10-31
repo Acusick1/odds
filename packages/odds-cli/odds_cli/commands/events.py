@@ -396,7 +396,7 @@ async def _sync_nba_games(since: date, until: date, apply: bool) -> None:
 
 @app.command("sync-nba-games")
 def sync_nba_games(
-    since: str = typer.Option("2026-10-21", "--since", help="First US game day (YYYY-MM-DD)"),
+    since: str = typer.Option(..., "--since", help="First US game day (YYYY-MM-DD)"),
     until: str | None = typer.Option(None, "--until", help="Last game day; default today"),
     apply: bool = typer.Option(False, "--apply", help="Write; without it each game is rolled back"),
 ) -> None:

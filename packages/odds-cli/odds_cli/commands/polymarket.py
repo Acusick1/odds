@@ -17,9 +17,7 @@ console = Console()
 @app.command("backfill-odds")
 def backfill_odds(
     sport: str = typer.Option("soccer_epl", "--sport", help="Sport key Polymarket lists"),
-    since: str | None = typer.Option(
-        None, "--since", help="Earliest kick-off (UTC date); default is the sport's backfill start"
-    ),
+    since: str = typer.Option(..., "--since", help="Earliest kick-off (UTC date)"),
     limit: int | None = typer.Option(None, "--limit", help="Backfill at most this many events"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Fetch and resample without writing"),
 ):
@@ -37,15 +35,10 @@ def backfill_odds(
             f"[red]Unknown sport {sport}; use one of {', '.join(POLYMARKET_SPORTS)}[/red]"
         )
         raise typer.Exit(1)
-    start = (
-        POLYMARKET_SPORTS[cast(SportKey, sport)].backfill_since
-        if since is None
-        else datetime.fromisoformat(since).replace(tzinfo=UTC)
-    )
     report = asyncio.run(
         backfill_sport(
             cast(SportKey, sport),
-            since=start,
+            since=datetime.fromisoformat(since).replace(tzinfo=UTC),
             limit=limit,
             dry_run=dry_run,
         )
@@ -91,7 +84,9 @@ async def _discover_async():
         task = progress.add_task("Fetching events from Gamma API...", total=None)
         try:
             async with PolymarketClient() as client:
-                events = await client.get_events("basketball_nba", active=True, closed=False)
+                events = await client.get_all_events(
+                    "basketball_nba", active=True, closed=False, ends_after=datetime.now(UTC)
+                )
             progress.update(task, completed=True)
         except Exception as e:
             progress.stop()

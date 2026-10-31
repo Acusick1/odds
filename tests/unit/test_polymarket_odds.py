@@ -153,7 +153,7 @@ class TestGrid:
 
 class TestResample:
     def test_flat_series_fills_whole_grid(self) -> None:
-        prices = Prices.three_way(0.5, 0.25, 0.25)
+        prices = Prices({"home": 0.5, "draw": 0.25, "away": 0.25})
         start = KICKOFF - MAX_HORIZON - MAX_STALENESS
         result = resample(flat_series(prices, start, KICKOFF), KICKOFF, KICKOFF)
 
@@ -173,13 +173,13 @@ class TestResample:
 
         result = resample(series, KICKOFF, early + timedelta(minutes=10))
 
-        assert result.points[0].prices == Prices.three_way(0.5, 0.3, 0.2)
+        assert result.points[0].prices == Prices({"home": 0.5, "draw": 0.3, "away": 0.2})
         assert result.points[-1].time == early + timedelta(minutes=10)
-        assert result.points[-1].prices == Prices.three_way(0.6, 0.25, 0.15)
+        assert result.points[-1].prices == Prices({"home": 0.6, "draw": 0.25, "away": 0.15})
 
     def test_never_looks_past_the_cutoff(self) -> None:
         start = KICKOFF - timedelta(hours=1)
-        series = flat_series(Prices.three_way(0.5, 0.25, 0.25), start, KICKOFF)
+        series = flat_series(Prices({"home": 0.5, "draw": 0.25, "away": 0.25}), start, KICKOFF)
         cutoff = KICKOFF - timedelta(minutes=20)
 
         result = resample(series, KICKOFF, cutoff)
@@ -189,7 +189,7 @@ class TestResample:
 
     def test_stale_side_drops_the_grid_point(self) -> None:
         start = KICKOFF - timedelta(minutes=10)
-        series = flat_series(Prices.three_way(0.5, 0.25, 0.25), start, KICKOFF)
+        series = flat_series(Prices({"home": 0.5, "draw": 0.25, "away": 0.25}), start, KICKOFF)
         series["draw"] = [(start - 2 * MAX_STALENESS, 0.25)]
 
         result = resample(series, KICKOFF, KICKOFF)
@@ -199,7 +199,7 @@ class TestResample:
 
     def test_prices_outside_open_interval_are_missing(self) -> None:
         start = KICKOFF - timedelta(minutes=10)
-        series = flat_series(Prices.three_way(1.0, 0.0, 0.0), start, KICKOFF)
+        series = flat_series(Prices({"home": 1.0, "draw": 0.0, "away": 0.0}), start, KICKOFF)
 
         result = resample(series, KICKOFF, KICKOFF)
 
@@ -208,7 +208,7 @@ class TestResample:
 
     def test_prices_off_sum_are_counted_and_dropped(self) -> None:
         start = KICKOFF - timedelta(minutes=10)
-        series = flat_series(Prices.three_way(0.5, 0.4, 0.4), start, KICKOFF)
+        series = flat_series(Prices({"home": 0.5, "draw": 0.4, "away": 0.4}), start, KICKOFF)
 
         result = resample(series, KICKOFF, KICKOFF)
 
@@ -217,7 +217,7 @@ class TestResample:
 
     def test_sum_just_inside_tolerance_is_kept(self) -> None:
         start = KICKOFF - timedelta(minutes=10)
-        series = flat_series(Prices.three_way(0.51, 0.26, 0.25), start, KICKOFF)
+        series = flat_series(Prices({"home": 0.51, "draw": 0.26, "away": 0.25}), start, KICKOFF)
 
         result = resample(series, KICKOFF, KICKOFF)
 
@@ -245,7 +245,9 @@ class TestBuildEnvelope:
     def test_price_rows_hold_the_yes_probabilities(self, gamma_event) -> None:
         match = parse_match_event(gamma_event(), EPL)
         assert match is not None
-        envelope = build_envelope(match, EPL, Prices.three_way(0.53, 0.25, 0.22), KICKOFF)
+        envelope = build_envelope(
+            match, EPL, Prices({"home": 0.53, "draw": 0.25, "away": 0.22}), KICKOFF
+        )
 
         [market] = expand_envelope(envelope, Source.POLYMARKET, "Bournemouth", "Chelsea").markets
         mids = {p.outcome: 1 / float(p.price) for p in market.prices if p.side is PriceSide.MID}
@@ -258,9 +260,9 @@ class TestBuildEnvelope:
         match = parse_match_event(gamma_event(), EPL)
         assert match is not None
 
-        outcomes = build_envelope(match, EPL, Prices.three_way(0.53, 0.25, 0.22), KICKOFF)[
-            "bookmakers"
-        ][0]["markets"][0]["outcomes"]
+        outcomes = build_envelope(
+            match, EPL, Prices({"home": 0.53, "draw": 0.25, "away": 0.22}), KICKOFF
+        )["bookmakers"][0]["markets"][0]["outcomes"]
 
         assert all("price" not in o for o in outcomes)
         assert sorted(o["price_decimal"] for o in outcomes) == pytest.approx(
@@ -271,9 +273,9 @@ class TestBuildEnvelope:
         match = parse_match_event(gamma_event(), EPL)
         assert match is not None
 
-        meta = build_envelope(match, EPL, Prices.three_way(0.53, 0.25, 0.22), KICKOFF)[
-            "bookmakers"
-        ][0]["polymarket_meta"]
+        meta = build_envelope(
+            match, EPL, Prices({"home": 0.53, "draw": 0.25, "away": 0.22}), KICKOFF
+        )["bookmakers"][0]["polymarket_meta"]
 
         assert meta["yes_probabilities"] == {"home": 0.53, "draw": 0.25, "away": 0.22}
         assert meta["pm_event_id"] == "900"
@@ -284,7 +286,11 @@ class TestBuildEnvelope:
         assert match is not None
 
         meta = build_envelope(
-            match, EPL, Prices.three_way(0.53, 0.25, 0.22), KICKOFF, include_quotes=True
+            match,
+            EPL,
+            Prices({"home": 0.53, "draw": 0.25, "away": 0.22}),
+            KICKOFF,
+            include_quotes=True,
         )["bookmakers"][0]["polymarket_meta"]
 
         assert meta["best_bid"] == {"home": 0.52, "draw": 0.24, "away": 0.20}
@@ -292,8 +298,7 @@ class TestBuildEnvelope:
 
 
 class TestSportConfig:
-    def test_epl_has_three_way_markets_and_no_nba_ids(self) -> None:
-        assert EPL.sides == ("home", "draw", "away")
+    def test_epl_series_and_market_key(self) -> None:
         assert (EPL.series_id, EPL.tag_id, EPL.market_key) == ("10188", None, "1x2")
 
     def test_match_slug_per_sport(self) -> None:
@@ -414,16 +419,26 @@ class TestTwoWayMatch:
         assert match is not None
         assert match.midpoints() is None
 
-    @pytest.mark.parametrize("abbreviation", ["lac", "phi", "por", "nyk"])
-    def test_every_team_resolves_by_abbreviation(self, abbreviation: str) -> None:
-        name = NBA.team_name({"name": "Unlisted", "abbreviation": abbreviation})
+    @pytest.mark.parametrize(
+        ("abbreviation", "name"),
+        [
+            ("lac", "Los Angeles Clippers"),
+            ("phi", "Philadelphia 76ers"),
+            ("por", "Portland Trail Blazers"),
+            ("nyk", "New York Knicks"),
+        ],
+    )
+    def test_team_resolves_by_abbreviation(self, abbreviation: str, name: str) -> None:
+        assert NBA.team_name({"name": "Unlisted", "abbreviation": abbreviation}) == name
 
-        assert name in {
-            "Los Angeles Clippers",
-            "Philadelphia 76ers",
-            "Portland Trail Blazers",
-            "New York Knicks",
-        }
+    @pytest.mark.parametrize("team", [{"name": "Spurs"}, {"name": "Spurs", "abbreviation": "xyz"}])
+    def test_a_nickname_without_a_known_abbreviation_is_not_a_team(self, team: dict) -> None:
+        assert NBA.team_name(team) is None
+
+    def test_a_match_with_an_unknown_team_is_dropped(self, gamma_nba_event) -> None:
+        event = gamma_nba_event(home=("Stars", "str"))
+
+        assert parse_match_event(event, NBA) is None
 
     def test_ignores_exact_margin_and_prop_events(self, gamma_nba_event) -> None:
         assert (
@@ -461,7 +476,7 @@ class TestTwoWayMatch:
         match = parse_match_event(gamma_nba_event(), NBA)
         assert match is not None
 
-        envelope = build_envelope(match, NBA, Prices.two_way(0.69, 0.31), NBA_START)
+        envelope = build_envelope(match, NBA, Prices({"home": 0.69, "away": 0.31}), NBA_START)
 
         [market] = envelope["bookmakers"][0]["markets"]
         assert market["key"] == "h2h"
@@ -477,10 +492,10 @@ class TestTwoWayMatch:
 
     def test_resample_over_two_sides(self) -> None:
         start = NBA_START - timedelta(hours=2)
-        series = flat_series(Prices.two_way(0.6, 0.4), start, NBA_START)
+        series = flat_series(Prices({"home": 0.6, "away": 0.4}), start, NBA_START)
 
         result = resample(series, NBA_START, NBA_START)
 
         assert result.points
-        assert all(point.prices == Prices.two_way(0.6, 0.4) for point in result.points)
+        assert all(point.prices == Prices({"home": 0.6, "away": 0.4}) for point in result.points)
         assert result.missing == 0 or result.points[0].time >= start
