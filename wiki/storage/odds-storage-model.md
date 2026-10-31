@@ -20,7 +20,7 @@ A fetch of one event from one source becomes one `odds_core.models.OddsSnapshot`
 
 ## One shape for every source
 
-Every writer, live or historical, builds an envelope in one shape ([envelope format](odds-tables.md#envelope-format)) and hands it to `odds_lambda.storage.shaped_snapshots.store_shaped_snapshot`, which reads it with `odds_lambda.price_rows.expand_envelope` ([Writing price rows](price-tables.md#writing-price-rows)). The source-specific parsing (team names to home and away, bookmaker aliases, Betfair runners, Polymarket probabilities, lay and traded sides) happens there, once, at write time, so no reader parses JSON (#663). What a snapshot's time means is a column, `time_basis`, not something a reader infers from the source (#662).
+Every writer, live or historical, builds an envelope in one shape ([envelope format](odds-tables.md#envelope-format)) and hands it to `odds_lambda.storage.shaped_snapshots.store_shaped_snapshot`, which reads it with `odds_lambda.price_rows.expand_envelope` (a market element's own `last_update` and `betfair_matched` take precedence over its bookmaker entry's) ([Writing price rows](price-tables.md#writing-price-rows)). The source-specific parsing (team names to home and away, bookmaker aliases, Betfair runners, Polymarket probabilities, lay and traded sides) happens there, once, at write time, so no reader parses JSON (#663). What a snapshot's time means is a column, `time_basis`, not something a reader infers from the source (#662).
 
 ## Why prices are rows
 

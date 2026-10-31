@@ -189,7 +189,10 @@ FEED_MARKETS: dict[str, FeedMarketSpec] = {
     ),
     # Basketball over/under and Asian handicap: the whole ladder comes in one request per
     # scope, and bookmakers are split between scopes 1 and 2 (all UK books are in one or
-    # the other).
+    # the other). The site labels scope 1 "FT including OT" and scope 2 "Full Time", but in
+    # three live games scope 2's books quoted the same main lines and the same de-vigged
+    # P(over) within about 1pp of scope 1's, where a regulation-only market would sit 2-3pp
+    # lower, so both are overtime-inclusive and are read as one market.
     "totals_ladder": FeedMarketSpec(
         betting_type=2,
         scopes=(1, 2),
@@ -209,7 +212,9 @@ FEED_MARKETS: dict[str, FeedMarketSpec] = {
     ),
 }
 
-_LADDER_KEY = re.compile(r"^E-(\d+)-(\d+)-0-(-?\d+(?:\.\d+)?)-0$")
+# The key's line is lossy (the site strips trailing zeros: ``E-5-1-0-1-0`` is handicap 10),
+# so it only filters type and scope; the line is the market's ``handicapValue``.
+_LADDER_KEY = re.compile(r"^E-(\d+)-(\d+)-0-.+-0$")
 
 
 @functools.cache
@@ -434,19 +439,32 @@ def extract_market(
         raise OddsPortalError("unexpected feed shape: 'd.oddsdata.back' is not an object")
     if spec.ladder:
         markets = [
-            (float(match.group(3)), market)
+            (_handicap_value(market), market)
             for raw_key, market in back.items()
             if (match := _LADDER_KEY.match(raw_key))
             and (int(match.group(1)), int(match.group(2))) == (spec.betting_type, scope)
+            and isinstance(market, dict)
         ]
     else:
         markets = [(spec.point, back.get(f"E-{spec.betting_type}-{scope}-0-{spec.handicap}-0"))]
 
     result: list[BookmakerPrices] = []
     for line, market in markets:
-        if isinstance(market, dict):
-            result.extend(_market_prices(market, spec, names, line))
+        if not isinstance(market, dict):
+            continue
+        if spec.ladder and line is None:
+            logger.warning("oddsportal_ladder_line_missing", market=spec.pipeline_key)
+            continue
+        result.extend(_market_prices(market, spec, names, line))
     return result
+
+
+def _handicap_value(market: dict[str, Any]) -> float | None:
+    try:
+        value = float(market["handicapValue"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) else None
 
 
 def _market_prices(

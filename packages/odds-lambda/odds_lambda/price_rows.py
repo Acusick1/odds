@@ -289,7 +289,7 @@ def _market_of(reader: _Reader, raw_market: Mapping[str, Any]) -> tuple[Market, 
 
 
 def _read_retail(reader: _Reader, entry: Mapping[str, Any], raw_key: str) -> None:
-    matched = entry.get("betfair_matched") or {}
+    entry_matched = entry.get("betfair_matched") or {}
     entry_changed = _changed_at(reader.source, entry.get("last_update"))
     claimed: dict[Market, str | None] = {}
     for raw_market in entry.get("markets") or []:
@@ -303,6 +303,7 @@ def _read_retail(reader: _Reader, entry: Mapping[str, Any], raw_key: str) -> Non
         if book is None:
             continue
         changed = _changed_at(reader.source, raw_market.get("last_update")) or entry_changed
+        matched = raw_market.get("betfair_matched") or entry_matched
         for raw_outcome in raw_market.get("outcomes") or []:
             name = str(raw_outcome.get("name") or "")
             outcome = reader.outcome_of(name, market)

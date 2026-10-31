@@ -753,7 +753,7 @@ class TestSelectMainLineWindow:
 
         kept = select_main_line_window(rows, spec.line_window)
 
-        assert {r.line for r in kept} == {6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.5}
+        assert {r.line for r in kept} == {6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0, 10.5}
         assert len({r.bookmaker_id for r in kept if r.line == 8.5}) == 16
 
 
@@ -780,7 +780,11 @@ class TestLadderFetch:
         self, encrypt_payload: Encrypt, sleeps: list[float]
     ) -> None:
         def feed(scope: int, price: float) -> dict[str, Any]:
-            market = {"odds": {"16": [price, price]}, "act": {"16": True}}
+            market = {
+                "odds": {"16": [price, price]},
+                "act": {"16": True},
+                "handicapValue": "220.50",
+            }
             return _feed(market, key=f"E-2-{scope}-0-220.5-0")
 
         client = FakeClient(
@@ -790,3 +794,39 @@ class TestLadderFetch:
         rows = await client.fetch_market(NBA_EVENT, "totals_ladder", NBA_CONTEXT)
 
         assert [(r.name, r.prices) for r in rows] == [("bet365", (1.9, 1.9))]
+
+
+class TestLadderLineIsTheHandicapValue:
+    """The feed key strips trailing zeros (``E-5-1-0-1-0`` is handicap 10), so the line is read
+    from ``handicapValue``."""
+
+    def test_a_spread_of_ten_is_not_read_as_one(self, oddsportal_fixtures: Path) -> None:
+        spec = FEED_MARKETS["spreads_ladder"]
+        feed = _nba_feed(oddsportal_fixtures, "spreads", 1)
+        assert feed["d"]["oddsdata"]["back"]["E-5-1-0-1-0"]["handicapValue"] == "10.00"
+
+        lines = {r.line for r in extract_market(feed, spec, NBA_NAMES, 1)}
+
+        assert 10.0 in lines
+
+    def test_a_negative_spread_of_ten_keeps_its_sign(self, oddsportal_fixtures: Path) -> None:
+        spec = FEED_MARKETS["spreads_ladder"]
+        feed = _nba_feed(oddsportal_fixtures, "spreads", 2)
+        assert feed["d"]["oddsdata"]["back"]["E-5-2-0--1-0"]["handicapValue"] == "-10.00"
+
+        assert -10.0 in {r.line for r in extract_market(feed, spec, NBA_NAMES, 2)}
+
+    def test_a_total_of_230_is_kept(self, oddsportal_fixtures: Path) -> None:
+        spec = FEED_MARKETS["totals_ladder"]
+        feed = _nba_feed(oddsportal_fixtures, "totals", 1)
+        assert feed["d"]["oddsdata"]["back"]["E-2-1-0-23-0"]["handicapValue"] == "230.00"
+
+        lines = {r.line for r in extract_market(feed, spec, NBA_NAMES, 1)}
+
+        assert 230.0 in lines
+        assert 23.0 not in lines
+
+    def test_a_market_without_a_handicap_value_is_skipped(self) -> None:
+        feed = _feed({"odds": {"16": [1.9, 1.9]}, "act": {"16": True}}, key="E-2-1-0-23-0")
+
+        assert extract_market(feed, FEED_MARKETS["totals_ladder"], NAMES, 1) == []

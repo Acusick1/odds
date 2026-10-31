@@ -60,6 +60,19 @@ def _outcomes(
     return outcomes
 
 
+def _line_market(
+    event: ListingEvent, spec: FeedMarketSpec, row: BookmakerPrices, updated: datetime
+) -> dict[str, Any]:
+    market: dict[str, Any] = {
+        "key": spec.pipeline_key,
+        "last_update": _iso_z(updated),
+        "outcomes": _outcomes(event, spec, row),
+    }
+    if row.volumes is not None:
+        market["betfair_matched"] = dict(zip(spec.outcomes, row.volumes, strict=True))
+    return market
+
+
 def _iso_z(moment: datetime) -> str:
     return moment.isoformat().replace("+00:00", "Z")
 
@@ -89,28 +102,28 @@ def convert_market(
     for bk in bookmakers:
         by_book.setdefault((bk.bookmaker_id, bk.name), []).append(bk)
 
+    def stamp(row: BookmakerPrices) -> datetime:
+        # The bookmaker's own change time is its update time; the validator rejects
+        # future timestamps, so cap it at the scrape time.
+        return min(row.last_change, scraped_at) if row.last_change else scraped_at
+
     entries: list[dict[str, Any]] = []
     for rows in by_book.values():
         first = rows[0]
-        # The bookmaker's own change time is its update time; the validator rejects
-        # future timestamps, so cap it at the scrape time.
-        changes = [r.last_change for r in rows if r.last_change]
-        last_update = min(max(changes), scraped_at) if changes else scraped_at
         entry: dict[str, Any] = {
             "key": normalize_bookmaker_key(first.name),
             "title": first.name,
-            "last_update": _iso_z(last_update),
-            "markets": [
-                {
-                    "key": spec.pipeline_key,
-                    "outcomes": [o for r in rows for o in _outcomes(event, spec, r)],
-                }
-            ],
+            "last_update": _iso_z(max(stamp(r) for r in rows)),
         }
-        # Volumes are per outcome and the entry's rows would all take them, so a market
-        # quoting several lines carries none.
-        if first.volumes is not None and not spec.ladder:
-            entry["betfair_matched"] = dict(zip(spec.outcomes, first.volumes, strict=True))
+        if spec.ladder:
+            # Each line is its own market element with its own change time and volumes.
+            entry["markets"] = [_line_market(event, spec, r, stamp(r)) for r in rows]
+        else:
+            entry["markets"] = [
+                {"key": spec.pipeline_key, "outcomes": _outcomes(event, spec, first)}
+            ]
+            if first.volumes is not None:
+                entry["betfair_matched"] = dict(zip(spec.outcomes, first.volumes, strict=True))
         entries.append(entry)
 
     if not entries:

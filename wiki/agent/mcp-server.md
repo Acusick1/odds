@@ -55,7 +55,7 @@ status: stable
 
 ## Shared vocabulary
 
-Every `event_id` argument is the integer `events.id`. `MarketKey = Literal["h2h", "1x2", "totals", "spreads"]` types the market argument; `league` and `sport` arguments take a `SportKey` ([sport and market keys](../collection/sport-and-market-keys.md#market-key-dialects)). The feed market keys that `odds_mcp.server.refresh_scrape` takes (`1x2`, `over_under_2_5`, `home_away`, `totals_ladder`, `spreads_ladder`) are a different vocabulary from the stored `MarketKey`. `odds_mcp.server._coerce_bookmaker_list` accepts a JSON-array string or comma-separated string for bookmaker lists because Claude Code's MCP client stringifies array parameters (anthropics/claude-code#22394, per the code comment).
+Every `event_id` argument is the integer `events.id`. `MarketKey = Literal["h2h", "1x2", "totals", "spreads"]` types the market argument; `league` and `sport` arguments take a `SportKey` ([sport and market keys](../collection/sport-and-market-keys.md#market-key-dialects)). The feed market keys that `odds_mcp.server.refresh_scrape` takes (`1x2`, `over_under_2_5`, `home_away`, `totals_ladder`, `spreads_ladder`; a ladder stores a game's main line and its neighbours) are a different vocabulary from the stored `MarketKey`. `odds_mcp.server._coerce_bookmaker_list` accepts a JSON-array string or comma-separated string for bookmaker lists because Claude Code's MCP client stringifies array parameters (anthropics/claude-code#22394, per the code comment).
 
 ## Dependencies
 

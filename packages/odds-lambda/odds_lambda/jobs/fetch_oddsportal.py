@@ -72,8 +72,9 @@ CADENCE = CadenceConfig(
     db_fallback=1.0,
 )
 
-# A league scrape takes about a minute (two minutes at most, October 2026), so a run this
-# long before a decision time has stored its snapshots by then.
+# An EPL or MLB scrape takes about a minute (two minutes at most, October 2026), so a run
+# this long before a decision time has stored its snapshots by then. An NBA scrape with its
+# ladders took about 6 minutes (22 games), so an NBA candidate needs a longer lead.
 SCRAPE_LEAD = timedelta(minutes=5)
 
 SOURCE = CollectionSource(

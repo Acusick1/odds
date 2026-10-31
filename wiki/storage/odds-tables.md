@@ -49,7 +49,7 @@ Every writer builds one envelope per event in the Odds API's per-event shape: `b
 
 | Producer | Extra keys |
 |---|---|
-| OddsPortal live (`odds_lambda.oddsportal_adapter.convert_market`) | `source: "oddsportal_live"`, `oddsportal_event_id`; per book, `betfair_matched` on the Betfair Exchange entry (none in a ladder market, whose entries hold one outcome pair per line, [ladder markets](../collection/oddsportal-scraper.md#ladder-markets)) |
+| OddsPortal live (`odds_lambda.oddsportal_adapter.convert_market`) | `source: "oddsportal_live"`, `oddsportal_event_id`; per book, `betfair_matched` on the Betfair Exchange entry (in a ladder market, on each line's market element instead, [ladder markets](../collection/oddsportal-scraper.md#ladder-markets)) |
 | OddsPortal history (`odds_lambda.oddsportal_common.build_envelope`) | `source: "oddsportal"`; `_snapshot_time`, which `scripts/ingest_oddsportal.py` removes and uses as the snapshot time (its basketball relink and load keep only the 30 NBA teams, `odds_lambda.polymarket_matching.canonical_nba_team`); a game with an ambiguous event match stores none |
 | Betfair (`odds_lambda.jobs.fetch_betfair_exchange.ingest_sport`) | `betfair_event_id`; per book, `betfair_meta` with the runners and market state (a book with no back prices stores no snapshot) |
 | Polymarket (`odds_lambda.polymarket_odds.build_envelope`) | `source: "polymarket"`; per book, `polymarket_meta` with the outcome probabilities (`yes_probabilities`) and, live, the bid and ask |
