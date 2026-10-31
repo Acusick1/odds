@@ -51,7 +51,7 @@ uv run pytest tests/unit tests/integration
 uv run pytest tests/unit/test_paper_trading.py -v
 ```
 
-Run unit and integration tests together; leave `tests/migration` to the deploy workflows ([AGENTS.md](../../AGENTS.md#tests)). What the suites run against, the shared fixtures in `tests/conftest.py` (the `pglite_async_session` database session and the Gamma event builders among them, which hands each test empty tables), the markers and the layout are in [Test suite](test-suite.md). A webhook exported in your shell or `.env` is safe: tests never post to it.
+Run unit and integration tests together; leave `tests/migration` to the deploy workflows ([AGENTS.md](../../AGENTS.md#tests)). What the suites run against, the shared fixtures in `tests/conftest.py` (among them the `pglite_async_session` database session, which hands each test empty tables, and the Gamma event builders), the markers and the layout are in [Test suite](test-suite.md). A webhook exported in your shell or `.env` is safe: tests never post to it.
 
 ## Related
 

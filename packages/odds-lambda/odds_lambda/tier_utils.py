@@ -48,8 +48,7 @@ def snapshot_tier(
 
     A ``close`` snapshot is the closing price, whatever its stamp. An ``upper_bound`` time
     says the price was taken at or before it, so one exactly on a boundary covers the farther
-    tier only (an FDUK opening stamped 3.0 h out is not a closing price, and the Odds API
-    backfill's fetches at 72, 24, 12 and 3 h cover OPENING, EARLY, SHARP and PREGAME). Every
+    tier only (an FDUK opening stamped 3.0 h out is not a closing price). Every
     other time is bucketed by ``calculate_tier``.
     """
     if time_basis == TimeBasis.CLOSE:

@@ -103,9 +103,17 @@ class TestClientRelabelsAtIngest:
     async def test_get_historical_odds_returns_1x2_for_soccer(self) -> None:
         client = TheOddsAPIClient(api_key="k", base_url="http://example.invalid")
         client._make_request = AsyncMock(  # type: ignore[method-assign]
-            return_value=({"data": [three_way_event()]}, 1)
+            return_value=(
+                {"timestamp": "2026-10-17T23:55:00Z", "data": [three_way_event()]},
+                1,
+            )
         )
-        response = await client.get_historical_odds(sport="soccer_epl", date="2026-10-18T00:00:00Z")
+        response = await client.get_historical_odds(
+            sport="soccer_epl",
+            date="2026-10-18T00:00:00Z",
+            markets=["h2h", "totals"],
+            regions=["uk"],
+        )
         assert market_keys(response.raw_events_data[0]) == ["1x2", "totals"]
 
 

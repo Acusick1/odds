@@ -98,7 +98,7 @@ A grid time is dropped, and counted, when:
 - any outcome has no observation within `odds_lambda.polymarket_odds.MAX_STALENESS` (30 minutes) at or before it, or a price is outside (0, 1) (`missing`);
 - the prices sum further than `odds_lambda.polymarket_odds.SUM_TOLERANCE` (0.03) from 1 (`off_sum`). The research found every match within 0.03 from 3 days out and 33 of 446 beyond it at 7 days, apparently placeholder quotes on empty books (inferred), so the filter mostly removes 7-day points.
 
-No grid time after the earlier of the event's `commence_time` and Polymarket's start time is used, so a differing kick-off cannot leak in-play prices. A snapshot's tier is derived from its time against the event's `commence_time` (`odds_lambda.tier_utils.snapshot_tier`).
+No grid time after the earlier of the event's `commence_time` and Polymarket's start time is used, so a differing kick-off cannot leak in-play prices. Each snapshot's tier is derived from its time against the event's `commence_time` (`odds_lambda.tier_utils.snapshot_tier`).
 
 ## Attaching to events
 

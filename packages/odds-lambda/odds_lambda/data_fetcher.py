@@ -15,6 +15,7 @@ from odds_core.api_models import (
 )
 from odds_core.bookmakers import ODDS_API_BOOKMAKER_KEY_MAP
 from odds_core.config import get_settings
+from odds_core.time import parse_api_datetime
 from odds_core.utils import relabel_three_way_markets
 from tenacity import (
     retry,
@@ -62,6 +63,7 @@ class TheOddsAPIClient:
         self.base_url = base_url or app_settings.api.base_url
         self.session: aiohttp.ClientSession | None = None
         self._quota_remaining: int | None = None
+        self._units_used: int | None = None
 
     async def __aenter__(self):
         """Async context manager entry."""
@@ -77,6 +79,11 @@ class TheOddsAPIClient:
     def quota_remaining(self) -> int | None:
         """Get remaining API quota from last request."""
         return self._quota_remaining
+
+    @property
+    def units_used(self) -> int | None:
+        """Units the last request cost, from its ``x-requests-last`` header."""
+        return self._units_used
 
     async def _make_request(
         self, endpoint: str, sport: str, params: dict | None = None
@@ -129,6 +136,11 @@ class TheOddsAPIClient:
         async with self.session.get(url, params=params, timeout=timeout) as response:
             if "x-requests-remaining" in response.headers:
                 self._quota_remaining = int(float(response.headers["x-requests-remaining"]))
+            self._units_used = (
+                int(float(response.headers["x-requests-last"]))
+                if "x-requests-last" in response.headers
+                else None
+            )
 
             response.raise_for_status()
 
@@ -283,44 +295,48 @@ class TheOddsAPIClient:
         self,
         sport: str,
         date: str,
+        markets: list[str],
         regions: list[str] | None = None,
-        markets: list[str] | None = None,
-        odds_format: str = "american",
         bookmakers: list[str] | None = None,
+        odds_format: str = "american",
     ) -> HistoricalOddsResponse:
         """
-        Fetch historical odds for a specific date.
+        Fetch the latest historical snapshot at or before ``date``.
 
         Args:
             sport: Sport key (e.g., 'basketball_nba')
             date: ISO date string (e.g., '2024-10-15T12:00:00Z')
-            regions: List of regions (defaults to settings)
-            markets: List of markets (defaults to settings)
+            markets: Markets to request
+            regions: Regions to request; give this or ``bookmakers``, not both
+            bookmakers: Bookmakers to request; give this or ``regions``, not both
             odds_format: Odds format ('american', 'decimal', 'fractional')
-            bookmakers: List of bookmakers (defaults to settings)
 
         Returns:
-            HistoricalOddsResponse with the listed games and raw data
+            HistoricalOddsResponse with the listed games, raw data and the snapshot's own time
+
+        Raises:
+            ValueError: If both or neither of ``regions`` and ``bookmakers`` are given
         """
-        app_settings = get_settings()
-        regions = regions or app_settings.data_collection.regions
-        markets = markets or app_settings.data_collection.markets
-        bookmakers = bookmakers or app_settings.data_collection.bookmakers_for(sport)
+        if bool(regions) == bool(bookmakers):
+            raise ValueError("give exactly one of regions or bookmakers")
 
         params = {
-            "regions": ",".join(regions),
             "markets": ",".join(markets),
             "oddsFormat": odds_format,
-            "bookmakers": ",".join(bookmakers),
             "date": date,
         }
+        if regions:
+            params["regions"] = ",".join(regions)
+        else:
+            params["bookmakers"] = ",".join(bookmakers or [])
 
         data, response_time = await self._make_request(
             f"historical/sports/{sport}/odds", sport, params=params
         )
+        if not isinstance(data, dict):
+            raise ValueError(f"historical odds response is not an object: {type(data).__name__}")
 
-        # Historical endpoint returns {"data": [...]}
-        response_data = data.get("data", []) if isinstance(data, dict) else []
+        response_data = data.get("data", [])
         raw_events_data = [
             relabel_three_way_markets(event_dict, sport)
             for event_dict in (response_data if isinstance(response_data, list) else [])
@@ -328,12 +344,15 @@ class TheOddsAPIClient:
         canonicalize_bookmaker_keys(raw_events_data)
 
         events = [parse_api_event(event_dict) for event_dict in raw_events_data]
+        snapshot_time = parse_api_datetime(data["timestamp"])
 
         logger.info(
             "historical_odds_fetched",
             sport=sport,
             date=date,
+            snapshot_time=snapshot_time.isoformat(),
             events_count=len(events),
+            units_used=self._units_used,
             response_time_ms=response_time,
         )
 
@@ -342,7 +361,8 @@ class TheOddsAPIClient:
             raw_events_data=raw_events_data,
             response_time_ms=response_time,
             quota_remaining=self._quota_remaining,
-            timestamp=datetime.now(UTC),
+            snapshot_time=snapshot_time,
+            units_used=self._units_used,
         )
 
     async def get_historical_events(

@@ -1,0 +1,191 @@
+{
+  "timestamp": "2026-04-18T09:55:00Z",
+  "previous_timestamp": "2026-04-18T09:50:00Z",
+  "next_timestamp": "2026-04-18T10:00:00Z",
+  "data": [
+    {
+      "id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2026-04-18T15:00:00Z",
+      "home_team": "Arsenal",
+      "away_team": "Chelsea",
+      "bookmakers": [
+        {
+          "key": "pinnacle",
+          "title": "pinnacle",
+          "last_update": "2026-04-18T09:54:12Z",
+          "markets": [
+            {
+              "key": "h2h",
+              "last_update": "2026-04-18T09:54:12Z",
+              "outcomes": [
+                {
+                  "name": "Arsenal",
+                  "price": -120
+                },
+                {
+                  "name": "Chelsea",
+                  "price": 330
+                },
+                {
+                  "name": "Draw",
+                  "price": 260
+                }
+              ]
+            },
+            {
+              "key": "totals",
+              "last_update": "2026-04-18T09:54:12Z",
+              "outcomes": [
+                {
+                  "name": "Over",
+                  "price": -110,
+                  "point": 2.5
+                },
+                {
+                  "name": "Under",
+                  "price": -105,
+                  "point": 2.5
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "key": "williamhill",
+          "title": "williamhill",
+          "last_update": "2026-04-18T09:54:12Z",
+          "markets": [
+            {
+              "key": "h2h",
+              "last_update": "2026-04-18T09:54:12Z",
+              "outcomes": [
+                {
+                  "name": "Arsenal",
+                  "price": -110
+                },
+                {
+                  "name": "Chelsea",
+                  "price": 340
+                },
+                {
+                  "name": "Draw",
+                  "price": 270
+                }
+              ]
+            },
+            {
+              "key": "totals",
+              "last_update": "2026-04-18T09:54:12Z",
+              "outcomes": [
+                {
+                  "name": "Over",
+                  "price": -115,
+                  "point": 2.5
+                },
+                {
+                  "name": "Under",
+                  "price": -105,
+                  "point": 2.5
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "0f9e8d7c6b5a49382716f5e4d3c2b1a0",
+      "sport_key": "soccer_epl",
+      "sport_title": "EPL",
+      "commence_time": "2026-04-18T16:30:00Z",
+      "home_team": "Liverpool",
+      "away_team": "Everton",
+      "bookmakers": [
+        {
+          "key": "pinnacle",
+          "title": "pinnacle",
+          "last_update": "2026-04-18T09:54:12Z",
+          "markets": [
+            {
+              "key": "h2h",
+              "last_update": "2026-04-18T09:54:12Z",
+              "outcomes": [
+                {
+                  "name": "Liverpool",
+                  "price": -250
+                },
+                {
+                  "name": "Everton",
+                  "price": 650
+                },
+                {
+                  "name": "Draw",
+                  "price": 430
+                }
+              ]
+            },
+            {
+              "key": "totals",
+              "last_update": "2026-04-18T09:54:12Z",
+              "outcomes": [
+                {
+                  "name": "Over",
+                  "price": -110,
+                  "point": 2.5
+                },
+                {
+                  "name": "Under",
+                  "price": -105,
+                  "point": 2.5
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "key": "williamhill",
+          "title": "williamhill",
+          "last_update": "2026-04-18T09:54:12Z",
+          "markets": [
+            {
+              "key": "h2h",
+              "last_update": "2026-04-18T09:54:12Z",
+              "outcomes": [
+                {
+                  "name": "Liverpool",
+                  "price": -240
+                },
+                {
+                  "name": "Everton",
+                  "price": 660
+                },
+                {
+                  "name": "Draw",
+                  "price": 440
+                }
+              ]
+            },
+            {
+              "key": "totals",
+              "last_update": "2026-04-18T09:54:12Z",
+              "outcomes": [
+                {
+                  "name": "Over",
+                  "price": -115,
+                  "point": 2.5
+                },
+                {
+                  "name": "Under",
+                  "price": -105,
+                  "point": 2.5
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

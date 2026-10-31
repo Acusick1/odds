@@ -168,6 +168,75 @@ class TestRequestRetries:
         assert len(session.api_keys) == 2
 
 
+class TestHistoricalOddsRequest:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("regions", "bookmakers"), [(None, None), (["uk"], ["pinnacle"]), ([], [])]
+    )
+    async def test_exactly_one_of_regions_or_bookmakers(self, regions, bookmakers) -> None:
+        client = TheOddsAPIClient(api_key="k")
+        request = AsyncMock()
+        with patch.object(client, "_make_request", request):
+            with pytest.raises(ValueError, match="exactly one"):
+                await client.get_historical_odds(
+                    "soccer_epl",
+                    "2026-04-18T10:00:00Z",
+                    markets=["h2h"],
+                    regions=regions,
+                    bookmakers=bookmakers,
+                )
+        request.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_sends_only_what_is_given_and_reads_the_snapshot_time(self) -> None:
+        client = TheOddsAPIClient(api_key="k")
+        client._units_used = 20
+        request = AsyncMock(return_value=({"timestamp": "2026-04-18T09:55:00Z", "data": []}, 1))
+        with patch.object(client, "_make_request", request):
+            response = await client.get_historical_odds(
+                "soccer_epl",
+                "2026-04-18T10:00:00Z",
+                markets=["h2h", "totals"],
+                bookmakers=["pinnacle"],
+            )
+
+        params = request.call_args.kwargs["params"]
+        assert params == {
+            "markets": "h2h,totals",
+            "oddsFormat": "american",
+            "date": "2026-04-18T10:00:00Z",
+            "bookmakers": "pinnacle",
+        }
+        assert response.snapshot_time == datetime(2026, 4, 18, 9, 55, tzinfo=UTC)
+        assert response.units_used == 20
+
+
+class TestUnitsUsed:
+    @pytest.mark.asyncio
+    async def test_the_last_request_header_is_captured(self) -> None:
+        client, _ = _client([200])
+        client.session.get = lambda *a, **k: _HeaderResponse({"x-requests-last": "20"})  # type: ignore[union-attr]
+
+        await client._make_request("sports", "soccer_epl")
+
+        assert client.units_used == 20
+
+    @pytest.mark.asyncio
+    async def test_a_response_without_the_header_leaves_none(self) -> None:
+        client, _ = _client([200])
+        client._units_used = 20
+
+        await client._make_request("sports", "soccer_epl")
+
+        assert client.units_used is None
+
+
+class _HeaderResponse(_StubResponse):
+    def __init__(self, headers: dict[str, str]) -> None:
+        super().__init__(200)
+        self.headers = headers
+
+
 class TestClientKeySource:
     def test_no_key_configured_raises(self, mock_settings):
         mock_settings.api.key = None

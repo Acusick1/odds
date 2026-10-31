@@ -141,35 +141,6 @@ class OddsReader:
         result = await self.session.execute(query)
         return list(result.scalars().all())
 
-    async def snapshot_exists(
-        self, event_id: int, snapshot_time: datetime, tolerance_minutes: int = 5
-    ) -> bool:
-        """
-        Check if a snapshot exists for an event at a specific time.
-
-        Args:
-            event_id: Event identifier
-            snapshot_time: Target snapshot time
-            tolerance_minutes: Tolerance window in minutes
-
-        Returns:
-            True if snapshot exists within tolerance window
-        """
-        time_lower = snapshot_time - timedelta(minutes=tolerance_minutes)
-        time_upper = snapshot_time + timedelta(minutes=tolerance_minutes)
-
-        query = select(func.count(OddsSnapshot.id)).where(
-            and_(
-                OddsSnapshot.event_id == event_id,
-                OddsSnapshot.snapshot_time >= time_lower,
-                OddsSnapshot.snapshot_time <= time_upper,
-            )
-        )
-
-        result = await self.session.execute(query)
-        count = result.scalar_one()
-        return count > 0
-
     async def get_fetch_logs(
         self,
         sport_key: str | None = None,
