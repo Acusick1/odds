@@ -10,6 +10,10 @@ sources:
   - odds_lambda.polymarket_matching.NBA_ABBREV_MAP
   - odds_lambda.espn_nba_schedule
   - odds_lambda.espn_nba_schedule.sync_schedule
+  - odds_lambda.espn_nba_schedule.sync_upcoming
+  - odds_lambda.espn_nba_schedule.SETTLE_DAYS
+  - odds_lambda.espn_nba_schedule.UPCOMING_DAYS
+  - odds_lambda.jobs.fetch_espn_fixtures.main
   - odds_cli.commands.events.sync_nba_games
   - odds_lambda.polymarket_odds
   - odds_lambda.polymarket_odds.TIER_STEPS
@@ -69,7 +73,7 @@ Polymarket's EPL and NBA match markets are stored as `odds_core.models.OddsSnaps
 | Ticker | `epl-{home}-{away}-date` | `nba-{away}-{home}-date` |
 | Market key, sides | `1x2`, home / draw / away | `h2h`, home / away |
 | Markets | three Yes/No markets, one per side | one moneyline market whose two outcomes are the teams |
-| Team names | Gamma name, minus ` FC`/` AFC`, through `odds_core.team.normalize_team_name` (`odds_lambda.polymarket_sports.epl_team_name`) | the ticker abbreviation in `odds_lambda.polymarket_matching.NBA_ABBREV_MAP` (Odds API names such as `Los Angeles Clippers`), else the nickname's alias (`odds_lambda.polymarket_sports.nba_team_name`) |
+| Team names | Gamma name, minus ` FC`/` AFC`, through `odds_core.team.normalize_team_name` (`odds_lambda.polymarket_sports.epl_team_name`) | the ticker abbreviation in `odds_lambda.polymarket_matching.NBA_ABBREV_MAP` (full names such as `Los Angeles Clippers`), else `odds_core.team.normalize_team_name` (`odds_lambda.polymarket_sports.nba_team_name`) |
 | Backfill from | 2025-08-01 | 2026-10-21 |
 
 `odds_lambda.polymarket_fetcher.PolymarketClient.get_events` fetches one Gamma page for a sport (at most `odds_lambda.polymarket_fetcher.GAMMA_PAGE_SIZE`, 25, events: an NBA event nests hundreds of prop markets, about 1 MB, so a page of 100 outruns the request timeout) and `odds_lambda.polymarket_fetcher.PolymarketClient.get_all_events` pages until an empty page and keeps one event per Polymarket id, because offset paging can repeat an event when the listing shifts. Gamma keeps `active=true` on closed events, so listing closed events passes `active=None`. `ends_after` and `ends_before` bound the events' end dates (`end_date_min`, `end_date_max`; an event ends at its start time), so a listing reads only the events in range: the job lists the next seven days and the backfill everything since `--since`. The series mixes match events with prop events (corners, exact score, player props), so `odds_lambda.polymarket_odds.parse_match_event` keeps only events whose slug is `{prefix}-{home3}-{away3}-YYYY-MM-DD`. For EPL it classifies the event's markets by slug suffix (`-{home3}`, `-draw`, `-{away3}`), not by title or order, because titles differ between seasons. For NBA the match market is the one whose slug is the event's own, and its outcomes are matched to the `teams` entries by name, not by position in the ticker. An event with an unknown or missing market is skipped with a warning. Gamma's `bestBid` and `bestAsk` of an NBA market quote its first outcome, so the second outcome's bid and ask are `1 - ask` and `1 - bid`. Team names come from the event's `teams` entries (`ordering` home or away) through the sport's `team_name` (table above).
@@ -112,16 +116,17 @@ Polymarket creates no events. `odds_lambda.storage.event_resolver.attach_event` 
 > [!WARNING]
 > The command writes to whatever `DATABASE_URL` points at. Production is loaded only from the production host ([databases](../foundations/databases-and-environments.md#environments)).
 
-## NBA games already played
+## NBA schedule from ESPN
 
-The backfill needs an event for each game, and Polymarket creates none. The Odds API `/events` lists only upcoming games and live OddsPortal creates only upcoming events, so a game played before the job's first run has none. `odds events sync-nba-games` (`odds_cli.commands.events.sync_nba_games`, which calls `odds_lambda.espn_nba_schedule.sync_schedule`) creates them from ESPN's public NBA scoreboard (`odds_lambda.espn_nba_schedule`), one request per US game day:
+NBA has no published schedule the other collectors can read, and no job created its events: Polymarket creates none, the Odds API `/events` lists only games it prices and live OddsPortal and Betfair create events only for listed games, so the NBA collectors would stay dormant ([dormancy](../scheduling/decision-engine.md#dormancy)) and a played game would have no event for the backfill. ESPN's public NBA scoreboard (`odds_lambda.espn_nba_schedule`, one request per US game day) lists every game with its kick-off, final score and an id:
 
+- `odds_lambda.jobs.fetch_espn_fixtures.main` runs it for `basketball_nba` as `fetch-espn-fixtures-nba` (daily cron, `fetch-espn-fixtures-nba` in `odds_core.config.AlertConfig.heartbeat_expectations`). `odds_lambda.espn_nba_schedule.sync_upcoming` covers the last `odds_lambda.espn_nba_schedule.SETTLE_DAYS` days and the next `odds_lambda.espn_nba_schedule.UPCOMING_DAYS`. The events it creates are NBA's published schedule: the stored-event lookup of the collectors sees them, so `odds_lambda.collection_calendar.published_schedule_kickoff` has no NBA table to read. A run fails, alerting, when any game failed after the others are stored, and warns when ESPN lists no game.
 - Each game goes through `odds_lambda.storage.event_resolver.resolve_event` as a game of source `espn` with ESPN's event id as its external id ([resolver](../storage/event-resolver.md)). A game another source already created is matched within ±2 h and gains the ESPN id; a rerun matches the event it made. ESPN is not in the NBA kick-off authority order (`odds_lambda.storage.event_kickoff.KICKOFF_AUTHORITY`), so it never moves an event.
-- A finished game (`STATUS_FINAL`) also sets its event FINAL with the score through `odds_lambda.storage.writers.OddsWriter.update_event_status`, which the backfill requires. Nothing else settles NBA games on a schedule.
-- Team names are the Odds API's (`odds_lambda.polymarket_matching.normalize_team`, so ESPN's `LA Clippers` becomes `Los Angeles Clippers`).
-- `--since` (default 2026-10-21) and `--until` (default today) bound the days; without `--apply` each game is rolled back, and a transaction holds one game.
+- A finished game (`STATUS_FINAL`) also sets its event FINAL with the score through `odds_lambda.storage.writers.OddsWriter.update_event_status`, which the backfill requires. This is the only NBA settlement on a schedule.
+- Team names go through `odds_core.team.normalize_team_name`, so ESPN's `LA Clippers` becomes `Los Angeles Clippers`.
+- `odds events sync-nba-games` (`odds_cli.commands.events.sync_nba_games`, which calls `odds_lambda.espn_nba_schedule.sync_schedule`) covers an arbitrary range for the backfill: `--since` (default 2026-10-21) and `--until` (default today). Without `--apply` each game is rolled back, and a transaction holds one game.
 
-Run it before `odds polymarket backfill-odds --sport basketball_nba`.
+Run the command for the season so far before `odds polymarket backfill-odds --sport basketball_nba`.
 
 ## The fetch-polymarket-odds job
 
@@ -133,7 +138,7 @@ Run it before `odds polymarket backfill-odds --sport basketball_nba`.
 4. Each sport's run writes an `odds_core.models.FetchLog` row (`success` is whether a snapshot was stored), ([fetch logs](odds-ingestion-service.md#fetch-logs)).
 5. Failures alert: a sport that raises, or that Gamma lists no upcoming match for while our database has SCHEDULED events within 5 days (`odds_lambda.jobs.fetch_polymarket_odds.LISTING_CHECK_HORIZON`, `odds_lambda.jobs.fetch_polymarket_odds.EmptyListingError`), is logged as a failed fetch, the job reschedules, and then it raises inside `odds_core.alerts.job_alert_context`, which sends the critical alert (once per outage), and skips the heartbeat. If matches were seen but none stored, `send_job_warning("job_empty:<job>")`. On the local scheduler a run past `odds_lambda.scheduling.runner.JOB_TIMEOUT` is cancelled and alerted, and a failed run that booked nothing is re-booked ([Local scheduler](../scheduling/local-scheduler.md#scheduling-primitives)).
 
-Its `odds_lambda.jobs.fetch_polymarket_odds.SOURCE` feeds the per-source [stale-data check](../operations/health-monitor.md#stale-data-check), which ignores it until the job is in `bootstrap_jobs` and has stored a first `observed` snapshot under source `polymarket`. The job writes a heartbeat, expected every 11 hours (the one Polymarket key, `fetch-polymarket-odds-epl` in `odds_core.config.AlertConfig.heartbeat_expectations`) to cover the 22:00-06:00 UTC overnight pause. The job attaches to existing events and never creates one, so a match the Odds API or OddsPortal has not yet synced is skipped until its event exists.
+Its `odds_lambda.jobs.fetch_polymarket_odds.SOURCE` feeds the per-source [stale-data check](../operations/health-monitor.md#stale-data-check), which ignores it until the job is in `bootstrap_jobs` and has stored a first `observed` snapshot under source `polymarket`. The job writes a heartbeat, expected every 11 hours (`fetch-polymarket-odds-epl` and `fetch-polymarket-odds-nba` in `odds_core.config.AlertConfig.heartbeat_expectations`) to cover the 22:00-06:00 UTC overnight pause. The job attaches to existing events and never creates one, so a match the Odds API, OddsPortal or (NBA) ESPN has not yet synced is skipped until its event exists.
 
 ## Related
 

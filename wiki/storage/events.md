@@ -9,8 +9,6 @@ sources:
   - odds_core.models.HealthCheckAcknowledgement
   - odds_core.sports.SportKey
   - odds_core.team.normalize_team_name
-  - odds_lambda.polymarket_matching.normalize_team
-  - odds_lambda.polymarket_matching.TEAM_ALIASES
   - odds_lambda.storage.writers.OddsWriter.update_event_status
   - odds_lambda.odds_api_events.resolve_odds_api_events
   - odds_lambda.odds_api_events.find_event_by_odds_api_id
@@ -50,12 +48,9 @@ No events column names a source. Training's `data_source` filter keeps events wi
 
 The table `legacy_event_ids` (`event_id`, `legacy_id`) holds the string key each event stored before `migrations/versions/75c92251aa25_rekey_events_to_integer_id.py` had: the Odds API's id for an event an Odds API listing created, else an id built from teams and kick-off (`op_`, `op_live_` or `fduk_`). It has no model and no foreign key, and only that migration's downgrade reads it, to restore the string keys; the downgrade's alert-context re-key casts an `event_ids` element to bigint only when it is a JSON number, so string elements stay as they are. Every Odds API key in it is also its event's `odds_api` external id, where the resolver finds it; the built ids were never a source's, and nothing matches on them.
 
-## Team-name normalizers
+## Team-name normalizer
 
-1. `odds_core.team.normalize_team_name`: whitespace collapse plus a lowercase alias map to the pipeline's canonical names (EPL short names, MLB and NBA Odds API names). Unknown names pass through unchanged.
-2. `odds_lambda.polymarket_matching.normalize_team`: NBA only (`odds_lambda.polymarket_matching.TEAM_ALIASES`), returns `None` for unknown names. The injury and game-log writers and injury features use it, not the core one.
-
-The two share no data.
+`odds_core.team.normalize_team_name` is the one alias map: whitespace collapse plus a lowercase alias map to the pipeline's canonical names (EPL short names, MLB and NBA Odds API names). Unknown names pass through unchanged, so a team missing from it is a gap that surfaces as a duplicate event or a NULL `event_id` ([event matching](event-matching.md)). NBA's canonical names are the Odds API's full names, and the NBA sources that spell a team differently (the Polymarket and ESPN "LA Clippers") have an alias. Polymarket lists NBA teams by nickname with a ticker abbreviation, which `odds_lambda.polymarket_matching.NBA_ABBREV_MAP` looks up to the full name: an id lookup, not an alias map.
 
 ## Writing events
 

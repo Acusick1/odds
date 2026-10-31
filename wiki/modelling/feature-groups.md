@@ -36,7 +36,7 @@ These groups serve the `raw` target; `retail_ev` takes only its own groups compu
 
 ## NBA injuries
 
-`odds_analytics.injury_features.extract_injury_features(reports, event, snapshot_time, player_stats)` takes reports with `report_time <= snapshot_time`, uses only the latest report snapshot, and returns `odds_analytics.injury_features.InjuryFeatures` (6 fields: `impact_out_home/away`, `impact_gtd_home/away`, `report_hours_before_game`, `injury_news_recency`).
+`odds_analytics.injury_features.extract_injury_features(reports, event, snapshot_time, player_stats)` takes reports with `report_time <= snapshot_time` (a report's team and the event's teams both go through `odds_core.team.normalize_team_name`), uses only the latest report snapshot, and returns `odds_analytics.injury_features.InjuryFeatures` (6 fields: `impact_out_home/away`, `impact_gtd_home/away`, `report_hours_before_game`, `injury_news_recency`).
 
 - Per-player impact is `(on_off_rtg - on_def_rtg) * (minutes / games_played / 48)` from player stats, falling back to 1.0 when stats, ratings or games are missing.
 - QUESTIONABLE and DOUBTFUL count at 0.5x; PROBABLE and AVAILABLE are ignored (GTD weighted 0.5).

@@ -11,7 +11,6 @@ sources:
   - odds_lambda.storage.injury_writer.InjuryWriter._match_event
   - odds_lambda.storage.game_log_writer.GameLogWriter._match_event
   - odds_lambda.polymarket_matching.NBA_ABBREV_MAP
-  - odds_lambda.polymarket_matching.normalize_team
   - odds_lambda.storage.event_resolver.attach_event
   - odds_lambda.polymarket_sports.PolymarketSportConfig
   - odds_core.team.normalize_team_name
@@ -47,7 +46,7 @@ There is no shared matcher for deciding which `events` row a piece of incoming d
 - **Different windows.** `odds_lambda.storage.event_resolver.resolve_event` uses ±2 h for live listings and ±24 h for historical ones (`odds_lambda.storage.event_resolver.MatchWindow`); both reuse an existing event (including a hex-id one) on a team match.
 - **Finders never merge.** `odds_lambda.storage.event_merge.find_match_id` only reads, and returns the candidate a merge would keep ([kept event](event-merge.md#kept-event)). The resolver's historical match takes the nearest candidate within ±2 h when there are several, and none when no candidate is within ±2 h, so neighbouring fixtures of the same teams (an NBA back-to-back) are never conflated. Merging is explicit ([Event merge](event-merge.md)).
 - **Odds API writers resolve.** Event sync, ingestion, `odds discover games` and the historical backfill attach a listed game to the event of its match whichever source stored it first, and create one only when none matches ([Odds API events](#odds-api-events)). Twins stored before the resolver stay until they are merged ([Event merge](event-merge.md)).
-- **Alias gaps become NULL.** Injury and game-log matching fall back to the raw team name when `odds_lambda.polymarket_matching.normalize_team` returns `None` (the game-log writer tries its abbreviation map first), so an alias gap shows up as a NULL `event_id`. Injury reports are league-wide, so unmatched pairs are expected for teams not playing that day. Unmatched NBA rows keep `event_id` NULL and are invisible to per-event readers.
+- **Alias gaps become NULL.** Injury and game-log matching normalise names with `odds_core.team.normalize_team_name`, which returns an unknown name unchanged (the game-log writer tries its abbreviation map first), so an alias gap shows up as a NULL `event_id`. Injury reports are league-wide, so unmatched pairs are expected for teams not playing that day. Unmatched NBA rows keep `event_id` NULL and are invisible to per-event readers.
 
 ## MLB gamePk resolver
 

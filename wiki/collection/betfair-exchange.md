@@ -42,7 +42,7 @@ Package `packages/odds-lambda/odds_lambda/betfair/`, driven by the fetch-betfair
 
 ### Where it runs
 
-- Production (local scheduler): in the default `bootstrap_jobs`, self-scheduling for every sport in `odds_lambda.betfair.constants.SPORT_CONFIG` (its `odds_lambda.scheduling.jobs._JOB_SPORTS` allowlist is derived from that map, as the `fetch-polymarket-odds` allowlist is from `odds_lambda.polymarket_sports.POLYMARKET_SPORTS`; other allowlists, such as EPL-only `fetch-oddsportal-results`, are written out). A scheduler restart keeps the pending run; with none, bootstrap runs the job once to start the chain ([bootstrap](../scheduling/local-scheduler.md#bootstrap-jobs-and-cron-table)).
+- Production (local scheduler): in the default `bootstrap_jobs`, self-scheduling for every sport in `odds_lambda.betfair.constants.SPORT_CONFIG` (its `odds_lambda.scheduling.jobs._JOB_SPORTS` allowlist is derived from that map, as the `fetch-polymarket-odds` allowlist is from the dict `odds_lambda.polymarket_sports.POLYMARKET_SPORTS`; other allowlists, such as EPL-only `fetch-oddsportal-results`, are written out). A scheduler restart keeps the pending run; with none, bootstrap runs the job once to start the chain ([bootstrap](../scheduling/local-scheduler.md#bootstrap-jobs-and-cron-table)).
 - AWS (dormant): per-sport rule on the AWS Lambda function (`deployment/aws/terraform/eventbridge.tf`), created only when Terraform `betfair_enabled` is true (default false); Betfair credentials and SSM cert parameter names are set in `deployment/aws/terraform/lambda.tf` ([aws-infrastructure](../operations/aws-infrastructure.md)). The dev deploy invokes `fetch-betfair-exchange-epl` as a smoke test ([ci-cd-workflows](../operations/ci-cd-workflows.md)).
 
 ### Flow

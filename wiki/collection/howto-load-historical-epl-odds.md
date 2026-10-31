@@ -13,7 +13,7 @@ status: stable
 
 # Load historical EPL odds
 
-The scripts load `odds_core.models.Event` rows with `odds_core.models.OddsSnapshot` ([columns and constraints](../storage/odds-tables.md#odds_snapshots)), `odds_core.models.Price` and payload rows (#435); OddsPortal history is stored as `source_stamped` and FDUK as `upper_bound` and `close`. What each script reads, matches and writes is on [historical-ingest-scripts](historical-ingest-scripts.md). Run against the local database only: never set `DATABASE_URL` to production ([databases-and-environments](../foundations/databases-and-environments.md#environments)).
+The scripts (the OddsPortal one also takes basketball) load `odds_core.models.Event` rows with `odds_core.models.OddsSnapshot` ([columns and constraints](../storage/odds-tables.md#odds_snapshots)), `odds_core.models.Price` and payload rows (#435); OddsPortal history is stored as `source_stamped` and FDUK as `upper_bound` and `close`. What each script reads, matches and writes is on [historical-ingest-scripts](historical-ingest-scripts.md). Run against the local database only: never set `DATABASE_URL` to production ([databases-and-environments](../foundations/databases-and-environments.md#environments)).
 
 1. Scrape OddsPortal history.
    ```bash
