@@ -38,7 +38,7 @@ status: stable
 
 - `odds_lambda.data_fetcher.TheOddsAPIClient.get_scores` always sends `daysFrom`, so each call costs 2: every caller needs completed games, which the vendor returns only when `daysFrom` is set, and without it the endpoint lists live and upcoming games only ([vendor](https://the-odds-api.com/liveapi/guides/v4/)).
 - Each key in `ODDS_API_KEYS` has its own plan and quota, spent by the sports that use its index; no setting holds the plan size. Historical endpoints are paid-tier only (inferred from vendor docs, not checked here). A manual `odds fetch current` costs 3 units by default.
-- `x-requests-remaining` is the balance of the key the call used and `x-requests-used` the credits it has spent since its last quota reset, so the key's plan size is their sum; the alert percentages divide the balance by it, per key.
+- `x-requests-remaining` is the balance of the key the call used and `x-requests-used` the credits it has spent since its last quota reset, so the key's plan size is their sum; the alert percentages divide the balance by it, per key. `odds_lambda.data_fetcher.TheOddsAPIClient._send` reads both, and `x-requests-last`, from every response, including an error response; a header the response lacks reads as `None`, never as the previous call's value.
 - The manifest planner derives a historical call's cost from its markets and bookmakers ([odds-api-backfill](odds-api-backfill.md#planning-calls)); the executor records the cost the header reports ([odds-api-backfill](odds-api-backfill.md#executing-calls)).
 
 ## Related

@@ -102,8 +102,8 @@ class TestLatestQuotaByKey:
 
     @pytest.mark.asyncio
     async def test_the_plan_is_used_plus_remaining_from_the_newest_reading(
-        self, pglite_async_session
-    ):
+        self, pglite_async_session: AsyncSession
+    ) -> None:
         pglite_async_session.add_all([_log(30, 18000, plan=20000), _log(5, 17900, plan=20000)])
         await pglite_async_session.commit()
 
@@ -114,7 +114,9 @@ class TestLatestQuotaByKey:
         assert quota.fraction == pytest.approx(0.895)
 
     @pytest.mark.asyncio
-    async def test_rows_without_a_used_count_are_skipped(self, pglite_async_session):
+    async def test_rows_without_a_used_count_are_skipped(
+        self, pglite_async_session: AsyncSession
+    ) -> None:
         pglite_async_session.add_all(
             [_log(30, 70), _log(5, 60, plan=None), _log(5, 400, "basketball_nba", plan=None)]
         )
@@ -124,7 +126,7 @@ class TestLatestQuotaByKey:
 
         assert quotas == {0: KeyQuota(("soccer_epl",), 70, 430)}
 
-    def test_a_zero_plan_has_a_zero_fraction(self):
+    def test_a_zero_plan_has_a_zero_fraction(self) -> None:
         assert KeyQuota(("soccer_epl",), 0, 0).fraction == 0.0
 
 
@@ -141,7 +143,9 @@ class TestShowQuota:
         assert "70 (14.0%)" in output
 
     @pytest.mark.asyncio
-    async def test_the_total_is_the_keys_plan_not_a_setting(self, pglite_async_session):
+    async def test_the_total_is_the_keys_plan_not_a_setting(
+        self, pglite_async_session: AsyncSession
+    ) -> None:
         pglite_async_session.add(_log(5, 17900, plan=20000))
         await pglite_async_session.commit()
 

@@ -113,8 +113,8 @@ class TestHealthMonitor:
 
     @pytest.mark.asyncio
     async def test_check_api_quota_uses_the_keys_plan_not_a_setting(
-        self, mock_session, mock_settings
-    ):
+        self, mock_session: AsyncMock, mock_settings: Settings
+    ) -> None:
         """900 left of a 20000-credit plan is 4.5%, well under the 10% critical threshold."""
         monitor = HealthMonitor(mock_session, mock_settings)
 

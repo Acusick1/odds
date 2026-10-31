@@ -14,6 +14,7 @@ from odds_core.models import (
     FetchLog,
 )
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.test_helpers import make_tagged_snapshot, store_tagged
 
@@ -217,8 +218,8 @@ class TestHealthCheckIntegration:
         [(900, 19100, "quota_critical"), (3000, 17000, "quota_low"), (3000, 7000, None)],
     )
     async def test_quota_fraction_comes_from_the_keys_plan_size(
-        self, test_session, remaining, used, alert_prefix
-    ):
+        self, test_session: AsyncSession, remaining: int, used: int, alert_prefix: str | None
+    ) -> None:
         """A 20000-credit plan with 900 left is 4.5%, critical; the plan is not a setting."""
         await _create_recent_snapshot(test_session, minutes_ago=10)
         test_session.add(

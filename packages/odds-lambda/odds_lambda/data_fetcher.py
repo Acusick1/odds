@@ -1,6 +1,7 @@
 """The Odds API client for fetching odds and scores data."""
 
 import time
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -41,6 +42,11 @@ def _is_transient_error(exc: BaseException) -> bool:
     if isinstance(exc, aiohttp.ClientResponseError):
         return exc.status >= 500
     return isinstance(exc, aiohttp.ClientError | TimeoutError)
+
+
+def _header_int(headers: Mapping[str, str], name: str) -> int | None:
+    """A numeric quota header of this response, None when the response lacks it."""
+    return int(float(headers[name])) if name in headers else None
 
 
 class TheOddsAPIClient:
@@ -140,15 +146,9 @@ class TheOddsAPIClient:
         start_time = time.time()
         timeout = aiohttp.ClientTimeout(total=30)
         async with self.session.get(url, params=params, timeout=timeout) as response:
-            if "x-requests-remaining" in response.headers:
-                self._quota_remaining = int(float(response.headers["x-requests-remaining"]))
-            if "x-requests-used" in response.headers:
-                self._quota_used = int(float(response.headers["x-requests-used"]))
-            self._units_used = (
-                int(float(response.headers["x-requests-last"]))
-                if "x-requests-last" in response.headers
-                else None
-            )
+            self._quota_remaining = _header_int(response.headers, "x-requests-remaining")
+            self._quota_used = _header_int(response.headers, "x-requests-used")
+            self._units_used = _header_int(response.headers, "x-requests-last")
 
             response.raise_for_status()
 

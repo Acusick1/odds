@@ -289,7 +289,7 @@ class TestClientKeySource:
 
 class TestQuotaOnErrors:
     @pytest.mark.asyncio
-    async def test_quota_updates_from_error_response_headers(self):
+    async def test_quota_updates_from_error_response_headers(self) -> None:
         client, _ = _client([429])
 
         with pytest.raises(aiohttp.ClientResponseError):
@@ -299,15 +299,19 @@ class TestQuotaOnErrors:
         assert client.quota_used == 400
 
     @pytest.mark.asyncio
-    async def test_the_plan_size_is_used_plus_remaining(self):
-        client, _ = _client([200])
+    async def test_a_response_without_quota_headers_clears_the_last_reading(self) -> None:
+        client, session = _client([200, 200])
+        await client._make_request("sports", "soccer_epl")
+        bare = _StubResponse(200)
+        bare.headers = {"x-requests-remaining": "90"}
+        session.get = lambda url, params, timeout: bare
 
-        data, _ = await client._make_request("sports", "soccer_epl")
+        await client._make_request("sports", "soccer_epl")
 
-        assert (client.quota_used, client.quota_remaining) == (400, 100)
+        assert (client.quota_remaining, client.quota_used) == (90, None)
 
     @pytest.mark.asyncio
-    async def test_responses_carry_quota_used(self):
+    async def test_responses_carry_quota_used(self) -> None:
         client, _ = _client([200])
 
         response = await client.get_events("soccer_epl")
