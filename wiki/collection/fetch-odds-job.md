@@ -29,7 +29,7 @@ status: stable
 
 # The fetch-odds job
 
-`odds_lambda.jobs.fetch_odds.main(ctx)` is the scheduled caller of [the ingestion service](odds-ingestion-service.md). It is in the default local scheduler `bootstrap_jobs` and runs on the production host as `fetch-odds-epl` and `fetch-odds-nba`; its `odds_lambda.scheduling.jobs._JOB_SPORTS` allowlist limits it to those two sports to save Odds API quota, each on its own key (the other bootstrapped collectors, including `fetch-polymarket-odds`, and `fetch-mlb-results` spend none; [job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs), [odds-api-quota](odds-api-quota.md)). Its AWS rule is dormant.
+`odds_lambda.jobs.fetch_odds.main(ctx)` is the scheduled caller of [the ingestion service](odds-ingestion-service.md). It is in the default local scheduler `bootstrap_jobs` and runs on the production host as `fetch-odds-epl` and `fetch-odds-nba`; its `odds_lambda.scheduling.jobs._JOB_SPORTS` allowlist limits it to those two sports to save Odds API quota, each on its own key (the other bootstrapped collectors, including `fetch-polymarket-odds` and `fetch-injuries`, and `fetch-mlb-results` spend none; [job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs), [odds-api-quota](odds-api-quota.md)). Its AWS rule is dormant.
 
 ## Flow
 

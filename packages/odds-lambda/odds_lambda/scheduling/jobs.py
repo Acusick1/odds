@@ -59,6 +59,7 @@ _JOB_MODULE_MAP: dict[str, tuple[str, str]] = {
     "fetch-betfair-exchange": ("odds_lambda.jobs.fetch_betfair_exchange", "main"),
     "fetch-polymarket-odds": ("odds_lambda.jobs.fetch_polymarket_odds", "main"),
     "fetch-mlb-probables": ("odds_lambda.jobs.fetch_mlb_probables", "main"),
+    "fetch-injuries": ("odds_lambda.jobs.fetch_injuries", "main"),
     "run-candidates": ("odds_lambda.jobs.run_candidates", "main"),
 }
 
@@ -105,6 +106,7 @@ _PER_SPORT_JOBS: frozenset[str] = frozenset(
         "fetch-betfair-exchange",
         "fetch-polymarket-odds",
         "fetch-mlb-probables",
+        "fetch-injuries",
         "run-candidates",
     }
 )
@@ -133,6 +135,7 @@ _JOB_SPORTS: dict[str, tuple[SportKey, ...]] = {
     "fetch-betfair-exchange": tuple(BETFAIR_SPORT_CONFIG),
     "fetch-polymarket-odds": tuple(POLYMARKET_SPORTS),
     "fetch-mlb-probables": ("baseball_mlb",),
+    "fetch-injuries": ("basketball_nba",),
     # MLB is settled from the MLB Stats API by fetch-mlb-results.
     "fetch-oddsportal-results": ("soccer_epl",),
     # EPL and NBA each spend their own Odds API key; NBA results come from ESPN, not fetch-scores.

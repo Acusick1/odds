@@ -41,7 +41,7 @@ A [mechanical candidate](../evaluation/candidate-rules.md#market-state) decides 
 
 ## Heartbeats
 
-Heartbeats are keyed `heartbeat:fetch-oddsportal-<sport>`; every sport has an entry (11 h EPL, 12 h MLB, 11 h NBA, covering the overnight window); the results jobs `fetch-oddsportal-results-epl` and `fetch-mlb-results` (26 h each), `fetch-mlb-probables` (30 h), `fetch-espn-fixtures` and `fetch-espn-fixtures-nba` (26 h) and `fetch-betfair-exchange` (10 h EPL, 11 h MLB, 11 h NBA), `fetch-polymarket-odds` (11 h EPL, 11 h NBA), `fetch-odds-epl` (49 h), `fetch-odds-nba` (25 h) and `fetch-scores-epl` (13 h) share the map in `odds_core.config.AlertConfig.heartbeat_expectations` ([alerting-and-heartbeats](../operations/alerting-and-heartbeats.md#heartbeats)).
+Heartbeats are keyed `heartbeat:fetch-oddsportal-<sport>`; every sport has an entry (11 h EPL, 12 h MLB, 11 h NBA, covering the overnight window); the results jobs `fetch-oddsportal-results-epl` and `fetch-mlb-results` (26 h each), `fetch-mlb-probables` (30 h), `fetch-injuries-nba` (15 h), `fetch-espn-fixtures` and `fetch-espn-fixtures-nba` (26 h) and `fetch-betfair-exchange` (10 h EPL, 11 h MLB, 11 h NBA), `fetch-polymarket-odds` (11 h EPL, 11 h NBA), `fetch-odds-epl` (49 h), `fetch-odds-nba` (25 h) and `fetch-scores-epl` (13 h) share the map in `odds_core.config.AlertConfig.heartbeat_expectations` ([alerting-and-heartbeats](../operations/alerting-and-heartbeats.md#heartbeats)).
 
 ## Related
 

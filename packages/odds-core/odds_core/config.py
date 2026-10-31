@@ -168,6 +168,7 @@ class SchedulerConfig(BaseSettings):
             "fetch-betfair-exchange",
             "fetch-polymarket-odds",
             "fetch-mlb-probables",
+            "fetch-injuries",
             "run-candidates",
         ],
         description="Jobs to bootstrap when starting the local scheduler",
@@ -278,6 +279,10 @@ class AlertConfig(BaseSettings):
             "fetch-betfair-exchange-nba": 11,
             "fetch-polymarket-odds-epl": 11,
             "fetch-polymarket-odds-nba": 11,
+            # Lead runs restart the 6 h cadence, so the last run of a night can be as late as
+            # 01:00 UTC or later and the next is 15:00 UTC after the overnight window: up to
+            # 14 h, plus 1 h slack.
+            "fetch-injuries-nba": 15,
             "check-health": 2,
         },
         description="Max hours between job completions before alerting (job_name -> hours)",

@@ -25,7 +25,7 @@ def fetch():
 async def _fetch_async() -> None:
     """Async implementation of fetch command."""
     from odds_core.database import async_session_maker
-    from odds_lambda.injury_fetcher import fetch_injury_report
+    from odds_lambda.injury_fetcher import fetch_latest_injury_report
     from odds_lambda.storage.injury_writer import InjuryWriter
 
     now = datetime.now(UTC)
@@ -39,20 +39,20 @@ async def _fetch_async() -> None:
             "Fetching injury report (JVM startup may take a few seconds)...", total=None
         )
         try:
-            records = fetch_injury_report(now)
+            found = fetch_latest_injury_report(now, max_slots_back=4)
             progress.update(task, completed=True)
         except Exception as e:
             progress.stop()
             console.print(f"\n[red]Failed to fetch injury report: {e}[/red]")
             raise typer.Exit(1) from e
 
-    if not records:
+    if found is None:
         console.print("[yellow]No injury data available for current time[/yellow]\n")
         return
 
     async with async_session_maker() as session:
         writer = InjuryWriter(session)
-        count = await writer.upsert_injury_reports(records)
+        count = (await writer.upsert_injury_reports(found[1])).rows
         await session.commit()
 
     console.print(f"[green]Stored {count} injury report entries[/green]\n")
@@ -152,6 +152,7 @@ async def _backfill_async(
     from odds_core.database import async_session_maker
     from odds_core.models import Event
     from odds_core.time import EASTERN
+    from odds_lambda.injury_fetcher import latest_report_slot
     from sqlalchemy import and_, select
 
     # Query events in the season date range
@@ -185,17 +186,11 @@ async def _backfill_async(
     for event in events:
         for hours in target_hours:
             target_utc = event.commence_time - timedelta(hours=hours)
-            # Round to nearest valid report slot in ET
-            target_et = target_utc.astimezone(EASTERN)
-            # Round down to hour for legacy era, 15-min for new era
-            if target_et.replace(tzinfo=None) < _NEW_ERA_CUTOFF_ET:
-                # Legacy: hourly
-                rounded_et = target_et.replace(minute=0, second=0, microsecond=0)
+            if target_utc.astimezone(EASTERN).replace(tzinfo=None) < _NEW_ERA_CUTOFF_ET:
+                rounded = target_utc.replace(minute=0, second=0, microsecond=0)
             else:
-                # New: 15-min intervals
-                rounded_minute = (target_et.minute // 15) * 15
-                rounded_et = target_et.replace(minute=rounded_minute, second=0, microsecond=0)
-            target_times.add(rounded_et.astimezone(UTC))
+                rounded = latest_report_slot(target_utc)
+            target_times.add(rounded)
 
     sorted_times = sorted(target_times)
     console.print(f"Events in DB: [white]{len(events)}[/white]")
@@ -237,9 +232,9 @@ async def _backfill_async(
                 if records:
                     async with async_session_maker() as session:
                         writer = InjuryWriter(session)
-                        count = await writer.upsert_injury_reports(records)
+                        result = await writer.upsert_injury_reports(records)
                         await session.commit()
-                        total_stored += count
+                        total_stored += result.rows
 
             except Exception as e:
                 errors += 1

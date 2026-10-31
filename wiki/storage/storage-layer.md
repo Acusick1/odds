@@ -36,13 +36,13 @@ status: stable
 | `odds_lambda.storage.tier_validator` | `odds_lambda.storage.tier_validator.TierCoverageValidator` | [Coverage and completeness checks](coverage-checks.md) (tiers from each snapshot's time basis, market and time, `odds_lambda.storage.tier_validator.covered_tiers` over `odds_lambda.tier_utils.snapshot_tiers`, which holds the OddsPortal and `close` rules; discovery matches by `odds_api` external id) |
 | `espn_*`, `fpl_availability_*` | per-source pairs | [EPL context](../collection/epl-context-data.md) |
 | `mlb_pitcher_*` | `odds_lambda.storage.mlb_pitcher_writer.MlbPitcherWriter` | [MLB pitchers](../collection/mlb-probable-pitchers.md) |
-| `injury_*` | `odds_lambda.storage.injury_writer.InjuryWriter` (teams normalised by `odds_core.team.normalize_team_name`) | [Injuries](../collection/nba-injuries-and-stats.md) |
+| `injury_*` | `odds_lambda.storage.injury_writer.InjuryWriter` (teams normalised by `odds_core.team.normalize_team_name`, matched to NBA events only) | [Injuries](../collection/nba-injuries-and-stats.md) |
 | `game_log_*`, `pbpstats_*` | per-source pairs | [NBA stats](../collection/nba-injuries-and-stats.md) |
 
 ## Commit contract
 
 - `odds_lambda.storage.writers.OddsWriter` never calls `commit()`. It only adds, deletes or executes statements, except that `odds_lambda.storage.writers.OddsWriter.store_envelope` flushes each inserted snapshot, inside a savepoint, so its price rows can carry its id ([OddsWriter](odds-writer.md#store_envelope)). `odds_lambda.storage.event_merge.EventMerger` also leaves committing to its caller for its foreign-key `UPDATE`s and its deletes (duplicate events, and a duplicate's candidate decisions of a candidate version the kept event also holds decisions of, with their trades), flushing only after deleting a duplicate's clashing external ids and acknowledgements; it reads external ids to pick the event a twin group keeps (`odds_lambda.storage.event_merge.kept_event`), and it re-points every reference to `events.id`, external ids and acknowledgements included; the caller commits, as `odds_lambda.ingestion.OddsIngestionService.ingest_sport` does, once per event.
-- Every per-source writer except `odds_lambda.storage.writers.OddsWriter` flushes after its bulk upsert (for example `odds_lambda.storage.injury_writer.InjuryWriter.upsert_injury_reports`, which matches events through the shared team normalizer) but still does not commit.
+- Every per-source writer except `odds_lambda.storage.writers.OddsWriter` flushes after its bulk upsert (for example `odds_lambda.storage.injury_writer.InjuryWriter.upsert_injury_reports`, which matches events through the shared team normalizer and returns the unmatched pairs) but still does not commit.
 - Each unit of work gets its own session, never one shared across tasks ([Databases and environments](../foundations/databases-and-environments.md)).
 
 ## Verb conventions
