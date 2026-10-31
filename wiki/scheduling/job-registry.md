@@ -24,7 +24,7 @@ status: stable
 
 # Job registry
 
-`odds_lambda.scheduling.jobs` is the source of truth for which jobs exist. It is a different thing from the `odds_lambda/jobs/` package that holds the job modules, so imports of "jobs" are ambiguous (`odds_lambda.jobs.update_status`'s docstring cites a path, scheduler/jobs, that does not exist). Where each registered job runs is on [Where each job runs](job-deployment-matrix.md#where-each-job-runs).
+`odds_lambda.scheduling.jobs` is the source of truth for which jobs exist and, in `odds_lambda.scheduling.jobs._JOB_SPORTS`, which sports each per-sport job takes. It is a different thing from the `odds_lambda/jobs/` package that holds the job modules, so imports of "jobs" are ambiguous (`odds_lambda.jobs.update_status`'s docstring cites a path, scheduler/jobs, that does not exist). Where each registered job runs is on [Where each job runs](job-deployment-matrix.md#where-each-job-runs).
 
 ## Registry
 
