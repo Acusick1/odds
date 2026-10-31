@@ -91,12 +91,12 @@ class TestLeagueSpecs:
             "nba": "/basketball/usa/nba/",
         }
 
-    def test_nba_spec_is_two_way_h2h_with_a_daytime_overnight_window(self) -> None:
+    def test_nba_spec_is_two_way_h2h_with_ladders_and_a_daytime_overnight_window(self) -> None:
         spec = LEAGUE_SPEC_BY_NAME["nba"]
 
         assert (spec.sport_key, spec.markets, spec.primary_market, spec.num_outcomes) == (
             "basketball_nba",
-            ["home_away"],
+            ["home_away", "totals_ladder", "spreads_ladder"],
             "home_away",
             2,
         )

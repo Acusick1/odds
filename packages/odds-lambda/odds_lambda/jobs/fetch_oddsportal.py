@@ -125,7 +125,7 @@ LEAGUE_SPECS: list[LeagueSpec] = [
         listing_path="/basketball/usa/nba/",
         sport_key="basketball_nba",
         sport_title="NBA",
-        markets=["home_away"],
+        markets=["home_away", "totals_ladder", "spreads_ladder"],
         primary_market="home_away",
         num_outcomes=2,
     ),

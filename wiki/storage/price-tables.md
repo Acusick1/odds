@@ -12,6 +12,7 @@ sources:
   - odds_core.bookmakers.BOOKMAKER_ALIASES_BY_SOURCE
   - migrations/versions/9c822a7a3faf_expand_odds_data_model.py
   - odds_core.quotes
+  - odds_lambda.oddsportal_adapter.convert_market
 status: stable
 ---
 
@@ -29,7 +30,7 @@ status: stable
 | `snapshot_id` | integer FK `odds_snapshots.id`, `ON DELETE CASCADE` | the snapshot the price came from; deleting the snapshot deletes its prices |
 | `bookmaker` | text | bookmaker key |
 | `outcome` | text, closed set | `odds_core.vocabulary.PriceOutcome`: home, draw, away, over, under |
-| `line` | numeric, nullable | the totals or spreads line |
+| `line` | numeric, nullable | the totals or spreads line; a spread's is signed per outcome ([sign](#spreads-line-sign)) |
 | `side` | text, closed set | `odds_core.vocabulary.Side`: back, lay, mid, traded |
 | `price` | numeric | decimal odds, above 1.0 (`ck_prices_price_gt_one`) |
 | `size` | numeric, nullable | amount available at that price and side |
@@ -89,6 +90,10 @@ A writer builds one envelope per event ([envelope format](odds-tables.md#envelop
 - **Outcomes** are matched once, here: a name equal to the event's home or away team after `odds_core.team.normalize_team_name`, `Draw` on 1x2, `Over` and `Under` on totals. Spreads and totals carry the outcome's `point` in `line`. An unmatched name is logged as `unmatched_outcome`; the payload keeps it for a re-parse.
 - **Bookmakers** are canonicalised through the source's alias map, `odds_core.bookmakers.BOOKMAKER_ALIASES_BY_SOURCE` (`odds_core.bookmakers.canonical_bookmaker`): every source takes `odds_core.bookmakers.BOOKMAKER_ALIASES`, and the Odds API also `odds_core.bookmakers.ODDS_API_BOOKMAKER_KEY_MAP` (its regional Betfair keys, which the fetch already rewrites) and `odds_core.bookmakers.ODDS_API_KEY_ALIASES` (US BetMGM is `betmgm_us`). When two entries of one envelope name one book in a market (`7bet` and `7betuk`), the first is kept and the second logged as `bookmaker_alias_collision`. A second quote for the same book, outcome, line and side is logged as `duplicate_price`.
 - **Invalid prices**, a decimal price not above 1.0 (or not a number) or a probability not strictly between 0 and 1, are not stored and are logged as `invalid_price`. An unknown market key is logged as `unknown_market`.
+
+### Spreads line sign
+
+A spread's `line` is stored signed on each outcome: the home outcome carries the home team's handicap and the away outcome its negative, so a home favourite at -5.5 is a `home` row at -5.5 and an `away` row at +5.5. A totals line is the same on `over` and `under`. A reader that pairs the two sides of a spread therefore negates one line (home line = -away line), and a reader of one team's price at a line filters on that outcome's own line. A book can quote several lines of one market in one snapshot (each is its own price rows, unique by line): OddsPortal's NBA totals and spreads store the main line and its neighbours ([ladder markets](../collection/oddsportal-scraper.md#ladder-markets)), and `odds_lambda.oddsportal_adapter.convert_market` writes the signs.
 
 ## Reading quotes
 

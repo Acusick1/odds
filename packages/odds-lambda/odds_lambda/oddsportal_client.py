@@ -134,15 +134,23 @@ class FeedMarketSpec:
     """One market's feed coordinates and its pipeline representation.
 
     ``handicap`` is the string as it appears in the feed key. ``outcomes`` are
-    labels in feed order: home, draw, away, over, under.
+    labels in feed order: home, draw, away, over, under. A ``ladder`` market has no
+    fixed line: the feed returns every line the books quote, and the line is data.
+    ``scopes`` are the feed scopes to request; bookmakers are split across them, so the
+    market is their union. ``mirror_line`` says a ladder's feed line is the home side's
+    and the away outcome takes its negative (spreads). ``line_window`` is how far, in
+    points, from the main line a ladder keeps lines.
     """
 
     betting_type: int
-    scope: int
+    scopes: tuple[int, ...]
     handicap: str
     pipeline_key: str
     outcomes: tuple[str, ...]
     point: float | None = None
+    ladder: bool = False
+    mirror_line: bool = False
+    line_window: float = 2.0
 
 
 @dataclass(frozen=True)
@@ -152,20 +160,21 @@ class BookmakerPrices:
     prices: tuple[float, ...]
     volumes: tuple[int, ...] | None
     last_change: datetime | None
+    line: float | None = None
 
 
 # Keys are the LeagueSpec market keys.
 FEED_MARKETS: dict[str, FeedMarketSpec] = {
     "1x2": FeedMarketSpec(
         betting_type=1,
-        scope=2,
+        scopes=(2,),
         handicap="0",
         pipeline_key="1x2",
         outcomes=("home", "draw", "away"),
     ),
     "over_under_2_5": FeedMarketSpec(
         betting_type=2,
-        scope=2,
+        scopes=(2,),
         handicap="2.5",
         pipeline_key="totals",
         outcomes=("over", "under"),
@@ -173,12 +182,34 @@ FEED_MARKETS: dict[str, FeedMarketSpec] = {
     ),
     "home_away": FeedMarketSpec(
         betting_type=3,
-        scope=1,
+        scopes=(1,),
         handicap="0",
         pipeline_key="h2h",
         outcomes=("home", "away"),
     ),
+    # Basketball over/under and Asian handicap: the whole ladder comes in one request per
+    # scope, and bookmakers are split between scopes 1 and 2 (all UK books are in one or
+    # the other).
+    "totals_ladder": FeedMarketSpec(
+        betting_type=2,
+        scopes=(1, 2),
+        handicap="",
+        pipeline_key="totals",
+        outcomes=("over", "under"),
+        ladder=True,
+    ),
+    "spreads_ladder": FeedMarketSpec(
+        betting_type=5,
+        scopes=(1, 2),
+        handicap="",
+        pipeline_key="spreads",
+        outcomes=("home", "away"),
+        ladder=True,
+        mirror_line=True,
+    ),
 }
+
+_LADDER_KEY = re.compile(r"^E-(\d+)-(\d+)-0-(-?\d+(?:\.\d+)?)-0$")
 
 
 @functools.cache
@@ -374,14 +405,19 @@ def _last_change(raw: Any) -> datetime | None:
 
 
 def extract_market(
-    feed: dict[str, Any], spec: FeedMarketSpec, names: dict[str, str]
+    feed: dict[str, Any],
+    spec: FeedMarketSpec,
+    names: dict[str, str],
+    scope: int | None = None,
 ) -> list[BookmakerPrices]:
     """Read per-bookmaker prices for one market from a decrypted feed.
 
     Skips suspended bookmakers (``act`` false), unknown bookmaker ids and rows
-    with missing, wrongly sized or non-decimal (at or below 1.0) prices.
+    with missing, wrongly sized or non-decimal (at or below 1.0) prices. A ladder
+    market returns one row per bookmaker and line, each carrying its ``line``; a fixed
+    market carries the spec's ``point``. ``scope`` defaults to the spec's first.
     """
-    key = f"E-{spec.betting_type}-{spec.scope}-0-{spec.handicap}-0"
+    scope = spec.scopes[0] if scope is None else scope
     data = feed.get("d")
     if not isinstance(data, dict):
         raise OddsPortalError("unexpected feed shape: 'd' is not an object")
@@ -396,10 +432,26 @@ def extract_market(
         return []
     if not isinstance(back, dict):
         raise OddsPortalError("unexpected feed shape: 'd.oddsdata.back' is not an object")
-    market = back.get(key)
-    if not isinstance(market, dict):
-        return []
+    if spec.ladder:
+        markets = [
+            (float(match.group(3)), market)
+            for raw_key, market in back.items()
+            if (match := _LADDER_KEY.match(raw_key))
+            and (int(match.group(1)), int(match.group(2))) == (spec.betting_type, scope)
+        ]
+    else:
+        markets = [(spec.point, back.get(f"E-{spec.betting_type}-{scope}-0-{spec.handicap}-0"))]
 
+    result: list[BookmakerPrices] = []
+    for line, market in markets:
+        if isinstance(market, dict):
+            result.extend(_market_prices(market, spec, names, line))
+    return result
+
+
+def _market_prices(
+    market: dict[str, Any], spec: FeedMarketSpec, names: dict[str, str], line: float | None
+) -> list[BookmakerPrices]:
     odds, active, volume, change_time = (
         v if isinstance(v, dict) else {}
         for v in (market.get(f) for f in ("odds", "act", "volume", "changeTime"))
@@ -425,9 +477,33 @@ def extract_market(
                 prices=prices,
                 volumes=_volumes(raw_volume, len(spec.outcomes)) if raw_volume else None,
                 last_change=_last_change(change_time.get(bookmaker_id)),
+                line=line,
             )
         )
     return result
+
+
+def select_main_line_window(prices: list[BookmakerPrices], window: float) -> list[BookmakerPrices]:
+    """Keep the lines within ``window`` points of the main line of a ladder.
+
+    The main line is the one quoted by the most bookmakers (OddsPortal's own marker),
+    and among equals the one whose two prices are closest in implied probability,
+    taking the median across bookmakers. No line, or no two-way price, selects nothing.
+    """
+    by_line: dict[float, list[BookmakerPrices]] = {}
+    for row in prices:
+        if row.line is not None and len(row.prices) == 2:
+            by_line.setdefault(row.line, []).append(row)
+    if not by_line:
+        return []
+
+    def rank(line: float) -> tuple[int, float]:
+        rows = by_line[line]
+        gaps = sorted(abs(1 / r.prices[0] - 1 / r.prices[1]) for r in rows)
+        return (-len({r.bookmaker_id for r in rows}), gaps[len(gaps) // 2])
+
+    main = min(by_line, key=lambda line: (rank(line), abs(line)))
+    return [r for line in sorted(by_line) if abs(line - main) <= window for r in by_line[line]]
 
 
 async def _sleep(seconds: float) -> None:
@@ -565,13 +641,26 @@ class OddsPortalClient:
         spec = FEED_MARKETS.get(market_key)
         if spec is None:
             raise OddsPortalError(f"unsupported market '{market_key}'")
-        url = (
-            f"{BASE_URL}/proxy/match-event/1-{event.sport_id}-{event.event_id}-"
-            f"{spec.betting_type}-{spec.scope}-{context.hashed_bookmakers}.dat"
-            f"?geo={context.geo}&lang=en"
-        )
         headers = {**_XHR_HEADERS, "Referer": urldefrag(event.url).url}
+        prices: list[BookmakerPrices] = []
+        seen: set[tuple[str, float | None]] = set()
+        for scope in spec.scopes:
+            url = (
+                f"{BASE_URL}/proxy/match-event/1-{event.sport_id}-{event.event_id}-"
+                f"{spec.betting_type}-{scope}-{context.hashed_bookmakers}.dat"
+                f"?geo={context.geo}&lang=en"
+            )
+            feed = await self._fetch_feed(url, headers, event, market_key)
+            for row in extract_market(feed, spec, context.names, scope):
+                # A bookmaker quoted in two scopes keeps its first scope's price.
+                if (row.bookmaker_id, row.line) not in seen:
+                    seen.add((row.bookmaker_id, row.line))
+                    prices.append(row)
+        return select_main_line_window(prices, spec.line_window) if spec.ladder else prices
 
+    async def _fetch_feed(
+        self, url: str, headers: dict[str, str], event: ListingEvent, market_key: str
+    ) -> dict[str, Any]:
         for attempt in range(_FEED_ERROR_MAX_RETRIES + 1):
             await _sleep(self._request_delay)
             feed = await self._get_json(url, headers)
@@ -579,7 +668,7 @@ class OddsPortalClient:
             if not isinstance(data, dict):
                 raise OddsPortalError(f"unexpected feed shape for {url}")
             if "E" not in data:
-                return extract_market(feed, spec, context.names)
+                return feed
             refresh = feed.get("refresh", _FEED_ERROR_DEFAULT_REFRESH_SECONDS)
             delay = min(
                 refresh
