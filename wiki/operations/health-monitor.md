@@ -124,6 +124,7 @@ A job inside [`odds_core.alerts.job_alert_context`](alerts.md#delivery) inserts 
 | fetch-betfair-exchange (per sport) | yes | 10 h EPL, 11 h MLB, 11 h NBA (overnight window plus the 2 h interval) |
 | fetch-polymarket-odds (per sport) | yes | 11 h EPL and NBA (overnight window plus polling interval, plus 1 h slack) |
 | fetch-mlb-probables | yes | 30 h |
+| fetch-injuries (NBA) | yes | 15 h (up to 14 h between runs over the NBA overnight window, since lead runs restart the 6 h cadence, plus 1 h slack; a dormant run still writes it) |
 | fetch-espn-fixtures (per sport: bare key for EPL, `-nba` for NBA) | yes | 26 h (daily cron plus slack) |
 | fetch-odds (EPL) | yes | 49 h (48 h opening-tier interval plus 1 h; no overnight pause) |
 | fetch-odds (NBA) | yes | 35 h (24 h interval pushed to 10:00 UTC by the 00:00-10:00 quiet window, about 33 h, plus slack) |

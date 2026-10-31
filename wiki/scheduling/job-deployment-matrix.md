@@ -40,11 +40,12 @@ Three lists in code decide what the production scheduler runs:
 | `run-candidates` | yes | every configured sport (NBA has no candidates, so it only settles trades) | self-scheduling, at the next decision time of an active mechanical candidate, at most 30 min apart ([run-candidates job](../evaluation/run-candidates-job.md#next-run)) |
 | `fetch-espn-fixtures` | yes | EPL (fixtures table) and NBA (creates and settles events, [NBA schedule](../collection/polymarket-odds-snapshots.md#nba-schedule-from-espn)) | cron `0 6 * * *` |
 | `fetch-mlb-probables` | yes | MLB | cron `0 6 * * *` |
+| `fetch-injuries` | yes | NBA (allowlist; the only league with the report) | self-scheduling, every 6 h plus runs 2 h and 30 min before each kickoff, dormant with no stored game in 28 days ([NBA injury job](../collection/nba-injuries-and-stats.md#the-fetch-injuries-job)) |
 | `agent-run` | no | every configured sport | fixture proximity |
 
 The betting agent is not scheduled: it is run by hand on the production host with `odds agent run` as the restricted `odds_agent` role ([Agent runtime](../agent/agent-run-job.md)). A collection job goes dormant for a sport with no fixture in the next 28 days, and wakes by itself ([dormancy](decision-engine.md#dormancy)).
 
-Per-job pages: [fetch-odds](../collection/fetch-odds-job.md), [fetch-scores, update-status and the results jobs](../collection/results-jobs.md), [status lifecycle](../collection/event-status-lifecycle.md), [OddsPortal](../collection/fetch-oddsportal-job.md), [Betfair](../collection/betfair-exchange.md), [health](../operations/health-monitor.md), [agent](../agent/agent-run-job.md), [ESPN fixtures](../collection/epl-context-data.md), [MLB probables](../collection/mlb-probable-pitchers.md), [Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md), [run-candidates](../evaluation/run-candidates-job.md).
+Per-job pages: [fetch-odds](../collection/fetch-odds-job.md), [fetch-scores, update-status and the results jobs](../collection/results-jobs.md), [status lifecycle](../collection/event-status-lifecycle.md), [OddsPortal](../collection/fetch-oddsportal-job.md), [Betfair](../collection/betfair-exchange.md), [health](../operations/health-monitor.md), [agent](../agent/agent-run-job.md), [ESPN fixtures](../collection/epl-context-data.md), [MLB probables](../collection/mlb-probable-pitchers.md), [Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md), [NBA injury reports](../collection/nba-injuries-and-stats.md#the-fetch-injuries-job), [run-candidates](../evaluation/run-candidates-job.md).
 
 Known defects on the production host: OddsPortal scrapes return 0 matches (#484) and one hung OddsPortal run ends the local chains (#485).
 

@@ -55,10 +55,10 @@ class TestInjuryWriter:
             _make_record(player_name="Brown, Jaylen", status=InjuryStatus.QUESTIONABLE),
         ]
 
-        count = await writer.upsert_injury_reports(records)
+        result = await writer.upsert_injury_reports(records)
         await pglite_async_session.commit()
 
-        assert count == 2
+        assert result.rows == 2
 
         # Verify data in DB
         from sqlalchemy import select
@@ -144,6 +144,46 @@ class TestInjuryWriter:
         assert row.event_id is None
 
     @pytest.mark.asyncio
+    async def test_unmatched_pairs_reported(self, pglite_async_session):
+        """The canonical (team, game_date) pairs with no event come back with the row count."""
+        pglite_async_session.add(
+            _make_event(
+                1,
+                home="Orlando Magic",
+                away="Boston Celtics",
+                commence=datetime(2026, 1, 17, 0, 0, tzinfo=UTC),
+            )
+        )
+        await pglite_async_session.commit()
+
+        result = await InjuryWriter(pglite_async_session).upsert_injury_reports(
+            [
+                _make_record(),
+                _make_record(player_name="Brown, Jaylen"),
+                _make_record(team="LA Clippers", matchup="LAC@PHX"),
+            ]
+        )
+
+        assert result.rows == 3
+        assert result.unmatched == (("Los Angeles Clippers", date(2026, 1, 16)),)
+
+    @pytest.mark.asyncio
+    async def test_event_of_another_sport_does_not_match(self, pglite_async_session):
+        event = _make_event(
+            1,
+            home="Orlando Magic",
+            away="Boston Celtics",
+            commence=datetime(2026, 1, 17, 0, 0, tzinfo=UTC),
+        )
+        event.sport_key = "baseball_mlb"
+        pglite_async_session.add(event)
+        await pglite_async_session.commit()
+
+        result = await InjuryWriter(pglite_async_session).upsert_injury_reports([_make_record()])
+
+        assert result.unmatched == (("Boston Celtics", date(2026, 1, 16)),)
+
+    @pytest.mark.asyncio
     async def test_event_matching_ambiguous(self, pglite_async_session):
         """event_id is None when multiple events match the same team+date."""
         # Two events for Boston on the same date (hypothetical)
@@ -204,7 +244,7 @@ class TestInjuryWriter:
     async def test_empty_records(self, pglite_async_session):
         writer = InjuryWriter(pglite_async_session)
         count = await writer.upsert_injury_reports([])
-        assert count == 0
+        assert count.rows == 0
 
 
 class TestInjuryReader:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 
 import structlog
@@ -17,13 +18,24 @@ from odds_lambda.injury_fetcher import InjuryRecord
 logger = structlog.get_logger(__name__)
 
 
+NBA_SPORT_KEY = "basketball_nba"
+
+
+@dataclass(slots=True, frozen=True)
+class UpsertResult:
+    """Rows written and the ``(team, game_date)`` pairs no event matched."""
+
+    rows: int
+    unmatched: tuple[tuple[str, date], ...]
+
+
 class InjuryWriter:
     """Handles all write operations for injury report data."""
 
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def upsert_injury_reports(self, records: list[InjuryRecord]) -> int:
+    async def upsert_injury_reports(self, records: list[InjuryRecord]) -> UpsertResult:
         """Insert or update injury report records with automatic event matching.
 
         Uses PostgreSQL ON CONFLICT DO UPDATE on the composite unique constraint
@@ -31,14 +43,14 @@ class InjuryWriter:
         (team, game_date) pair and cached within the batch.
 
         Returns:
-            Number of rows upserted.
+            Rows upserted and the canonical ``(team, game_date)`` pairs that matched no event.
         """
         if not records:
-            return 0
+            return UpsertResult(0, ())
 
         # Cache event_id lookups per (canonical_team, game_date) to avoid
         # redundant queries within a single batch
-        event_cache: dict[tuple[str, date], str | None] = {}
+        event_cache: dict[tuple[str, date], int | None] = {}
 
         report_dicts: list[dict] = []
         for record in records:
@@ -81,9 +93,10 @@ class InjuryWriter:
             events_matched=matched,
             events_unmatched=len(event_cache) - matched,
         )
-        return len(report_dicts)
+        unmatched = tuple(pair for pair, event_id in event_cache.items() if event_id is None)
+        return UpsertResult(len(report_dicts), unmatched)
 
-    async def _match_event(self, team_name: str, game_date: date) -> str | None:
+    async def _match_event(self, team_name: str, game_date: date) -> int | None:
         """Match a team + game_date to a sportsbook Event record.
 
         Converts the ET calendar date to a UTC window covering that single
@@ -92,7 +105,7 @@ class InjuryWriter:
         tipoffs and late-night UTC rollovers.
 
         Returns:
-            event_id if exactly one match found, None otherwise.
+            The event's id if exactly one NBA event matches, None otherwise.
         """
         from odds_core.time import EASTERN
 
@@ -103,6 +116,7 @@ class InjuryWriter:
 
         query = select(Event.id).where(
             and_(
+                Event.sport_key == NBA_SPORT_KEY,
                 Event.commence_time >= window_start,
                 Event.commence_time <= window_end,
                 or_(Event.home_team == team_name, Event.away_team == team_name),
