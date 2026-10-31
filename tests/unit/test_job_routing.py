@@ -299,11 +299,11 @@ class TestExpectedCompoundJobNames:
     def test_no_bootstrap_jobs_yields_empty(self) -> None:
         assert expected_compound_job_names([], ["soccer_epl"]) == set()
 
-    def test_default_bootstrap_schedules_polymarket_for_epl_only(self) -> None:
+    def test_default_bootstrap_schedules_polymarket_only_for_sports_it_lists(self) -> None:
         from odds_core.config import AlertConfig, SchedulerConfig
 
         expected = expected_compound_job_names(
-            SchedulerConfig().bootstrap_jobs, ["soccer_epl", "baseball_mlb", "basketball_nba"]
+            SchedulerConfig().bootstrap_jobs, ["soccer_epl", "baseball_mlb"]
         )
         assert {n for n in expected if n.startswith("fetch-polymarket")} == {
             "fetch-polymarket-odds-epl"
