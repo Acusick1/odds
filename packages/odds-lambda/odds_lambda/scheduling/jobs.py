@@ -10,7 +10,7 @@ import structlog
 from odds_core.sports import SportKey
 
 from odds_lambda.betfair.constants import SPORT_CONFIG as BETFAIR_SPORT_CONFIG
-from odds_lambda.polymarket_sports import MATCH_ODDS_SPORTS
+from odds_lambda.polymarket_sports import POLYMARKET_SPORTS
 
 logger = structlog.get_logger()
 
@@ -131,7 +131,7 @@ _JOB_SPORTS: dict[str, tuple[SportKey, ...]] = {
     # Allowlist derived from the BFE adapter's supported-sports map so adding
     # a new sport requires only a SPORT_CONFIG entry.
     "fetch-betfair-exchange": tuple(BETFAIR_SPORT_CONFIG),
-    "fetch-polymarket-odds": MATCH_ODDS_SPORTS,
+    "fetch-polymarket-odds": tuple(POLYMARKET_SPORTS),
     "fetch-mlb-probables": ("baseball_mlb",),
     # MLB is settled from the MLB Stats API by fetch-mlb-results.
     "fetch-oddsportal-results": ("soccer_epl",),

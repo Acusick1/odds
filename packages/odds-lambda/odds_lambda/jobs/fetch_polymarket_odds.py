@@ -1,7 +1,7 @@
 """Fetch current Polymarket match prices as ``polymarket`` odds snapshots.
 
 Reads the open match events of a sport from Gamma, attaches each to its existing
-event through the resolver (Polymarket creates none), and stores the three Yes
+event through the resolver (Polymarket creates none), and stores the outcome
 midpoints and quotes through ``OddsWriter.store_envelope``. Self-schedules
 with the cadence that mirrors the backfill grid spacing.
 """
@@ -35,7 +35,7 @@ from odds_lambda.polymarket_odds import (
     parse_match_event,
     sum_is_valid,
 )
-from odds_lambda.polymarket_sports import MATCH_ODDS_SPORTS, POLYMARKET_SPORTS
+from odds_lambda.polymarket_sports import POLYMARKET_SPORTS
 from odds_lambda.scheduling.decision import (
     OVERNIGHT_WINDOWS,
     CadenceConfig,
@@ -72,7 +72,7 @@ SOURCE = CollectionSource(
     job_name="fetch-polymarket-odds",
     source=Source.POLYMARKET,
     cadence=CADENCE,
-    fixture_horizons=dict.fromkeys(MATCH_ODDS_SPORTS, LISTING_CHECK_HORIZON),
+    fixture_horizons=dict.fromkeys(POLYMARKET_SPORTS, LISTING_CHECK_HORIZON),
     skips_overnight=True,
 )
 
@@ -112,10 +112,12 @@ async def ingest_sport(sport_key: SportKey, snapshot_time: datetime) -> Ingestio
     sport = POLYMARKET_SPORTS[sport_key]
     stats = IngestionStats(sport=sport_key)
 
-    async with PolymarketClient() as client:
-        raw_events = await client.get_all_events(sport_key, active=True, closed=False)
-
     horizon = snapshot_time + MAX_HORIZON
+    async with PolymarketClient() as client:
+        raw_events = await client.get_all_events(
+            sport_key, active=True, closed=False, ends_after=snapshot_time, ends_before=horizon
+        )
+
     matches = [
         m
         for raw in raw_events
@@ -235,8 +237,10 @@ async def main(ctx: JobContext) -> None:
         logger.info("polymarket_odds_disabled", reason="polymarket.enabled=False")
         return
 
-    if sport not in MATCH_ODDS_SPORTS:
-        logger.error("polymarket_odds_unknown_sport", sport=sport, supported=MATCH_ODDS_SPORTS)
+    if sport not in POLYMARKET_SPORTS:
+        logger.error(
+            "polymarket_odds_unknown_sport", sport=sport, supported=tuple(POLYMARKET_SPORTS)
+        )
         return
 
     compound_job_name = make_compound_job_name("fetch-polymarket-odds", sport)
