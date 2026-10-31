@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock
 
 import pytest
 from odds_analytics.backfill_executor import BackfillExecutor
+from odds_analytics.backfill_plan import Call, Fixture, Manifest, Target
 from odds_core.api_models import (
     ApiEvent,
     EventsResponse,
-    HistoricalOddsResponse,
     OddsResponse,
     parse_api_event,
 )
@@ -26,13 +27,15 @@ from odds_core.models import (
     Price,
     SnapshotPayload,
 )
+from odds_core.time import parse_api_datetime
 from odds_core.vocabulary import Market, Source, TimeBasis
 from odds_lambda import odds_api_events
+from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.event_sync import EventSyncService
 from odds_lambda.ingestion import OddsIngestionService
 from odds_lambda.jobs import fetch_scores
 from odds_lambda.mlb_stats_fetcher import MlbGameResult, MlbGameState
-from odds_lambda.odds_api_events import find_event_by_odds_api_id, odds_api_id_of
+from odds_lambda.odds_api_events import find_event_by_odds_api_id
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,6 +43,7 @@ from tests.test_helpers import StubOddsClient, game_pk_of, make_epl_event
 
 KICKOFF = (datetime.now(UTC) + timedelta(days=2)).replace(minute=0, second=0, microsecond=0)
 MLB = "baseball_mlb"
+FIXTURES = Path(__file__).parents[1] / "fixtures"
 
 
 class _Factory:
@@ -518,8 +522,6 @@ class TestScores:
         found = await find_event_by_odds_api_id(session, "apihex2")
 
         assert found is not None and found.id == 2
-        assert await odds_api_id_of(session, 2) == "apihex2"
-        assert await odds_api_id_of(session, 999) is None
 
     async def test_reissued_api_id_replaces_the_recorded_one_and_is_logged(
         self, pglite_async_session: AsyncSession
@@ -554,7 +556,6 @@ class TestScores:
         await session.flush()
 
         assert await find_event_by_odds_api_id(session, "apihex1") is None
-        assert await odds_api_id_of(session, 1) is None
 
     async def test_job_settles_the_event_the_api_id_names(
         self, pglite_async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
@@ -598,53 +599,122 @@ class TestScores:
         assert (event.status, event.home_score, event.away_score) == (EventStatus.FINAL, 2, 1)
 
 
+class _RecordedSession:
+    """Serves one recorded historical response through the client's HTTP layer."""
+
+    def __init__(self, payload: dict[str, Any], headers: dict[str, str]) -> None:
+        self._payload = payload
+        self._headers = headers
+        self.status = 200
+        self.requests: list[dict[str, Any]] = []
+
+    def get(self, url: str, params: dict[str, Any], timeout: Any) -> _RecordedSession:
+        self.requests.append({"url": url, **params})
+        return self
+
+    @property
+    def headers(self) -> dict[str, str]:
+        return self._headers
+
+    def raise_for_status(self) -> None:
+        return None
+
+    async def json(self) -> Any:
+        return self._payload
+
+    async def __aenter__(self) -> _RecordedSession:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+
+def _manifest() -> Manifest:
+    return Manifest.model_validate(
+        {
+            "sport": "soccer_epl",
+            "seasons": {
+                "2025-26": {"start": "2025-07-01T00:00:00Z", "end": "2026-07-01T00:00:00Z"}
+            },
+            "markets": [{"key": "h2h"}, {"key": "totals", "line": 2.5}],
+            "regions": ["uk"],
+            "coverage": [
+                {"min_lead_minutes": 1, "max_lead_minutes": 120, "max_input_age_minutes": 10}
+            ],
+            "snapshot_grid": [{"start": "2020-06-06T00:00:00Z", "step_minutes": 10}],
+            "probe": {
+                "snapshots": ["2026-04-18T10:00:00Z"],
+                "min_fixture_lead_hours": 12,
+                "required_bookmakers": {},
+                "units_per_call": 20,
+            },
+        }
+    )
+
+
 @pytest.mark.asyncio
 class TestBackfill:
-    async def test_snapshot_is_stored_on_the_event_holding_the_api_id_as_an_upper_bound(
-        self, pglite_async_session: AsyncSession
+    @pytest.mark.parametrize("reverse", [False, True], ids=["listed", "reversed"])
+    async def test_one_call_stores_every_fixture_it_returns_at_the_snapshot_time(
+        self, pglite_async_session: AsyncSession, reverse: bool
     ) -> None:
         session = pglite_async_session
-        past = datetime(2024, 1, 15, 19, 0, tzinfo=UTC)
-        session.add(make_epl_event(1, past))
+        recorded = json.loads((FIXTURES / "odds_api_historical_epl.json").read_text())
+        listed = [{k: v for k, v in e.items() if k != "bookmakers"} for e in recorded["data"]]
+        kickoffs = [parse_api_datetime(e["commence_time"]) for e in listed]
+        session.add(make_epl_event(1, kickoffs[0]))
+        session.add(make_epl_event(2, kickoffs[1], "Liverpool", "Everton"))
         await session.flush()
-        await _sync(session, [_listed("apihex1", past)])
-        listed = _listed("apihex1", past)
-        event = parse_api_event(listed)
-        client = AsyncMock()
-        response = HistoricalOddsResponse(
-            events=[event],
-            raw_events_data=[{**listed, "bookmakers": [_book("bet365")]}],
-            response_time_ms=1,
-            quota_remaining=5,
-            timestamp=past - timedelta(hours=1),
-        )
+        await _sync(session, listed)
 
-        client.get_historical_odds = AsyncMock(return_value=response)
-        plan = {
-            "games": [
-                {
-                    "event_id": 1,
-                    "odds_api_id": "apihex1",
-                    "home_team": "Arsenal",
-                    "away_team": "Chelsea",
-                    "snapshots": [(past - timedelta(hours=1)).isoformat()],
-                }
-            ]
-        }
+        manifest = _manifest()
+        requested = datetime(2026, 4, 18, 10, 0, tzinfo=UTC)
+        band = manifest.coverage[0]
+        call = Call(
+            requested,
+            tuple(
+                Target(Fixture(event_id, kickoff), band, requested, requested)
+                for event_id, kickoff in ((1, kickoffs[0]), (2, kickoffs[1]))
+            ),
+        )
+        # The fixtures' lock order must not depend on the order the API lists them in.
+        served = recorded | {"data": recorded["data"][::-1] if reverse else recorded["data"]}
+        http = _RecordedSession(served, {"x-requests-last": "20", "x-requests-remaining": "12345"})
+        client = TheOddsAPIClient(api_key="k", base_url="http://example.invalid")
+        client.session = http  # type: ignore[assignment]
 
         async with BackfillExecutor(
-            sport="basketball_nba",
-            client=client,  # type: ignore[arg-type]
-            session_factory=_Factory(session),
-            skip_existing=False,
-            rate_limit_seconds=0,
+            manifest, client=client, session_factory=_Factory(session), rate_limit_seconds=0
         ) as executor:
-            result = await executor.execute_plan(plan)
+            result = await executor.execute([call])
 
-        assert result.successful_snapshots == 1
-        assert [e.id for e in await _events(session)] == [1]
+        assert [r["date"] for r in http.requests] == ["2026-04-18T10:00:00Z"]
+        assert http.requests[0]["regions"] == "uk"
+        assert "bookmakers" not in http.requests[0]
+        assert http.requests[0]["markets"] == "h2h,totals"
+        assert [e.id for e in await _events(session)] == [1, 2]
         snapshots = (await session.execute(select(OddsSnapshot))).scalars().all()
-        assert {(s.event_id, s.source, s.time_basis) for s in snapshots} == {
-            (1, Source.ODDS_API, TimeBasis.UPPER_BOUND)
+        assert {(s.event_id, s.snapshot_time, s.source, s.time_basis) for s in snapshots} == {
+            (
+                event_id,
+                parse_api_datetime(recorded["timestamp"]),
+                Source.ODDS_API,
+                TimeBasis.OBSERVED,
+            )
+            for event_id in (1, 2)
         }
         assert {s.market for s in snapshots} == {Market.ONE_X_TWO, Market.TOTALS}
+        logs = (await session.execute(select(FetchLog))).scalars().all()
+        assert [(log.sport_key, log.events_count, log.api_quota_remaining) for log in logs] == [
+            ("soccer_epl", 2, 12345)
+        ]
+        assert (result.calls_made, result.units_used, result.fixtures_stored) == (1, 20, 2)
+        assert result.quota_remaining == 12345
+
+        async with BackfillExecutor(
+            manifest, client=client, session_factory=_Factory(session), rate_limit_seconds=0
+        ) as executor:
+            rerun = await executor.execute([call])
+
+        assert (rerun.calls_made, rerun.calls_skipped) == (0, 1)
+        assert len(http.requests) == 1

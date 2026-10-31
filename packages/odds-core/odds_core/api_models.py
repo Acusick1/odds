@@ -55,13 +55,18 @@ class EventsResponse:
 
 @dataclass(slots=True)
 class HistoricalOddsResponse:
-    """Response from get_historical_odds() API call."""
+    """Response from get_historical_odds() API call.
+
+    ``snapshot_time`` is the provider's own time for the snapshot, the latest at or before the
+    requested date; ``units_used`` is the call's cost from ``x-requests-last``.
+    """
 
     events: list[ApiEvent]
     raw_events_data: list[dict]
     response_time_ms: int
     quota_remaining: int | None
-    timestamp: datetime
+    snapshot_time: datetime
+    units_used: int | None = None
 
 
 def parse_scores_from_api_dict(score_data: dict) -> tuple[int | None, int | None]:

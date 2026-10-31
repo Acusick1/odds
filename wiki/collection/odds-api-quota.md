@@ -21,7 +21,7 @@ sources:
   - odds_lambda.storage.readers.OddsReader.get_fetch_logs
   - odds_lambda.storage.readers.OddsReader.get_database_stats
   - odds_cli.commands.status._show_quota
-  - odds_analytics.gap_backfill_planner.GapBackfillPlanner
+  - odds_analytics.backfill_executor.BackfillExecutor.execute
 status: stable
 ---
 
@@ -66,7 +66,7 @@ Replaying the schedule over the stored NBA events (30-day windows starting 2025-
 ## Where the views disagree
 
 - **Failed calls.** A failed `/odds` call writes no `fetch_logs` row, so it leaves no quota trace (#472; [fetch logs](odds-ingestion-service.md#fetch-logs)).
-- **Historical estimates.** The gap backfill planner plans, per event id, one fetch per missing tier at the times that tier's `upper_bound` fetch covers, and estimates historical cost from a literal, not from the configured regions or markets, so its estimates drift if those change (#441; [odds-api-backfill](odds-api-backfill.md)).
+- **Historical calls.** The manifest planner derives a call's cost from the manifest's markets and bookmakers, and the executor records the key's remaining quota (`x-requests-remaining`) in `fetch_logs` after each call, failed calls included, so a backfill's spend shows in `odds status quota`; each call's own cost (`x-requests-last`) is only in the structured log and the run's summed units ([odds-api-backfill](odds-api-backfill.md#executing-calls)).
 - **Scores.** `fetch-scores` spends more than the minimum per call because the client always sends `daysFrom` ([results-jobs](results-jobs.md)).
 
 ## Related

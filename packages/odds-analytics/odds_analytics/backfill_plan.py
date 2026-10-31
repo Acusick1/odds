@@ -204,12 +204,19 @@ class Manifest(_Frozen):
             for band in sorted(self.coverage, key=lambda band: band.min_lead_minutes)
         ]
 
-    def floor_to_grid(self, t: datetime) -> datetime:
-        """The latest snapshot time at or before ``t``."""
+    def _step_at(self, t: datetime) -> GridStep:
         steps = [step for step in self.snapshot_grid if step.start <= t]
         if not steps:
             raise ValueError(f"{t.isoformat()} is before the first snapshot")
-        step = steps[-1]
+        return steps[-1]
+
+    def grid_step_at(self, t: datetime) -> timedelta:
+        """The interval between snapshots in force at ``t``."""
+        return timedelta(minutes=self._step_at(t).step_minutes)
+
+    def floor_to_grid(self, t: datetime) -> datetime:
+        """The latest snapshot time at or before ``t``."""
+        step = self._step_at(t)
         size = timedelta(minutes=step.step_minutes)
         return step.start + (t - step.start) // size * size
 

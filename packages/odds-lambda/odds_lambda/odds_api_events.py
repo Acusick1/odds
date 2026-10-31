@@ -92,12 +92,3 @@ async def find_event_by_odds_api_id(session: AsyncSession, odds_api_id: str) -> 
         )
     )
     return held.scalar_one_or_none()
-
-
-async def odds_api_id_of(session: AsyncSession, event_id: int) -> str | None:
-    held = await session.execute(
-        select(EventExternalId.external_id).where(
-            EventExternalId.source == Source.ODDS_API, EventExternalId.event_id == event_id
-        )
-    )
-    return held.scalar_one_or_none()

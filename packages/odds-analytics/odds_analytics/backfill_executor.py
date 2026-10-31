@@ -1,343 +1,277 @@
-"""Backfill execution logic for historical data collection."""
+"""Runs the historical Odds API calls an acquisition manifest plans.
+
+Each call is paid for once and everything it returns that resolves to a stored event is stored,
+at the snapshot time the API reports.
+"""
 
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any, Literal
 
 import structlog
 from odds_core.database import async_session_maker
-from odds_core.time import parse_api_datetime
-from odds_core.vocabulary import Source, TimeBasis
+from odds_core.models import FetchLog, OddsSnapshot
+from odds_core.time import utc_isoformat
+from odds_core.utils import is_three_way_sport
+from odds_core.vocabulary import Market, Source, TimeBasis
 from odds_lambda.data_fetcher import TheOddsAPIClient
-from odds_lambda.live_events import DroppedGame, LiveEventFinder, alert_dropped_games
-from odds_lambda.odds_api_events import (
-    odds_api_finder,
-    resolve_odds_api_event,
-)
-from odds_lambda.storage.readers import OddsReader
+from odds_lambda.live_events import DroppedGame, alert_dropped_games, lock_order
+from odds_lambda.odds_api_events import game_row, odds_api_finder, resolve_odds_api_event
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload
 from odds_lambda.storage.writers import OddsWriter
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from odds_analytics.backfill_plan import Call, Manifest
 
 logger = structlog.get_logger()
+
+CallStatus = Literal["fetched", "skipped", "would_fetch", "failed"]
 
 
 @dataclass
 class BackfillResult:
-    """Results from a backfill operation."""
+    """What a run did: ``calls_made`` paid calls, ``calls_skipped`` calls whose fixtures were
+    already stored, ``would_fetch`` calls a dry run did not make."""
 
-    successful_games: int
-    successful_snapshots: int
-    failed_snapshots: int
-    skipped_snapshots: int
-    total_quota_used: int
+    calls_made: int = 0
+    calls_skipped: int = 0
+    would_fetch: int = 0
+    units_used: int = 0
+    snapshots_stored: int = 0
+    fixtures_stored: int = 0
+    quota_remaining: int | None = None
     dropped_games: list[DroppedGame] = field(default_factory=list)
 
 
-@dataclass
-class BackfillProgress:
-    """Progress update during backfill."""
+@dataclass(frozen=True)
+class CallProgress:
+    """One call's outcome, reported as the run goes."""
 
-    event_id: int
-    home_team: str
-    away_team: str
-    snapshot_time: str
-    status: str  # 'success', 'failed', 'skipped', 'exists'
-    message: str
+    time: datetime
+    status: CallStatus
+    fixtures_stored: int = 0
+    units_used: int | None = None
     quota_remaining: int | None = None
+    message: str | None = None
 
 
 class BackfillExecutor:
-    """Executes historical data backfill operations."""
+    """Executes a manifest's planned calls against the Odds API."""
 
     def __init__(
         self,
-        sport: str,
+        manifest: Manifest,
         client: TheOddsAPIClient | None = None,
-        session_factory: Callable | None = None,
+        session_factory: Callable[[], Any] | None = None,
         skip_existing: bool = True,
         dry_run: bool = False,
         rate_limit_seconds: float = 1.0,
     ):
         """
-        Initialize backfill executor.
-
         Args:
-            sport: Sport whose games are backfilled; its key pays for the calls
-            client: API client (will create one if not provided)
-            session_factory: Factory function to create database sessions
-                           (defaults to async_session_maker)
-            skip_existing: Whether to skip snapshots that already exist
-            dry_run: If True, simulate execution without API calls
-            rate_limit_seconds: Seconds to wait between API requests
+            manifest: Fixes the sport (whose key pays), markets, and bookmakers or regions
+            client: API client (one is created and closed with the executor if not given)
+            session_factory: Creates database sessions (defaults to ``async_session_maker``)
+            skip_existing: Skip a call when every fixture it serves already has the snapshot it
+                would return
+            dry_run: Make no API call and write nothing
+            rate_limit_seconds: Pause after each paid call
         """
-        self.sport = sport
+        self.manifest = manifest
         self._client = client
         self._owns_client = client is None
         self._session_factory = session_factory or async_session_maker
         self.skip_existing = skip_existing
         self.dry_run = dry_run
         self.rate_limit_seconds = rate_limit_seconds
-        # Not MLB, so the finder reads no MLB schedule and one serves the whole run
-        self._finder: LiveEventFinder | None = None
-        self._dropped_games: list[DroppedGame] = []
 
-    async def __aenter__(self):
-        """Context manager entry."""
+    async def __aenter__(self) -> "BackfillExecutor":
         if self._owns_client:
             self._client = TheOddsAPIClient()
             await self._client.__aenter__()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         if self._owns_client and self._client:
             await self._client.__aexit__(exc_type, exc_val, exc_tb)
 
-    async def execute_plan(
+    async def execute(
         self,
-        plan: dict,
-        progress_callback: Callable[[BackfillProgress], None] | None = None,
+        calls: list[Call],
+        progress_callback: Callable[[CallProgress], None] | None = None,
     ) -> BackfillResult:
+        """Run ``calls`` in order, stopping at the first exception.
+
+        Each call is paid, and a rerun skips the calls already stored, so a failure ends the run
+        after reporting it rather than spending on.
         """
-        Execute a backfill plan.
+        result = BackfillResult()
 
-        Args:
-            plan: Backfill plan dictionary with 'games' list
-            progress_callback: Optional callback for progress updates
-                               Called with BackfillProgress objects
+        def report(progress: CallProgress) -> None:
+            if progress_callback:
+                progress_callback(progress)
 
-        Returns:
-            BackfillResult with execution statistics
-
-        Raises:
-            ValueError: If plan is invalid
-        """
-        # Validate plan
-        games = plan.get("games", [])
-        if not games:
-            raise ValueError("Plan contains no games")
-
-        # Initialize statistics
-        successful_games = 0
-        successful_snapshots = 0
-        failed_snapshots = 0
-        skipped_snapshots = 0
-        total_quota_used = 0
-
-        # Process each game
-        for game in games:
-            event_id = game["event_id"]
-            odds_api_id = game.get("odds_api_id")
-            home_team = game["home_team"]
-            away_team = game["away_team"]
-            snapshots = game["snapshots"]
-
-            game_success = True
-
-            # Process each snapshot for this game
-            for snapshot_time in snapshots:
+        try:
+            for call in calls:
                 try:
-                    result = await self._process_snapshot(
-                        event_id=event_id,
-                        odds_api_id=odds_api_id,
-                        home_team=home_team,
-                        away_team=away_team,
-                        snapshot_time=snapshot_time,
-                    )
-
-                    # Update statistics
-                    if result.status == "success":
-                        successful_snapshots += 1
-                        total_quota_used += 30  # Approximate quota cost
-                    elif result.status == "exists":
-                        skipped_snapshots += 1
-                    elif result.status == "skipped":
-                        # In dry run, skipped means "would fetch" - count as success
-                        if self.dry_run:
-                            successful_snapshots += 1
-                        else:
-                            skipped_snapshots += 1
-                    elif result.status == "failed":
-                        failed_snapshots += 1
-                        game_success = False
-
-                    # Call progress callback
-                    if progress_callback:
-                        progress_callback(result)
-
-                    # Rate limiting
-                    if not self.dry_run and result.status == "success":
-                        await asyncio.sleep(self.rate_limit_seconds)
-
+                    progress = await self._run_call(call, result)
                 except Exception as e:
-                    failed_snapshots += 1
-                    game_success = False
+                    logger.error("backfill_call_failed", call_time=utc_isoformat(call.time))
+                    report(CallProgress(call.time, "failed", message=str(e)))
+                    raise
+                report(progress)
+                if progress.status == "fetched":
+                    await asyncio.sleep(self.rate_limit_seconds)
+        finally:
+            await alert_dropped_games("odds-backfill", result.dropped_games)
+        return result
 
-                    logger.error(
-                        "snapshot_processing_failed",
-                        event_id=event_id,
-                        snapshot_time=snapshot_time,
-                        error=str(e),
-                    )
-
-                    if progress_callback:
-                        progress_callback(
-                            BackfillProgress(
-                                event_id=event_id,
-                                home_team=home_team,
-                                away_team=away_team,
-                                snapshot_time=snapshot_time,
-                                status="failed",
-                                message=str(e),
-                            )
-                        )
-
-            if game_success:
-                successful_games += 1
-
-        await alert_dropped_games("odds-backfill", self._dropped_games)
-
-        return BackfillResult(
-            dropped_games=list(self._dropped_games),
-            successful_games=successful_games,
-            successful_snapshots=successful_snapshots,
-            failed_snapshots=failed_snapshots,
-            skipped_snapshots=skipped_snapshots,
-            total_quota_used=total_quota_used,
-        )
-
-    async def _process_snapshot(
-        self,
-        event_id: int,
-        odds_api_id: str | None,
-        home_team: str,
-        away_team: str,
-        snapshot_time: str,
-    ) -> BackfillProgress:
-        """
-        Process a single snapshot.
-
-        Args:
-            event_id: Event identifier
-            odds_api_id: The id The Odds API gives the event
-            home_team: Home team name
-            away_team: Away team name
-            snapshot_time: ISO format snapshot time
-
-        Returns:
-            BackfillProgress with result
-        """
-        # Dry run mode
+    async def _run_call(self, call: Call, result: BackfillResult) -> CallProgress:
+        if self.skip_existing and await self._already_stored(call):
+            result.calls_skipped += 1
+            return CallProgress(call.time, "skipped", message="Already stored")
         if self.dry_run:
-            return BackfillProgress(
-                event_id=event_id,
-                home_team=home_team,
-                away_team=away_team,
-                snapshot_time=snapshot_time,
-                status="skipped",
-                message="Dry run - would fetch",
-            )
+            result.would_fetch += 1
+            return CallProgress(call.time, "would_fetch")
 
-        # Check if snapshot already exists
-        if self.skip_existing:
-            snapshot_dt = parse_api_datetime(snapshot_time)
-
-            async with self._session_factory() as check_session:
-                reader = OddsReader(check_session)
-                exists = await reader.snapshot_exists(event_id, snapshot_dt)
-
-                if exists:
-                    return BackfillProgress(
-                        event_id=event_id,
-                        home_team=home_team,
-                        away_team=away_team,
-                        snapshot_time=snapshot_time,
-                        status="exists",
-                        message="Already exists",
-                    )
-
-        if odds_api_id is None:
-            return BackfillProgress(
-                event_id=event_id,
-                home_team=home_team,
-                away_team=away_team,
-                snapshot_time=snapshot_time,
-                status="skipped",
-                message="Event has no Odds API id",
-            )
-
-        # Fetch historical odds - API client returns parsed Event instances
         client = self._client
         if client is None:
             raise RuntimeError("BackfillExecutor client not initialized")
+        try:
+            return await self._fetch_and_store(call, result, client)
+        except Exception as e:
+            await self._log_failed_fetch(client, result, e)
+            raise
 
+    async def _fetch_and_store(
+        self, call: Call, result: BackfillResult, client: TheOddsAPIClient
+    ) -> CallProgress:
+        manifest = self.manifest
         response = await client.get_historical_odds(
-            sport=self.sport,
-            date=snapshot_time,
+            sport=manifest.sport,
+            date=utc_isoformat(call.time),
+            markets=[str(market.key) for market in manifest.markets],
+            regions=list(manifest.regions) or None,
+            bookmakers=list(manifest.bookmakers) or None,
+        )
+        result.calls_made += 1
+        result.units_used += response.units_used or 0
+        result.quota_remaining = response.quota_remaining
+        logger.info(
+            "backfill_call_fetched",
+            call_time=utc_isoformat(call.time),
+            snapshot_time=utc_isoformat(response.snapshot_time),
+            units_used=response.units_used,
+            quota_remaining=response.quota_remaining,
         )
 
-        # Find our specific event in the response
-        event = None
-        event_data = None
-        for evt, raw_evt in zip(response.events, response.raw_events_data, strict=True):
-            if evt.odds_api_id == odds_api_id:
-                event = evt
-                event_data = raw_evt
-                break
-
-        if not event or event_data is None:
-            return BackfillProgress(
-                event_id=event_id,
-                home_team=home_team,
-                away_team=away_team,
-                snapshot_time=snapshot_time,
-                status="skipped",
-                message="Event not found in API response",
-            )
-
-        # Store to database
-        snapshot_dt = parse_api_datetime(snapshot_time)
-
+        stored = 0
         async with self._session_factory() as session:
             writer = OddsWriter(session)
-
-            if self._finder is None:
-                self._finder = await odds_api_finder(event.sport_key, [event])
-            found = await resolve_odds_api_event(self._finder, session, event)
-            if isinstance(found, DroppedGame):
-                self._dropped_games.append(found)
-                return BackfillProgress(
-                    event_id=event_id,
-                    home_team=home_team,
-                    away_team=away_team,
-                    snapshot_time=snapshot_time,
-                    status="skipped",
-                    message=f"Game dropped: {found.describe()}",
+            finder = await odds_api_finder(manifest.sport, response.events)
+            payload_id: int | None = None
+            # The resolver takes fixture locks, which must be acquired in ascending order.
+            fixtures = sorted(
+                zip(response.events, response.raw_events_data, strict=True),
+                key=lambda pair: lock_order(manifest.sport, game_row(pair[0])),
+            )
+            for event, raw in fixtures:
+                found = await resolve_odds_api_event(finder, session, event)
+                if isinstance(found, DroppedGame):
+                    result.dropped_games.append(found)
+                    continue
+                if payload_id is None:
+                    payload_id = await store_payload(session, response.raw_events_data)
+                envelope = await writer.store_envelope(
+                    event_id=found.event.id,
+                    envelope=raw,
+                    snapshot_time=response.snapshot_time,
+                    shape=SnapshotShape(Source.ODDS_API, TimeBasis.OBSERVED, payload_id),
                 )
-            payload_id = await store_payload(session, [event_data])
-            await writer.store_envelope(
-                event_id=found.event.id,
-                envelope=event_data,
-                snapshot_time=snapshot_dt,
-                shape=SnapshotShape(Source.ODDS_API, TimeBasis.UPPER_BOUND, payload_id),
+                result.snapshots_stored += envelope.snapshots_written
+                stored += 1
+            await writer.log_fetch(
+                FetchLog(
+                    sport_key=manifest.sport,
+                    events_count=len(response.events),
+                    bookmakers_count=len(
+                        {
+                            b["key"]
+                            for raw in response.raw_events_data
+                            for b in raw.get("bookmakers", [])
+                        }
+                    ),
+                    success=True,
+                    api_quota_remaining=response.quota_remaining,
+                    response_time_ms=response.response_time_ms,
+                )
+            )
+            await session.commit()
+        result.fixtures_stored += stored
+        return CallProgress(
+            call.time,
+            "fetched",
+            fixtures_stored=stored,
+            units_used=response.units_used,
+            quota_remaining=response.quota_remaining,
+        )
+
+    async def _log_failed_fetch(
+        self, client: TheOddsAPIClient, result: BackfillResult, error: Exception
+    ) -> None:
+        """Record a failed call's fetch log in its own transaction, so the key's last balance
+        survives the call's rollback."""
+        result.quota_remaining = client.quota_remaining
+        async with self._session_factory() as session:
+            await OddsWriter(session).log_fetch(
+                FetchLog(
+                    sport_key=self.manifest.sport,
+                    events_count=0,
+                    bookmakers_count=0,
+                    success=False,
+                    error_message=f"{type(error).__name__}: {error}",
+                    api_quota_remaining=client.quota_remaining,
+                )
             )
             await session.commit()
 
-        quota_remaining = response.quota_remaining or 0
+    async def _already_stored(self, call: Call) -> bool:
+        """Whether every fixture the call serves has the snapshot it would return: an Odds API
+        snapshot of each requested market in ``(call time - grid step, call time]``."""
+        wanted = {target.fixture.event_id for target in call.serves}
+        if not wanted:
+            return True
+        # Soccer's three-way h2h is stored as 1x2 (odds_core.utils.relabel_three_way_markets).
+        markets = {
+            Market.ONE_X_TWO
+            if market.key == Market.H2H and is_three_way_sport(self.manifest.sport)
+            else Market(market.key)
+            for market in self.manifest.markets
+        }
+        step = self.manifest.grid_step_at(call.time)
+        async with self._session_factory() as session:
+            stored = await _stored_markets(session, wanted, call.time - step, call.time)
+        return all(markets <= stored.get(event_id, set()) for event_id in wanted)
 
-        logger.info(
-            "snapshot_stored",
-            event_id=event_id,
-            snapshot_time=snapshot_time,
-            quota_remaining=quota_remaining,
-        )
 
-        return BackfillProgress(
-            event_id=event_id,
-            home_team=home_team,
-            away_team=away_team,
-            snapshot_time=snapshot_time,
-            status="success",
-            message="Stored successfully",
-            quota_remaining=quota_remaining,
+async def _stored_markets(
+    session: AsyncSession, event_ids: set[int], after: datetime, until: datetime
+) -> dict[int, set[Market]]:
+    rows = await session.execute(
+        select(OddsSnapshot.event_id, OddsSnapshot.market)
+        .where(
+            OddsSnapshot.event_id.in_(event_ids),  # type: ignore[attr-defined]
+            OddsSnapshot.source == Source.ODDS_API,
+            OddsSnapshot.snapshot_time > after,
+            OddsSnapshot.snapshot_time <= until,
         )
+        .distinct()
+    )
+    stored: dict[int, set[Market]] = {}
+    for event_id, market in rows.all():
+        if market is not None:
+            stored.setdefault(event_id, set()).add(market)
+    return stored

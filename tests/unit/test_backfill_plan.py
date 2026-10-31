@@ -250,6 +250,16 @@ class TestManifest:
         with pytest.raises(ValidationError, match=message):
             Manifest.model_validate(manifest_data(coverage=coverage))
 
+    def test_grid_step_is_the_interval_in_force(self, manifest: Manifest) -> None:
+        assert manifest.grid_step_at(FIVE_MINUTES_FROM - timedelta(minutes=1)) == timedelta(
+            minutes=10
+        )
+        assert manifest.grid_step_at(FIVE_MINUTES_FROM) == timedelta(minutes=5)
+
+    def test_grid_step_before_the_first_snapshot_raises(self, manifest: Manifest) -> None:
+        with pytest.raises(ValueError, match="before the first snapshot"):
+            manifest.grid_step_at(datetime(2020, 1, 1, tzinfo=UTC))
+
     def test_band_cuts_drop_one_band_each(self, manifest: Manifest) -> None:
         cuts = manifest.band_cuts()
 

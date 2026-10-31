@@ -67,7 +67,7 @@ League-wide injury report snapshots parsed from the official PDFs by `nbainjurie
 
 stats.nba.com blocks raw HTTP (Akamai), so `odds_lambda.game_log_fetcher.fetch_game_logs` is synchronous Playwright: headless Firefox loads nba.com for cookies, then calls the API from the page. Two rows per game, about 2,460 per regular season. Because Playwright's sync API cannot run inside an event loop, the CLI fetches all seasons first, then writes asynchronously.
 
-`odds_lambda.storage.game_log_reader.GameLogReader.get_game_logs_for_event` and `odds_lambda.storage.game_log_reader.GameLogReader.get_team_previous_game` serve the `rest` features (the first takes an event's integer id), which are all-NaN for EPL and dropped by the variance filter ([feature-groups](../modelling/feature-groups.md)). `odds backfill scores` reads logs linked to events to fill missing scores ([odds-api-backfill](odds-api-backfill.md)).
+`odds_lambda.storage.game_log_reader.GameLogReader.get_game_logs_for_event` and `odds_lambda.storage.game_log_reader.GameLogReader.get_team_previous_game` serve the `rest` features (the first takes an event's integer id), which are all-NaN for EPL and dropped by the variance filter ([feature-groups](../modelling/feature-groups.md)). `odds backfill scores` fills missing scores from the logs linked to events ([odds-api-backfill](odds-api-backfill.md)).
 
 ## Player stats
 

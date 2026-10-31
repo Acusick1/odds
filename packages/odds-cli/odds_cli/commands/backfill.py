@@ -1,12 +1,11 @@
 """Historical data backfill commands."""
 
 import asyncio
-import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import typer
-from odds_analytics.backfill_executor import BackfillExecutor, BackfillProgress
+from odds_analytics.backfill_executor import BackfillExecutor, CallProgress
 from odds_analytics.backfill_plan import (
     Fixture,
     Manifest,
@@ -46,11 +45,7 @@ def plan_backfill(
         odds backfill plan --manifest backfills/odds-api-epl-2020-26.yaml --cost
     """
     manifest = Manifest.load(Path(manifest_file))
-    unknown = sorted(set(season or ()) - manifest.seasons.keys())
-    if unknown:
-        console.print(f"[red]Not a manifest season: {', '.join(unknown)}[/red]")
-        raise typer.Exit(1)
-    seasons = {name: s for name, s in manifest.seasons.items() if not season or name in season}
+    seasons = _select_seasons(manifest, season)
     fixtures, balance = asyncio.run(_load_season_fixtures(manifest, seasons))
     if cost:
         console.print(_cost_table(manifest, fixtures, balance))
@@ -59,6 +54,14 @@ def plan_backfill(
         console.print(f"[bold]{name}[/bold]")
         for call in plan(manifest, season_fixtures):
             console.print(f"  {utc_isoformat(call.time)}  {len(call.serves)}")
+
+
+def _select_seasons(manifest: Manifest, season: list[str] | None) -> dict[str, Season]:
+    unknown = sorted(set(season or ()) - manifest.seasons.keys())
+    if unknown:
+        console.print(f"[red]Not a manifest season: {', '.join(unknown)}[/red]")
+        raise typer.Exit(1)
+    return {name: s for name, s in manifest.seasons.items() if not season or name in season}
 
 
 async def _load_season_fixtures(
@@ -123,80 +126,56 @@ def _cost_table(manifest: Manifest, fixtures: dict[str, list[Fixture]], balance:
 
 @app.command("execute")
 def execute_backfill(
-    plan_file: str = typer.Option(..., "--plan", "-p", help="Path to backfill plan JSON file"),
-    sport: str = typer.Option(
-        ..., "--sport", help="Sport of the plan (its key pays for the calls)"
+    manifest_file: str = typer.Option(..., "--manifest", "-m", help="Acquisition manifest YAML"),
+    season: list[str] | None = typer.Option(  # noqa: B008 — typer option idiom
+        None, "--season", help="Execute only this manifest season (repeatable)"
     ),
     dry_run: bool = typer.Option(
-        False, "--dry-run", help="Simulate execution without making API calls"
+        False, "--dry-run", help="Count the calls that would be made without making any"
     ),
     skip_existing: bool = typer.Option(
         True,
         "--skip-existing/--no-skip-existing",
-        help="Skip games that already have historical snapshots",
+        help="Skip calls whose fixtures already have the snapshot the call returns",
     ),
 ):
     """
-    Execute a backfill plan to fetch historical odds.
+    Make the Odds API historical calls an acquisition manifest plans and store what they return.
 
-    This will make actual API calls and consume quota. Use --dry-run first
-    to validate the plan.
+    Spends paid quota on the manifest's sport key. Use --dry-run first to count the calls.
 
     Example:
-        odds backfill execute --plan gap_plan.json --sport basketball_nba
-        odds backfill execute --plan gap_plan.json --sport basketball_nba --dry-run
+        odds backfill execute --manifest backfills/odds-api-epl-2020-26.yaml --season 2024-25 --dry-run
     """
-    console.print("\n[bold cyan]Executing Historical Backfill[/bold cyan]\n")
-
-    asyncio.run(_execute_backfill_async(plan_file, dry_run, skip_existing, sport))
+    manifest = Manifest.load(Path(manifest_file))
+    seasons = _select_seasons(manifest, season)
+    asyncio.run(_execute_backfill_async(manifest, seasons, dry_run, skip_existing))
 
 
 async def _execute_backfill_async(
-    plan_file: str,
-    dry_run: bool,
-    skip_existing: bool,
-    sport: str,
-):
-    """Async implementation of backfill execution."""
-    # Load plan
-    try:
-        with open(plan_file) as f:
-            plan = json.load(f)
-    except FileNotFoundError as e:
-        console.print(f"[red]Error: Plan file not found: {plan_file}[/red]")
-        raise typer.Exit(1) from e
-    except json.JSONDecodeError as e:
-        console.print(f"[red]Error: Invalid JSON in plan file: {e}[/red]")
-        raise typer.Exit(1) from e
-
-    games = plan.get("games", [])
-    if not games:
-        console.print("[red]Error: No games in plan[/red]")
+    manifest: Manifest, seasons: dict[str, Season], dry_run: bool, skip_existing: bool
+) -> None:
+    fixtures, balance = await _load_season_fixtures(manifest, seasons)
+    calls = [
+        call for season_fixtures in fixtures.values() for call in plan(manifest, season_fixtures)
+    ]
+    if not calls:
+        console.print("[red]No calls planned: no FINAL fixtures in the selected seasons[/red]")
         raise typer.Exit(1)
 
-    # Display execution summary
-    console.print(f"[bold]Games to backfill:[/bold] {len(games)}")
-    console.print(f"[bold]Total snapshots:[/bold] {plan['total_snapshots']}")
-    console.print(f"[bold]Estimated quota:[/bold] {plan['estimated_quota_usage']:,}")
-
+    units = len(calls) * manifest.units_per_call
+    console.print(f"[bold]Calls:[/bold] {len(calls):,}")
+    console.print(f"[bold]Estimated units:[/bold] {units:,}")
+    console.print(f"[bold]Key balance:[/bold] {balance:,}")
     if dry_run:
         console.print("\n[yellow]DRY RUN - No API calls will be made[/yellow]")
-
-    # Confirm execution
-    if not dry_run:
+    else:
         console.print("\n[yellow]This will consume API quota. Continue?[/yellow]")
-        confirmed = typer.confirm("Proceed with backfill?")
-        if not confirmed:
+        if not typer.confirm("Proceed with backfill?"):
             console.print("[red]Aborted[/red]")
             raise typer.Exit(0)
 
-    # Execute backfill with progress tracking
-    async with BackfillExecutor(
-        sport=sport,
-        skip_existing=skip_existing,
-        dry_run=dry_run,
-        rate_limit_seconds=1.0,
-    ) as executor:
+    async with BackfillExecutor(manifest, skip_existing=skip_existing, dry_run=dry_run) as executor:
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -204,94 +183,42 @@ async def _execute_backfill_async(
             TaskProgressColumn(),
             console=console,
         ) as progress:
-            game_task = progress.add_task("Processing games...", total=len(games))
+            task = progress.add_task("Executing calls...", total=len(calls))
 
-            current_game = None
+            def on_progress(update: CallProgress) -> None:
+                progress.console.print(_progress_line(update))
+                progress.advance(task)
 
-            def on_progress(progress_update: BackfillProgress):
-                """Handle progress updates from executor."""
-                nonlocal current_game
+            result = await executor.execute(calls, progress_callback=on_progress)
 
-                # Print game header when starting new game
-                game_key = f"{progress_update.away_team}@{progress_update.home_team}"
-                if current_game != game_key:
-                    current_game = game_key
-                    # Find snapshot count for this game
-                    game_info = next(
-                        (g for g in games if g["event_id"] == progress_update.event_id), None
-                    )
-                    snapshot_count = len(game_info["snapshots"]) if game_info else "?"
-                    progress.console.print(
-                        f"\n[cyan]{progress_update.away_team} @ {progress_update.home_team}[/cyan] ({snapshot_count} snapshots)"
-                    )
+    table = Table(title="Backfill complete")
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value", style="green")
+    table.add_row("Calls made", f"{result.calls_made:,}")
+    table.add_row("Calls skipped", f"{result.calls_skipped:,}")
+    if dry_run:
+        table.add_row("Calls that would be made", f"{result.would_fetch:,}")
+    table.add_row("Units used", f"{result.units_used:,}")
+    table.add_row("Fixtures stored", f"{result.fixtures_stored:,}")
+    table.add_row("Snapshots stored", f"{result.snapshots_stored:,}")
+    table.add_row("Dropped games", f"{len(result.dropped_games):,}")
+    if result.quota_remaining is not None:
+        table.add_row("Key quota remaining", f"{result.quota_remaining:,}")
+    console.print(table)
 
-                # Print snapshot result
-                snapshot_short = progress_update.snapshot_time[:16]
-                if progress_update.status == "success":
-                    quota_str = (
-                        f"(quota: {progress_update.quota_remaining:,})"
-                        if progress_update.quota_remaining
-                        else ""
-                    )
-                    progress.console.print(f"    [green]✓ {snapshot_short}[/green] {quota_str}")
-                elif progress_update.status == "exists":
-                    progress.console.print(
-                        f"    [dim]⊘ Skipped (already exists): {snapshot_short}[/dim]"
-                    )
-                elif progress_update.status == "skipped":
-                    if dry_run:
-                        progress.console.print(
-                            f"  [dim]Would fetch: {progress_update.snapshot_time}[/dim]"
-                        )
-                    else:
-                        progress.console.print(
-                            f"    [yellow]⚠ {progress_update.message}: {snapshot_short}[/yellow]"
-                        )
-                elif progress_update.status == "failed":
-                    message = (
-                        progress_update.message[:60]
-                        if len(progress_update.message) > 60
-                        else progress_update.message
-                    )
-                    progress.console.print(f"    [red]✗ Failed: {message}[/red]")
 
-            # Track games processed for progress bar
-            last_event_id = None
-
-            def on_progress_with_advance(progress_update: BackfillProgress):
-                nonlocal last_event_id
-                on_progress(progress_update)
-                # Advance progress bar when we finish a game (move to new event)
-                if last_event_id and last_event_id != progress_update.event_id:
-                    progress.advance(game_task)
-                last_event_id = progress_update.event_id
-
-            # Execute the backfill
-            result = await executor.execute_plan(plan, progress_callback=on_progress_with_advance)
-
-            # Advance for the last game
-            progress.advance(game_task)
-
-    # Final summary
-    console.print("\n" + "=" * 60)
-    console.print("[bold cyan]Backfill Complete[/bold cyan]")
-    console.print("=" * 60)
-
-    summary_table = Table()
-    summary_table.add_column("Metric", style="cyan")
-    summary_table.add_column("Value", style="green")
-
-    summary_table.add_row("Successful Games", str(result.successful_games))
-    summary_table.add_row("Successful Snapshots", str(result.successful_snapshots))
-    summary_table.add_row("Failed Snapshots", str(result.failed_snapshots))
-    summary_table.add_row("Skipped Snapshots", str(result.skipped_snapshots))
-
-    if not dry_run:
-        summary_table.add_row("Approx. Quota Used", f"{result.total_quota_used:,}")
-
-    console.print("\n")
-    console.print(summary_table)
-    console.print()
+def _progress_line(update: CallProgress) -> str:
+    when = utc_isoformat(update.time)
+    if update.status == "fetched":
+        return (
+            f"[green]fetched[/green] {when}  {update.fixtures_stored} fixtures, "
+            f"{update.units_used} units, quota {update.quota_remaining}"
+        )
+    if update.status == "skipped":
+        return f"[dim]skipped[/dim] {when}"
+    if update.status == "would_fetch":
+        return f"[dim]would fetch[/dim] {when}"
+    return f"[red]failed[/red] {when}  {update.message}"
 
 
 @app.command("status")
@@ -496,212 +423,3 @@ async def _backfill_scores_async(start_date_str: str, end_date_str: str, dry_run
             "\n[dim]Tip: Run 'odds nba-stats fetch --all' to populate game log data[/dim]"
         )
     console.print()
-
-
-@app.command("gaps")
-def detect_and_plan_gaps(
-    start_date: str = typer.Option(..., "--start", "-s", help="Start date (YYYY-MM-DD)"),
-    end_date: str = typer.Option(..., "--end", "-e", help="End date (YYYY-MM-DD)"),
-    max_quota: int | None = typer.Option(
-        None,
-        "--max-quota",
-        help="Maximum quota to use (default: unlimited)",
-    ),
-    output_file: str | None = typer.Option(
-        None,
-        "--output",
-        "-o",
-        help="Save plan to file (e.g., gap_plan.json)",
-    ),
-):
-    """
-    Detect gaps in tier coverage and generate backfill plan.
-
-    This command identifies missing fetch tier data (OPENING, EARLY, SHARP,
-    PREGAME, CLOSING) and generates an executable backfill plan to fill those gaps.
-
-    Games are prioritized by highest-priority missing tier:
-    - CLOSING (highest priority) - closest to game start
-    - PREGAME
-    - SHARP
-    - EARLY
-    - OPENING (lowest priority) - earliest snapshots
-
-    When quota is limited, only complete games are included (all missing tiers
-    filled per game). Partial games are never included.
-
-    Examples:
-        # Detect gaps and show summary
-        odds backfill gaps --start 2024-10-01 --end 2024-10-31
-
-        # Generate plan with quota limit
-        odds backfill gaps --start 2024-10-01 --end 2024-10-31 --max-quota 3000
-
-        # Generate and save plan
-        odds backfill gaps --start 2024-10-01 --end 2024-10-31 --output gap_plan.json
-
-    After generating a plan, execute it with:
-        odds backfill execute --plan gap_plan.json --sport basketball_nba
-    """
-    console.print("\n[bold cyan]Gap Detection and Backfill Planning[/bold cyan]\n")
-    asyncio.run(_detect_and_plan_gaps_async(start_date, end_date, max_quota, output_file))
-
-
-async def _detect_and_plan_gaps_async(
-    start_date_str: str,
-    end_date_str: str,
-    max_quota: int | None,
-    output_file: str | None,
-):
-    """Async implementation of gap detection and planning."""
-    try:
-        start_date = datetime.fromisoformat(start_date_str).date()
-        end_date = datetime.fromisoformat(end_date_str).date()
-    except ValueError as e:
-        console.print(f"[red]Error parsing dates: {e}[/red]")
-        raise typer.Exit(1) from e
-
-    # Display settings
-    console.print(f"[bold]Date range:[/bold] {start_date_str} to {end_date_str}")
-    if max_quota:
-        console.print(f"[bold]Max quota:[/bold] {max_quota:,} units")
-    else:
-        console.print("[bold]Max quota:[/bold] unlimited")
-    console.print()
-
-    # Import here to avoid circular dependencies
-    from odds_analytics.gap_backfill_planner import GapBackfillPlanner
-
-    # Analyze gaps
-    console.print("[cyan]Analyzing tier coverage gaps...[/cyan]")
-
-    async with async_session_maker() as session:
-        planner = GapBackfillPlanner(session)
-
-        # Run gap analysis
-        try:
-            analysis = await planner.analyze_gaps(start_date, end_date)
-        except Exception as e:
-            console.print(f"\n[red]Gap analysis failed: {e}[/red]")
-            raise typer.Exit(1) from e
-
-        # Display analysis summary
-        console.print("\n[bold]Gap Analysis Summary:[/bold]\n")
-
-        summary_table = Table(show_header=False, box=None)
-        summary_table.add_column("Metric", style="cyan")
-        summary_table.add_column("Value", style="white")
-
-        summary_table.add_row("Total Games", str(analysis.total_games))
-        summary_table.add_row(
-            "Games with Gaps",
-            f"[red]{analysis.games_with_gaps}[/red]"
-            if analysis.games_with_gaps > 0
-            else "[green]0[/green]",
-        )
-        summary_table.add_row(
-            "Total Missing Snapshots",
-            f"[red]{analysis.total_missing_snapshots}[/red]"
-            if analysis.total_missing_snapshots > 0
-            else "[green]0[/green]",
-        )
-
-        console.print(summary_table)
-        console.print()
-
-        # If no gaps, exit early
-        if analysis.games_with_gaps == 0:
-            console.print("[green]No gaps found! All games have complete tier coverage.[/green]\n")
-            return
-
-        # Display games by priority tier
-        console.print("[bold]Games Missing Each Tier (by priority):[/bold]\n")
-
-        priority_table = Table(show_header=True)
-        priority_table.add_column("Priority", style="cyan")
-        priority_table.add_column("Tier", style="cyan")
-        priority_table.add_column("Games Missing", justify="right")
-
-        from odds_lambda.fetch_tier import FetchTier
-
-        for idx, tier in enumerate(FetchTier.get_priority_order(), start=1):
-            games_missing_tier = len(analysis.games_by_priority.get(tier, []))
-
-            if games_missing_tier > 0:
-                games_str = f"[red]{games_missing_tier}[/red]"
-            else:
-                games_str = f"[green]{games_missing_tier}[/green]"
-
-            priority_table.add_row(
-                f"#{idx}",
-                tier.value.upper(),
-                games_str,
-            )
-
-        console.print(priority_table)
-        console.print()
-
-        # Generate backfill plan
-        console.print("[cyan]Generating backfill plan...[/cyan]")
-
-        try:
-            plan = await planner.generate_plan(start_date, end_date, max_quota)
-        except ValueError as e:
-            console.print(f"\n[red]Error: {e}[/red]")
-            console.print(
-                "[yellow]Tip: Use --max-quota with a higher value or remove the limit.[/yellow]\n"
-            )
-            raise typer.Exit(1) from e
-        except Exception as e:
-            console.print(f"\n[red]Plan generation failed: {e}[/red]")
-            raise typer.Exit(1) from e
-
-        # Display plan summary
-        console.print("\n[bold]Backfill Plan Summary:[/bold]\n")
-
-        plan_table = Table(show_header=False, box=None)
-        plan_table.add_column("Metric", style="cyan")
-        plan_table.add_column("Value", style="white")
-
-        plan_table.add_row("Games in Plan", str(plan["total_games"]))
-        plan_table.add_row("Total Snapshots", str(plan["total_snapshots"]))
-        plan_table.add_row("Estimated Quota", f"{plan['estimated_quota_usage']:,} units")
-
-        # Calculate coverage
-        if analysis.games_with_gaps > 0:
-            coverage_pct = (plan["total_games"] / analysis.games_with_gaps) * 100
-            coverage_str = (
-                f"[green]{coverage_pct:.1f}%[/green]"
-                if coverage_pct == 100
-                else f"[yellow]{coverage_pct:.1f}%[/yellow]"
-            )
-            plan_table.add_row("Gap Coverage", coverage_str)
-
-        console.print(plan_table)
-        console.print()
-
-        # Show incomplete coverage warning if applicable
-        if max_quota and plan["total_games"] < analysis.games_with_gaps:
-            skipped_games = analysis.games_with_gaps - plan["total_games"]
-            console.print(
-                f"[yellow]Note: {skipped_games} games excluded due to quota limit.[/yellow]"
-            )
-            console.print(
-                "[yellow]Increase --max-quota to include more games or remove limit for full coverage.[/yellow]\n"
-            )
-
-        # Save plan to file if requested
-        if output_file:
-            output_path = Path(output_file)
-            with open(output_path, "w") as f:
-                json.dump(plan, f, indent=2)
-
-            console.print(f"[green]Plan saved to {output_path}[/green]\n")
-
-            # Show execution command
-            console.print("[bold]Execute plan with:[/bold]")
-            console.print(f"  odds backfill execute --plan {output_file} --sport basketball_nba\n")
-        else:
-            console.print(
-                "[yellow]No output file specified. Use --output to save plan for execution.[/yellow]\n"
-            )

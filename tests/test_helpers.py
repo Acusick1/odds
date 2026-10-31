@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from odds_core.api_models import EventsResponse, HistoricalOddsResponse, OddsResponse
+from odds_core.api_models import EventsResponse, OddsResponse
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.quotes import Quote
 from odds_core.vocabulary import Source, TimeBasis
@@ -17,9 +17,8 @@ from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_shaped_sna
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# Hours before kick-off that odds_lambda.tier_utils.calculate_tier puts in each fetch tier, at the
-# Odds API backfill's snapshot time where one lies in the tier
-# (odds_analytics.gap_backfill_planner.TIER_SNAPSHOT_LEADS); IN_PLAY is after kick-off.
+# Hours before kick-off that odds_lambda.tier_utils.calculate_tier puts in each fetch tier;
+# IN_PLAY is after kick-off.
 TIER_HOURS_BEFORE: dict[FetchTier, float] = {
     FetchTier.OPENING: 100,
     FetchTier.EARLY: 72,
@@ -123,65 +122,6 @@ class StubOddsClient:
     async def get_events(self, *args, **kwargs) -> EventsResponse:
         """Return the configured events response."""
         return self._events_response
-
-
-class StubHistoricalOddsClient:
-    """
-    Stub for historical odds API client with call-based response variation.
-
-    This stub cycles through a list of responses based on call count, useful
-    for testing pagination or multiple API calls with different results.
-
-    Example:
-        >>> responses = [
-        ...     HistoricalOddsResponse(events=[event1], ...),
-        ...     HistoricalOddsResponse(events=[event2], ...),
-        ... ]
-        >>> client = StubHistoricalOddsClient(responses)
-        >>> async with client as c:
-        ...     result1 = await c.get_historical_odds(...)  # Returns responses[0]
-        ...     result2 = await c.get_historical_odds(...)  # Returns responses[1]
-        ...     result3 = await c.get_historical_odds(...)  # Returns responses[1] again
-    """
-
-    def __init__(self, responses: list[HistoricalOddsResponse]):
-        """
-        Initialize stub with list of responses.
-
-        Args:
-            responses: List of HistoricalOddsResponse objects to return.
-                       Cycles through based on call count.
-        """
-        if not responses:
-            raise ValueError("Must provide at least one response")
-        self._responses = responses
-        self._call_count = 0
-
-    async def __aenter__(self):
-        """Enter async context manager."""
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        """Exit async context manager."""
-        return False
-
-    async def get_historical_odds(self, *args, **kwargs) -> HistoricalOddsResponse:
-        """
-        Return a response based on call count.
-
-        First call returns responses[0], second call returns responses[1], etc.
-        If call count exceeds list length, returns the last response repeatedly.
-
-        Args and kwargs are accepted but ignored for stub simplicity.
-        """
-        # Use min to avoid index out of bounds - return last response if exceeded
-        response = self._responses[min(self._call_count, len(self._responses) - 1)]
-        self._call_count += 1
-        return response
-
-    def reset_call_count(self):
-        """Reset the call counter to 0 (useful for test isolation)."""
-        self._call_count = 0
 
 
 TWIN_KICKOFF = datetime(2026, 4, 15, 15, 0, tzinfo=UTC)

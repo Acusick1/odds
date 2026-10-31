@@ -46,7 +46,7 @@ The boundaries in the table are `odds_lambda.fetch_tier.FetchTier.max_hours` and
 | Time basis | Tier |
 |---|---|
 | `close` | CLOSING, whatever the stamp (an FDUK closing price is stamped at kick-off) |
-| `upper_bound` | `odds_lambda.tier_utils.calculate_tier`, except that a time exactly on a boundary covers the farther tier only, since the price was taken at or before it: an FDUK opening stamped 3.0 h out is PREGAME, and the Odds API backfill's fetches at 72, 24, 12 and 3 h before kick-off cover OPENING, EARLY, SHARP and PREGAME |
+| `upper_bound` | `odds_lambda.tier_utils.calculate_tier`, except that a time exactly on a boundary covers the farther tier only, since the price was taken at or before it: an FDUK opening stamped 3.0 h out is PREGAME |
 | `observed`, `source_stamped` | `odds_lambda.tier_utils.calculate_tier` |
 
 `odds_lambda.tier_utils.snapshot_tiers` applies it to an event's snapshots, given with their source, time basis and market, and adds two rules that need the other snapshots:
@@ -54,7 +54,7 @@ The boundaries in the table are `odds_lambda.fetch_tier.FetchTier.max_hours` and
 - **OddsPortal history closing.** A market's latest OddsPortal `source_stamped` time is its history closing price, so it is CLOSING however near or after kick-off the stamp (the latest change among the books) lies. A market with a single stamp before kick-off may hold only an opening whose closing was never scraped, so that stamp keeps its own tier; an opening is never stamped after kick-off.
 - **A source's `close` is its only closing.** When a source has a `close` snapshot for a market, none of the source's other snapshots of that market is CLOSING; one that would be covers PREGAME. An FDUK opening stamped under 3 h before kick-off therefore stays in the pregame pool the [tier sampler](../modelling/feature-pipeline.md) draws decision rows from.
 
-Every tier in the system comes from `odds_lambda.tier_utils.snapshot_tier` or `odds_lambda.tier_utils.snapshot_tiers`: the coverage check (`odds_lambda.storage.tier_validator.covered_tiers`), the coverage metrics (`odds_analytics.quality_metrics.QualityMetrics`), the training sampler and `raw` close (`odds_analytics.feature_groups.TierSampler`, `odds_analytics.feature_groups.raw_closes`) and the gap planner, which tiers each planned fetch as the `upper_bound` snapshot the backfill stores, so a filled game is not planned again.
+Every tier in the system comes from `odds_lambda.tier_utils.snapshot_tier` or `odds_lambda.tier_utils.snapshot_tiers`: the coverage check (`odds_lambda.storage.tier_validator.covered_tiers`), the coverage metrics (`odds_analytics.quality_metrics.QualityMetrics`), the training sampler and `raw` close (`odds_analytics.feature_groups.TierSampler`, `odds_analytics.feature_groups.raw_closes`).
 
 ## Where tiers are read
 
