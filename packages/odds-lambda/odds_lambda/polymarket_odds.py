@@ -8,21 +8,18 @@ from bisect import bisect_right
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Literal
+from typing import Any
 
 import structlog
 from odds_core.odds_math import PRICE_DECIMAL_KEY
-from odds_core.team import normalize_team_name
 from odds_core.vocabulary import Source
 
 from odds_lambda.fetch_tier import FetchTier
-from odds_lambda.polymarket_sports import PolymarketSportConfig
+from odds_lambda.polymarket_sports import PolymarketSportConfig, Side
 from odds_lambda.storage.event_resolver import ListedGame
 
 logger = structlog.get_logger()
 
-Side = Literal["home", "draw", "away"]
-SIDES: tuple[Side, ...] = ("home", "draw", "away")
 Observation = tuple[datetime, float]
 
 BOOKMAKER_KEY = "polymarket"
@@ -47,21 +44,19 @@ MAX_STALENESS = timedelta(minutes=30)
 # A live midpoint is only quoted when the book is tight; a wider spread is an empty book.
 MAX_QUOTE_SPREAD = 0.03
 
-_CLUB_SUFFIX = re.compile(r"\s+A?FC$")
-
 
 @dataclass(frozen=True)
 class Prices:
-    home: float
-    draw: float
-    away: float
+    """The outcome probabilities of one match, keyed by the sides its sport has."""
+
+    values: Mapping[Side, float]
 
     @property
     def total(self) -> float:
-        return self.home + self.draw + self.away
+        return sum(self.values.values())
 
     def by_side(self) -> dict[Side, float]:
-        return {"home": self.home, "draw": self.draw, "away": self.away}
+        return dict(self.values)
 
 
 @dataclass(frozen=True)
@@ -91,22 +86,24 @@ class PolymarketMatch:
     start_time: datetime
     home_team: str
     away_team: str
-    home: OutcomeMarket
-    draw: OutcomeMarket
-    away: OutcomeMarket
+    outcomes: Mapping[Side, OutcomeMarket]
+
+    @property
+    def sides(self) -> tuple[Side, ...]:
+        return tuple(self.outcomes)
 
     def outcome_market(self, side: Side) -> OutcomeMarket:
-        return {"home": self.home, "draw": self.draw, "away": self.away}[side]
+        return self.outcomes[side]
 
     def max_spread(self) -> float | None:
-        spreads = [self.outcome_market(side).spread for side in SIDES]
+        spreads = [market.spread for market in self.outcomes.values()]
         return None if any(spread is None for spread in spreads) else max(spreads)  # type: ignore[type-var]
 
     def midpoints(self) -> Prices | None:
-        mids = {side: self.outcome_market(side).midpoint for side in SIDES}
+        mids = {side: market.midpoint for side, market in self.outcomes.items()}
         if any(mid is None or not 0.0 < mid < 1.0 for mid in mids.values()):
             return None
-        return Prices(**mids)  # type: ignore[arg-type]
+        return Prices(mids)  # type: ignore[arg-type]
 
 
 @dataclass(frozen=True)
@@ -122,11 +119,7 @@ class Resampled:
     off_sum: int = 0
 
 
-def canonical_team(name: str) -> str:
-    return normalize_team_name(_CLUB_SUFFIX.sub("", name))
-
-
-def _outcome_market(market: dict[str, Any]) -> OutcomeMarket:
+def _yes_market(market: dict[str, Any]) -> OutcomeMarket:
     bid, ask = market.get("bestBid"), market.get("bestAsk")
     return OutcomeMarket(
         pm_market_id=str(market["id"]),
@@ -136,20 +129,29 @@ def _outcome_market(market: dict[str, Any]) -> OutcomeMarket:
     )
 
 
-def parse_match_event(
-    event: dict[str, Any], sport: PolymarketSportConfig
-) -> PolymarketMatch | None:
-    slug_match = sport.match_slug.match(event.get("slug", ""))
-    if slug_match is None:
-        return None
-    names = {team["ordering"]: team["name"] for team in event.get("teams", [])}
-    if "home" not in names or "away" not in names:
-        return None
+def _team_market(market: dict[str, Any], index: int) -> OutcomeMarket:
+    """One team's outcome of a two-outcome market. Gamma's bid and ask quote the first outcome;
+    the second's are their complements."""
+    first = _yes_market(market)
+    if index == 0:
+        return first
+    return OutcomeMarket(
+        pm_market_id=first.pm_market_id,
+        yes_token_id=json.loads(market["clobTokenIds"])[index],
+        best_bid=None if first.best_ask is None else 1.0 - first.best_ask,
+        best_ask=None if first.best_bid is None else 1.0 - first.best_bid,
+    )
 
+
+def _three_way_outcomes(
+    event: dict[str, Any], slug_match: re.Match[str]
+) -> dict[Side, OutcomeMarket] | None:
+    """Home, draw and away Yes markets, classified by slug suffix (``-{home3}``, ``-draw``,
+    ``-{away3}``)."""
     slug_suffix: dict[str, Side] = {
-        slug_match["home"]: "home",
+        slug_match["first"]: "home",
         DRAW_SLUG_SUFFIX: "draw",
-        slug_match["away"]: "away",
+        slug_match["second"]: "away",
     }
     by_side: dict[Side, dict[str, Any]] = {}
     for market in event.get("markets", []):
@@ -160,19 +162,58 @@ def parse_match_event(
             )
             return None
         by_side[side] = market
-    if len(by_side) != len(SIDES):
+    if len(by_side) != len(slug_suffix):
         logger.warning("polymarket_incomplete_match_markets", ticker=event["slug"])
+        return None
+    return {side: _yes_market(by_side[side]) for side in ("home", "draw", "away")}
+
+
+def _two_way_outcomes(
+    event: dict[str, Any], team_names: dict[Side, str]
+) -> dict[Side, OutcomeMarket] | None:
+    """Home and away outcomes of the moneyline: the market whose slug is the event's, with one
+    outcome per team (named as the event's ``teams`` entries)."""
+    market = next((m for m in event.get("markets", []) if m.get("slug") == event["slug"]), None)
+    if market is None:
+        logger.warning("polymarket_incomplete_match_markets", ticker=event["slug"])
+        return None
+    labels: list[str] = json.loads(market["outcomes"])
+    if sorted(labels) != sorted(team_names.values()):
+        logger.warning("polymarket_unclassified_market", ticker=event["slug"], outcomes=labels)
+        return None
+    return {side: _team_market(market, labels.index(team_names[side])) for side in ("home", "away")}
+
+
+def parse_match_event(
+    event: dict[str, Any], sport: PolymarketSportConfig
+) -> PolymarketMatch | None:
+    slug_match = sport.match_slug.match(event.get("slug", ""))
+    if slug_match is None:
+        return None
+    teams: dict[Side, dict[str, Any]] = {team["ordering"]: team for team in event.get("teams", [])}
+    if "home" not in teams or "away" not in teams:
+        return None
+
+    outcomes = (
+        _three_way_outcomes(event, slug_match)
+        if sport.has_draw
+        else _two_way_outcomes(event, {side: team["name"] for side, team in teams.items()})
+    )
+    if outcomes is None:
+        return None
+
+    home_team, away_team = sport.team_name(teams["home"]), sport.team_name(teams["away"])
+    if home_team is None or away_team is None:
+        logger.warning("polymarket_unknown_team", ticker=event["slug"])
         return None
 
     return PolymarketMatch(
         pm_event_id=str(event["id"]),
         ticker=event["slug"],
         start_time=datetime.fromisoformat(event["startTime"]),
-        home_team=canonical_team(names["home"]),
-        away_team=canonical_team(names["away"]),
-        home=_outcome_market(by_side["home"]),
-        draw=_outcome_market(by_side["draw"]),
-        away=_outcome_market(by_side["away"]),
+        home_team=home_team,
+        away_team=away_team,
+        outcomes=outcomes,
     )
 
 
@@ -223,22 +264,23 @@ def resample(
     ``MAX_STALENESS``, with prices inside (0, 1) and a total within
     ``SUM_TOLERANCE`` of 1; other grid times are counted and dropped.
     """
-    times = {side: [t for t, _ in series[side]] for side in SIDES}
+    sides = tuple(series)
+    times = {side: [t for t, _ in series[side]] for side in sides}
     result = Resampled()
     for offset in reversed(grid_offsets()):
         at = kickoff - offset
         if at > cutoff:
             continue
         values: dict[Side, float] = {}
-        for side in SIDES:
+        for side in sides:
             index = bisect_right(times[side], at) - 1
             if index < 0 or at - times[side][index] > MAX_STALENESS:
                 break
             values[side] = series[side][index][1]
-        if len(values) < len(SIDES) or not all(0.0 < p < 1.0 for p in values.values()):
+        if len(values) < len(sides) or not all(0.0 < p < 1.0 for p in values.values()):
             result.missing += 1
             continue
-        prices = Prices(**values)
+        prices = Prices(values)
         if not sum_is_valid(prices):
             result.off_sum += 1
             continue
@@ -280,8 +322,8 @@ def build_envelope(
                     "probability_sum": prices.total,
                     **(
                         {
-                            "best_bid": {s: match.outcome_market(s).best_bid for s in SIDES},
-                            "best_ask": {s: match.outcome_market(s).best_ask for s in SIDES},
+                            "best_bid": {s: match.outcome_market(s).best_bid for s in match.sides},
+                            "best_ask": {s: match.outcome_market(s).best_ask for s in match.sides},
                         }
                         if include_quotes
                         else {}

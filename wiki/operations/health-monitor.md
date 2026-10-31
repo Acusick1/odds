@@ -55,7 +55,7 @@ status: stable
 4. `odds_lambda.health_monitor.HealthMonitor.check_job_heartbeats`: compares the newest `heartbeat:<job>` row per key in `odds_core.config.AlertConfig.heartbeat_expectations` to its allowed hours. The default keys and allowed hours are in [Heartbeats](#heartbeats). A job with no history is not alerted (#384).
 5. `odds_lambda.health_monitor.HealthMonitor.check_event_identity`: per sport, matches stored as several events, EPL fixtures stored twice in a season, and MLB events (by integer id) over 24 h old holding no `gamePk` (`mlb_stats_api` external id) and no `missing_mlb_game_pk` acknowledgement (`odds_lambda.health_monitor.HealthMonitor.find_mlb_events_without_game_pk`), each its own warning (`duplicate_events:<sport>`, `repeated_fixtures:<sport>`, `missing_game_pk:baseball_mlb`). Nothing is merged; `odds events merge-twins --sport <sport> --apply` clears twins, and `odds events assign-game-pks --apply` the missing `gamePk`s ([Event merge](../storage/event-merge.md#detection)).
 6. `odds_lambda.health_monitor.HealthMonitor.check_schedule_chains`: dead self-scheduling chains, each its own critical `dead_schedule_chain:<job>` ([Schedule chain check](#schedule-chain-check)).
-7. `odds_lambda.health_monitor.HealthMonitor.check_unsettled_events`: per sport in `odds_lambda.health_monitor.UNSETTLED_SPORTS` (EPL and MLB), current-season events still SCHEDULED or LIVE more than 24 h after kick-off (`odds_lambda.storage.unsettled_events.find_unsettled_events`), one warning `unsettled_events:<sport>` naming them, repeated once a day. The season starts on 1 August for EPL and on 1 January for MLB (`odds_lambda.storage.unsettled_events.season_start`). POSTPONED and CANCELLED events are not pending, so a postponed MLB game waiting on its replay stays quiet, and neither are UNMATCHED ones, the MLB events with no game in MLB's schedule, which no results job can settle ([results jobs](../collection/results-jobs.md), [no game in the schedule](../storage/event-resolver.md#no-game-in-the-schedule)).
+7. `odds_lambda.health_monitor.HealthMonitor.check_unsettled_events`: per sport in `odds_lambda.health_monitor.UNSETTLED_SPORTS` (EPL, MLB and NBA), current-season events still SCHEDULED or LIVE more than 24 h after kick-off (`odds_lambda.storage.unsettled_events.find_unsettled_events`), one warning `unsettled_events:<sport>` naming them, repeated once a day. The season starts on 1 August for EPL and on 1 January for MLB (`odds_lambda.storage.unsettled_events.season_start`). POSTPONED and CANCELLED events are not pending, so a postponed MLB game waiting on its replay stays quiet, and neither are UNMATCHED ones, the MLB events with no game in MLB's schedule, which no results job can settle ([results jobs](../collection/results-jobs.md), [no game in the schedule](../storage/event-resolver.md#no-game-in-the-schedule)).
 
 Then `odds_lambda.health_monitor.HealthMonitor.purge_old_heartbeats` runs on every health check, and it deletes `heartbeat:%` rows older than `heartbeat_retention_days` (7) and is the only retention sweep in the system.
 
@@ -122,9 +122,9 @@ A job inside [`odds_core.alerts.job_alert_context`](alerts.md#delivery) inserts 
 | check-health | yes | 2 h |
 | update-status | yes | none |
 | fetch-betfair-exchange (per sport) | yes | 10 h EPL, 11 h MLB, 11 h NBA (overnight window plus the 2 h interval) |
-| fetch-polymarket-odds (per sport) | yes | 11 h EPL (overnight window plus polling interval, plus 1 h slack) |
+| fetch-polymarket-odds (per sport) | yes | 11 h EPL and NBA (overnight window plus polling interval, plus 1 h slack) |
 | fetch-mlb-probables | yes | 30 h |
-| fetch-espn-fixtures | yes | 26 h (daily cron plus slack) |
+| fetch-espn-fixtures (per sport: bare key for EPL, `-nba` for NBA) | yes | 26 h (daily cron plus slack) |
 | fetch-odds (EPL) | yes | 49 h (48 h opening-tier interval plus 1 h; no overnight pause) |
 | fetch-scores (EPL) | yes | 13 h (12 h idle interval plus 1 h; no overnight pause) |
 | agent-run | no: not wrapped in `odds_core.alerts.job_alert_context` (#438) | none |

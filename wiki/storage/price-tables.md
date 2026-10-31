@@ -46,11 +46,11 @@ status: stable
 |---|---|---|
 | OddsPortal live (`odds_lambda.jobs.fetch_oddsportal.ingest_league`) | `observed` | a list of the run's envelopes, one payload per league run |
 | Betfair (`odds_lambda.jobs.fetch_betfair_exchange.ingest_sport`) | `observed` | a list of the run's envelopes (one per event, all its markets), one payload per sport run (EPL, MLB and NBA) |
-| Polymarket live (`odds_lambda.jobs.fetch_polymarket_odds`) | `observed` | a list of the run's envelopes |
+| Polymarket live (`odds_lambda.jobs.fetch_polymarket_odds`, EPL and NBA) | `observed` | a list of the run's envelopes |
 | Odds API ingestion (`odds_lambda.ingestion.OddsIngestionService.ingest_sport`) | `observed` | the response's list of event envelopes, one payload per run |
 | Odds API backfill (`odds_analytics.backfill_executor.BackfillExecutor`) | `upper_bound`: the historical endpoint returns the last snapshot at or before the requested time | a list holding the one event's envelope |
-| Polymarket history (`odds_lambda.polymarket_odds_backfill.backfill_sport`) | `observed` | one envelope per grid point |
-| OddsPortal history (`scripts/ingest_oddsportal.py`) | `source_stamped` | a list of the game's opening and closing envelopes; none for a game whose event match is ambiguous |
+| Polymarket history (`odds_lambda.polymarket_odds_backfill.backfill_sport`, EPL and NBA) | `observed` | one envelope per grid point |
+| OddsPortal history (`scripts/ingest_oddsportal.py`, any sport; NBA games with an unknown side are skipped) | `source_stamped` | a list of the game's opening and closing envelopes; none for a game whose event match is ambiguous |
 | football-data.co.uk (`scripts/ingest_football_data_uk.py`) | `upper_bound` (opening) or `close` | a list of the game's opening and closing envelopes; none for a game whose event match is ambiguous |
 
 `odds_lambda.storage.shaped_snapshots.store_payload` adds the payload in the writer's transaction before its snapshots. A writer whose snapshots were all skipped as already stored removes the payload with `odds_lambda.storage.shaped_snapshots.discard_payload`. Payloads rebuilt from stored prices carry `rebuilt_from` ([Rebuilt payloads](odds-tables.md#rebuilt-payloads)).

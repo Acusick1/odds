@@ -25,7 +25,7 @@ from __future__ import annotations
 #   Texas Rangers, Toronto Blue Jays, Washington Nationals.
 #
 # Pipeline canonical NBA names are The Odds API's full names ("Boston Celtics"); the
-# 30 are the keys of odds_lambda.polymarket_matching.TEAM_ALIASES. OddsPortal and
+# 30 are the values of odds_lambda.polymarket_matching.NBA_ABBREV_MAP. OddsPortal and
 # Betfair already use them, so only the "LA" spellings of the two Los Angeles
 # teams need an alias. A bare nickname ("Wolves") is not an alias here: this map is
 # shared across sports and "Wolves" is the canonical EPL name.

@@ -48,7 +48,7 @@ Four jobs and one command move events to LIVE, FINAL, POSTPONED and CANCELLED ([
 
 ## fetch-scores
 
-`odds_lambda.jobs.fetch_scores.main(ctx)` is the Odds API `/scores` job. It is per sport and its `odds_lambda.scheduling.jobs._JOB_SPORTS` allowlist limits its schedules to EPL to save quota, so no scheduled job fetches MLB scores from the Odds API; MLB events reach FINAL through [fetch-mlb-results](#fetch-mlb-results).
+`odds_lambda.jobs.fetch_scores.main(ctx)` is the Odds API `/scores` job. It is per sport and its `odds_lambda.scheduling.jobs._JOB_SPORTS` allowlist limits its schedules to EPL to save quota, so no scheduled job fetches MLB or NBA scores from the Odds API; NBA events reach FINAL through the [ESPN sync](polymarket-odds-snapshots.md#nba-schedule-from-espn) and MLB events reach FINAL through [fetch-mlb-results](#fetch-mlb-results).
 
 1. Gate with `odds_lambda.scheduling.decision.decide_backward_resilient` using `odds_lambda.jobs.fetch_scores.SCORES_WINDOW` (3 days), `odds_lambda.jobs.fetch_scores.SCORES_ACTIVE_INTERVAL` 6 h and `odds_lambda.jobs.fetch_scores.SCORES_IDLE_INTERVAL` 12 h: it runs while any event that kicked off in the last three days is not FINAL. Any non-FINAL event counts (`odds_lambda.scheduling.decision.decide_backward`), including POSTPONED and CANCELLED ones.
 2. Pre-schedule, then skip if idle.

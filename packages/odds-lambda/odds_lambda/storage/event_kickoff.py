@@ -23,7 +23,7 @@ KICKOFF_AUTHORITY: Mapping[SportKey, tuple[Source, ...]] = MappingProxyType(
     {
         "baseball_mlb": (Source.MLB_STATS_API,),
         "soccer_epl": (Source.ODDSPORTAL, Source.ODDS_API, Source.FOOTBALL_DATA_UK),
-        "basketball_nba": (Source.ODDSPORTAL, Source.ODDS_API),
+        "basketball_nba": (Source.ODDSPORTAL, Source.ODDS_API, Source.ESPN),
     }
 )
 

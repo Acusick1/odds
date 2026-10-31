@@ -19,9 +19,9 @@ Every move of an [event](events.md)'s `commence_time` on behalf of a source goes
 |---|---|
 | `baseball_mlb` | MLB Stats API (`mlb_stats_api`) |
 | `soccer_epl` | OddsPortal (`oddsportal`), then Odds API (`odds_api`), then football-data.co.uk (`football_data_uk`) |
-| `basketball_nba` | OddsPortal (`oddsportal`), then Odds API (`odds_api`) |
+| `basketball_nba` | OddsPortal (`oddsportal`), then Odds API (`odds_api`), then ESPN (`espn`) |
 
-A source outside its sport's order never moves an event: Betfair, Polymarket and ESPN move no EPL or NBA event, and football-data.co.uk moves no NBA event. A source in the order moves an event only when no source ranked above it holds an external id on that event ([external ids](events.md#external-ids)), so the Odds API moves an EPL or NBA event only while it holds no OddsPortal id, and football-data.co.uk moves an EPL event only while it holds neither an OddsPortal nor an Odds API id and no other source has a snapshot on it (see [Before and after the stored kick-off](#before-and-after-the-stored-kick-off)).
+A source outside its sport's order never moves an event: Betfair and Polymarket move no EPL or NBA event, and ESPN moves no EPL event (for NBA it ranks last, so an event only ESPN holds an id on follows a reschedule), and football-data.co.uk moves no NBA event. A source in the order moves an event only when no source ranked above it holds an external id on that event ([external ids](events.md#external-ids)), so the Odds API moves an EPL or NBA event only while it holds no OddsPortal id, and football-data.co.uk moves an EPL event only while it holds neither an OddsPortal nor an Odds API id and no other source has a snapshot on it (see [Before and after the stored kick-off](#before-and-after-the-stored-kick-off)).
 
 ## Basis for the EPL and NBA order
 

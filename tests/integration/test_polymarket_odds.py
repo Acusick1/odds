@@ -351,9 +351,103 @@ class TestBackfill:
         assert report.unmatched_event_ids == [1]
         assert report.snapshots_written == 0
 
-    async def test_rejects_sport_without_three_way_markets(self) -> None:
-        with pytest.raises(ValueError, match="three-way"):
-            await backfill_sport("basketball_nba", since=KICKOFF)
+
+NBA_KICKOFF = datetime(2026, 10, 31, 2, 0, tzinfo=UTC)
+
+
+def nba_history() -> dict[str, list[Observation]]:
+    start = NBA_KICKOFF - MAX_HORIZON - 2 * MAX_STALENESS
+    minutes = int((NBA_KICKOFF - start).total_seconds() // 60)
+    return {
+        token: [(start + timedelta(minutes=i), p) for i in range(minutes + 1)]
+        for token, p in (("tok-away", 0.31), ("tok-home", 0.69))
+    }
+
+
+def make_nba_event(event_id: int, status: EventStatus = EventStatus.FINAL) -> Event:
+    return Event(
+        id=event_id,
+        sport_key="basketball_nba",
+        sport_title="NBA",
+        commence_time=NBA_KICKOFF,
+        home_team="Golden State Warriors",
+        away_team="Los Angeles Lakers",
+        status=status,
+        home_score=110 if status is EventStatus.FINAL else None,
+        away_score=104 if status is EventStatus.FINAL else None,
+    )
+
+
+class TestNbaBackfill:
+    @pytest.fixture
+    def patch_nba(
+        self, monkeypatch: pytest.MonkeyPatch, pglite_async_session: Any, gamma_nba_event: Any
+    ) -> FakeClient:
+        client = FakeClient([gamma_nba_event()], nba_history())
+        monkeypatch.setattr("odds_lambda.polymarket_odds_backfill.PolymarketClient", lambda: client)
+        monkeypatch.setattr(
+            "odds_lambda.polymarket_odds_backfill.async_session_maker",
+            SessionMaker(pglite_async_session),
+        )
+        return client
+
+    async def test_writes_h2h_snapshots_with_two_mid_prices(
+        self, pglite_async_session: Any, patch_nba: FakeClient
+    ) -> None:
+        pglite_async_session.add(make_nba_event(1))
+        await pglite_async_session.commit()
+
+        report = await backfill_sport("basketball_nba", since=NBA_KICKOFF - timedelta(days=1))
+
+        snapshots = (await pglite_async_session.execute(select(OddsSnapshot))).scalars().all()
+        prices = (await pglite_async_session.execute(select(Price))).scalars().all()
+        assert (report.events_written, report.snapshots_written) == (1, len(grid_offsets()))
+        assert {(s.source, s.market, s.time_basis) for s in snapshots} == {
+            (Source.POLYMARKET, Market.H2H, TimeBasis.OBSERVED)
+        }
+        assert len(prices) == 2 * len(snapshots)
+        home = {round(1 / float(p.price), 4) for p in prices if p.outcome is PriceOutcome.HOME}
+        away = {round(1 / float(p.price), 4) for p in prices if p.outcome is PriceOutcome.AWAY}
+        assert (home, away) == ({0.69}, {0.31})
+
+    async def test_rerun_adds_nothing(
+        self, pglite_async_session: Any, patch_nba: FakeClient
+    ) -> None:
+        pglite_async_session.add(make_nba_event(1))
+        await pglite_async_session.commit()
+        await backfill_sport("basketball_nba", since=NBA_KICKOFF - timedelta(days=1))
+
+        report = await backfill_sport("basketball_nba", since=NBA_KICKOFF - timedelta(days=1))
+
+        assert (report.events_skipped_existing, report.snapshots_written) == (1, 0)
+
+    async def test_creates_no_event_for_a_game_without_one(
+        self, pglite_async_session: Any, patch_nba: FakeClient
+    ) -> None:
+        report = await backfill_sport("basketball_nba", since=NBA_KICKOFF - timedelta(days=1))
+
+        assert report.unmatched_pm_tickers == ["nba-lal-gsw-2026-10-30"]
+        assert (await pglite_async_session.execute(select(Event))).first() is None
+
+    async def test_live_job_stores_a_two_outcome_snapshot(
+        self, monkeypatch: pytest.MonkeyPatch, pglite_async_session: Any, gamma_nba_event: Any
+    ) -> None:
+        client = FakeClient([gamma_nba_event()], {})
+        monkeypatch.setattr(fetch_polymarket_odds, "PolymarketClient", lambda: client)
+        monkeypatch.setattr(
+            fetch_polymarket_odds, "async_session_maker", SessionMaker(pglite_async_session)
+        )
+        pglite_async_session.add(make_nba_event(1, EventStatus.SCHEDULED))
+        await pglite_async_session.commit()
+
+        stats = await fetch_polymarket_odds.ingest_sport(
+            "basketball_nba", NBA_KICKOFF - timedelta(hours=5)
+        )
+
+        prices = (await pglite_async_session.execute(select(Price))).scalars().all()
+        assert stats.snapshots_stored == 1
+        assert len(prices) == 6
+        assert {p.outcome for p in prices} == {PriceOutcome.HOME, PriceOutcome.AWAY}
 
 
 class TestLiveIngestion:

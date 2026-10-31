@@ -27,9 +27,7 @@ class TestAbbrevToCanonical:
                 f"Mismatch for {abbrev}: expected {nba_teams[abbrev]}, got {canonical}"
             )
 
-    def test_matches_polymarket_aliases(self):
-        """Verify all canonical names exist in TEAM_ALIASES."""
-        from odds_lambda.polymarket_matching import TEAM_ALIASES
+    def test_matches_the_polymarket_abbreviation_table(self):
+        from odds_lambda.polymarket_matching import NBA_ABBREV_MAP
 
-        for canonical in _ABBREV_TO_CANONICAL.values():
-            assert canonical in TEAM_ALIASES, f"Canonical name {canonical!r} not in TEAM_ALIASES"
+        assert set(_ABBREV_TO_CANONICAL.values()) == set(NBA_ABBREV_MAP.values())

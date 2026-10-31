@@ -28,7 +28,7 @@ Use of Polymarket as an MLB sharp reference is untested and not part of the ADR.
 
 ## Series and tag ids
 
-`odds_lambda.polymarket_sports.POLYMARKET_SPORTS` holds the series and tag IDs for NBA and EPL. The MLB IDs were recorded during research and are not in config (inferred, dff040d):
+`odds_lambda.polymarket_sports.POLYMARKET_SPORTS` holds the series and tag IDs for NBA and EPL (`nba-{away3}-{home3}`, the away team first, as MLB's below; the team entries, not the ticker order, say which side is home). The MLB IDs were recorded during research and are not in config (inferred, dff040d):
 
 | Sport | Series ID | Tag IDs | Ticker |
 |---|---|---|---|

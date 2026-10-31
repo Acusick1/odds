@@ -378,3 +378,36 @@ def mark_unassignable(
         odds events mark-unassignable 10398 --reason "no such game" --apply
     """
     asyncio.run(_mark_unassignable(event_id, reason, apply))
+
+
+async def _sync_nba_games(since: date, until: date, apply: bool) -> None:
+    from odds_lambda.espn_nba_schedule import sync_schedule
+
+    report = await sync_schedule(since, until, apply=apply)
+    console.print(
+        f"ESPN games: {report.games}; events created: {report.created}; "
+        f"matched: {report.matched}; set FINAL: {report.finalised}; failed: {len(report.errors)}"
+    )
+    for error in report.errors:
+        console.print(f"  [red]{error}[/red]")
+    if not apply:
+        console.print("Dry run: nothing written. Re-run with --apply.")
+
+
+@app.command("sync-nba-games")
+def sync_nba_games(
+    since: str = typer.Option(..., "--since", help="First US game day (YYYY-MM-DD)"),
+    until: str | None = typer.Option(None, "--until", help="Last game day; default today"),
+    apply: bool = typer.Option(False, "--apply", help="Write; without it each game is rolled back"),
+) -> None:
+    """Create events for played NBA games from ESPN's scoreboard and set them FINAL.
+
+    Polymarket attaches prices to events that exist and creates none, so the history of a game
+    already played needs its event first. Events hold the ESPN id (source `espn`); a game an
+    event already exists for is matched, not duplicated. Safe to re-run.
+
+    Example:
+        odds events sync-nba-games --since 2026-10-21 --apply
+    """
+    last = date.fromisoformat(until) if until is not None else datetime.now(UTC).date()
+    asyncio.run(_sync_nba_games(date.fromisoformat(since), last, apply))

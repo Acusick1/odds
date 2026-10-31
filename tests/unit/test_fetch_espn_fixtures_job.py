@@ -148,3 +148,71 @@ class TestFetchAndUpsertFailures:
         warning.assert_awaited_once()
         assert "eng.fa, uefa.europa" in warning.await_args.args[1]
         calendar.assert_not_awaited()
+
+
+class TestNbaSchedule:
+    @pytest.fixture
+    def sync(self) -> Iterator[AsyncMock]:
+        with patch("odds_lambda.espn_nba_schedule.sync_upcoming", new_callable=AsyncMock) as mock:
+            yield mock
+
+    async def test_nba_run_syncs_the_schedule_not_the_epl_fixtures(self, sync: AsyncMock) -> None:
+        from odds_lambda.espn_nba_schedule import SyncReport
+        from odds_lambda.scheduling.jobs import JobContext
+
+        sync.return_value = SyncReport(games=5, created=2, matched=3)
+        with patch.object(fetch_espn_fixtures, "_fetch_and_upsert", new_callable=AsyncMock) as epl:
+            await fetch_espn_fixtures.main(JobContext(sport="basketball_nba"))
+
+        sync.assert_awaited_once()
+        epl.assert_not_awaited()
+
+    async def test_failed_games_fail_the_run(self, sync: AsyncMock) -> None:
+        from odds_lambda.espn_nba_schedule import SyncReport
+        from odds_lambda.scheduling.jobs import JobContext
+
+        sync.return_value = SyncReport(games=1, errors=["X at Y: boom"])
+
+        with pytest.raises(RuntimeError, match="1 NBA games failed"):
+            await fetch_espn_fixtures.main(JobContext(sport="basketball_nba"))
+
+    async def test_other_sports_are_rejected(self) -> None:
+        from odds_lambda.scheduling.jobs import JobContext
+
+        with pytest.raises(ValueError, match="supports"):
+            await fetch_espn_fixtures.main(JobContext(sport="baseball_mlb"))
+
+
+class TestNbaEmptyListing:
+    @pytest.fixture
+    def warn(self) -> Iterator[AsyncMock]:
+        with patch.object(fetch_espn_fixtures, "send_job_warning", new_callable=AsyncMock) as mock:
+            yield mock
+
+    async def _run(self, in_horizon: int) -> None:
+        from odds_lambda.espn_nba_schedule import SyncReport
+        from odds_lambda.scheduling.jobs import JobContext
+
+        calendar = FixtureCalendar(next_kickoff=None, kickoffs_in_horizon=in_horizon)
+        with (
+            patch(
+                "odds_lambda.espn_nba_schedule.sync_upcoming",
+                new_callable=AsyncMock,
+                return_value=SyncReport(),
+            ),
+            patch.object(
+                fetch_espn_fixtures, "event_calendar", new_callable=AsyncMock, return_value=calendar
+            ),
+            patch.object(fetch_espn_fixtures, "async_session_maker", MagicMock()),
+        ):
+            await fetch_espn_fixtures.main(JobContext(sport="basketball_nba"))
+
+    async def test_warns_when_events_are_scheduled(self, warn: AsyncMock) -> None:
+        await self._run(in_horizon=3)
+
+        warn.assert_awaited_once()
+
+    async def test_the_off_season_is_silent(self, warn: AsyncMock) -> None:
+        await self._run(in_horizon=0)
+
+        warn.assert_not_awaited()

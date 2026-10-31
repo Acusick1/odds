@@ -10,6 +10,7 @@ sources:
   - odds_lambda.jobs.fetch_oddsportal_results.process_results
   - odds_lambda.jobs.fetch_mlb_results.process_results
   - odds_lambda.jobs.fetch_espn_fixtures._mark_postponed_events
+  - odds_lambda.espn_nba_schedule.sync_games
   - odds_lambda.storage.espn_fixture_reader.EspnFixtureReader.get_postponed_home_fixtures
   - odds_lambda.odds_api_events.resolve_odds_api_events
   - odds_core.models.EventStatus.can_become
@@ -42,12 +43,13 @@ A result is the strongest evidence, so every status but FINAL and UNMATCHED can 
 
 | Transition | Setter | Rule |
 |---|---|---|
-| (new) → SCHEDULED | `odds_lambda.storage.event_resolver.resolve_event` (only when no event matches, by `gamePk`, source id or teams; the database numbers the new event; an MLB game outside the MLB schedule is dropped, not created), called by the live jobs, Odds API ingestion, the backfill, event sync and `odds discover games` (`odds_lambda.odds_api_events.resolve_odds_api_events`) | default status |
+| (new) → SCHEDULED | `odds_lambda.storage.event_resolver.resolve_event` (only when no event matches, by `gamePk`, source id or teams; the database numbers the new event; an MLB game outside the MLB schedule is dropped, not created), called by the live jobs, Odds API ingestion, the backfill, event sync, `odds discover games` and the NBA ESPN sync (`odds_lambda.espn_nba_schedule.sync_games`) (`odds_lambda.odds_api_events.resolve_odds_api_events`) | default status |
 | SCHEDULED → LIVE | `odds_lambda.jobs.update_status._update_event_statuses` | events already past `commence_time` within `odds_lambda.jobs.update_status.STATUS_WINDOW`; `reader.get_events_by_date_range(status=SCHEDULED)` |
 | → FINAL | `odds_lambda.jobs.fetch_scores._fetch_and_update_scores` | Odds API `/scores` ([results-jobs](results-jobs.md#fetch-scores)), only when `completed` and both scores parse, on the event that holds the entry's id as its Odds API external id (`odds_lambda.odds_api_events.find_event_by_odds_api_id`) |
 | → FINAL | `odds_lambda.jobs.fetch_oddsportal_results.process_results` | EPL: OddsPortal finished matches for events already past kickoff that are SCHEDULED, LIVE, POSTPONED, or FINAL without scores (`odds_lambda.results_run.get_pending_events`, which also reads each MLB event's `gamePk` from its `mlb_stats_api` external id); a run that settles nothing alerts ([results-jobs](results-jobs.md#fetch-oddsportal-results)) |
 | → CANCELLED | `odds_lambda.jobs.fetch_oddsportal_results.process_results` | EPL: OddsPortal results row with status 5 ("Canceled") matched to a pending SCHEDULED or LIVE event ([results-jobs](results-jobs.md#fetch-oddsportal-results)) |
 | → FINAL, CANCELLED, POSTPONED | `odds_lambda.jobs.fetch_mlb_results.process_results` | MLB: the state of the game a pending event's `gamePk` names in the MLB Stats API schedule; a run that settles nothing alerts ([results-jobs](results-jobs.md#fetch-mlb-results)) |
+| → FINAL, POSTPONED, CANCELLED | `odds_lambda.espn_nba_schedule.sync_games`, from `fetch-espn-fixtures-nba` and `odds events sync-nba-games` | NBA: the status ESPN's scoreboard gives a game (`STATUS_FINAL` with both scores, `STATUS_POSTPONED`, `STATUS_CANCELED`) for the event it resolves, when `odds_core.models.EventStatus.can_become` allows it ([NBA schedule](polymarket-odds-snapshots.md#nba-schedule-from-espn)) |
 | → POSTPONED | `odds_lambda.jobs.fetch_espn_fixtures._mark_postponed_events` | a Premier League `espn_fixtures` row with status "Postponed" at the event's kick-off (within the event-matching window), for a SCHEDULED or LIVE event ([EPL context data](epl-context-data.md#espn-fixtures)) |
 | POSTPONED → SCHEDULED | `odds_lambda.storage.event_kickoff.move_kickoff` ([Kick-off authority](../storage/kickoff-authority.md)), from the live OddsPortal and Betfair jobs and the Odds API writers (ingestion, the backfill, event sync (`odds_lambda.odds_api_events.resolve_odds_api_events`) and `odds discover games`), `fetch-mlb-results` and `odds events assign-game-pks` / `set-game-pk`, each passing the current time; the MLB Stats API, and football-data.co.uk for an event no other source has observed, may move to a past start | the event moves to a new start on its sport's [kick-off authority](../storage/kickoff-authority.md) ([Event matching](../storage/event-matching.md#live-mlb-events)) |
 | LIVE → SCHEDULED | `odds_lambda.storage.event_kickoff.move_kickoff`, from the same callers | the event moves to a start after the clock passed to the call (a delayed kick-off) |

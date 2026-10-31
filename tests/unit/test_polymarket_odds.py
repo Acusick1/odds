@@ -19,13 +19,13 @@ from odds_lambda.polymarket_odds import (
     Prices,
     Side,
     build_envelope,
-    canonical_team,
     grid_offsets,
     listed_game,
     parse_match_event,
     resample,
+    sum_is_valid,
 )
-from odds_lambda.polymarket_sports import MATCH_ODDS_SPORTS, POLYMARKET_SPORTS
+from odds_lambda.polymarket_sports import POLYMARKET_SPORTS
 from odds_lambda.price_rows import expand_envelope
 from odds_lambda.tier_utils import calculate_tier
 
@@ -48,9 +48,9 @@ class TestParseMatchEvent:
         assert match is not None
         assert (match.home_team, match.away_team) == ("Bournemouth", "Chelsea")
         assert match.start_time == KICKOFF
-        assert match.home.yes_token_id == "yes-bou"
-        assert match.draw.yes_token_id == "yes-draw"
-        assert match.away.yes_token_id == "yes-che"
+        assert match.outcomes["home"].yes_token_id == "yes-bou"
+        assert match.outcomes["draw"].yes_token_id == "yes-draw"
+        assert match.outcomes["away"].yes_token_id == "yes-che"
 
     def test_midpoints_from_best_bid_and_ask(self, gamma_event) -> None:
         match = parse_match_event(gamma_event(), EPL)
@@ -125,7 +125,7 @@ class TestCanonicalTeam:
         ],
     )
     def test_matches_events_table_names(self, polymarket_name: str, canonical: str) -> None:
-        assert canonical_team(polymarket_name) == canonical
+        assert EPL.team_name({"name": polymarket_name}) == canonical
 
 
 class TestGrid:
@@ -153,7 +153,7 @@ class TestGrid:
 
 class TestResample:
     def test_flat_series_fills_whole_grid(self) -> None:
-        prices = Prices(0.5, 0.25, 0.25)
+        prices = Prices({"home": 0.5, "draw": 0.25, "away": 0.25})
         start = KICKOFF - MAX_HORIZON - MAX_STALENESS
         result = resample(flat_series(prices, start, KICKOFF), KICKOFF, KICKOFF)
 
@@ -173,13 +173,13 @@ class TestResample:
 
         result = resample(series, KICKOFF, early + timedelta(minutes=10))
 
-        assert result.points[0].prices == Prices(0.5, 0.3, 0.2)
+        assert result.points[0].prices == Prices({"home": 0.5, "draw": 0.3, "away": 0.2})
         assert result.points[-1].time == early + timedelta(minutes=10)
-        assert result.points[-1].prices == Prices(0.6, 0.25, 0.15)
+        assert result.points[-1].prices == Prices({"home": 0.6, "draw": 0.25, "away": 0.15})
 
     def test_never_looks_past_the_cutoff(self) -> None:
         start = KICKOFF - timedelta(hours=1)
-        series = flat_series(Prices(0.5, 0.25, 0.25), start, KICKOFF)
+        series = flat_series(Prices({"home": 0.5, "draw": 0.25, "away": 0.25}), start, KICKOFF)
         cutoff = KICKOFF - timedelta(minutes=20)
 
         result = resample(series, KICKOFF, cutoff)
@@ -189,7 +189,7 @@ class TestResample:
 
     def test_stale_side_drops_the_grid_point(self) -> None:
         start = KICKOFF - timedelta(minutes=10)
-        series = flat_series(Prices(0.5, 0.25, 0.25), start, KICKOFF)
+        series = flat_series(Prices({"home": 0.5, "draw": 0.25, "away": 0.25}), start, KICKOFF)
         series["draw"] = [(start - 2 * MAX_STALENESS, 0.25)]
 
         result = resample(series, KICKOFF, KICKOFF)
@@ -199,7 +199,7 @@ class TestResample:
 
     def test_prices_outside_open_interval_are_missing(self) -> None:
         start = KICKOFF - timedelta(minutes=10)
-        series = flat_series(Prices(1.0, 0.0, 0.0), start, KICKOFF)
+        series = flat_series(Prices({"home": 1.0, "draw": 0.0, "away": 0.0}), start, KICKOFF)
 
         result = resample(series, KICKOFF, KICKOFF)
 
@@ -208,7 +208,7 @@ class TestResample:
 
     def test_prices_off_sum_are_counted_and_dropped(self) -> None:
         start = KICKOFF - timedelta(minutes=10)
-        series = flat_series(Prices(0.5, 0.4, 0.4), start, KICKOFF)
+        series = flat_series(Prices({"home": 0.5, "draw": 0.4, "away": 0.4}), start, KICKOFF)
 
         result = resample(series, KICKOFF, KICKOFF)
 
@@ -217,7 +217,7 @@ class TestResample:
 
     def test_sum_just_inside_tolerance_is_kept(self) -> None:
         start = KICKOFF - timedelta(minutes=10)
-        series = flat_series(Prices(0.51, 0.26, 0.25), start, KICKOFF)
+        series = flat_series(Prices({"home": 0.51, "draw": 0.26, "away": 0.25}), start, KICKOFF)
 
         result = resample(series, KICKOFF, KICKOFF)
 
@@ -245,7 +245,9 @@ class TestBuildEnvelope:
     def test_price_rows_hold_the_yes_probabilities(self, gamma_event) -> None:
         match = parse_match_event(gamma_event(), EPL)
         assert match is not None
-        envelope = build_envelope(match, EPL, Prices(0.53, 0.25, 0.22), KICKOFF)
+        envelope = build_envelope(
+            match, EPL, Prices({"home": 0.53, "draw": 0.25, "away": 0.22}), KICKOFF
+        )
 
         [market] = expand_envelope(envelope, Source.POLYMARKET, "Bournemouth", "Chelsea").markets
         mids = {p.outcome: 1 / float(p.price) for p in market.prices if p.side is PriceSide.MID}
@@ -258,9 +260,9 @@ class TestBuildEnvelope:
         match = parse_match_event(gamma_event(), EPL)
         assert match is not None
 
-        outcomes = build_envelope(match, EPL, Prices(0.53, 0.25, 0.22), KICKOFF)["bookmakers"][0][
-            "markets"
-        ][0]["outcomes"]
+        outcomes = build_envelope(
+            match, EPL, Prices({"home": 0.53, "draw": 0.25, "away": 0.22}), KICKOFF
+        )["bookmakers"][0]["markets"][0]["outcomes"]
 
         assert all("price" not in o for o in outcomes)
         assert sorted(o["price_decimal"] for o in outcomes) == pytest.approx(
@@ -271,9 +273,9 @@ class TestBuildEnvelope:
         match = parse_match_event(gamma_event(), EPL)
         assert match is not None
 
-        meta = build_envelope(match, EPL, Prices(0.53, 0.25, 0.22), KICKOFF)["bookmakers"][0][
-            "polymarket_meta"
-        ]
+        meta = build_envelope(
+            match, EPL, Prices({"home": 0.53, "draw": 0.25, "away": 0.22}), KICKOFF
+        )["bookmakers"][0]["polymarket_meta"]
 
         assert meta["yes_probabilities"] == {"home": 0.53, "draw": 0.25, "away": 0.22}
         assert meta["pm_event_id"] == "900"
@@ -283,17 +285,20 @@ class TestBuildEnvelope:
         match = parse_match_event(gamma_event(), EPL)
         assert match is not None
 
-        meta = build_envelope(match, EPL, Prices(0.53, 0.25, 0.22), KICKOFF, include_quotes=True)[
-            "bookmakers"
-        ][0]["polymarket_meta"]
+        meta = build_envelope(
+            match,
+            EPL,
+            Prices({"home": 0.53, "draw": 0.25, "away": 0.22}),
+            KICKOFF,
+            include_quotes=True,
+        )["bookmakers"][0]["polymarket_meta"]
 
         assert meta["best_bid"] == {"home": 0.52, "draw": 0.24, "away": 0.20}
         assert meta["best_ask"] == {"home": 0.54, "draw": 0.26, "away": 0.22}
 
 
 class TestSportConfig:
-    def test_epl_has_three_way_markets_and_no_nba_ids(self) -> None:
-        assert MATCH_ODDS_SPORTS == ("soccer_epl",)
+    def test_epl_series_and_market_key(self) -> None:
         assert (EPL.series_id, EPL.tag_id, EPL.market_key) == ("10188", None, "1x2")
 
     def test_match_slug_per_sport(self) -> None:
@@ -337,7 +342,7 @@ class TestPriceSeries:
         await client.get_events("soccer_epl", active=None, closed=True)
 
         params = client._make_request.call_args.kwargs["params"]
-        assert params == {"series_id": "10188", "closed": "true", "limit": 100, "offset": 0}
+        assert params == {"series_id": "10188", "closed": "true", "limit": 25, "offset": 0}
 
     async def test_events_request_sends_nba_tag(self) -> None:
         client = PolymarketClient()
@@ -375,3 +380,122 @@ class TestPriceSeries:
         assert [e["id"] for e in events] == ["1", "2", "3"]
         offsets = [c.kwargs["params"]["offset"] for c in client._make_request.call_args_list]
         assert offsets == [0, 2, 3]
+
+
+NBA = POLYMARKET_SPORTS["basketball_nba"]
+NBA_START = datetime(2026, 10, 31, 2, 0, tzinfo=UTC)
+
+
+class TestTwoWayMatch:
+    def test_names_and_tokens_follow_the_team_not_the_slug_position(self, gamma_nba_event) -> None:
+        match = parse_match_event(gamma_nba_event(), NBA)
+
+        assert match is not None
+        assert (match.home_team, match.away_team) == (
+            "Golden State Warriors",
+            "Los Angeles Lakers",
+        )
+        assert match.start_time == NBA_START
+        assert match.sides == ("home", "away")
+        assert match.outcomes["away"].yes_token_id == "tok-away"
+        assert match.outcomes["home"].yes_token_id == "tok-home"
+
+    def test_second_outcome_quotes_are_the_complement(self, gamma_nba_event) -> None:
+        match = parse_match_event(gamma_nba_event(quote=(0.30, 0.32)), NBA)
+
+        assert match is not None
+        away, home = match.outcomes["away"], match.outcomes["home"]
+        assert (away.best_bid, away.best_ask) == (0.30, 0.32)
+        assert (home.best_bid, home.best_ask) == pytest.approx((0.68, 0.70))
+        prices = match.midpoints()
+        assert prices is not None
+        assert prices.by_side() == pytest.approx({"home": 0.69, "away": 0.31})
+        assert sum_is_valid(prices)
+        assert match.max_spread() == pytest.approx(0.02)
+
+    def test_a_book_with_no_bid_has_no_prices(self, gamma_nba_event) -> None:
+        match = parse_match_event(gamma_nba_event(quote=(None, 0.32)), NBA)
+
+        assert match is not None
+        assert match.midpoints() is None
+
+    @pytest.mark.parametrize(
+        ("abbreviation", "name"),
+        [
+            ("lac", "Los Angeles Clippers"),
+            ("phi", "Philadelphia 76ers"),
+            ("por", "Portland Trail Blazers"),
+            ("nyk", "New York Knicks"),
+        ],
+    )
+    def test_team_resolves_by_abbreviation(self, abbreviation: str, name: str) -> None:
+        assert NBA.team_name({"name": "Unlisted", "abbreviation": abbreviation}) == name
+
+    @pytest.mark.parametrize("team", [{"name": "Spurs"}, {"name": "Spurs", "abbreviation": "xyz"}])
+    def test_a_nickname_without_a_known_abbreviation_is_not_a_team(self, team: dict) -> None:
+        assert NBA.team_name(team) is None
+
+    def test_a_match_with_an_unknown_team_is_dropped(self, gamma_nba_event) -> None:
+        event = gamma_nba_event(home=("Stars", "str"))
+
+        assert parse_match_event(event, NBA) is None
+
+    def test_ignores_exact_margin_and_prop_events(self, gamma_nba_event) -> None:
+        assert (
+            parse_match_event(gamma_nba_event(slug="nba-lal-gsw-2026-10-30-exact-margin"), NBA)
+            is None
+        )
+
+    def test_rejects_event_whose_moneyline_outcomes_are_not_the_teams(
+        self, gamma_nba_event
+    ) -> None:
+        event = gamma_nba_event()
+        event["markets"][1]["outcomes"] = '["Over", "Under"]'
+
+        assert parse_match_event(event, NBA) is None
+
+    def test_rejects_event_without_a_moneyline_market(self, gamma_nba_event) -> None:
+        event = gamma_nba_event()
+        event["markets"].pop()
+
+        assert parse_match_event(event, NBA) is None
+
+    def test_lists_the_game_under_the_nba_sport_and_polymarket_id(self, gamma_nba_event) -> None:
+        match = parse_match_event(gamma_nba_event(), NBA)
+        assert match is not None
+
+        game = listed_game(match, NBA)
+
+        assert (game.source, game.external_id, game.sport_key) == (
+            Source.POLYMARKET,
+            "1244721",
+            "basketball_nba",
+        )
+
+    def test_envelope_has_two_h2h_outcomes_named_for_the_teams(self, gamma_nba_event) -> None:
+        match = parse_match_event(gamma_nba_event(), NBA)
+        assert match is not None
+
+        envelope = build_envelope(match, NBA, Prices({"home": 0.69, "away": 0.31}), NBA_START)
+
+        [market] = envelope["bookmakers"][0]["markets"]
+        assert market["key"] == "h2h"
+        assert [o["name"] for o in market["outcomes"]] == [
+            "Golden State Warriors",
+            "Los Angeles Lakers",
+        ]
+        [expanded] = expand_envelope(
+            envelope, Source.POLYMARKET, "Golden State Warriors", "Los Angeles Lakers"
+        ).markets
+        mids = {p.outcome: 1 / float(p.price) for p in expanded.prices if p.side is PriceSide.MID}
+        assert mids == pytest.approx({PriceOutcome.HOME: 0.69, PriceOutcome.AWAY: 0.31})
+
+    def test_resample_over_two_sides(self) -> None:
+        start = NBA_START - timedelta(hours=2)
+        series = flat_series(Prices({"home": 0.6, "away": 0.4}), start, NBA_START)
+
+        result = resample(series, NBA_START, NBA_START)
+
+        assert result.points
+        assert all(point.prices == Prices({"home": 0.6, "away": 0.4}) for point in result.points)
+        assert result.missing == 0 or result.points[0].time >= start

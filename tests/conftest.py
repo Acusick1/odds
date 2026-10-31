@@ -393,3 +393,47 @@ def gamma_event() -> Callable[..., dict[str, Any]]:
         }
 
     return build
+
+
+@pytest.fixture
+def gamma_nba_event() -> Callable[..., dict[str, Any]]:
+    """Build a Gamma NBA game event: one moneyline market whose two outcomes are the teams
+    (away first, as in the ticker), quoted on the first outcome, plus a prop market."""
+
+    def build(
+        slug: str = "nba-lal-gsw-2026-10-30",
+        away: tuple[str, str] = ("Lakers", "lal"),
+        home: tuple[str, str] = ("Warriors", "gsw"),
+        start: str = "2026-10-31T02:00:00Z",
+        quote: tuple[float | None, float | None] = (0.30, 0.32),
+    ) -> dict[str, Any]:
+        bid, ask = quote
+        return {
+            "id": "1244721",
+            "slug": slug,
+            "startTime": start,
+            "teams": [
+                {"name": away[0], "abbreviation": away[1], "ordering": "away"},
+                {"name": home[0], "abbreviation": home[1], "ordering": "home"},
+            ],
+            "markets": [
+                {
+                    "id": "10",
+                    "slug": f"{slug}-odd-even",
+                    "outcomes": json.dumps(["Odd", "Even"]),
+                    "clobTokenIds": json.dumps(["odd", "even"]),
+                    "bestBid": 0.49,
+                    "bestAsk": 0.51,
+                },
+                {
+                    "id": "11",
+                    "slug": slug,
+                    "outcomes": json.dumps([away[0], home[0]]),
+                    "clobTokenIds": json.dumps(["tok-away", "tok-home"]),
+                    "bestBid": bid,
+                    "bestAsk": ask,
+                },
+            ],
+        }
+
+    return build

@@ -470,8 +470,8 @@ class TestExtractInjuryFeatures:
         assert features.injury_news_recency == pytest.approx(2.0)
 
     def test_team_name_normalization(self) -> None:
-        # Event uses short names, reports use full names
-        event = _make_event(home_team="Lakers", away_team="Celtics")
+        # Event uses the Polymarket spelling, reports use the full name
+        event = _make_event(home_team="LA Lakers", away_team="Boston Celtics")
         snapshot_time = datetime(2025, 1, 14, 22, 0, tzinfo=UTC)
         report_time = datetime(2025, 1, 14, 20, 0, tzinfo=UTC)
 

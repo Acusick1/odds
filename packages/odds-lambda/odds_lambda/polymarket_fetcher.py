@@ -19,12 +19,12 @@ from odds_lambda.polymarket_sports import POLYMARKET_SPORTS
 logger = structlog.get_logger()
 
 # Request timeout in seconds
-REQUEST_TIMEOUT = 30
+REQUEST_TIMEOUT = 120
 
 # Maximum concurrent requests for batch operations
 MAX_CONCURRENT_REQUESTS = 10
 
-GAMMA_PAGE_SIZE = 100
+GAMMA_PAGE_SIZE = 25
 
 # CLOB rejects startTs/endTs windows of 20 days and accepts 14.
 MAX_HISTORY_WINDOW = timedelta(days=14)
@@ -127,10 +127,15 @@ class PolymarketClient:
         closed: bool = False,
         limit: int = GAMMA_PAGE_SIZE,
         offset: int = 0,
+        ends_after: datetime | None = None,
+        ends_before: datetime | None = None,
     ) -> list[dict]:
-        """Fetch one page of a sport's events from the Gamma API (at most 100 per page).
+        """Fetch one page of a sport's events from the Gamma API (at most ``limit`` per page).
 
-        Closed events keep ``active=true``, so pass ``active=None`` to list them.
+        Closed events keep ``active=true``, so pass ``active=None`` to list them. ``ends_after``
+        and ``ends_before`` bound the events' end dates, which spares paging through every
+        event of a series: an NBA event nests hundreds of prop markets (about 1 MB each), so a
+        page takes seconds.
         """
         sport = POLYMARKET_SPORTS[sport_key]
         params: dict[str, str | int] = {
@@ -143,6 +148,10 @@ class PolymarketClient:
             params["active"] = str(active).lower()
         if sport.tag_id is not None:
             params["tag_id"] = sport.tag_id
+        if ends_after is not None:
+            params["end_date_min"] = ends_after.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+        if ends_before is not None:
+            params["end_date_max"] = ends_before.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         data, response_time = await self._make_request(self.gamma_url, "/events", params=params)
 
@@ -160,7 +169,12 @@ class PolymarketClient:
         return events
 
     async def get_all_events(
-        self, sport_key: SportKey, active: bool | None = True, closed: bool = False
+        self,
+        sport_key: SportKey,
+        active: bool | None = True,
+        closed: bool = False,
+        ends_after: datetime | None = None,
+        ends_before: datetime | None = None,
     ) -> list[dict]:
         """Fetch every page of a sport's events, ending on the first empty page.
 
@@ -169,7 +183,14 @@ class PolymarketClient:
         """
         events: dict[str, dict] = {}
         offset = 0
-        while page := await self.get_events(sport_key, active=active, closed=closed, offset=offset):
+        while page := await self.get_events(
+            sport_key,
+            active=active,
+            closed=closed,
+            offset=offset,
+            ends_after=ends_after,
+            ends_before=ends_before,
+        ):
             offset += len(page)
             events.update({str(event["id"]): event for event in page})
         return list(events.values())

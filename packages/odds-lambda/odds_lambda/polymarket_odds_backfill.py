@@ -19,7 +19,6 @@ from odds_lambda.polymarket_fetcher import MAX_CONCURRENT_REQUESTS, PolymarketCl
 from odds_lambda.polymarket_odds import (
     MAX_HORIZON,
     MAX_STALENESS,
-    SIDES,
     Observation,
     PolymarketMatch,
     Resampled,
@@ -70,7 +69,9 @@ async def _fetch_series(
                 match.outcome_market(side).yes_token_id, start, end
             )
 
-    return dict(zip(SIDES, await asyncio.gather(*(one(side) for side in SIDES)), strict=True))
+    return dict(
+        zip(match.sides, await asyncio.gather(*(one(side) for side in match.sides)), strict=True)
+    )
 
 
 async def _history_event_ids(session: AsyncSession) -> set[int]:
@@ -99,14 +100,13 @@ async def backfill_sport(
     dry_run: bool = False,
 ) -> BackfillReport:
     sport = POLYMARKET_SPORTS[sport_key]
-    if not sport.three_way_markets:
-        raise ValueError(f"{sport_key} has no three-way match markets to snapshot")
-
     report = BackfillReport()
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
 
     async with PolymarketClient() as client, async_session_maker() as session:
-        raw_events = await client.get_all_events(sport_key, active=None, closed=True)
+        raw_events = await client.get_all_events(
+            sport_key, active=None, closed=True, ends_after=since
+        )
         matches = [m for raw in raw_events if (m := parse_match_event(raw, sport))]
 
         final_event_ids = list(

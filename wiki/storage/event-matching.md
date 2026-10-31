@@ -11,9 +11,8 @@ sources:
   - odds_lambda.storage.injury_writer.InjuryWriter._match_event
   - odds_lambda.storage.game_log_writer.GameLogWriter._match_event
   - odds_lambda.polymarket_matching.NBA_ABBREV_MAP
-  - odds_lambda.polymarket_matching.normalize_team
   - odds_lambda.storage.event_resolver.attach_event
-  - odds_lambda.polymarket_odds.canonical_team
+  - odds_lambda.polymarket_sports.PolymarketSportConfig
   - odds_core.team.normalize_team_name
   - odds_lambda.mlb_game_resolver
   - odds_lambda.live_events.LiveEventFinder
@@ -39,7 +38,7 @@ There is no shared matcher for deciding which `events` row a piece of incoming d
 | `odds_lambda.storage.event_resolver.resolve_event` | live OddsPortal scrape and Betfair jobs and the Odds API writers, through `odds_lambda.live_events.LiveEventFinder` | MLB: the event holding the row's `gamePk`, else the source's id, else ±2 h among events with none; other sports: the source's id, else ±2 h | `odds_core.team.normalize_team_name` applied first; sport filter | the nearest candidate, ties to the one stored first ([Event resolver](event-resolver.md#steps)) |
 | `odds_lambda.storage.injury_writer.InjuryWriter._match_event` | [NBA injury reports](../collection/nba-injuries-and-stats.md) | ET `game_date` 10:00 to next day 06:00, converted to UTC | team is home or away | `None` |
 | `odds_lambda.storage.game_log_writer.GameLogWriter._match_event` | [NBA game logs](../collection/nba-injuries-and-stats.md) | same ET window (a verbatim copy) | team is home or away | `None` |
-| `odds_lambda.storage.event_resolver.attach_event` | `odds polymarket backfill-odds` and the fetch-polymarket-odds job | the source's id, else ±2 h | `odds_lambda.polymarket_odds.canonical_team`, then `odds_core.team.normalize_team_name`; sport filter | the nearest candidate; with no candidate, or a refused id, it returns `None` and creates no event ([Event resolver](event-resolver.md#attaching-without-creating)) |
+| `odds_lambda.storage.event_resolver.attach_event` | `odds polymarket backfill-odds` and the fetch-polymarket-odds job | the source's id, else ±2 h | the sport's `team_name` (`odds_lambda.polymarket_sports.PolymarketSportConfig`; NBA by ticker abbreviation, and a match whose team has no name is dropped before attaching); sport filter | the nearest candidate; with no candidate, or a refused id, it returns `None` and creates no event ([Event resolver](event-resolver.md#attaching-without-creating)) |
 
 ## Consequences of the differences
 
@@ -47,7 +46,7 @@ There is no shared matcher for deciding which `events` row a piece of incoming d
 - **Different windows.** `odds_lambda.storage.event_resolver.resolve_event` uses ±2 h for live listings and ±24 h for historical ones (`odds_lambda.storage.event_resolver.MatchWindow`); both reuse an existing event (including a hex-id one) on a team match.
 - **Finders never merge.** `odds_lambda.storage.event_merge.find_match_id` only reads, and returns the candidate a merge would keep ([kept event](event-merge.md#kept-event)). The resolver's historical match takes the nearest candidate within ±2 h when there are several, and none when no candidate is within ±2 h, so neighbouring fixtures of the same teams (an NBA back-to-back) are never conflated. Merging is explicit ([Event merge](event-merge.md)).
 - **Odds API writers resolve.** Event sync, ingestion, `odds discover games` and the historical backfill attach a listed game to the event of its match whichever source stored it first, and create one only when none matches ([Odds API events](#odds-api-events)). Twins stored before the resolver stay until they are merged ([Event merge](event-merge.md)).
-- **Alias gaps become NULL.** Injury and game-log matching fall back to the raw team name when `odds_lambda.polymarket_matching.normalize_team` returns `None` (the game-log writer tries its abbreviation map first), so an alias gap shows up as a NULL `event_id`. Injury reports are league-wide, so unmatched pairs are expected for teams not playing that day. Unmatched NBA rows keep `event_id` NULL and are invisible to per-event readers.
+- **Alias gaps become NULL.** Injury and game-log matching normalise names with `odds_core.team.normalize_team_name`, which returns an unknown name unchanged (the game-log writer tries its abbreviation map first), so an alias gap shows up as a NULL `event_id`. Injury reports are league-wide, so unmatched pairs are expected for teams not playing that day. Unmatched NBA rows keep `event_id` NULL and are invisible to per-event readers.
 
 ## MLB gamePk resolver
 
@@ -81,7 +80,7 @@ The same module reads a game's slots for the jobs that follow it after resolutio
 
 When a run drops any game, the job sends `mlb_games_dropped:<job>` with the count and the matchups (`odds_lambda.live_events.alert_dropped_games`, [Alerts](../operations/alerts.md#alert-history)) and still completes with its heartbeat.
 
-`odds_lambda.storage.event_resolver.ListedGame` raises `ValueError` for an MLB game without its `gamePk` or with the historical window, so the resolver never creates one. The historical loaders (`scripts/ingest_oddsportal.py`, `scripts/ingest_football_data_uk.py`) cover only NBA and EPL, and match with the historical window; their snapshots' tiers follow from each one's time basis and the event's other snapshots ([the tier a snapshot covers](fetch-tier.md#the-tier-a-snapshot-covers)). The Odds API writers resolve an MLB game through its `gamePk` too ([Odds API events](#odds-api-events)); `fetch-odds` is limited to EPL by `odds_lambda.scheduling.jobs._JOB_SPORTS`, so only a manual `odds discover` or `odds fetch` runs them for MLB.
+`odds_lambda.storage.event_resolver.ListedGame` raises `ValueError` for an MLB game without its `gamePk` or with the historical window, so the resolver never creates one. The historical loaders (`scripts/ingest_oddsportal.py`, which skips an NBA game with a side outside the 30 teams, and `scripts/ingest_football_data_uk.py`) cover only NBA and EPL, and match with the historical window; their snapshots' tiers follow from each one's time basis and the event's other snapshots ([the tier a snapshot covers](fetch-tier.md#the-tier-a-snapshot-covers)). The Odds API writers resolve an MLB game through its `gamePk` too ([Odds API events](#odds-api-events)); `fetch-odds` is limited to EPL by `odds_lambda.scheduling.jobs._JOB_SPORTS`, so only a manual `odds discover` or `odds fetch` runs them for MLB.
 
 ## Odds API events
 

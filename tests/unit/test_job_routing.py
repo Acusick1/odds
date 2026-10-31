@@ -218,9 +218,9 @@ class TestJobCronRegistry:
         assert get_job_cron("totally-made-up") is None
 
     def test_get_job_sports_returns_allowlist_when_restricted(self) -> None:
-        # fetch-espn-fixtures is EPL-only — the sport allowlist is load-bearing
-        # (ESPN has no fixtures for the other configured sports).
-        assert get_job_sports("fetch-espn-fixtures") == ("soccer_epl",)
+        # fetch-espn-fixtures covers EPL and NBA — the sport allowlist is load-bearing
+        # (its main() raises for the other configured sports, MLB included).
+        assert get_job_sports("fetch-espn-fixtures") == ("soccer_epl", "basketball_nba")
 
     @pytest.mark.parametrize("job", ["fetch-odds", "fetch-scores"])
     def test_get_job_sports_restricts_event_driven_jobs_to_epl(self, job: str) -> None:
@@ -299,16 +299,24 @@ class TestExpectedCompoundJobNames:
     def test_no_bootstrap_jobs_yields_empty(self) -> None:
         assert expected_compound_job_names([], ["soccer_epl"]) == set()
 
-    def test_default_bootstrap_schedules_polymarket_for_epl_only(self) -> None:
+    def test_default_bootstrap_schedules_polymarket_and_espn_for_the_sports_they_list(self) -> None:
         from odds_core.config import AlertConfig, SchedulerConfig
 
         expected = expected_compound_job_names(
             SchedulerConfig().bootstrap_jobs, ["soccer_epl", "baseball_mlb", "basketball_nba"]
         )
         assert {n for n in expected if n.startswith("fetch-polymarket")} == {
-            "fetch-polymarket-odds-epl"
+            "fetch-polymarket-odds-epl",
+            "fetch-polymarket-odds-nba",
         }
-        assert "fetch-polymarket-odds-epl" in AlertConfig().heartbeat_expectations
+        assert {n for n in expected if n.startswith("fetch-espn-fixtures")} == {
+            "fetch-espn-fixtures-epl",
+            "fetch-espn-fixtures-nba",
+        }
+        heartbeats = AlertConfig().heartbeat_expectations
+        assert "fetch-polymarket-odds-epl" in heartbeats
+        assert heartbeats["fetch-polymarket-odds-nba"] == 11
+        assert "fetch-espn-fixtures-nba" in heartbeats
 
 
 class TestRequireSport:

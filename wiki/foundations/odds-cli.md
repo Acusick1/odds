@@ -41,7 +41,7 @@ status: stable
 | `validate`, `quality` | [Coverage and completeness checks](../storage/coverage-checks.md) (`quality coverage` lists each book by its canonical key, from price rows) |
 | `copy` | [Copy production data locally](howto-copy-production-data.md) |
 | `scheduler` | [Local scheduler](../scheduling/local-scheduler.md) |
-| `polymarket` | [Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md#backfill-command) (`odds_cli.commands.polymarket.backfill_odds` attaches matches to events before storing history, and reports the matches that failed) |
+| `polymarket` | [Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md#backfill-command) (`odds_cli.commands.polymarket.backfill_odds` attaches matches to events before storing history for EPL or NBA from a required `--since`, and reports the matches that failed) |
 | `injuries`, `nba-stats`, `pbpstats` | [NBA feeds](../collection/nba-injuries-and-stats.md) |
 | `paper` | [Paper trading](../agent/paper-trading.md) |
 | `candidates` | [Candidate registry](../evaluation/candidate-registry.md#odds-candidates-list), [Replay backtest](../evaluation/candidate-backtest.md), [Parity check](../evaluation/candidate-parity.md) |
