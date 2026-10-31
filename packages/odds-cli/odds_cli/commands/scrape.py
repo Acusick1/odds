@@ -21,7 +21,7 @@ def scrape_upcoming(
     market: Annotated[
         list[str] | None,
         typer.Option(
-            "--market", "-m", help="Markets to scrape (repeatable): 1x2, over_under_2_5, home_away"
+            "--market", "-m", help="Markets to scrape (repeatable): a key of FEED_MARKETS"
         ),
     ] = None,
     dry_run: bool = typer.Option(False, "--dry-run", help="Scrape and convert but don't store"),

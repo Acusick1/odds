@@ -39,7 +39,7 @@ class MatchOdds:
 
 
 def _outcomes(
-    event: ListingEvent, spec: FeedMarketSpec, prices: tuple[float, ...]
+    event: ListingEvent, spec: FeedMarketSpec, bk: BookmakerPrices
 ) -> list[dict[str, Any]]:
     names = {
         "home": event.home_team,
@@ -49,12 +49,28 @@ def _outcomes(
         "under": "Under",
     }
     outcomes: list[dict[str, Any]] = []
-    for label, price in zip(spec.outcomes, prices, strict=True):
+    for label, price in zip(spec.outcomes, bk.prices, strict=True):
         outcome: dict[str, Any] = {"name": names[label], PRICE_DECIMAL_KEY: price}
-        if spec.point is not None:
-            outcome["point"] = spec.point
+        line = bk.line if bk.line is not None else spec.point
+        if line is not None:
+            # A spread's feed line is the home side's; each side carries its own sign.
+            mirrored = spec.mirror_line and label == "away"
+            outcome["point"] = -line if mirrored else line
         outcomes.append(outcome)
     return outcomes
+
+
+def _line_market(
+    event: ListingEvent, spec: FeedMarketSpec, row: BookmakerPrices, updated: datetime
+) -> dict[str, Any]:
+    market: dict[str, Any] = {
+        "key": spec.pipeline_key,
+        "last_update": _iso_z(updated),
+        "outcomes": _outcomes(event, spec, row),
+    }
+    if row.volumes is not None:
+        market["betfair_matched"] = dict(zip(spec.outcomes, row.volumes, strict=True))
+    return market
 
 
 def _iso_z(moment: datetime) -> str:
@@ -71,7 +87,7 @@ def convert_market(
 
     Args:
         event: Listing entry the prices belong to.
-        market: LeagueSpec market key: "1x2", "over_under_2_5" or "home_away".
+        market: LeagueSpec market key: a ``FEED_MARKETS`` key.
         bookmakers: Prices from ``extract_market``.
         scraped_at: Time the feed was read; stamps the snapshot.
 
@@ -82,24 +98,32 @@ def convert_market(
     if spec is None:
         raise ValueError(f"Unsupported market: {market}")
 
-    entries: list[dict[str, Any]] = []
+    by_book: dict[tuple[str, str], list[BookmakerPrices]] = {}
     for bk in bookmakers:
+        by_book.setdefault((bk.bookmaker_id, bk.name), []).append(bk)
+
+    def stamp(row: BookmakerPrices) -> datetime:
         # The bookmaker's own change time is its update time; the validator rejects
         # future timestamps, so cap it at the scrape time.
-        last_update = min(bk.last_change, scraped_at) if bk.last_change else scraped_at
+        return min(row.last_change, scraped_at) if row.last_change else scraped_at
+
+    entries: list[dict[str, Any]] = []
+    for rows in by_book.values():
+        first = rows[0]
         entry: dict[str, Any] = {
-            "key": normalize_bookmaker_key(bk.name),
-            "title": bk.name,
-            "last_update": _iso_z(last_update),
-            "markets": [
-                {
-                    "key": spec.pipeline_key,
-                    "outcomes": _outcomes(event, spec, bk.prices),
-                }
-            ],
+            "key": normalize_bookmaker_key(first.name),
+            "title": first.name,
+            "last_update": _iso_z(max(stamp(r) for r in rows)),
         }
-        if bk.volumes is not None:
-            entry["betfair_matched"] = dict(zip(spec.outcomes, bk.volumes, strict=True))
+        if spec.ladder:
+            # Each line is its own market element with its own change time and volumes.
+            entry["markets"] = [_line_market(event, spec, r, stamp(r)) for r in rows]
+        else:
+            entry["markets"] = [
+                {"key": spec.pipeline_key, "outcomes": _outcomes(event, spec, first)}
+            ]
+            if first.volumes is not None:
+                entry["betfair_matched"] = dict(zip(spec.outcomes, first.volumes, strict=True))
         entries.append(entry)
 
     if not entries:

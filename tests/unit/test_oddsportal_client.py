@@ -15,6 +15,7 @@ from odds_lambda import oddsportal_client
 from odds_lambda.oddsportal_client import (
     FEED_MARKETS,
     BookmakerContext,
+    BookmakerPrices,
     ListingEvent,
     OddsPortalClient,
     OddsPortalError,
@@ -23,6 +24,7 @@ from odds_lambda.oddsportal_client import (
     parse_archive_path,
     parse_listing,
     parse_results_page,
+    select_main_line_window,
 )
 from structlog.testing import capture_logs
 
@@ -626,3 +628,205 @@ class TestRecordedResultsFeed:
             ("Cleveland Guardians", "Tampa Bay Rays", 3, 7),
             ("Los Angeles Dodgers", "Milwaukee Brewers", 4, 6),
         ]
+
+
+NBA_NAMES = {
+    "16": "bet365",
+    "15": "William Hill",
+    "74": "Skybet",
+    "26": "Betway",
+    "14": "10bet",
+    "44": "Betfair Exchange",
+    "76": "BetVictor",
+    "60": "Paddy Power",
+    "1281": "BetMGM.uk",
+    "625": "Unibetuk",
+    "2": "bwin",
+    "27": "888sport",
+    "979": "Betano.uk",
+    "263": "BetUK",
+    "841": "Midnite",
+    "895": "7BetUK",
+    "869": "AllBritishCasino",
+    "1009": "SpreadEX",
+    "21": "Betfred",
+}
+NBA_CONTEXT = BookmakerContext(hashed_bookmakers="a" * 32, geo="GB", names=NBA_NAMES)
+NBA_EVENT = ListingEvent(
+    event_id="hdJcPIgS",
+    sport_id=3,
+    home_team="Utah Jazz",
+    away_team="Portland Trail Blazers",
+    start_time=datetime(2026, 10, 31, 19, 0, tzinfo=UTC),
+    url="https://www.oddsportal.com/basketball/h2h/portland-x/utah-y/#hdJcPIgS",
+)
+
+
+def _nba_feed(fixtures: Path, market: str, scope: int) -> dict[str, Any]:
+    return json.loads((fixtures / f"feed_nba_{market}_scope{scope}.json").read_text())
+
+
+def _prices_at(
+    book: str, line: float | None, prices: tuple[float, ...] = (1.9, 1.9)
+) -> BookmakerPrices:
+    return BookmakerPrices(book, book, prices, None, None, line)
+
+
+class TestLadderExtraction:
+    @pytest.mark.parametrize("market", ["totals", "spreads"])
+    def test_every_line_of_the_ladder_is_read_per_scope(
+        self, oddsportal_fixtures: Path, market: str
+    ) -> None:
+        spec = FEED_MARKETS[f"{market}_ladder"]
+
+        rows = extract_market(_nba_feed(oddsportal_fixtures, market, 1), spec, NBA_NAMES, 1)
+
+        assert len({r.line for r in rows}) > 20
+        assert all(r.line is not None and len(r.prices) == 2 for r in rows)
+
+    def test_scopes_split_the_bookmakers(self, oddsportal_fixtures: Path) -> None:
+        spec = FEED_MARKETS["totals_ladder"]
+
+        scope1 = {
+            r.name
+            for r in extract_market(_nba_feed(oddsportal_fixtures, "totals", 1), spec, NBA_NAMES, 1)
+        }
+        scope2 = {
+            r.name
+            for r in extract_market(_nba_feed(oddsportal_fixtures, "totals", 2), spec, NBA_NAMES, 2)
+        }
+
+        assert {"bet365", "10bet"} <= scope1
+        assert {"Skybet", "William Hill", "Paddy Power"} <= scope2
+        assert not scope1 & scope2
+
+    def test_a_scope_reads_only_its_own_keys(self, oddsportal_fixtures: Path) -> None:
+        spec = FEED_MARKETS["totals_ladder"]
+
+        assert extract_market(_nba_feed(oddsportal_fixtures, "totals", 1), spec, NBA_NAMES, 2) == []
+
+    def test_fixed_market_carries_the_spec_point(self) -> None:
+        feed = _feed({"odds": {"16": [1.9, 1.9]}, "act": {"16": True}}, key="E-2-2-0-2.5-0")
+
+        rows = extract_market(feed, FEED_MARKETS["over_under_2_5"], NAMES)
+
+        assert [r.line for r in rows] == [2.5]
+
+
+class TestSelectMainLineWindow:
+    def test_main_line_is_the_one_with_most_books_and_its_window_is_kept(self) -> None:
+        rows = [_prices_at(b, 220.5) for b in "ab"] + [_prices_at(b, 221.5) for b in "abc"]
+        rows += [_prices_at(b, 222.5) for b in "ab"] + [_prices_at(b, 225.5) for b in "abc"]
+
+        kept = select_main_line_window(rows, 1.0)
+
+        assert sorted({r.line for r in kept}) == [220.5, 221.5, 222.5]
+
+    def test_a_tie_goes_to_the_more_balanced_line(self) -> None:
+        rows = [_prices_at(b, 220.5, (1.6, 2.4)) for b in "ab"]
+        rows += [_prices_at(b, 221.5, (1.9, 1.95)) for b in "ab"]
+
+        kept = select_main_line_window(rows, 0.0)
+
+        assert {r.line for r in kept} == {221.5}
+
+    def test_main_line_counts_a_book_once(self) -> None:
+        rows = [_prices_at("a", 220.5)] * 3 + [_prices_at(b, 221.5) for b in "ab"]
+
+        assert {r.line for r in select_main_line_window(rows, 0.0)} == {221.5}
+
+    def test_no_lines_selects_nothing(self) -> None:
+        assert select_main_line_window([], 2.0) == []
+        assert select_main_line_window([_prices_at("a", None)], 2.0) == []
+
+    def test_real_ladders_centre_on_the_line_most_books_quote(
+        self, oddsportal_fixtures: Path
+    ) -> None:
+        spec = FEED_MARKETS["spreads_ladder"]
+        rows = [
+            r
+            for scope in spec.scopes
+            for r in extract_market(
+                _nba_feed(oddsportal_fixtures, "spreads", scope), spec, NBA_NAMES, scope
+            )
+        ]
+
+        kept = select_main_line_window(rows, spec.line_window)
+
+        assert {r.line for r in kept} == {6.5, 7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0, 10.5}
+        assert len({r.bookmaker_id for r in kept if r.line == 8.5}) == 16
+
+
+class TestLadderFetch:
+    async def test_requests_every_scope_and_merges_the_bookmakers(
+        self, oddsportal_fixtures: Path, encrypt_payload: Encrypt, sleeps: list[float]
+    ) -> None:
+        client = FakeClient(
+            [
+                (200, encrypt_payload(_nba_feed(oddsportal_fixtures, "totals", scope)))
+                for scope in (1, 2)
+            ]
+        )
+
+        rows = await client.fetch_market(NBA_EVENT, "totals_ladder", NBA_CONTEXT)
+
+        assert [url.split("-")[4:6] for url, _ in client.requests] == [["2", "1"], ["2", "2"]]
+        main = {r.name for r in rows if r.line == 231.5}
+        assert {"10bet", "Skybet", "William Hill"} <= main
+        assert {r.line for r in rows} >= {229.5, 231.5, 233.5}
+        assert min(r.line for r in rows if r.line is not None) == 229.5
+
+    async def test_a_book_in_both_scopes_keeps_the_first(
+        self, encrypt_payload: Encrypt, sleeps: list[float]
+    ) -> None:
+        def feed(scope: int, price: float) -> dict[str, Any]:
+            market = {
+                "odds": {"16": [price, price]},
+                "act": {"16": True},
+                "handicapValue": "220.50",
+            }
+            return _feed(market, key=f"E-2-{scope}-0-220.5-0")
+
+        client = FakeClient(
+            [(200, encrypt_payload(feed(1, 1.9))), (200, encrypt_payload(feed(2, 2.0)))]
+        )
+
+        rows = await client.fetch_market(NBA_EVENT, "totals_ladder", NBA_CONTEXT)
+
+        assert [(r.name, r.prices) for r in rows] == [("bet365", (1.9, 1.9))]
+
+
+class TestLadderLineIsTheHandicapValue:
+    """The feed key strips trailing zeros (``E-5-1-0-1-0`` is handicap 10), so the line is read
+    from ``handicapValue``."""
+
+    def test_a_spread_of_ten_is_not_read_as_one(self, oddsportal_fixtures: Path) -> None:
+        spec = FEED_MARKETS["spreads_ladder"]
+        feed = _nba_feed(oddsportal_fixtures, "spreads", 1)
+        assert feed["d"]["oddsdata"]["back"]["E-5-1-0-1-0"]["handicapValue"] == "10.00"
+
+        lines = {r.line for r in extract_market(feed, spec, NBA_NAMES, 1)}
+
+        assert 10.0 in lines
+
+    def test_a_negative_spread_of_ten_keeps_its_sign(self, oddsportal_fixtures: Path) -> None:
+        spec = FEED_MARKETS["spreads_ladder"]
+        feed = _nba_feed(oddsportal_fixtures, "spreads", 2)
+        assert feed["d"]["oddsdata"]["back"]["E-5-2-0--1-0"]["handicapValue"] == "-10.00"
+
+        assert -10.0 in {r.line for r in extract_market(feed, spec, NBA_NAMES, 2)}
+
+    def test_a_total_of_230_is_kept(self, oddsportal_fixtures: Path) -> None:
+        spec = FEED_MARKETS["totals_ladder"]
+        feed = _nba_feed(oddsportal_fixtures, "totals", 1)
+        assert feed["d"]["oddsdata"]["back"]["E-2-1-0-23-0"]["handicapValue"] == "230.00"
+
+        lines = {r.line for r in extract_market(feed, spec, NBA_NAMES, 1)}
+
+        assert 230.0 in lines
+        assert 23.0 not in lines
+
+    def test_a_market_without_a_handicap_value_is_skipped(self) -> None:
+        feed = _feed({"odds": {"16": [1.9, 1.9]}, "act": {"16": True}}, key="E-2-1-0-23-0")
+
+        assert extract_market(feed, FEED_MARKETS["totals_ladder"], NAMES, 1) == []

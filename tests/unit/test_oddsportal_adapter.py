@@ -156,3 +156,107 @@ class TestConvertMarket:
     def test_unsupported_market_raises(self, event: ListingEvent) -> None:
         with pytest.raises(ValueError, match="Unsupported market"):
             convert_market(event, "spreads", [_bk("bet365", (2.0, 2.0))], SCRAPED_AT)
+
+
+class TestLadderMarkets:
+    def test_totals_ladder_gives_each_line_its_own_market_with_its_own_change_time(
+        self, event: ListingEvent
+    ) -> None:
+        early, late = SCRAPED_AT - timedelta(hours=3), SCRAPED_AT - timedelta(minutes=5)
+        rows = [
+            BookmakerPrices("1", "bet365", (1.9, 1.95), None, early, 220.5),
+            BookmakerPrices("1", "bet365", (1.7, 2.2), None, late, 219.5),
+        ]
+
+        match = convert_market(event, "totals_ladder", rows, SCRAPED_AT)
+
+        assert match is not None
+        assert match.bookmaker_count == 1
+        (entry,) = match.envelope["bookmakers"]
+        assert entry["last_update"] == "2026-10-17T11:55:00Z"
+        assert [
+            (m["key"], m["last_update"], [(o["name"], o["point"]) for o in m["outcomes"]])
+            for m in entry["markets"]
+        ] == [
+            ("totals", "2026-10-17T09:00:00Z", [("Over", 220.5), ("Under", 220.5)]),
+            ("totals", "2026-10-17T11:55:00Z", [("Over", 219.5), ("Under", 219.5)]),
+        ]
+
+    def test_spreads_ladder_signs_the_line_per_outcome(self, event: ListingEvent) -> None:
+        rows = [BookmakerPrices("1", "bet365", (1.9, 1.95), None, None, -5.5)]
+
+        match = convert_market(event, "spreads_ladder", rows, SCRAPED_AT)
+
+        assert match is not None
+        (market,) = match.envelope["bookmakers"][0]["markets"]
+        assert market["key"] == "spreads"
+        assert [(o["name"], o["point"]) for o in market["outcomes"]] == [
+            ("Arsenal", -5.5),
+            ("Everton", 5.5),
+        ]
+
+    def test_ladder_volumes_are_attached_per_line(self, event: ListingEvent) -> None:
+        from odds_core.vocabulary import Source
+        from odds_lambda.price_rows import expand_envelope
+
+        rows = [
+            BookmakerPrices("1", "Betfair Exchange", (1.9, 1.95), (10, 20), None, 5.5),
+            BookmakerPrices("1", "Betfair Exchange", (2.1, 1.8), (30, 40), None, 6.5),
+        ]
+
+        match = convert_market(event, "spreads_ladder", rows, SCRAPED_AT)
+
+        assert match is not None
+        entry = match.envelope["bookmakers"][0]
+        assert "betfair_matched" not in entry
+        assert [m["betfair_matched"] for m in entry["markets"]] == [
+            {"home": 10, "away": 20},
+            {"home": 30, "away": 40},
+        ]
+        [expanded] = expand_envelope(
+            match.envelope, Source.ODDSPORTAL, event.home_team, event.away_team
+        ).markets
+        assert sorted((float(p.line), float(p.matched)) for p in expanded.prices) == [
+            (-6.5, 40.0),
+            (-5.5, 20.0),
+            (5.5, 10.0),
+            (6.5, 30.0),
+        ]
+
+    def test_fixed_totals_keep_the_spec_point(self, event: ListingEvent) -> None:
+        match = convert_market(event, "over_under_2_5", [_bk("bet365", (2.0, 1.5))], SCRAPED_AT)
+
+        assert match is not None
+        outcomes = match.envelope["bookmakers"][0]["markets"][0]["outcomes"]
+        assert [o["point"] for o in outcomes] == [2.5, 2.5]
+
+    def test_ladder_envelopes_expand_to_one_row_per_line_and_outcome(self) -> None:
+        from odds_core.vocabulary import Market, PriceOutcome, Source
+        from odds_lambda.price_rows import expand_envelope
+
+        nba = ListingEvent(
+            "hdJcPIgS",
+            3,
+            "Utah Jazz",
+            "Portland Trail Blazers",
+            datetime(2026, 10, 31, 19, 0, tzinfo=UTC),
+            "https://www.oddsportal.com/basketball/h2h/x/y/#hdJcPIgS",
+        )
+        rows = [
+            BookmakerPrices("1", "bet365", (1.9, 1.95), None, None, -5.5),
+            BookmakerPrices("1", "bet365", (2.2, 1.7), None, None, -4.5),
+        ]
+        match = convert_market(nba, "spreads_ladder", rows, SCRAPED_AT)
+        assert match is not None
+
+        [expanded] = expand_envelope(
+            match.envelope, Source.ODDSPORTAL, nba.home_team, nba.away_team
+        ).markets
+
+        assert expanded.market is Market.SPREADS
+        assert sorted((float(p.line), p.outcome, float(p.price)) for p in expanded.prices) == [
+            (-5.5, PriceOutcome.HOME, 1.9),
+            (-4.5, PriceOutcome.HOME, 2.2),
+            (4.5, PriceOutcome.AWAY, 1.7),
+            (5.5, PriceOutcome.AWAY, 1.95),
+        ]
