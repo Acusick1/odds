@@ -43,37 +43,6 @@ resource "aws_iam_role_policy" "eventbridge_access" {
   })
 }
 
-# Policy for SSM access (API key rotation state)
-resource "aws_iam_role_policy" "ssm_api_key" {
-  name = "${var.project_name}-ssm-api-key"
-  role = aws_iam_role.lambda_exec.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = [
-          "ssm:GetParameter",
-          "ssm:PutParameter"
-        ]
-        Resource = "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project_name}/active-api-key-index"
-      }
-    ]
-  })
-}
-
-# SSM parameter for active API key index (Lambda manages the value at runtime)
-resource "aws_ssm_parameter" "active_api_key_index" {
-  name  = "/${var.project_name}/active-api-key-index"
-  type  = "String"
-  value = "0"
-
-  lifecycle {
-    ignore_changes = [value]
-  }
-}
-
 # Read-only access to the Betfair cert/key SSM SecureString parameters.
 # The parameter values themselves are populated out-of-band by an operator
 # (`aws ssm put-parameter --type SecureString ...`) so cert material is never
@@ -114,7 +83,6 @@ resource "aws_lambda_function" "odds_scheduler" {
       DATABASE_URL      = var.database_url
       ODDS_API_KEY      = var.odds_api_key
       ODDS_API_KEYS     = var.odds_api_keys
-      SSM_API_KEY_INDEX = "/${var.project_name}/active-api-key-index"
       LAMBDA_ARN        = "arn:aws:lambda:${var.aws_region}:${data.aws_caller_identity.current.account_id}:function:${var.project_name}"
       RULE_PREFIX       = var.rule_prefix
 

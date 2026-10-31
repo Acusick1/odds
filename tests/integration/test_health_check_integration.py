@@ -151,7 +151,7 @@ class TestHealthCheckIntegration:
 
         assert health_status.overall_healthy is True
         assert len(health_status.issues_detected) == 0
-        assert health_status.metrics.api_quota_remaining == 15000
+        assert health_status.metrics.api_quota_by_key == {1: 15000}
 
     @pytest.mark.asyncio
     async def test_health_check_detects_stale_data(self, test_session):
@@ -208,7 +208,7 @@ class TestHealthCheckIntegration:
         assert health_status.overall_healthy is False
         assert len(health_status.issues_detected) > 0
         assert any("quota" in issue.lower() for issue in health_status.issues_detected)
-        assert health_status.metrics.api_quota_remaining == 25
+        assert health_status.metrics.api_quota_by_key == {1: 25}
 
     @pytest.mark.asyncio
     async def test_health_check_detects_data_quality_issues(self, test_session):
@@ -313,7 +313,7 @@ class TestHealthCheckIntegration:
         )
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("condition", ["data_quality_errors", "quota_critical"])
+    @pytest.mark.parametrize("condition", ["data_quality_errors", "quota_critical:key1"])
     async def test_persistent_warning_repeats_only_after_reminder_interval(
         self, test_session, condition
     ):

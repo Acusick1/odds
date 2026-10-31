@@ -33,6 +33,7 @@ def create_backfill_plan(
     output_file: str = typer.Option(
         "backfill_plan.json", "--output", "-o", help="Output file for backfill plan"
     ),
+    sport: str = typer.Option(..., "--sport", help="Sport to plan (its key pays for the backfill)"),
 ):
     """
     Create a backfill plan from games already in the database.
@@ -43,19 +44,19 @@ def create_backfill_plan(
 
     Workflow:
         1. Discover events: odds discover games --start DATE --end DATE
-        2. Plan backfill: odds backfill plan --start DATE --end DATE [--games N]
-        3. Execute plan: odds backfill execute --plan backfill_plan.json
+        2. Plan backfill: odds backfill plan --start DATE --end DATE --sport SPORT [--games N]
+        3. Execute plan: odds backfill execute --plan backfill_plan.json --sport SPORT
 
     Examples:
         # Backfill all discovered games in date range
-        odds backfill plan --start 2023-10-01 --end 2024-04-30
+        odds backfill plan --start 2023-10-01 --end 2024-04-30 --sport basketball_nba
 
         # Backfill specific number of games (balanced selection)
-        odds backfill plan --start 2023-10-01 --end 2024-04-30 --games 166
+        odds backfill plan --start 2023-10-01 --end 2024-04-30 --sport basketball_nba --games 166
     """
     console.print("\n[bold cyan]Creating Historical Backfill Plan[/bold cyan]\n")
 
-    asyncio.run(_create_plan_async(start_date, end_date, target_games, output_file))
+    asyncio.run(_create_plan_async(start_date, end_date, target_games, output_file, sport))
 
 
 async def _create_plan_async(
@@ -63,6 +64,7 @@ async def _create_plan_async(
     end_date_str: str,
     target_games: int | None,
     output_file: str,
+    sport: str,
 ):
     """Async implementation of plan creation."""
     try:
@@ -99,7 +101,7 @@ async def _create_plan_async(
         all_events = await reader.get_events_by_date_range(
             start_date=start_date,
             end_date=end_date,
-            sport_key="basketball_nba",
+            sport_key=sport,
         )
 
         # Filter to events with past commence times (eligible for historical backfill)
@@ -111,11 +113,13 @@ async def _create_plan_async(
                 f"[red]No events found in database for date range {start_date_str} to {end_date_str}[/red]"
             )
             console.print("\n[yellow]Run event discovery first:[/yellow]")
-            console.print(f"  odds discover games --start {start_date_str} --end {end_date_str}")
+            console.print(
+                f"  odds discover games --start {start_date_str} --end {end_date_str} --sport {sport}"
+            )
             console.print("\n[yellow]Then create your plan:[/yellow]")
             games_param = f" --games {target_games}" if target_games else ""
             console.print(
-                f"  odds backfill plan --start {start_date_str} --end {end_date_str}{games_param}\n"
+                f"  odds backfill plan --start {start_date_str} --end {end_date_str} --sport {sport}{games_param}\n"
             )
             raise typer.Exit(1)
 
@@ -140,6 +144,10 @@ async def _create_plan_async(
                 events_by_date[date_str] = []
             events_by_date[date_str].append(event_dict)
 
+        key_quota = (await reader.get_latest_quota_by_key(get_settings().api)).get(
+            get_settings().api.key_index_for(sport)
+        )
+
         # Display date distribution
         dates_with_games = len(events_by_date)
         console.print(f"Events span {dates_with_games} unique dates")
@@ -157,7 +165,12 @@ async def _create_plan_async(
     table.add_row("Total Snapshots", str(plan["total_snapshots"]))
     table.add_row("Estimated Quota Usage", f"{plan['estimated_quota_usage']:,}")
     app_settings = get_settings()
-    table.add_row("Quota Remaining", f"{app_settings.api.quota - plan['estimated_quota_usage']:,}")
+    key_index = app_settings.api.key_index_for(sport)
+    balance = key_quota.remaining if key_quota else app_settings.api.quota
+    table.add_row(
+        f"Key {key_index} remaining after plan",
+        f"{balance - plan['estimated_quota_usage']:,} of {balance:,}",
+    )
     table.add_row("Date Range", f"{start_date_str} to {end_date_str}")
 
     console.print("\n")
@@ -170,12 +183,15 @@ async def _create_plan_async(
 
     console.print(f"\n[green]✓ Plan saved to {output_file}[/green]")
     console.print("\n[yellow]Review the plan, then execute with:[/yellow]")
-    console.print(f"[bold]  odds backfill execute --plan {output_file}[/bold]\n")
+    console.print(f"[bold]  odds backfill execute --plan {output_file} --sport {sport}[/bold]\n")
 
 
 @app.command("execute")
 def execute_backfill(
     plan_file: str = typer.Option(..., "--plan", "-p", help="Path to backfill plan JSON file"),
+    sport: str = typer.Option(
+        ..., "--sport", help="Sport of the plan (its key pays for the calls)"
+    ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Simulate execution without making API calls"
     ),
@@ -192,18 +208,19 @@ def execute_backfill(
     to validate the plan.
 
     Example:
-        odds backfill execute --plan backfill_plan.json
-        odds backfill execute --plan backfill_plan.json --dry-run
+        odds backfill execute --plan backfill_plan.json --sport basketball_nba
+        odds backfill execute --plan backfill_plan.json --sport basketball_nba --dry-run
     """
     console.print("\n[bold cyan]Executing Historical Backfill[/bold cyan]\n")
 
-    asyncio.run(_execute_backfill_async(plan_file, dry_run, skip_existing))
+    asyncio.run(_execute_backfill_async(plan_file, dry_run, skip_existing, sport))
 
 
 async def _execute_backfill_async(
     plan_file: str,
     dry_run: bool,
     skip_existing: bool,
+    sport: str,
 ):
     """Async implementation of backfill execution."""
     # Load plan
@@ -240,6 +257,7 @@ async def _execute_backfill_async(
 
     # Execute backfill with progress tracking
     async with BackfillExecutor(
+        sport=sport,
         skip_existing=skip_existing,
         dry_run=dry_run,
         rate_limit_seconds=1.0,
@@ -588,7 +606,7 @@ def detect_and_plan_gaps(
         odds backfill gaps --start 2024-10-01 --end 2024-10-31 --output gap_plan.json
 
     After generating a plan, execute it with:
-        odds backfill execute --plan gap_plan.json
+        odds backfill execute --plan gap_plan.json --sport basketball_nba
     """
     console.print("\n[bold cyan]Gap Detection and Backfill Planning[/bold cyan]\n")
     asyncio.run(_detect_and_plan_gaps_async(start_date, end_date, max_quota, output_file))
@@ -747,7 +765,7 @@ async def _detect_and_plan_gaps_async(
 
             # Show execution command
             console.print("[bold]Execute plan with:[/bold]")
-            console.print(f"  odds backfill execute --plan {output_file}\n")
+            console.print(f"  odds backfill execute --plan {output_file} --sport basketball_nba\n")
         else:
             console.print(
                 "[yellow]No output file specified. Use --output to save plan for execution.[/yellow]\n"

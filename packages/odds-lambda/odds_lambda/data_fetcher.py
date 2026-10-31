@@ -23,8 +23,6 @@ from tenacity import (
     wait_exponential,
 )
 
-from odds_lambda.api_key_manager import AllKeysExhaustedError, APIKeyManager
-
 logger = structlog.get_logger()
 
 
@@ -52,21 +50,13 @@ class TheOddsAPIClient:
         Initialize API client.
 
         Args:
-            api_key: API key (defaults to settings)
+            api_key: API key for every sport (defaults to the sport's key in settings)
             base_url: Base URL (defaults to settings)
         """
         app_settings = get_settings()
-        self._key_manager: APIKeyManager | None = None
-
-        if api_key:
-            self.api_key = api_key
-        elif app_settings.api.keys:
-            keys = [k.strip() for k in app_settings.api.keys.split(",") if k.strip()]
-            self._key_manager = APIKeyManager(keys)
-            self.api_key = self._key_manager.get_active_key()
-        elif app_settings.api.key:
-            self.api_key = app_settings.api.key
-        else:
+        self._explicit_key = api_key
+        self._api = app_settings.api
+        if not api_key and not self._api.key_list:
             raise ValueError("No Odds API key configured: set ODDS_API_KEYS or ODDS_API_KEY")
 
         self.base_url = base_url or app_settings.api.base_url
@@ -89,45 +79,38 @@ class TheOddsAPIClient:
         return self._quota_remaining
 
     async def _make_request(
-        self, endpoint: str, params: dict | None = None
+        self, endpoint: str, sport: str, params: dict | None = None
     ) -> tuple[dict | list, int]:
         """
-        Make an HTTP request, rotating the API key on 401/429 when a key manager is configured.
+        Make an HTTP request with the key ``sport`` spends.
 
         Args:
             endpoint: API endpoint path
+            sport: Sport key whose configured key pays for the call
             params: Query parameters
 
         Returns:
             Tuple of (response data, response time in ms)
 
         Raises:
-            aiohttp.ClientResponseError: On a non-retryable HTTP error, or a 401/429 with no
-                further key to rotate to
-            AllKeysExhaustedError: When every configured key has returned 401/429
+            aiohttp.ClientResponseError: On a non-retryable HTTP error (a 401 or 429 is not
+                retried on another key: each sport spends its own)
             aiohttp.ClientError, TimeoutError: On transient failures that outlast the retries
         """
-        while True:
-            try:
-                return await self._send(endpoint, {**(params or {}), "apiKey": self.api_key})
-            except aiohttp.ClientResponseError as e:
-                if e.status not in (401, 429) or not self._key_manager:
-                    logger.error(
-                        "api_request_failed",
-                        endpoint=endpoint,
-                        status=e.status,
-                        message=str(e),
-                    )
-                    raise
-                try:
-                    self.api_key = self._key_manager.rotate_key()
-                except AllKeysExhaustedError:
-                    logger.error("all_api_keys_exhausted", endpoint=endpoint)
-                    raise
-                logger.info("api_key_rotated_on_error", status=e.status, endpoint=endpoint)
-            except Exception as e:
-                logger.error("api_request_error", endpoint=endpoint, error=str(e))
-                raise
+        api_key = self._explicit_key or self._api.key_for(sport)
+        try:
+            return await self._send(endpoint, {**(params or {}), "apiKey": api_key})
+        except aiohttp.ClientResponseError as e:
+            logger.error(
+                "api_request_failed",
+                endpoint=endpoint,
+                status=e.status,
+                message=str(e),
+            )
+            raise
+        except Exception as e:
+            logger.error("api_request_error", endpoint=endpoint, error=str(e))
+            raise
 
     @retry(
         retry=retry_if_exception(_is_transient_error),
@@ -201,7 +184,7 @@ class TheOddsAPIClient:
             "bookmakers": ",".join(bookmakers),
         }
 
-        data, response_time = await self._make_request(f"sports/{sport}/odds", params=params)
+        data, response_time = await self._make_request(f"sports/{sport}/odds", sport, params=params)
 
         # Ensure data is a list
         raw_events_data = [
@@ -241,7 +224,7 @@ class TheOddsAPIClient:
             This endpoint costs 0 quota units. Use it for event discovery
             instead of get_odds() which costs 3+ units.
         """
-        data, response_time = await self._make_request(f"sports/{sport}/events")
+        data, response_time = await self._make_request(f"sports/{sport}/events", sport)
 
         raw_events_data = data if isinstance(data, list) else [data] if data else []
         events = [parse_api_event(event_dict) for event_dict in raw_events_data]
@@ -276,7 +259,9 @@ class TheOddsAPIClient:
         """
         params = {"daysFrom": days_from}
 
-        data, response_time = await self._make_request(f"sports/{sport}/scores", params=params)
+        data, response_time = await self._make_request(
+            f"sports/{sport}/scores", sport, params=params
+        )
 
         scores_data = data if isinstance(data, list) else [data] if data else []
 
@@ -331,7 +316,7 @@ class TheOddsAPIClient:
         }
 
         data, response_time = await self._make_request(
-            f"historical/sports/{sport}/odds", params=params
+            f"historical/sports/{sport}/odds", sport, params=params
         )
 
         # Historical endpoint returns {"data": [...]}
@@ -382,7 +367,7 @@ class TheOddsAPIClient:
         params = {"date": date}
 
         data, response_time = await self._make_request(
-            f"historical/sports/{sport}/events", params=params
+            f"historical/sports/{sport}/events", sport, params=params
         )
 
         logger.info(

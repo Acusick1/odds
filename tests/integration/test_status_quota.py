@@ -7,16 +7,17 @@ from unittest.mock import patch
 
 import pytest
 from odds_cli.commands import status
+from odds_core.config import APIConfig
 from odds_core.models import FetchLog
-from odds_lambda.storage.readers import OddsReader
+from odds_lambda.storage.readers import KeyQuota, OddsReader
 from rich.console import Console
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
-def _log(minutes_ago: int, quota: int | None) -> FetchLog:
+def _log(minutes_ago: int, quota: int | None, sport_key: str = "soccer_epl") -> FetchLog:
     return FetchLog(
         fetch_time=datetime.now(UTC) - timedelta(minutes=minutes_ago),
-        sport_key="soccer_epl",
+        sport_key=sport_key,
         events_count=8,
         bookmakers_count=1,
         success=True,
@@ -49,7 +50,59 @@ class TestFetchLogsWithQuota:
         assert [log.api_quota_remaining for log in logs] == [290, 300]
 
 
+class TestLatestQuotaByKey:
+    API = APIConfig(keys="a,b", key_index_by_sport={"basketball_nba": 1})
+
+    @pytest.mark.asyncio
+    async def test_each_key_reports_the_newest_quota_of_its_sports(self, pglite_async_session):
+        pglite_async_session.add_all(
+            [
+                _log(60, 80),
+                _log(30, 70),
+                _log(1, None),
+                _log(45, 500, "basketball_nba"),
+                _log(15, 497, "basketball_nba"),
+            ]
+        )
+        await pglite_async_session.commit()
+
+        quotas = await OddsReader(pglite_async_session).get_latest_quota_by_key(self.API)
+
+        assert quotas == {0: KeyQuota(("soccer_epl",), 70), 1: KeyQuota(("basketball_nba",), 497)}
+
+    @pytest.mark.asyncio
+    async def test_sports_sharing_a_key_give_one_reading_from_the_newest_row(
+        self, pglite_async_session
+    ):
+        pglite_async_session.add_all([_log(30, 70), _log(10, 60, "baseball_mlb")])
+        await pglite_async_session.commit()
+
+        quotas = await OddsReader(pglite_async_session).get_latest_quota_by_key(self.API)
+
+        assert quotas == {0: KeyQuota(("baseball_mlb", "soccer_epl"), 60)}
+
+    @pytest.mark.asyncio
+    async def test_a_reading_over_a_month_old_is_ignored(self, pglite_async_session):
+        pglite_async_session.add_all([_log(60 * 24 * 32, 19900, "basketball_nba"), _log(5, 70)])
+        await pglite_async_session.commit()
+
+        quotas = await OddsReader(pglite_async_session).get_latest_quota_by_key(self.API)
+
+        assert quotas == {0: KeyQuota(("soccer_epl",), 70)}
+
+
 class TestShowQuota:
+    @pytest.mark.asyncio
+    async def test_prints_each_key_separately(self, pglite_async_session):
+        pglite_async_session.add_all([_log(30, 70), _log(15, 497, "basketball_nba")])
+        await pglite_async_session.commit()
+
+        output = await _run_show_quota(pglite_async_session)
+
+        assert output.index("key 0: soccer_epl") < output.index("key 1: basketball_nba")
+        assert "497 (99.4%)" in output
+        assert "70 (14.0%)" in output
+
     @pytest.mark.asyncio
     async def test_reads_newest_row_with_quota(self, pglite_async_session):
         pglite_async_session.add_all([_log(60, 300), _log(30, 290), _log(1, None)])

@@ -1,13 +1,21 @@
 """Unit tests for health monitoring system."""
 
+from contextlib import ExitStack
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from odds_core.config import AlertConfig, APIConfig, SchedulerConfig, Settings
-from odds_lambda.health_monitor import HealthMetrics, HealthMonitor, HealthStatus, StaleSource
+from odds_lambda.health_monitor import (
+    HealthMetrics,
+    HealthMonitor,
+    HealthStatus,
+    QuotaReading,
+    StaleSource,
+)
 from odds_lambda.scheduling.backends.base import JobStatus, ScheduledJob
+from odds_lambda.storage.readers import KeyQuota
 
 
 @pytest.fixture
@@ -74,16 +82,14 @@ class TestHealthMonitor:
 
         with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_class:
             mock_reader = AsyncMock()
-            mock_reader.get_database_stats.return_value = {
-                "api_quota_remaining": 125,  # 25% of 500
+            mock_reader.get_latest_quota_by_key.return_value = {
+                0: KeyQuota(("soccer_epl",), 125),  # 25% of 500
             }
             mock_reader_class.return_value = mock_reader
 
-            is_healthy, quota_remaining, quota_fraction = await monitor.check_api_quota()
+            readings = await monitor.check_api_quota()
 
-            assert is_healthy is True
-            assert quota_remaining == 125
-            assert quota_fraction == 0.25
+            assert readings == [QuotaReading(0, ("soccer_epl",), 125, 0.25)]
 
     @pytest.mark.asyncio
     async def test_check_api_quota_low_warning(self, mock_session, mock_settings):
@@ -92,16 +98,18 @@ class TestHealthMonitor:
 
         with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_class:
             mock_reader = AsyncMock()
-            mock_reader.get_database_stats.return_value = {
-                "api_quota_remaining": 75,  # 15% of 500 (below 20% warning)
+            mock_reader.get_latest_quota_by_key.return_value = {
+                1: KeyQuota(("basketball_nba",), 450),
+                0: KeyQuota(("soccer_epl",), 75),  # 15% of 500 (below 20% warning)
             }
             mock_reader_class.return_value = mock_reader
 
-            is_healthy, quota_remaining, quota_fraction = await monitor.check_api_quota()
+            readings = await monitor.check_api_quota()
 
-            assert is_healthy is False
-            assert quota_remaining == 75
-            assert quota_fraction == 0.15
+            assert readings == [
+                QuotaReading(0, ("soccer_epl",), 75, 0.15),
+                QuotaReading(1, ("basketball_nba",), 450, 0.9),
+            ]
 
     @pytest.mark.asyncio
     async def test_collect_metrics_returns_full_metrics(self, mock_session, mock_settings):
@@ -111,7 +119,7 @@ class TestHealthMonitor:
         with patch("odds_lambda.storage.readers.OddsReader") as mock_reader_class:
             mock_reader = AsyncMock()
             mock_reader.get_database_stats.return_value = {
-                "api_quota_remaining": 15000,
+                "api_quota_by_key": {0: KeyQuota(("soccer_epl",), 15000)},
                 "events_by_status": {
                     "scheduled": 10,
                     "live": 2,
@@ -126,7 +134,7 @@ class TestHealthMonitor:
                     metrics = await monitor.collect_metrics()
 
             assert isinstance(metrics, HealthMetrics)
-            assert metrics.api_quota_remaining == 15000
+            assert metrics.api_quota_by_key == {0: 15000}
             assert metrics.hours_since_last_fetch is not None
             assert metrics.data_quality_errors_24h == 2
             assert metrics.events_scheduled == 10
@@ -142,7 +150,7 @@ class TestHealthMonitor:
         with patch.object(monitor, "collect_metrics") as mock_collect:
             mock_collect.return_value = HealthMetrics(
                 hours_since_last_fetch=0.5,
-                api_quota_remaining=15000,
+                api_quota_by_key={0: 15000},
                 data_quality_errors_24h=2,
                 events_scheduled=5,
                 events_live=0,
@@ -153,7 +161,11 @@ class TestHealthMonitor:
                 patch.object(monitor, "check_stale_sources", return_value=[]),
                 patch.object(monitor, "check_missing_betfair_closes", return_value=[]),
             ):
-                with patch.object(monitor, "check_api_quota", return_value=(True, 15000, 0.75)):
+                with patch.object(
+                    monitor,
+                    "check_api_quota",
+                    return_value=[QuotaReading(0, ("soccer_epl",), 15000, 0.75)],
+                ):
                     with patch.object(monitor, "check_data_quality", return_value=(True, 2)):
                         with (
                             patch.object(monitor, "check_job_heartbeats", return_value=[]),
@@ -176,7 +188,7 @@ class TestHealthMonitor:
         with patch.object(monitor, "collect_metrics") as mock_collect:
             mock_collect.return_value = HealthMetrics(
                 hours_since_last_fetch=3.0,
-                api_quota_remaining=1000,
+                api_quota_by_key={0: 1000},
                 data_quality_errors_24h=15,
                 events_scheduled=0,
                 events_live=0,
@@ -200,7 +212,11 @@ class TestHealthMonitor:
                     ],
                 ),
             ):
-                with patch.object(monitor, "check_api_quota", return_value=(False, 1000, 0.05)):
+                with patch.object(
+                    monitor,
+                    "check_api_quota",
+                    return_value=[QuotaReading(0, ("soccer_epl",), 1000, 0.05)],
+                ):
                     with patch.object(monitor, "check_data_quality", return_value=(False, 15)):
                         with (
                             patch.object(monitor, "check_job_heartbeats", return_value=[]),
@@ -387,7 +403,7 @@ class TestCheckScheduleChains:
             for name, value in (
                 ("check_stale_sources", []),
                 ("check_missing_betfair_closes", []),
-                ("check_api_quota", (True, None, None)),
+                ("check_api_quota", []),
                 ("check_data_quality", (True, 0)),
                 ("check_job_heartbeats", []),
                 ("check_event_identity", []),
@@ -397,7 +413,7 @@ class TestCheckScheduleChains:
                     "collect_metrics",
                     HealthMetrics(
                         hours_since_last_fetch=0.1,
-                        api_quota_remaining=None,
+                        api_quota_by_key={},
                         data_quality_errors_24h=0,
                         events_scheduled=1,
                         events_live=0,
@@ -417,3 +433,51 @@ class TestCheckScheduleChains:
 
         assert status.alerts_sent == ["dead_schedule_chain:fetch-betfair-exchange-epl"]
         assert send.call_args.kwargs["severity"] == "critical"
+
+
+class TestQuotaAlerts:
+    @pytest.mark.asyncio
+    async def test_a_low_key_alerts_once_while_the_other_key_stays_quiet(
+        self, mock_session, mock_settings
+    ):
+        monitor = HealthMonitor(mock_session, mock_settings)
+        readings = [
+            QuotaReading(0, ("soccer_epl", "baseball_mlb"), 30, 0.06),
+            QuotaReading(1, ("basketball_nba",), 450, 0.9),
+        ]
+        quiet = [
+            patch.object(monitor, name, return_value=value)
+            for name, value in (
+                ("check_stale_sources", []),
+                ("check_missing_betfair_closes", []),
+                ("check_api_quota", readings),
+                ("check_data_quality", (True, 0)),
+                ("check_job_heartbeats", []),
+                ("check_event_identity", []),
+                ("check_unsettled_events", []),
+                ("purge_old_heartbeats", 0),
+                (
+                    "collect_metrics",
+                    HealthMetrics(
+                        hours_since_last_fetch=0.1,
+                        api_quota_by_key={0: 30, 1: 450},
+                        data_quality_errors_24h=0,
+                        events_scheduled=1,
+                        events_live=0,
+                        events_final=0,
+                    ),
+                ),
+            )
+        ]
+        with ExitStack() as stack:
+            for p in quiet:
+                stack.enter_context(p)
+            send = stack.enter_context(patch.object(monitor, "_send_alert", return_value=True))
+            await monitor.check_system_health()
+
+        quota_alerts = [
+            call.kwargs["alert_type"]
+            for call in send.call_args_list
+            if call.kwargs["alert_type"].startswith("quota_")
+        ]
+        assert quota_alerts == ["quota_critical:key0"]

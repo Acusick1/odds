@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
+from typing import NamedTuple
 
 import structlog
+from odds_core.config import APIConfig, get_settings
 from odds_core.models import (
     DataQualityLog,
     Event,
@@ -17,6 +20,17 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = structlog.get_logger()
+
+
+# A key's quota reading older than this no longer describes the key (the quota resets monthly).
+QUOTA_MAX_AGE = timedelta(days=31)
+
+
+class KeyQuota(NamedTuple):
+    """The newest remaining quota of an Odds API key and the sports that spend it."""
+
+    sports: tuple[str, ...]
+    remaining: int
 
 
 class OddsReader:
@@ -162,6 +176,7 @@ class OddsReader:
         start_time: datetime | None = None,
         limit: int = 100,
         with_quota: bool = False,
+        sport_keys: Sequence[str] | None = None,
     ) -> list[FetchLog]:
         """
         Get fetch operation logs.
@@ -171,6 +186,7 @@ class OddsReader:
             start_time: Only logs after this time (optional)
             limit: Maximum number of records
             with_quota: Only rows with a non-null api_quota_remaining
+            sport_keys: Filter by any of these sports (optional)
 
         Returns:
             List of FetchLog records
@@ -179,6 +195,9 @@ class OddsReader:
 
         if sport_key:
             query = query.where(FetchLog.sport_key == sport_key)
+
+        if sport_keys is not None:
+            query = query.where(FetchLog.sport_key.in_(list(sport_keys)))  # type: ignore[attr-defined]
 
         if start_time:
             query = query.where(FetchLog.fetch_time >= start_time)
@@ -190,6 +209,34 @@ class OddsReader:
 
         result = await self.session.execute(query)
         return list(result.scalars().all())
+
+    async def get_latest_quota_by_key(self, api: APIConfig) -> dict[int, KeyQuota]:
+        """The newest recorded remaining quota of each Odds API key, by key index.
+
+        A key spends for the sports ``APIConfig.key_index_by_sport`` gives its index, so its
+        balance is the newest reading of any of them. A reading older than ``QUOTA_MAX_AGE`` is a
+        key no sport has spent for a month (an off-season, or a key left behind) and is ignored.
+        """
+        result = await self.session.execute(
+            select(FetchLog.sport_key, FetchLog.fetch_time, FetchLog.api_quota_remaining)
+            .where(
+                FetchLog.api_quota_remaining.is_not(None),
+                FetchLog.fetch_time >= datetime.now(UTC) - QUOTA_MAX_AGE,
+            )
+            .distinct(FetchLog.sport_key)
+            .order_by(FetchLog.sport_key, FetchLog.fetch_time.desc())
+        )
+        readings: dict[int, tuple[datetime, int]] = {}
+        sports: dict[int, list[str]] = {}
+        for sport_key, fetch_time, remaining in result.all():
+            index = api.key_index_for(sport_key)
+            sports.setdefault(index, []).append(sport_key)
+            if index not in readings or fetch_time > readings[index][0]:
+                readings[index] = (fetch_time, remaining)
+        return {
+            index: KeyQuota(tuple(sports[index]), remaining)
+            for index, (_, remaining) in sorted(readings.items())
+        }
 
     async def get_data_quality_logs(
         self,
@@ -247,22 +294,14 @@ class OddsReader:
         snapshots_result = await self.session.execute(snapshots_count_query)
         total_snapshots = snapshots_result.scalar_one()
 
-        # Most recent API quota
-        latest_quota_query = (
-            select(FetchLog.api_quota_remaining)
-            .where(FetchLog.api_quota_remaining.is_not(None))
-            .order_by(FetchLog.fetch_time.desc())
-            .limit(1)
-        )
-        quota_result = await self.session.execute(latest_quota_query)
-        latest_quota = quota_result.scalar_one_or_none()
+        quota_by_key = await self.get_latest_quota_by_key(get_settings().api)
 
         return {
             "events_by_status": events_by_status,
             "total_events": sum(events_by_status.values()),
             "total_price_rows": price_rows,
             "total_snapshots": total_snapshots,
-            "api_quota_remaining": latest_quota,
+            "api_quota_by_key": quota_by_key,
         }
 
     async def get_snapshot_count_for_event(self, event_id: int) -> int:

@@ -29,7 +29,7 @@ Three lists in code decide what the production scheduler runs:
 
 | Job | Bootstrapped by default | Sports | Schedule |
 |---|---|---|---|
-| `fetch-odds` | yes | EPL (allowlist; Odds API quota) | self-scheduling by [tier](../storage/fetch-tier.md), 30 min to 48 h |
+| `fetch-odds` | yes | EPL and NBA (allowlist; Odds API quota, one key each) | self-scheduling by [tier](../storage/fetch-tier.md), 2 h to 48 h for EPL, per slate for NBA ([NBA schedule](../collection/fetch-odds-job.md#nba-schedule)) |
 | `fetch-scores` | yes | EPL (allowlist; Odds API quota) | self-scheduling, game activity |
 | `update-status`, `check-health` | yes | global | self-scheduling; health every 60 min |
 | `fetch-oddsportal` | yes | every configured sport (EPL, MLB, NBA) | proximity (30 min to 2 h), dormant with no fixture in 28 days |

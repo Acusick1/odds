@@ -21,8 +21,15 @@ sources:
   - odds_lambda.collection_calendar.published_schedule_kickoff
   - odds_lambda.scheduling.helpers.self_schedule
   - odds_lambda.scheduling.helpers.get_next_kickoff
+  - odds_lambda.scheduling.helpers.next_slate_start
+  - odds_lambda.scheduling.helpers.get_next_slate_start
+  - odds_lambda.scheduling.helpers.get_next_slate_main_tip
+  - odds_lambda.scheduling.decision.Lead
   - odds_lambda.scheduling.helpers.apply_overnight_skip
   - odds_lambda.jobs.fetch_odds.CADENCE
+  - odds_lambda.jobs.fetch_odds.NBA_CADENCE
+  - odds_lambda.jobs.fetch_odds.NBA_LEADS
+  - odds_lambda.jobs.fetch_odds.NBA_QUIET_HOURS
   - odds_lambda.jobs.fetch_oddsportal.CADENCE
   - odds_lambda.jobs.fetch_betfair_exchange.CADENCE
   - odds_lambda.jobs.fetch_betfair_exchange.CLOSE_LEAD
@@ -43,6 +50,7 @@ status: stable
 
 - `odds_lambda.scheduling.helpers.self_schedule(job_name, next_time, dry_run, sport, ...)` builds a backend and books `next_time` with `{"sport": ...}` as payload ([backends](scheduler-backends.md)). Each call builds a fresh backend ([backends](scheduler-backends.md#the-abc)).
 - `odds_lambda.scheduling.helpers.get_next_kickoff` sees only stored future SCHEDULED events, so a sport with no stored future events sleeps for `no_game` hours even if fixtures exist upstream, and `odds_lambda.fetch_tier.FetchTier.IN_PLAY` is never produced by forward decisions. A job that must wake without help from stored events passes another source as `next_kickoff_lookup` ([Dormancy](#dormancy)).
+- `odds_lambda.scheduling.helpers.next_slate_start` gives the first kickoff after a time with none in the 6 h before it, and `odds_lambda.scheduling.helpers.get_next_slate_start` reads it from the sport's stored events (cancelled and postponed excluded, 14 days ahead). It is a `odds_lambda.scheduling.decision.KickoffLookup` for sports whose games come in slates ([NBA schedule](../collection/fetch-odds-job.md#nba-schedule)).
 
 ## Forward decisions
 
@@ -74,26 +82,28 @@ Hours per tier:
 
 | Job | closing | pregame | sharp | early | opening | no game |
 |---|---|---|---|---|---|---|
-| `fetch-odds` | 2 | 3 | 12 | 24 | 48 | 24 |
+| `fetch-odds` (EPL) | 2 | 3 | 12 | 24 | 48 | 24 |
+| `fetch-odds` (NBA) | 12 | 12 | 12 | 24 | 24 | 24 |
 | `fetch-oddsportal` | 0.5 | 1 | 2 | 2 | 2 | 6 |
 | `fetch-betfair-exchange` | 0.25 | 0.5 | 2 | 2 | 2 | 6 |
 | `fetch-polymarket-odds` | 0.083 | 0.25 | 0.25 | 0.5 | 1 | 6 |
 | `agent-run` | 1 | 4 | 4 | 12 | 24 | 12 |
 
-Values are each job module's cadence constant (`odds_lambda.jobs.fetch_odds.CADENCE`, `odds_lambda.jobs.fetch_oddsportal.CADENCE`, `odds_lambda.jobs.fetch_betfair_exchange.CADENCE`, `odds_lambda.jobs.fetch_polymarket_odds.CADENCE`, `odds_lambda.jobs.agent_run.CADENCE`); they replace the `interval_hours` argument of `odds_lambda.scheduling.helpers.self_schedule`, which is only logged. `odds_lambda.scheduling.decision.CadenceConfig.interval_for` maps `IN_PLAY` to `closing`. Scores: 3-day window, 6 h active, 12 h idle. Status: 4 h window, 1 h active, 6 h idle.
+Values are each job module's cadence constant (`odds_lambda.jobs.fetch_odds.CADENCE`, `odds_lambda.jobs.fetch_odds.NBA_CADENCE`, `odds_lambda.jobs.fetch_oddsportal.CADENCE`, `odds_lambda.jobs.fetch_betfair_exchange.CADENCE`, `odds_lambda.jobs.fetch_polymarket_odds.CADENCE`, `odds_lambda.jobs.agent_run.CADENCE`); they replace the `interval_hours` argument of `odds_lambda.scheduling.helpers.self_schedule`, which is only logged. `odds_lambda.scheduling.decision.CadenceConfig.interval_for` maps `IN_PLAY` to `closing`. Scores: 3-day window, 6 h active, 12 h idle. Status: 4 h window, 1 h active, 6 h idle.
 
 ## Lead runs
 
-A lead (`odds_lambda.scheduling.decision.Lead`) is a time before kickoff at which a job must run whatever its cadence (`before`), and how long before kickoff a run that fell behind is still worth taking (`until`). `odds_lambda.scheduling.decision.decide_forward_resilient` and `odds_lambda.collection_calendar.decide_collection_run` take a sequence of `leads` and `run_started`, the start of the run that is deciding (default now). A run serves a lead time when it started at most `odds_lambda.scheduling.decision.MIN_LEAD_RUN_GAP` (60 s) before it, or after it: its snapshots are as recent as the lead run's. For each lead and sport, `odds_lambda.scheduling.decision.next_lead_run` looks up the earliest kickoff whose lead time the deciding run did not serve and that is more than `until` away. Its run is at the lead time, or now when that has passed, so a cadence run that started before a lead time but finished after it never cancels the lead run. Kickoffs come from the `lead_kickoff_lookup` of `odds_lambda.scheduling.decision.decide_forward_resilient`: the stored SCHEDULED events' `commence_time` (`odds_lambda.scheduling.helpers.get_next_kickoff`) by default, and the `stored_kickoff` that `odds_lambda.collection_calendar.decide_collection_run` is given. The earliest of those runs is an `odds_lambda.scheduling.decision.LeadRun`. If the cadence's next time falls after it, the run moves to it, and the overnight skip does not apply to it. A dormant decision has no lead run. `odds_lambda.scheduling.decision.decide_forward` takes no leads.
+A lead (`odds_lambda.scheduling.decision.Lead`) is a time before kickoff at which a job must run whatever its cadence (`before`), and how long before kickoff a run that fell behind is still worth taking (`until`). A lead may carry its own `kickoff_lookup`, which replaces the call's lead lookup for that lead, so leads of one job can key off different kickoffs. `odds_lambda.scheduling.decision.decide_forward_resilient` and `odds_lambda.collection_calendar.decide_collection_run` take a sequence of `leads` and `run_started`, the start of the run that is deciding (default now). A run serves a lead time when it started at most `odds_lambda.scheduling.decision.MIN_LEAD_RUN_GAP` (60 s) before it, or after it: its snapshots are as recent as the lead run's. For each lead and sport, `odds_lambda.scheduling.decision.next_lead_run` looks up the earliest kickoff whose lead time the deciding run did not serve and that is more than `until` away. Its run is at the lead time, or now when that has passed, so a cadence run that started before a lead time but finished after it never cancels the lead run. Kickoffs come from the `lead_kickoff_lookup` of `odds_lambda.scheduling.decision.decide_forward_resilient`: the stored SCHEDULED events' `commence_time` (`odds_lambda.scheduling.helpers.get_next_kickoff`) by default, and the `stored_kickoff` that `odds_lambda.collection_calendar.decide_collection_run` is given. The earliest of those runs is an `odds_lambda.scheduling.decision.LeadRun`. If the cadence's next time falls after it, the run moves to it, and the overnight skip does not apply to it. A dormant decision has no lead run. `odds_lambda.scheduling.decision.decide_forward` takes no leads.
 
-Two jobs pass leads:
+Three jobs pass leads:
 
 - `fetch-betfair-exchange` passes `odds_lambda.jobs.fetch_betfair_exchange.CLOSE_LEAD` (5 min before kickoff, late until kickoff), so the Betfair close does not depend on where the 15-minute cadence happens to fall. Its kickoffs come from `odds_lambda.betfair.kickoff.next_betfair_kickoff`, which adds an earlier market start (`odds_snapshots.market_start_time` of the event's latest `betfair` match-odds snapshot) as a target while it is ahead, so an event can get a close run before it as well as before its `commence_time` ([Betfair job](../collection/betfair-exchange.md#flow)).
+- `fetch-odds` for NBA passes `odds_lambda.jobs.fetch_odds.NBA_LEADS` (3 h and 1 h before a slate's first tip-off, and 1 h before its main tip-off through the lead's own `odds_lambda.scheduling.helpers.get_next_slate_main_tip`) and passes the start of the run as `run_started`, with `odds_lambda.scheduling.helpers.get_next_slate_start` as both kickoff lookups, so its leads count slates, not games: `odds_lambda.scheduling.helpers.next_slate_start` is the first kickoff with none in the 6 h before it ([NBA schedule](../collection/fetch-odds-job.md#nba-schedule)).
 - `fetch-oddsportal` passes `odds_lambda.jobs.fetch_oddsportal.candidate_scrape_leads`: 5 min before each active mechanical candidate's decision time, late until that decision time, so every candidate decision reads a snapshot taken just before it ([fetch-oddsportal job](../collection/fetch-oddsportal-job.md#flow)).
 
 ## Overnight windows
 
-`odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS` suppresses runs in `soccer_epl` 22:00-06:00 UTC, `baseball_mlb` 05:00-14:00 UTC and `basketball_nba` 07:00-15:00 UTC (the last tip-off is about 03:30 UTC and the game ends by about 06:00; the earliest weekend tip-offs are about 16:00 UTC) via `odds_lambda.scheduling.helpers.apply_overnight_skip`, which pushes a candidate time to the resume hour and never raises. It applies only if the caller passes `overnight`: the fetch-oddsportal job passes its `odds_lambda.jobs.fetch_oddsportal.LeagueSpec` overnight window, Betfair and Polymarket odds look the sport up with `.get()` (no window for a sport missing from the map), `agent-run` indexes the map and raises `ValueError` for a sport missing from it (`odds_lambda.jobs.agent_run.schedule_next`), and `fetch-odds`, scores and status pass none. The same windows are also kept in the `overnight_*_utc` fields of `odds_lambda.jobs.fetch_oddsportal.LeagueSpec` (#463).
+`odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS` suppresses runs in `soccer_epl` 22:00-06:00 UTC, `baseball_mlb` 05:00-14:00 UTC and `basketball_nba` 07:00-15:00 UTC (the last tip-off is about 03:30 UTC and the game ends by about 06:00; the earliest weekend tip-offs are about 16:00 UTC) via `odds_lambda.scheduling.helpers.apply_overnight_skip`, which pushes a candidate time to the resume hour and never raises. It applies only if the caller passes `overnight`: the fetch-oddsportal job passes its `odds_lambda.jobs.fetch_oddsportal.LeagueSpec` overnight window, Betfair and Polymarket odds look the sport up with `.get()` (no window for a sport missing from the map), `agent-run` indexes the map and raises `ValueError` for a sport missing from it (`odds_lambda.jobs.agent_run.schedule_next`), `fetch-odds` passes `odds_lambda.jobs.fetch_odds.NBA_QUIET_HOURS` (00:00-10:00 UTC) for NBA only, so its morning run is the first cadence run after the late games, and scores, status and EPL's `fetch-odds` pass none. The same windows are also kept in the `overnight_*_utc` fields of `odds_lambda.jobs.fetch_oddsportal.LeagueSpec` (#463).
 
 `lookahead_days` comes from `odds_core.config.SchedulerConfig.lookahead_days` in `fetch-odds`, from `odds_lambda.scheduling.decision.DORMANCY_HORIZON_DAYS` in the three collectors, and is the function default of 7 elsewhere. Only an active run applies the overnight skip; a dormant check-in does not.
 

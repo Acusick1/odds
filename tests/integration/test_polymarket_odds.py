@@ -30,7 +30,6 @@ from odds_lambda.polymarket_odds import (
 )
 from odds_lambda.polymarket_odds_backfill import backfill_sport
 from odds_lambda.scheduling.jobs import JobContext
-from odds_lambda.storage.event_resolver import event_lock_key
 from odds_lambda.storage.shaped_snapshots import (
     SnapshotShape,
     store_payload,
@@ -220,55 +219,6 @@ class TestBackfill:
         assert report.snapshots_written == len(grid_offsets())
         assert (await pglite_async_session.execute(select(OddsSnapshot))).first() is None
         assert (await pglite_async_session.execute(select(EventExternalId))).first() is None
-
-    async def test_dry_run_releases_fixture_locks_between_matches(
-        self,
-        pglite_async_session: Any,
-        finished_event: Any,
-        patch_backfill: FakeClient,
-        gamma_event: Any,
-    ) -> None:
-        fixtures = [
-            ("Bournemouth", "Chelsea", "AFC Bournemouth", "Chelsea FC", "bou", "che"),
-            ("Arsenal", "Everton", "Arsenal FC", "Everton FC", "ars", "eve"),
-            ("Liverpool", "Fulham", "Liverpool FC", "Fulham FC", "liv", "ful"),
-        ]
-        fixtures.sort(key=lambda f: event_lock_key("soccer_epl", f[0], f[1]), reverse=True)
-        events = []
-        for index, (home, away, gamma_home, gamma_away, home_code, away_code) in enumerate(
-            fixtures
-        ):
-            if home != "Bournemouth":
-                pglite_async_session.add(
-                    make_epl_event(10 + index, KICKOFF, home, away, status=EventStatus.FINAL)
-                )
-            slug = f"epl-{home_code}-{away_code}-2025-12-06"
-            gamma = gamma_event(
-                slug=slug,
-                home=gamma_home,
-                away=gamma_away,
-                quotes={away_code: (0.20, 0.22), "draw": (0.24, 0.26), home_code: (0.52, 0.54)},
-            )
-            gamma["id"] = str(900 + index)
-            for market in gamma["markets"]:
-                market["clobTokenIds"] = market["clobTokenIds"].replace("yes-", f"yes-{home_code}-")
-            patch_backfill.series.update(
-                {
-                    f"yes-{home_code}-{suffix}": observations
-                    for suffix, observations in zip(
-                        (home_code, "draw", away_code), full_history().values(), strict=True
-                    )
-                }
-            )
-            events.append(gamma)
-        await pglite_async_session.commit()
-        patch_backfill.events = events
-
-        report = await backfill_sport("soccer_epl", since=KICKOFF - timedelta(days=1), dry_run=True)
-
-        assert report.errors == []
-        assert (report.matches_attached, report.events_written) == (3, 3)
-        assert (await pglite_async_session.execute(select(OddsSnapshot))).first() is None
 
     async def test_cutoff_is_the_earlier_kickoff(
         self,

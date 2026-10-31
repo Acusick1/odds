@@ -11,6 +11,8 @@ sources:
   - odds_lambda.betfair.adapter.betfair_book_to_bookmaker_entry
   - odds_lambda.oddsportal_adapter.convert_market
   - scripts/ingest_football_data_uk.py
+mentions:
+  - odds_lambda.storage.readers.OddsReader
 status: stable
 ---
 

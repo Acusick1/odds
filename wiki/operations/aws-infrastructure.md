@@ -22,7 +22,7 @@ Everything lives under `deployment/aws/`; region `eu-west-1`. The stack is dorma
 
 The scheduler function is named `var.project_name` (prod `odds-scheduler`, default `odds-scheduler-dev`). Its image is `Dockerfile.lambda`: `odds-core`, `odds-lambda`, `odds-analytics`, `odds-cli` wheels and their declared dependencies, XGBoost included. Memory is `lambda_memory_size` (512 MB) and timeout `lambda_timeout` (300 s) (`deployment/aws/terraform/variables.tf`). No Lambda runs `fetch-oddsportal` or `fetch-oddsportal-results`; they run on the local scheduler.
 
-The handler and registry are described on [scheduler-backends](../scheduling/scheduler-backends.md#lambda-handler). The log group `/aws/lambda/<function>` keeps 14 days. The IAM role grants: EventBridge rule writes (restricted to `{rule_prefix}-*`; it lacks `events:ListRules`, so listing and health checks work only from a shell with broader credentials; #443), SSM read/write of `/{project_name}/active-api-key-index` (the [API key rotation](../collection/odds-api-client.md#retry-and-rotation) index, set through `SSM_API_KEY_INDEX`), and, if `betfair_enabled`, SSM read of the Betfair cert/key parameters ([Betfair client](../collection/betfair-exchange.md)).
+The handler and registry are described on [scheduler-backends](../scheduling/scheduler-backends.md#lambda-handler). The log group `/aws/lambda/<function>` keeps 14 days. The IAM role grants: EventBridge rule writes (restricted to `{rule_prefix}-*`; it lacks `events:ListRules`, so listing and health checks work only from a shell with broader credentials; #443), and, if `betfair_enabled`, SSM read of the Betfair cert/key parameters ([Betfair client](../collection/betfair-exchange.md)).
 
 ## Terraform
 
@@ -35,7 +35,7 @@ EventBridge rules are named `{rule_prefix}-{job}[-{sport suffix}]` and `eventbri
 ## Constraints
 
 - Database connections use `NullPool` automatically when `AWS_LAMBDA_FUNCTION_NAME` is set, whatever the scheduler backend (`odds_core.database`; [databases-and-environments](../foundations/databases-and-environments.md#engine-creation)).
-- Stateless between invocations apart from the SSM key-rotation index (`SSM_API_KEY_INDEX` in `deployment/aws/terraform/lambda.tf`).
+- Stateless between invocations.
 
 ## Costs and usage
 
@@ -43,7 +43,7 @@ Spend cannot be verified from the repo; check it with `aws ce get-cost-and-usage
 
 ## Secrets
 
-API keys come from environment variables and Terraform variables (`odds_api_key`, `odds_api_keys`, `database_url` in `deployment/aws/terraform/variables.tf`), passed to the functions as environment variables in `deployment/aws/terraform/lambda.tf`; only the key-rotation index lives in SSM.
+API keys come from environment variables and Terraform variables (`odds_api_key`, `odds_api_keys`, `database_url` in `deployment/aws/terraform/variables.tf`), passed to the functions as environment variables in `deployment/aws/terraform/lambda.tf`; each sport spends the key at its index ([keys](../collection/odds-api-client.md#retry-and-keys)).
 
 ## Related
 

@@ -8,7 +8,8 @@ This job:
 4. Self-schedules next execution based on game proximity
 """
 
-from datetime import timedelta
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 import structlog
 from odds_core.alerts import job_alert_context, send_outage_warning, send_scheduling_failure
@@ -22,10 +23,17 @@ from odds_lambda.ingestion import OddsIngestionService
 from odds_lambda.live_events import alert_dropped_games
 from odds_lambda.scheduling.decision import (
     CadenceConfig,
+    KickoffLookup,
+    Lead,
+    OvernightWindow,
     ScheduleDecision,
     decide_forward_resilient,
 )
-from odds_lambda.scheduling.helpers import self_schedule
+from odds_lambda.scheduling.helpers import (
+    get_next_slate_main_tip,
+    get_next_slate_start,
+    self_schedule,
+)
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
 
 logger = structlog.get_logger()
@@ -51,6 +59,71 @@ SOURCE = CollectionSource(
     skips_overnight=False,
 )
 
+# NBA has a second key of 500 units a month (3 units a call), so about 160 calls. A call prices
+# the whole slate, so the schedule is set per slate, not per game: runs 3 h and 1 h before the
+# slate's first tip-off and 1 h before its main tip (the leads), plus a morning run that falls out
+# of the 12 h interval after the previous night's last lead run, held to NBA_QUIET_HOURS' end.
+# Replayed over stored NBA events that is 100-117 calls (300-351 units) in 30 days, and the
+# share of games last priced over 3 h before tip-off falls from 36-45% to 14-21%.
+NBA_CADENCE = CadenceConfig(
+    closing=12.0,
+    pregame=12.0,
+    sharp=12.0,
+    early=24.0,
+    opening=24.0,
+    no_game=24.0,
+)
+NBA_LEADS = (
+    Lead(before=timedelta(hours=3), until=timedelta(hours=2)),
+    Lead(before=timedelta(hours=1), until=timedelta(minutes=20)),
+    # A slate's main tip (the one most games share) can be hours after its first, so its games
+    # would be priced 3 h or more out; this lead keys off the main tip and has no run to make
+    # when the main tip is within an hour of the first.
+    Lead(
+        before=timedelta(hours=1),
+        until=timedelta(minutes=20),
+        kickoff_lookup=get_next_slate_main_tip,
+    ),
+)
+# Cadence runs are not taken from 00:00 to 10:00 UTC (the late games are under way and the
+# lines of the next slate are posted by the morning); leads ignore the window.
+NBA_QUIET_HOURS: OvernightWindow = (0, 10)
+
+# A run that wrote no row fails when an NBA game is within this horizon. NBA stays out of ``SOURCE``
+# because the stale-source check derives its threshold from ``CADENCE``, which would fire between
+# the sparse NBA runs.
+NBA_SOURCE = CollectionSource(
+    key="odds_api_nba",
+    job_name="fetch-odds",
+    source=Source.ODDS_API,
+    cadence=NBA_CADENCE,
+    fixture_horizons={"basketball_nba": timedelta(hours=14)},
+    skips_overnight=False,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class FetchPlan:
+    """When a sport's fetch-odds runs and the check that a run wrote rows."""
+
+    cadence: CadenceConfig
+    source: CollectionSource
+    leads: tuple[Lead, ...] = ()
+    overnight: OvernightWindow | None = None
+    kickoff_lookup: KickoffLookup | None = None
+
+
+PLANS: dict[str, FetchPlan] = {
+    "soccer_epl": FetchPlan(CADENCE, SOURCE),
+    "basketball_nba": FetchPlan(
+        NBA_CADENCE,
+        NBA_SOURCE,
+        leads=NBA_LEADS,
+        overnight=NBA_QUIET_HOURS,
+        kickoff_lookup=get_next_slate_start,
+    ),
+}
+
 
 def build_ingestion_service(client: TheOddsAPIClient, settings: Settings) -> OddsIngestionService:
     """Factory to create ingestion service; exposed for test patching."""
@@ -72,9 +145,13 @@ async def main(ctx: JobContext) -> None:
     4. Calculate next execution time
     5. Schedule next run via backend
     """
+    started = datetime.now(UTC)
     app_settings = get_settings()
     sport = require_sport(ctx, "fetch-odds")
     sports = [sport]
+    if sport not in PLANS:
+        raise ValueError(f"fetch-odds has no plan for {sport}; add one to PLANS")
+    plan = PLANS[sport]
 
     logger.info(
         "fetch_odds_job_started",
@@ -134,8 +211,13 @@ async def main(ctx: JobContext) -> None:
     # /odds call) if the kickoff query fails, so the chain never breaks.
     decision = await decide_forward_resilient(
         sports,
-        CADENCE,
+        plan.cadence,
+        overnight=plan.overnight,
         lookahead_days=app_settings.scheduler.lookahead_days,
+        next_kickoff_lookup=plan.kickoff_lookup,
+        leads=plan.leads,
+        lead_kickoff_lookup=plan.kickoff_lookup,
+        run_started=started,
     )
 
     # Pre-schedule before any work so the chain survives crashes.
@@ -181,7 +263,7 @@ async def main(ctx: JobContext) -> None:
                 )
 
             await require_rows_for_fixtures(
-                SOURCE, {r.sport_key: r.processed_events for r in results.sport_results}
+                plan.source, {r.sport_key: r.processed_events for r in results.sport_results}
             )
 
             logger.info(
@@ -199,8 +281,13 @@ async def main(ctx: JobContext) -> None:
     # the proximity tier.
     post_decision = await decide_forward_resilient(
         sports,
-        CADENCE,
+        plan.cadence,
+        overnight=plan.overnight,
         lookahead_days=app_settings.scheduler.lookahead_days,
+        next_kickoff_lookup=plan.kickoff_lookup,
+        leads=plan.leads,
+        lead_kickoff_lookup=plan.kickoff_lookup,
+        run_started=started,
     )
     await _schedule(post_decision, label="post-fetch", final=not pre_booked)
     logger.info(

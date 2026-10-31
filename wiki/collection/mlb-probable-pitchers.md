@@ -11,9 +11,10 @@ sources:
   - odds_lambda.storage.mlb_pitcher_reader.MlbPitcherReader
   - odds_core.mlb_data_models.MlbProbablePitchers
   - odds_lambda.scheduling.jobs._JOB_CRON_MAP
-  - odds_lambda.scheduling.jobs._JOB_SPORTS
   - odds_mcp.tools.mlb.get_probable_pitchers
   - deployment/aws/terraform/eventbridge.tf
+mentions:
+  - odds_lambda.scheduling.jobs._JOB_SPORTS
 status: stable
 ---
 

@@ -24,7 +24,9 @@ console = Console()
 
 @app.command("current")
 def fetch_current(
-    sport: str = typer.Option("basketball_nba", "--sport", "-s", help="Sport to fetch odds for"),
+    sport: str = typer.Option(
+        ..., "--sport", "-s", help="Sport to fetch odds for (spends its key's units)"
+    ),
 ):
     """Fetch current odds for upcoming games."""
     asyncio.run(_fetch_current(sport))
@@ -115,7 +117,9 @@ def fetch_results(
 
 @app.command("scores")
 def fetch_scores(
-    sport: str = typer.Option("basketball_nba", "--sport", "-s", help="Sport to fetch scores for"),
+    sport: str = typer.Option(
+        ..., "--sport", "-s", help="Sport to fetch scores for (spends its key's units)"
+    ),
     days: int = typer.Option(3, "--days", "-d", help="Number of days back to fetch scores"),
 ):
     """Fetch scores for completed games."""

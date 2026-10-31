@@ -53,8 +53,9 @@ status: stable
 
 | Command | Default |
 |---|---|
-| `odds_cli.commands.fetch` (`current`, `scores`; `scores` finds each event by its Odds API id and logs `score_event_not_found` for an unknown one) | `basketball_nba`; `results` defaults to `soccer_epl`, settles `baseball_mlb` from the MLB Stats API and prints the settled, cancelled, postponed, moved and unresolved counts ([results jobs](../collection/results-jobs.md#fetch-oddsportal-results)) |
-| `odds_cli.commands.discover` | `basketball_nba` |
+| `odds_cli.commands.fetch` (`current`, `scores`; `scores` finds each event by its Odds API id and logs `score_event_not_found` for an unknown one) | required, since each sport spends its own Odds API key; `results` defaults to `soccer_epl`, settles `baseball_mlb` from the MLB Stats API and prints the settled, cancelled, postponed, moved and unresolved counts ([results jobs](../collection/results-jobs.md#fetch-oddsportal-results)) |
+| `odds_cli.commands.discover` (`odds_cli.commands.discover.games` spends units) | it is required by `odds_cli.commands.discover.games`; `odds_cli.commands.discover.upcoming` (free) defaults to `basketball_nba` |
+| `odds_cli.commands.backfill` (`plan`, `execute`) | required; `execute` spends the sport's key |
 | `odds_cli.commands.quality` | `basketball_nba` |
 | `odds_cli.commands.polymarket.discover` | `basketball_nba` |
 | `odds_cli.commands.copy_from_prod` | `soccer_epl` |

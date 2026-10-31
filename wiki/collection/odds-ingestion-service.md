@@ -34,7 +34,7 @@ status: stable
 
 ## What the CLI does instead
 
-`odds fetch current` is only the service call and a summary. `--sport` defaults to `basketball_nba` (which `fetch-odds` does not collect), and there is no event sync, scheduling or alert. It exits 1 on any exception.
+`odds fetch current` is only the service call and a summary. `--sport` is required because the call spends that sport's key (NBA's is `ODDS_API_KEYS` index 1; [keys](odds-api-client.md#retry-and-keys)), and there is no event sync, scheduling or alert. It exits 1 on any exception.
 
 ## Fetch logs
 
@@ -49,7 +49,7 @@ status: stable
 
 **Readers.**
 - `odds status show` takes the latest row; `odds status quota` the latest 10 ([odds status](../operations/health-monitor.md#odds-status)).
-- `odds_lambda.storage.readers.OddsReader.get_database_stats`: the newest non-null `api_quota_remaining`, beside its event, price-row and snapshot counts.
+- `odds_lambda.storage.readers.OddsReader.get_database_stats`: the newest non-null `api_quota_remaining` of each Odds API key, ignoring rows over 31 days old (`api_quota_by_key`), beside its event, price-row and snapshot counts.
 - `odds_lambda.health_monitor.HealthMonitor.check_api_quota` reads the quota ([health-monitor](../operations/health-monitor.md)).
 
 ## Manual event discovery
@@ -58,6 +58,6 @@ status: stable
 
 ## Related
 
-- [Odds API client and key rotation](odds-api-client.md)
+- [Odds API client and per-sport keys](odds-api-client.md)
 - [Odds API quota accounting](odds-api-quota.md)
 - [Self-scheduling](../scheduling/self-scheduling.md)

@@ -333,7 +333,8 @@ class AlertHistory(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
 
     alert_type: str = Field(
-        index=True, description="Alert type: quota_low, stale_data, missing_heartbeat:<job>, etc."
+        index=True,
+        description="Alert type: quota_low:key<N>, stale_data:<source>:<sport>, heartbeat:<job>, etc.",
     )
     severity: str = Field(description="Severity: info, warning, error, critical")
     message: str = Field(description="Alert message content")

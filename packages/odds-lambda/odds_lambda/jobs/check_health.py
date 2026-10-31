@@ -42,7 +42,7 @@ async def main(ctx: JobContext) -> None:
             issues_detected=len(health_status.issues_detected),
             alerts_sent=len(health_status.alerts_sent),
             hours_since_last_fetch=health_status.metrics.hours_since_last_fetch,
-            quota_remaining=health_status.metrics.api_quota_remaining,
+            quota_by_key=health_status.metrics.api_quota_by_key,
         )
 
         if not health_status.overall_healthy:

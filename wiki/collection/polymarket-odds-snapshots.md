@@ -52,6 +52,7 @@ sources:
   - odds_lambda.jobs.fetch_polymarket_odds.EmptyListingError
 mentions:
   - odds_core.alerts.job_alert_context
+  - odds_core.config.AlertConfig.heartbeat_expectations
 status: stable
 ---
 
@@ -110,7 +111,7 @@ Polymarket creates no events. `odds_lambda.storage.event_resolver.attach_event` 
 - It lists closed events from Gamma that end at or after `--since` and attaches each to an event of the database `DATABASE_URL` points at ([attaching](#attaching-to-events)). It uses the event only when it is `FINAL` and its kick-off is at or after `--since`.
 - It skips an event (by its integer id) that already holds a history snapshot, found as a `polymarket` snapshot whose payload is its own envelope without the bid and ask keys (a live run's payload lists its envelopes, which always carry those keys; `odds_lambda.polymarket_odds_backfill._history_event_ids`), so a rerun adds nothing. It commits after each attachment and each event, and runs each attachment and each event's writes in a savepoint, so a match that fails is rolled back, recorded in the report's errors, and the others stand.
 - It writes `odds_core.models.OddsSnapshot` rows through `odds_lambda.storage.shaped_snapshots.store_shaped_snapshot`: source `polymarket`, the sport's market key (`1x2` or `h2h`), time basis `observed` (the history is an as-of resample at our grid times), one `mid` price row per outcome (three for EPL, two for NBA), and its own payload holding its envelope ([writing price rows](../storage/price-tables.md#writing-price-rows)). A snapshot already stored is skipped and its payload discarded; the counts are of snapshots inserted.
-- It prints the counts: matches, attached, skipped, written, snapshots, dropped points by reason, finished events without a match, matches without an event, and matches that failed. `--dry-run` fetches and resamples but writes nothing, not even the external ids. It rolls back after each match, so the fixture locks of the attach step are released as in a committing run and the dry run covers the same matches in any order.
+- It prints the counts: matches, attached, skipped, written, snapshots, dropped points by reason, finished events without a match, matches without an event, and matches that failed. `--dry-run` fetches and resamples but writes nothing, not even the external ids.
 
 > [!WARNING]
 > The command writes to whatever `DATABASE_URL` points at. Production is loaded only from the production host ([databases](../foundations/databases-and-environments.md#environments)).

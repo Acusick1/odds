@@ -16,7 +16,7 @@ Five feeds write snapshots from envelopes in The Odds API shape ([odds tables](.
 
 | Source | Supplies | Collected by | Where it runs | Events |
 |---|---|---|---|---|
-| The Odds API | Pinnacle, Betfair Exchange and UK retail books for EPL; US books for MLB and NBA; dense snapshots | `fetch-odds` job ([fetch-odds-job](fetch-odds-job.md), [client](odds-api-client.md)) | production host, EPL only | creates events, recording the API's id |
+| The Odds API | Pinnacle, Betfair Exchange and UK retail books for EPL; US books for MLB; Pinnacle and UK retail books for NBA; dense snapshots | `fetch-odds` job ([fetch-odds-job](fetch-odds-job.md), [client](odds-api-client.md)) | production host, EPL and NBA, each on its own key | creates events, recording the API's id |
 | OddsPortal | UK books, upcoming and closing odds (EPL, MLB and NBA) | `fetch-oddsportal` job ([fetch-oddsportal-job](fetch-oddsportal-job.md)) | production host | creates events, recording the OddsPortal id |
 | Betfair Exchange | Best back price per outcome | `fetch-betfair-exchange` job ([betfair-exchange](betfair-exchange.md)) | production host | creates events, recording the Betfair id |
 | Polymarket | EPL three-way and NBA two-way match midpoints, history from the first market (EPL 2025-08, NBA 2026-10) | `odds polymarket backfill-odds` (manual) and the bootstrapped per-sport `fetch-polymarket-odds-epl` job ([polymarket-odds-snapshots](polymarket-odds-snapshots.md)) | backfill manual; the job self-schedules and is dormant with no stored event in 28 days | attaches to existing events, recording the Polymarket id, and creates none; snapshots stored as source `polymarket` |
