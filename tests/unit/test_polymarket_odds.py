@@ -425,9 +425,6 @@ class TestTwoWayMatch:
             "New York Knicks",
         }
 
-    def test_nickname_resolves_without_an_abbreviation(self) -> None:
-        assert NBA.team_name({"name": "Trail Blazers"}) == "Portland Trail Blazers"
-
     def test_ignores_exact_margin_and_prop_events(self, gamma_nba_event) -> None:
         assert (
             parse_match_event(gamma_nba_event(slug="nba-lal-gsw-2026-10-30-exact-margin"), NBA)

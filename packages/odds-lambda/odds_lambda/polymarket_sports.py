@@ -11,7 +11,7 @@ from typing import Any, Literal
 from odds_core.sports import SportKey
 from odds_core.team import normalize_team_name
 
-from odds_lambda.polymarket_matching import NBA_ABBREV_MAP, normalize_team
+from odds_lambda.polymarket_matching import NBA_ABBREV_MAP
 
 Side = Literal["home", "draw", "away"]
 
@@ -24,13 +24,10 @@ def epl_team_name(team: Mapping[str, Any]) -> str:
 
 
 def nba_team_name(team: Mapping[str, Any]) -> str:
-    """The Odds API's full name of a Polymarket NBA team, which Polymarket lists by nickname
-    ("Lakers") with a ticker abbreviation ("lal")."""
-    return (
-        NBA_ABBREV_MAP.get(str(team.get("abbreviation", "")).lower())
-        or normalize_team(team["name"])
-        or team["name"]
-    )
+    """The full name of a Polymarket NBA team, which Polymarket lists by nickname ("Lakers")
+    with a ticker abbreviation ("lal") that identifies it."""
+    abbreviation = str(team.get("abbreviation", "")).lower()
+    return NBA_ABBREV_MAP.get(abbreviation) or normalize_team_name(team["name"])
 
 
 @dataclass(frozen=True)

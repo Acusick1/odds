@@ -7,12 +7,12 @@ from datetime import UTC, date, datetime, timedelta
 import structlog
 from odds_core.injury_models import InjuryReport
 from odds_core.models import Event
+from odds_core.team import normalize_team_name
 from sqlalchemy import and_, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.injury_fetcher import InjuryRecord
-from odds_lambda.polymarket_matching import normalize_team
 
 logger = structlog.get_logger(__name__)
 
@@ -42,8 +42,7 @@ class InjuryWriter:
 
         report_dicts: list[dict] = []
         for record in records:
-            canonical_team = normalize_team(record.team)
-            cache_key = (canonical_team or record.team, record.game_date)
+            cache_key = (normalize_team_name(record.team), record.game_date)
 
             if cache_key not in event_cache:
                 event_cache[cache_key] = await self._match_event(cache_key[0], record.game_date)

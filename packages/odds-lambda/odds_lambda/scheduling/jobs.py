@@ -127,7 +127,7 @@ _JOB_CRON_MAP: dict[str, str] = {
 # raise inside ``job_alert_context`` and spam critical Discord alerts) or
 # that should not spend resources on every configured sport.
 _JOB_SPORTS: dict[str, tuple[SportKey, ...]] = {
-    "fetch-espn-fixtures": ("soccer_epl",),
+    "fetch-espn-fixtures": ("soccer_epl", "basketball_nba"),
     # Allowlist derived from the BFE adapter's supported-sports map so adding
     # a new sport requires only a SPORT_CONFIG entry.
     "fetch-betfair-exchange": tuple(BETFAIR_SPORT_CONFIG),

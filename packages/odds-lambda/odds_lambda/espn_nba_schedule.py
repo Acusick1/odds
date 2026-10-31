@@ -1,9 +1,10 @@
-"""NBA games from ESPN's public scoreboard, as events for games already played.
+"""NBA's schedule from ESPN's public scoreboard: events for upcoming and played games.
 
-Polymarket attaches prices to existing events and creates none, and the live sources list only
-upcoming games, so a played NBA game has no event until something lists it. ESPN's scoreboard
-lists every game of a day with its kick-off, final score and an id of its own
-(``odds_core.vocabulary.Source.ESPN``). It is not a kick-off authority for NBA
+The NBA has no published schedule the live sources can read: OddsPortal, Betfair and the Odds API
+list only games that already have prices, and Polymarket attaches to existing events and creates
+none. ESPN's scoreboard lists every game of a day with its kick-off, final score and an id of its
+own (``odds_core.vocabulary.Source.ESPN``). The events it creates are the schedule that wakes the
+dormant NBA collectors. It is not a kick-off authority for NBA
 (``odds_lambda.storage.event_kickoff.KICKOFF_AUTHORITY``), so it never moves an event another
 source created.
 """
@@ -19,9 +20,9 @@ import httpx
 import structlog
 from odds_core.database import async_session_maker
 from odds_core.models import EventStatus
+from odds_core.team import normalize_team_name
 from odds_core.vocabulary import Source
 
-from odds_lambda.polymarket_matching import normalize_team
 from odds_lambda.storage.event_resolver import ListedGame, Resolution, resolve_event
 from odds_lambda.storage.writers import OddsWriter
 
@@ -68,8 +69,7 @@ class SyncReport:
 
 
 def _team_name(competitor: dict[str, Any]) -> str:
-    name = competitor["team"]["displayName"]
-    return normalize_team(name) or name
+    return normalize_team_name(competitor["team"]["displayName"])
 
 
 def parse_scoreboard(data: dict[str, Any]) -> list[EspnNbaGame]:
@@ -148,6 +148,19 @@ async def sync_games(games: list[EspnNbaGame], report: SyncReport, *, apply: boo
                 f"{game.away_team} at {game.home_team} {game.commence_time:%F}: {e}"
             )
             logger.error("espn_nba_sync_failed", espn_id=game.espn_id, exc_info=True)
+
+
+UPCOMING_DAYS = 21
+SETTLE_DAYS = 3
+
+
+async def sync_upcoming(now: datetime) -> SyncReport:
+    """Create the events of the next ``UPCOMING_DAYS`` and settle those of the last
+    ``SETTLE_DAYS``; the scheduled job's window."""
+    today = now.astimezone(UTC).date()
+    return await sync_schedule(
+        today - timedelta(days=SETTLE_DAYS), today + timedelta(days=UPCOMING_DAYS), apply=True
+    )
 
 
 async def sync_schedule(since: date, until: date, *, apply: bool) -> SyncReport:

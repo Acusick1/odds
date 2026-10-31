@@ -82,3 +82,24 @@ class TestSyncGames:
 
         assert report.created == 1
         assert (await pglite_async_session.execute(select(Event))).first() is None
+
+
+class TestSyncUpcoming:
+    async def test_covers_three_days_back_and_three_weeks_ahead(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from datetime import date
+
+        from odds_lambda import espn_nba_schedule
+
+        seen: list[tuple[date, date, bool]] = []
+
+        async def fake(since: date, until: date, *, apply: bool) -> SyncReport:
+            seen.append((since, until, apply))
+            return SyncReport()
+
+        monkeypatch.setattr(espn_nba_schedule, "sync_schedule", fake)
+
+        await espn_nba_schedule.sync_upcoming(datetime(2026, 11, 1, 6, tzinfo=UTC))
+
+        assert seen == [(date(2026, 10, 29), date(2026, 11, 22), True)]

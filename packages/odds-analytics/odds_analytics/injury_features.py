@@ -14,7 +14,7 @@ import numpy as np
 from odds_core.injury_models import InjuryReport, InjuryStatus
 from odds_core.models import Event
 from odds_core.player_stats_models import NbaPlayerSeasonStats
-from odds_lambda.polymarket_matching import normalize_team
+from odds_core.team import normalize_team_name
 
 __all__ = [
     "InjuryFeatures",
@@ -100,9 +100,7 @@ def _classify_team(
     away_team_canonical: str | None,
 ) -> str | None:
     """Classify an injury report as 'home', 'away', or None (unmatched)."""
-    report_canonical = normalize_team(report.team)
-    if report_canonical is None:
-        return None
+    report_canonical = normalize_team_name(report.team)
     if report_canonical == home_team_canonical:
         return "home"
     if report_canonical == away_team_canonical:
@@ -148,8 +146,8 @@ def extract_injury_features(
     latest_reports = [r for r in eligible if r.report_time == latest_time]
 
     # Normalize event team names
-    home_canonical = normalize_team(event.home_team)
-    away_canonical = normalize_team(event.away_team)
+    home_canonical = normalize_team_name(event.home_team)
+    away_canonical = normalize_team_name(event.away_team)
 
     # Accumulate impact-weighted sums
     impact_out_home = 0.0

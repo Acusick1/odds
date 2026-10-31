@@ -190,8 +190,9 @@ async def published_schedule_kickoff(
     """Next kickoff in the sport's published schedule, which no collection job writes.
 
     EPL reads the ESPN fixtures of the daily ``fetch-espn-fixtures`` cron and
-    MLB the Stats API schedule of the daily ``fetch-mlb-probables`` cron. A
-    sport without a published schedule here has none.
+    MLB the Stats API schedule of the daily ``fetch-mlb-probables`` cron. NBA has no
+    table of its own: its ``fetch-espn-fixtures`` run creates the events, which the
+    stored lookup reads. A sport without a published schedule here has none.
     """
     if sport_key == MLB_SPORT_KEY:
         calendar = await _mlb_schedule_calendar(session, now=now, horizon=timedelta(0))

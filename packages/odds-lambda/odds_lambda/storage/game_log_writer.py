@@ -7,12 +7,12 @@ from datetime import UTC, date, datetime, timedelta
 import structlog
 from odds_core.game_log_models import NbaTeamGameLog
 from odds_core.models import Event
+from odds_core.team import normalize_team_name
 from sqlalchemy import and_, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.game_log_fetcher import GameLogRecord
-from odds_lambda.polymarket_matching import normalize_team
 
 logger = structlog.get_logger(__name__)
 
@@ -77,8 +77,8 @@ class GameLogWriter:
         for record in records:
             canonical = _ABBREV_TO_CANONICAL.get(record.team_abbreviation)
             if canonical is None:
-                canonical = normalize_team(record.team_name)
-            cache_key = (canonical or record.team_name, record.game_date)
+                canonical = normalize_team_name(record.team_name)
+            cache_key = (canonical, record.game_date)
 
             if cache_key not in event_cache:
                 event_cache[cache_key] = await self._match_event(cache_key[0], record.game_date)

@@ -151,10 +151,11 @@ log = logging.getLogger("ingest_oddsportal")
 
 def _get_nba_normalizer() -> tuple[dict[str, str], Callable[[str], str | None]]:
     """Lazy-import NBA normalization to avoid hard dependency for non-basketball sports."""
-    from odds_lambda.polymarket_matching import CANONICAL_TO_ABBREV, normalize_team
+    from odds_core.team import normalize_team_name
+    from odds_lambda.polymarket_matching import CANONICAL_TO_ABBREV
 
     abbrev_to_canonical: dict[str, str] = {v: k for k, v in CANONICAL_TO_ABBREV.items()}
-    return abbrev_to_canonical, normalize_team
+    return abbrev_to_canonical, normalize_team_name
 
 
 def _normalize_team_passthrough(name: str) -> str | None:

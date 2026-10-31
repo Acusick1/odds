@@ -227,10 +227,12 @@ class AlertConfig(BaseSettings):
             "fetch-mlb-probables": 30,
             # Daily 06:00 UTC cron, plus slack.
             "fetch-espn-fixtures": 26,
+            "fetch-espn-fixtures-nba": 26,
             "fetch-betfair-exchange-epl": 10,
             "fetch-betfair-exchange-mlb": 11,
             "fetch-betfair-exchange-nba": 11,
             "fetch-polymarket-odds-epl": 11,
+            "fetch-polymarket-odds-nba": 11,
             "check-health": 2,
         },
         description="Max hours between job completions before alerting (job_name -> hours)",

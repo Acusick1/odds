@@ -1,5 +1,7 @@
 """Fetch ESPN fixtures job — refresh current-season all-competition schedules.
 
+For NBA the job instead syncs ESPN's scoreboard into events (``odds_lambda.espn_nba_schedule``).
+
 Flow:
 1. Fetch current-season fixtures across EPL + FA Cup + League Cup + European
    competitions from the ESPN Site API (free, unauthenticated).
@@ -45,8 +47,9 @@ from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
 
-# Sport this job serves. ESPN fixture coverage here is EPL-only.
+# EPL keeps its fixtures in ``espn_fixtures``; NBA's schedule is written as events directly.
 SPORT_KEY = "soccer_epl"
+NBA_SPORT_KEY = "basketball_nba"
 
 
 async def main(ctx: JobContext) -> None:
@@ -59,8 +62,13 @@ async def main(ctx: JobContext) -> None:
     from odds_core.alerts import job_alert_context
 
     sport = require_sport(ctx, "fetch-espn-fixtures")
+    if sport == NBA_SPORT_KEY:
+        await _sync_nba_schedule()
+        return
     if sport != SPORT_KEY:
-        raise ValueError(f"fetch-espn-fixtures only supports {SPORT_KEY}, got sport={sport!r}")
+        raise ValueError(
+            f"fetch-espn-fixtures supports {SPORT_KEY} and {NBA_SPORT_KEY}, got sport={sport!r}"
+        )
 
     app_settings = get_settings()
     season = current_season()
@@ -83,6 +91,35 @@ async def main(ctx: JobContext) -> None:
         )
         postponed = await _mark_postponed_events()
         logger.info("fetch_espn_fixtures_postponed_marked", events=postponed)
+
+
+async def _sync_nba_schedule() -> None:
+    """Create the NBA events of the next weeks and settle the finished ones; raises when any
+    game failed, after the others are stored."""
+    from odds_core.alerts import job_alert_context
+
+    from odds_lambda.espn_nba_schedule import sync_upcoming
+    from odds_lambda.scheduling.jobs import make_compound_job_name
+
+    async with job_alert_context(make_compound_job_name("fetch-espn-fixtures", NBA_SPORT_KEY)):
+        report = await sync_upcoming(datetime.now(UTC))
+        logger.info(
+            "fetch_espn_nba_schedule_completed",
+            games=report.games,
+            created=report.created,
+            matched=report.matched,
+            finalised=report.finalised,
+            errors=len(report.errors),
+        )
+        if report.errors:
+            raise RuntimeError(
+                f"{len(report.errors)} NBA games failed to sync: " + "; ".join(report.errors[:3])
+            )
+        if report.games == 0:
+            await send_job_warning(
+                "espn_nba_empty:fetch-espn-fixtures",
+                "fetch-espn-fixtures-nba: ESPN listed no NBA game in the window",
+            )
 
 
 # How many days ahead the upcoming fetch reaches. 30 days covers the agent's
