@@ -76,8 +76,8 @@ class TestResolveJobName:
         assert sport == "baseball_mlb"
 
     def test_unknown_suffix_returns_no_sport(self) -> None:
-        base, sport = resolve_job_name("fetch-odds-nba")
-        assert base == "fetch-odds-nba"
+        base, sport = resolve_job_name("fetch-odds-nhl")
+        assert base == "fetch-odds-nhl"
         assert sport is None
 
     def test_totally_unknown_name(self) -> None:
@@ -102,7 +102,7 @@ class TestSportKeyToSuffix:
         assert sport_key_to_suffix("baseball_mlb") == "mlb"
 
     def test_unknown_sport(self) -> None:
-        assert sport_key_to_suffix("basketball_nba") is None
+        assert sport_key_to_suffix("icehockey_nhl") is None
 
 
 class TestMakeCompoundJobName:
@@ -123,7 +123,7 @@ class TestMakeCompoundJobName:
         assert make_compound_job_name("check-health", None) == "check-health"
 
     def test_unknown_sport_returns_base(self) -> None:
-        assert make_compound_job_name("fetch-odds", "basketball_nba") == "fetch-odds"
+        assert make_compound_job_name("fetch-odds", "icehockey_nhl") == "fetch-odds"
 
     def test_non_per_sport_job_returns_base(self) -> None:
         assert make_compound_job_name("check-health", "soccer_epl") == "check-health"

@@ -1,7 +1,7 @@
 ---
 type: reference
 title: NBA injury reports, game logs and player stats
-description: "The deprioritized NBA feeds (injury PDFs, stats.nba.com game logs, PBPStats player stats), their manual CLIs, writers and event matching."
+description: "The manual NBA feeds (injury PDFs, stats.nba.com game logs, PBPStats player stats), their manual CLIs, writers and event matching."
 sources:
   - odds_core.injury_models.InjuryReport
   - odds_lambda.injury_fetcher.fetch_injury_report
@@ -25,7 +25,7 @@ status: stable
 
 # NBA injury reports, game logs and player stats
 
-Three manual-CLI NBA feeds. NBA is deprioritized and no scheduled job collects any of them ([project-overview](../foundations/project-overview.md)). The feature groups built on these tables are in [feature-groups](../modelling/feature-groups.md).
+Three manual-CLI NBA feeds. No scheduled job collects any of them (scheduled NBA collection is prices only: [fetch-oddsportal-job](fetch-oddsportal-job.md#leagues), [betfair-exchange](betfair-exchange.md)) ([project-overview](../foundations/project-overview.md)). The feature groups built on these tables are in [feature-groups](../modelling/feature-groups.md).
 
 | | Injury reports | Game logs | Player stats |
 |---|---|---|---|

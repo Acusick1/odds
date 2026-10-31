@@ -22,7 +22,7 @@ Design principles `(inferred)`: robust collection and storage before analysis; a
 
 ## Sports
 
-EPL and MLB data collection is active. The agents run by hand on the production host, not autonomously, and are paused. NBA code (injuries, game logs, team-name normalization) exists but is deprioritized. `odds_core.sports.SportKey` allows all three. EPL odds are stored under market key `1x2` and MLB under `h2h`; see [Sport, market and bookmaker keys](../collection/sport-and-market-keys.md).
+EPL and MLB price collection is active. NBA OddsPortal and Betfair collection is configured and starts once the ESPN NBA schedule supplies fixtures (#725); the Odds API collects EPL only. The agents run by hand on the production host, not autonomously, and are paused. NBA injury, game-log and player-stat code exists but runs only by manual command. `odds_core.sports.SportKey` allows all three. EPL odds are stored under market key `1x2` and MLB under `h2h`; see [Sport, market and bookmaker keys](../collection/sport-and-market-keys.md).
 
 ## Goal
 
@@ -38,7 +38,7 @@ Per-job table: [Where each job runs](../scheduling/job-deployment-matrix.md#wher
 
 The repo carries the residue of three pivots (PRs `#214`, `#217`, `#267`, `#387`). Knowing which era a module comes from tells you whether its defaults match the active sports.
 
-1. **NBA to EPL and MLB.** The first experiments are NBA (February 2026); EPL work starts in March (PRs `#214`, `#217`). NBA code remains (injuries, game logs, team-name normalization).
+1. **NBA to EPL and MLB, then NBA prices back.** The first experiments are NBA (February 2026); EPL work starts in March (PRs `#214`, `#217`). NBA code remains (injuries, game logs, team-name normalization), and OddsPortal and Betfair NBA prices are collected again.
 2. **Model edge to information edge**, in April 2026 (`#290`, [ADR-0005](../../docs/adr/0005-information-edge.md)).
 3. **Structural consolidations**: alerts moved from odds-cli to odds-core (`#267`), self-scheduling unified into one decision module (`#387`). See [Alerts and the alert_history table](../operations/alerts.md), [Self-scheduling](../scheduling/self-scheduling.md).
 

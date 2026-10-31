@@ -87,7 +87,7 @@ Python 3.12+ (`pyproject.toml`), a uv workspace. Per package dependencies are in
 | `odds_core.betfair_close` | `odds_core.betfair_close.pick_close` and `odds_core.betfair_close.event_close` (the close of an event, within `odds_core.betfair_close.LIVE_CLOSE_WINDOW` else FDUK's) and `odds_core.betfair_close.close_quotes` (the quotes that can be the close): the close that the retail-EV builder, the candidate report and the [Betfair close check](../operations/health-monitor.md#betfair-close-check) share. The outcomes each market prices are in `odds_core.market_prices` |
 | `odds_core.as_of` | `odds_core.as_of.latest_snapshot`: which stored quotes count as known at a decision time ([candidate rules](../evaluation/candidate-rules.md#market-state)) |
 | `utils.py` | `odds_core.utils.relabel_three_way_markets` |
-| `odds_core.sports`, `odds_core.team`, `odds_core.time`, `odds_core.logging_setup` | [Sport keys](../collection/sport-and-market-keys.md), [team-name normalization](../storage/event-matching.md), [timezone helpers](timezones.md), structlog setup |
+| `odds_core.sports`, `odds_core.team`, `odds_core.time`, `odds_core.logging_setup` | [Sport keys](../collection/sport-and-market-keys.md), [team-name normalization](../storage/event-matching.md) (EPL, MLB and NBA), [timezone helpers](timezones.md), structlog setup |
 | `odds_core.api_models` | The Odds API response models and event factories |
 
 Importing any `odds_core` submodule runs `odds_core.database`, which builds the engine from `odds_core.config.get_settings()`. Every `odds` command therefore needs `ODDS_API_KEY` and `DATABASE_URL` to resolve, even commands that never touch the API or database ([Engine creation](databases-and-environments.md#engine-creation), [Configuration](configuration.md)).

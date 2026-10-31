@@ -70,7 +70,7 @@ class DataCollectionConfig(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     sports: list[SportKey] = Field(
-        default=["soccer_epl", "baseball_mlb"], description="Sports to track"
+        default=["soccer_epl", "baseball_mlb", "basketball_nba"], description="Sports to track"
     )
     bookmakers: dict[SportKey, list[str]] = Field(
         default_factory=lambda: {
@@ -212,7 +212,7 @@ class AlertConfig(BaseSettings):
     # Keys are compound job names matching EventBridge rules (e.g. "fetch-oddsportal-epl").
     heartbeat_expectations: dict[str, float] = Field(
         default={
-            # Overnight windows (EPL 22-06 UTC, MLB 05-14 UTC) pause these jobs, so the
+            # Overnight windows (EPL 22-06 UTC, MLB 05-14 UTC, NBA 07-15 UTC) pause these jobs, so the
             # allowed gap is the window plus the polling interval.
             # The longest gaps between runs: the 48 h opening tier for fetch-odds (the 24 h
             # no-game check-in is shorter) and the 12 h idle interval for fetch-scores,
@@ -222,12 +222,14 @@ class AlertConfig(BaseSettings):
             "fetch-oddsportal-epl": 11,
             "fetch-oddsportal-results-epl": 26,
             "fetch-oddsportal-mlb": 12,
+            "fetch-oddsportal-nba": 11,
             "fetch-mlb-results": 26,
             "fetch-mlb-probables": 30,
             # Daily 06:00 UTC cron, plus slack.
             "fetch-espn-fixtures": 26,
             "fetch-betfair-exchange-epl": 10,
             "fetch-betfair-exchange-mlb": 11,
+            "fetch-betfair-exchange-nba": 11,
             "fetch-polymarket-odds-epl": 11,
             "check-health": 2,
         },

@@ -90,7 +90,11 @@ SOURCE = CollectionSource(
     job_name="fetch-betfair-exchange",
     source=Source.BETFAIR,
     cadence=CADENCE,
-    fixture_horizons={"soccer_epl": timedelta(hours=72), "baseball_mlb": timedelta(hours=6)},
+    fixture_horizons={
+        "soccer_epl": timedelta(hours=72),
+        "baseball_mlb": timedelta(hours=6),
+        "basketball_nba": timedelta(hours=6),
+    },
     skips_overnight=True,
 )
 
@@ -244,8 +248,7 @@ async def ingest_sport(
         )
         if entry is None:
             stats.errors.append(f"unusable_outcomes: {book.betfair_event_name}")
-            if is_suspended:
-                _account_for(accounted, book, sport_cfg)
+            _account_for(accounted, book, sport_cfg)
             continue
         if started:
             stats.books_pre_play_past_start += 1

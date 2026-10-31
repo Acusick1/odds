@@ -116,12 +116,12 @@ A job inside [`odds_core.alerts.job_alert_context`](alerts.md#delivery) inserts 
 
 | Job | Writes a heartbeat | Default expectation |
 |---|---|---|
-| fetch-oddsportal (per sport) | yes | 11 h EPL, 12 h MLB (overnight window plus polling interval) |
+| fetch-oddsportal (per sport) | yes | 11 h EPL, 12 h MLB, 11 h NBA (overnight window plus polling interval) |
 | fetch-oddsportal-results (EPL) | yes | 26 h |
 | fetch-mlb-results | yes | 26 h |
 | check-health | yes | 2 h |
 | update-status | yes | none |
-| fetch-betfair-exchange (per sport) | yes | 10 h EPL, 11 h MLB (overnight window plus the 2 h interval) |
+| fetch-betfair-exchange (per sport) | yes | 10 h EPL, 11 h MLB, 11 h NBA (overnight window plus the 2 h interval) |
 | fetch-polymarket-odds (per sport) | yes | 11 h EPL (overnight window plus polling interval, plus 1 h slack) |
 | fetch-mlb-probables | yes | 30 h |
 | fetch-espn-fixtures | yes | 26 h (daily cron plus slack) |

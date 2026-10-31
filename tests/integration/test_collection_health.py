@@ -1347,6 +1347,63 @@ class TestBetfairEplAccounting:
 
 
 @pytest.mark.usefixtures("guard_session")
+class TestBetfairNbaAccounting:
+    """An open book with no back prices accounts for its event, as a suspended one does."""
+
+    @pytest.fixture(autouse=True)
+    def session_maker(self, monkeypatch: pytest.MonkeyPatch, pglite_async_session: Any) -> None:
+        monkeypatch.setattr(
+            fetch_betfair_exchange, "async_session_maker", SessionMaker(pglite_async_session)
+        )
+
+    async def test_an_open_unpriced_book_accounts_for_its_event(
+        self, pglite_async_session: Any
+    ) -> None:
+        tip = NOW + timedelta(hours=1)
+        pglite_async_session.add(
+            Event(
+                id=1,
+                sport_key="basketball_nba",
+                sport_title="NBA",
+                commence_time=tip,
+                home_team="Utah Jazz",
+                away_team="Portland Trail Blazers",
+                status=EventStatus.SCHEDULED,
+            )
+        )
+        await pglite_async_session.commit()
+        book = BetfairBook(
+            market_id="1.1",
+            market_type="MATCH_ODDS",
+            betfair_event_id="1",
+            betfair_event_name="Portland Trail Blazers @ Utah Jazz",
+            market_start_time=tip,
+            market_status="OPEN",
+            inplay=False,
+            total_matched=10.0,
+            runners=[
+                BetfairRunner(1, "Portland Trail Blazers", None, None, None, None, None),
+                BetfairRunner(2, "Utah Jazz", None, None, None, None, None),
+            ],
+        )
+        client = MagicMock()
+        client.list_events.return_value = ["1"]
+        client.list_books.return_value = [book]
+
+        stats = await fetch_betfair_exchange.ingest_sport(
+            SPORT_CONFIG["basketball_nba"], client=client, lookahead_hours=72, snapshot_time=NOW
+        )
+
+        assert (stats.snapshots_stored, stats.accounted_fixtures) == (0, {EventKey(1)})
+        await require_rows_for_fixtures(
+            fetch_betfair_exchange.SOURCE,
+            {"basketball_nba": stats.snapshots_stored},
+            accounted_by_sport={"basketball_nba": stats.accounted_fixtures},
+            now=NOW,
+        )
+
+
+@pytest.mark.usefixtures("guard_session")
 class TestFetchOddsJob:
     @pytest.fixture(autouse=True)
     def stubs(self, monkeypatch: pytest.MonkeyPatch) -> None:

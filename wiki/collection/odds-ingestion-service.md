@@ -34,7 +34,7 @@ status: stable
 
 ## What the CLI does instead
 
-`odds fetch current` is only the service call and a summary. `--sport` defaults to `basketball_nba` (not a configured sport), and there is no event sync, scheduling or alert. It exits 1 on any exception.
+`odds fetch current` is only the service call and a summary. `--sport` defaults to `basketball_nba` (which `fetch-odds` does not collect), and there is no event sync, scheduling or alert. It exits 1 on any exception.
 
 ## Fetch logs
 

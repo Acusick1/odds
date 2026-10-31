@@ -26,7 +26,7 @@ status: stable
 
 ## Leagues
 
-`odds_lambda.jobs.fetch_oddsportal.LEAGUE_SPECS` holds `odds_lambda.jobs.fetch_oddsportal.LeagueSpec` rows: EPL (`england-premier-league`, listing `/football/england/premier-league/`, markets `1x2` and `over_under_2_5`, 3 outcomes, overnight 22-06) and MLB (`mlb`, listing `/baseball/usa/mlb/`, market `home_away`, 2 outcomes, overnight 05-14). `ctx.sport` is required and only its spec runs; a missing sport raises `ValueError` and an unknown sport logs an error and returns. The `odds_lambda.jobs.fetch_oddsportal.LeagueSpec` overnight fields duplicate `odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS` in the decision engine ([decision-engine](../scheduling/decision-engine.md#overnight-windows)).
+`odds_lambda.jobs.fetch_oddsportal.LEAGUE_SPECS` holds `odds_lambda.jobs.fetch_oddsportal.LeagueSpec` rows: EPL (`england-premier-league`, listing `/football/england/premier-league/`, markets `1x2` and `over_under_2_5`, 3 outcomes, overnight 22-06), MLB (`mlb`, listing `/baseball/usa/mlb/`, market `home_away`, 2 outcomes, overnight 05-14) and NBA (`nba`, listing `/basketball/usa/nba/`, market `home_away`, 2 outcomes, overnight 07-15). OddsPortal lists NBA games by full team name, which are the canonical names. `ctx.sport` is required and only its spec runs; a missing sport raises `ValueError` and an unknown sport logs an error and returns. The job reads its overnight window from `odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS` by the spec's sport ([decision-engine](../scheduling/decision-engine.md#overnight-windows)). NBA fixtures come from the ESPN NBA schedule (#725), so the NBA job stays dormant until that is scheduled.
 
 ## Flow
 
@@ -41,7 +41,7 @@ A [mechanical candidate](../evaluation/candidate-rules.md#market-state) decides 
 
 ## Heartbeats
 
-Heartbeats are keyed `heartbeat:fetch-oddsportal-<sport>`; both sports have entries (11 h EPL, 12 h MLB, covering the overnight window); the results jobs `fetch-oddsportal-results-epl` and `fetch-mlb-results` (26 h each), `fetch-mlb-probables` (30 h), `fetch-espn-fixtures` (26 h) and `fetch-betfair-exchange` (10 h EPL, 11 h MLB), `fetch-polymarket-odds` (11 h EPL), `fetch-odds-epl` (49 h) and `fetch-scores-epl` (13 h) share the map in `odds_core.config.AlertConfig.heartbeat_expectations` ([alerting-and-heartbeats](../operations/alerting-and-heartbeats.md#heartbeats)).
+Heartbeats are keyed `heartbeat:fetch-oddsportal-<sport>`; every sport has an entry (11 h EPL, 12 h MLB, 11 h NBA, covering the overnight window); the results jobs `fetch-oddsportal-results-epl` and `fetch-mlb-results` (26 h each), `fetch-mlb-probables` (30 h), `fetch-espn-fixtures` (26 h) and `fetch-betfair-exchange` (10 h EPL, 11 h MLB, 11 h NBA), `fetch-polymarket-odds` (11 h EPL), `fetch-odds-epl` (49 h) and `fetch-scores-epl` (13 h) share the map in `odds_core.config.AlertConfig.heartbeat_expectations` ([alerting-and-heartbeats](../operations/alerting-and-heartbeats.md#heartbeats)).
 
 ## Related
 

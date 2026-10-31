@@ -76,6 +76,7 @@ _JOB_BOOTSTRAP_MAP: dict[str, tuple[str, str]] = {
 _SPORT_SUFFIX_MAP: dict[str, SportKey] = {
     "epl": "soccer_epl",
     "mlb": "baseball_mlb",
+    "nba": "basketball_nba",
 }
 
 # Jobs that must never run during a deploy smoke check, even when listed in

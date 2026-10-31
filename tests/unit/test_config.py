@@ -31,7 +31,11 @@ class TestSettings:
             assert settings.api.quota == 500
             assert settings.api.keys is None
             assert settings.database.pool_size == 5
-            assert settings.data_collection.sports == ["soccer_epl", "baseball_mlb"]
+            assert settings.data_collection.sports == [
+                "soccer_epl",
+                "baseball_mlb",
+                "basketball_nba",
+            ]
             assert settings.data_collection.bookmakers_for("soccer_epl") == [
                 "pinnacle",
                 "betfair_ex_uk",

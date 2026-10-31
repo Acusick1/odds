@@ -48,7 +48,12 @@ from odds_lambda.live_events import (
 from odds_lambda.mlb_game_resolver import GameRow
 from odds_lambda.oddsportal_adapter import MatchOdds, convert_market
 from odds_lambda.oddsportal_client import OddsPortalClient, OddsPortalError
-from odds_lambda.scheduling.decision import CadenceConfig, Lead, ScheduleDecision
+from odds_lambda.scheduling.decision import (
+    OVERNIGHT_WINDOWS,
+    CadenceConfig,
+    Lead,
+    ScheduleDecision,
+)
 from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload
@@ -76,7 +81,11 @@ SOURCE = CollectionSource(
     job_name="fetch-oddsportal",
     source=Source.ODDSPORTAL,
     cadence=CADENCE,
-    fixture_horizons={"soccer_epl": timedelta(hours=48), "baseball_mlb": timedelta(hours=48)},
+    fixture_horizons={
+        "soccer_epl": timedelta(hours=48),
+        "baseball_mlb": timedelta(hours=48),
+        "basketball_nba": timedelta(hours=48),
+    },
     skips_overnight=True,
 )
 
@@ -92,8 +101,6 @@ class LeagueSpec:
     markets: list[str] = field(default_factory=lambda: ["1x2"])
     primary_market: str = "1x2"
     num_outcomes: int = 3
-    overnight_start_utc: int = 22
-    overnight_resume_utc: int = 6
 
 
 LEAGUE_SPECS: list[LeagueSpec] = [
@@ -112,8 +119,15 @@ LEAGUE_SPECS: list[LeagueSpec] = [
         markets=["home_away"],
         primary_market="home_away",
         num_outcomes=2,
-        overnight_start_utc=5,
-        overnight_resume_utc=14,
+    ),
+    LeagueSpec(
+        league="nba",
+        listing_path="/basketball/usa/nba/",
+        sport_key="basketball_nba",
+        sport_title="NBA",
+        markets=["home_away"],
+        primary_market="home_away",
+        num_outcomes=2,
     ),
 ]
 
@@ -327,7 +341,7 @@ async def main(ctx: JobContext) -> None:
         return
 
     compound_job_name = make_compound_job_name("fetch-oddsportal", sport)
-    overnight = (spec.overnight_start_utc, spec.overnight_resume_utc)
+    overnight = OVERNIGHT_WINDOWS[spec.sport_key]
     sport_keys = [spec.sport_key]
     leads = candidate_scrape_leads(spec.sport_key)
     started = datetime.now(UTC)

@@ -12,6 +12,7 @@ from odds_core.vocabulary import Market
 # Betfair event-type IDs (stable; see developer.betfair.com).
 EVENT_TYPE_SOCCER = "1"
 EVENT_TYPE_BASEBALL = "7511"
+EVENT_TYPE_BASKETBALL = "7522"
 
 # Premier League competition ID — community-stable across seasons.
 # Hints are a fallback in case Betfair re-issues the competition_id.
@@ -23,6 +24,10 @@ EPL_COMPETITION_NAME_HINTS: tuple[str, ...] = ("English Premier League", "Premie
 # kept as a fallback in case Betfair re-issues the competition_id.
 MLB_COMPETITION_ID = "11196870"
 MLB_COMPETITION_NAME_HINTS: tuple[str, ...] = ("Major League Baseball", "MLB")
+
+# NBA competition ID — Betfair calls it "NBA".
+NBA_COMPETITION_ID = "10547864"
+NBA_COMPETITION_NAME_HINTS: tuple[str, ...] = ("NBA",)
 
 
 @dataclass(frozen=True)
@@ -55,7 +60,7 @@ class SportBetfairConfig:
     # Markets collected alongside the match odds, stored only for an event whose match odds are.
     other_markets: tuple[BetfairMarketSpec, ...] = ()
     # Betfair event-name separator and ordering. Soccer: "Home v Away".
-    # Baseball: "Away @ Home". ``name_separator`` splits the event name and
+    # Baseball and basketball: "Away @ Home". ``name_separator`` splits the event name and
     # ``name_order`` says which side comes first in the resulting parts.
     name_separator: str = " v "
     name_order: Literal["home_first", "away_first"] = "home_first"
@@ -85,6 +90,16 @@ SPORT_CONFIG: dict[SportKey, SportBetfairConfig] = {
         match_odds=BetfairMarketSpec("MATCH_ODDS", Market.H2H),
         competition_id=MLB_COMPETITION_ID,
         competition_name_hints=MLB_COMPETITION_NAME_HINTS,
+        name_separator=" @ ",
+        name_order="away_first",
+    ),
+    "basketball_nba": SportBetfairConfig(
+        sport_key="basketball_nba",
+        sport_title="NBA",
+        event_type_id=EVENT_TYPE_BASKETBALL,
+        match_odds=BetfairMarketSpec("MATCH_ODDS", Market.H2H),
+        competition_id=NBA_COMPETITION_ID,
+        competition_name_hints=NBA_COMPETITION_NAME_HINTS,
         name_separator=" @ ",
         name_order="away_first",
     ),

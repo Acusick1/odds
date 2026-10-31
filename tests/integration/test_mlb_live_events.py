@@ -747,7 +747,7 @@ class TestBetfairUnpricedBooks:
         assert snapshot.market_start_time == self.BETFAIR_START
         assert snapshot.in_play is False
 
-    async def test_a_priceless_open_book_past_its_betfair_start_fails_the_empty_run_check(
+    async def test_a_priceless_open_book_past_its_betfair_start_passes_the_empty_run_check(
         self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
     ) -> None:
         mlb_schedule.schedule = [_game(813001, EVENING, YANKEES, RED_SOX)]
@@ -768,14 +768,13 @@ class TestBetfairUnpricedBooks:
             snapshot_time=self.SNAPSHOT,
         )
 
-        assert (stats.snapshots_stored, stats.accounted_fixtures) == (0, set())
-        with pytest.raises(EmptyCollectionError, match="with 1 fixture"):
-            await require_rows_for_fixtures(
-                fetch_betfair_exchange.SOURCE,
-                {MLB: stats.snapshots_stored},
-                accounted_by_sport={MLB: stats.accounted_fixtures},
-                now=self.SNAPSHOT,
-            )
+        assert (stats.snapshots_stored, stats.accounted_fixtures) == (0, {MlbGameKey(813001)})
+        await require_rows_for_fixtures(
+            fetch_betfair_exchange.SOURCE,
+            {MLB: stats.snapshots_stored},
+            accounted_by_sport={MLB: stats.accounted_fixtures},
+            now=self.SNAPSHOT,
+        )
 
     async def test_a_closed_book_past_its_betfair_start_accounts_for_its_game(
         self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
@@ -802,7 +801,7 @@ class TestBetfairUnpricedBooks:
         assert stats.accounted_fixtures == {MlbGameKey(813001)}
         assert stats.snapshots_stored == 0
 
-    async def test_an_unpriced_book_that_is_open_accounts_for_nothing(
+    async def test_an_unpriced_book_that_is_open_accounts_for_its_game(
         self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
     ) -> None:
         mlb_schedule.schedule = [_game(813001, EVENING, YANKEES, RED_SOX)]
@@ -811,7 +810,7 @@ class TestBetfairUnpricedBooks:
             _book(LISTED, EVENING, YANKEES, RED_SOX, priced=False), snapshot_time=self.SNAPSHOT
         )
 
-        assert stats.accounted_fixtures == set()
+        assert stats.accounted_fixtures == {MlbGameKey(813001)}
 
     @pytest.mark.parametrize("inplay", [True, False])
     async def test_a_book_with_no_start_time_stores_and_accounts_for_nothing(
