@@ -133,25 +133,31 @@ async def backfill_sport(
             try:
                 async with session.begin_nested():
                     found = await attach_event(session, listed_game(match, sport))
-                if not dry_run:
+                # A rollback expires the ORM event, so read what the loop needs first.
+                event = found.event if found is not None else None
+                event_id = event.id if event is not None else None
+                status = event.status if event is not None else None
+                kickoff = event.commence_time if event is not None else None
+                # Either way the fixture lock is released, so the next match may take a lower key.
+                if dry_run:
+                    await session.rollback()
+                else:
                     await session.commit()
-                if found is None:
+                if event is None or event_id is None or status is None or kickoff is None:
                     report.unmatched_pm_tickers.append(match.ticker)
                     continue
-                event = found.event
                 report.matches_attached += 1
-                if event.status != EventStatus.FINAL or event.commence_time < since:
+                if status != EventStatus.FINAL or kickoff < since:
                     report.matches_out_of_scope += 1
                     continue
-                attached_ids.add(event.id)
-                if event.id in existing:
+                attached_ids.add(event_id)
+                if event_id in existing:
                     report.events_skipped_existing += 1
                     continue
                 if limit is not None and written >= limit:
                     continue
                 written += 1
 
-                kickoff = event.commence_time
                 cutoff = min(kickoff, match.start_time)
                 series = await _fetch_series(
                     client, match, kickoff - MAX_HORIZON - MAX_STALENESS, cutoff, semaphore
@@ -162,7 +168,7 @@ async def backfill_sport(
                 if not resampled.points:
                     report.events_without_points += 1
                     logger.warning(
-                        "polymarket_no_grid_points", event_id=event.id, ticker=match.ticker
+                        "polymarket_no_grid_points", event_id=event_id, ticker=match.ticker
                     )
                     continue
 
@@ -175,7 +181,7 @@ async def backfill_sport(
                 report.events_written += 1
                 logger.info(
                     "polymarket_event_backfilled",
-                    event_id=event.id,
+                    event_id=event_id,
                     ticker=match.ticker,
                     snapshots=stored,
                     missing=resampled.missing,
