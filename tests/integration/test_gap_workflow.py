@@ -229,6 +229,7 @@ class TestGapDetectionWorkflow:
 
         # Execute with dry_run=True (simulates CLI --dry-run)
         async with BackfillExecutor(
+            sport="basketball_nba",
             client=mock_client,
             session_factory=mock_session_factory,
             skip_existing=True,  # Skip existing to avoid conflicts with fixture snapshots
@@ -277,6 +278,7 @@ class TestGapDetectionWorkflow:
         )
 
         async with BackfillExecutor(
+            sport="basketball_nba",
             client=mock_client,
             session_factory=mock_session_factory,
             skip_existing=False,
@@ -394,6 +396,7 @@ class TestGapDetectionWorkflow:
         }
 
         async with BackfillExecutor(
+            sport="basketball_nba",
             client=mock_client,
             session_factory=mock_session_factory,
             skip_existing=False,
@@ -499,6 +502,7 @@ class TestGapPlanCompatibility:
         )
 
         async with BackfillExecutor(
+            sport="basketball_nba",
             client=mock_client,
             session_factory=mock_session_factory,
             skip_existing=False,

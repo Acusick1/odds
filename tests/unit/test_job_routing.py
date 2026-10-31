@@ -222,10 +222,18 @@ class TestJobCronRegistry:
         # (its main() raises for the other configured sports, MLB included).
         assert get_job_sports("fetch-espn-fixtures") == ("soccer_epl", "basketball_nba")
 
-    @pytest.mark.parametrize("job", ["fetch-odds", "fetch-scores"])
-    def test_get_job_sports_restricts_event_driven_jobs_to_epl(self, job: str) -> None:
+    @pytest.mark.parametrize(
+        ("job", "sports"),
+        [
+            ("fetch-odds", ("soccer_epl", "basketball_nba")),
+            ("fetch-scores", ("soccer_epl",)),
+        ],
+    )
+    def test_get_job_sports_restricts_event_driven_jobs_to_the_sports_with_a_key(
+        self, job: str, sports: tuple[str, ...]
+    ) -> None:
         assert get_job_cron(job) is None
-        assert get_job_sports(job) == ("soccer_epl",)
+        assert get_job_sports(job) == sports
 
     def test_get_job_sports_returns_none_for_unrestricted_job(self) -> None:
         assert get_job_sports("fetch-oddsportal") is None

@@ -20,12 +20,40 @@ class APIConfig(BaseSettings):
 
     key: str | None = Field(default=None, description="A single Odds API key")
     keys: str | None = Field(
-        default=None, description="Comma-separated API keys for rotation (overrides key)"
+        default=None, description="Comma-separated API keys, in index order (overrides key)"
+    )
+    key_index_by_sport: dict[str, int] = Field(
+        default={"basketball_nba": 1},
+        description="Index into the keys of the key each sport spends; absent sports use index 0",
     )
     base_url: str = Field(
         default="https://api.the-odds-api.com/v4", description="Base URL for The Odds API"
     )
     quota: int = Field(default=500, description="Monthly API request quota per key")
+
+    @property
+    def key_list(self) -> list[str]:
+        """The configured keys in index order: ``keys`` when set, else ``key``."""
+        if self.keys:
+            return [k.strip() for k in self.keys.split(",") if k.strip()]
+        return [self.key] if self.key else []
+
+    def key_index_for(self, sport: str | None) -> int:
+        """Index of the key ``sport`` spends: its ``key_index_by_sport`` entry, 0 by default."""
+        return self.key_index_by_sport.get(sport, 0) if sport else 0
+
+    def key_for(self, sport: str | None) -> str:
+        """The key ``sport`` spends."""
+        keys = self.key_list
+        if not keys:
+            raise ValueError("No Odds API key configured: set ODDS_API_KEYS or ODDS_API_KEY")
+        index = self.key_index_for(sport)
+        if index >= len(keys):
+            raise ValueError(
+                f"{sport} spends Odds API key index {index} but {len(keys)} key(s) are "
+                "configured: set ODDS_API_KEYS to one key per index"
+            )
+        return keys[index]
 
 
 class DatabaseConfig(BaseSettings):
@@ -64,6 +92,21 @@ _UK_BOOKMAKERS: tuple[str, ...] = (
 )
 
 
+# Pinnacle and the UK retail books the Odds API prices for NBA (probed 2026-10-31, region uk).
+_NBA_BOOKMAKERS: tuple[str, ...] = (
+    "pinnacle",
+    "williamhill",
+    "ladbrokes_uk",
+    "coral",
+    "sport888",
+    "betvictor",
+    "paddypower",
+    "skybet",
+    "unibet_uk",
+    "betway",
+)
+
+
 class DataCollectionConfig(BaseSettings):
     """Data collection parameters."""
 
@@ -76,7 +119,7 @@ class DataCollectionConfig(BaseSettings):
         default_factory=lambda: {
             "soccer_epl": list(_UK_BOOKMAKERS),
             "baseball_mlb": list(_US_BOOKMAKERS),
-            "basketball_nba": list(_US_BOOKMAKERS),
+            "basketball_nba": list(_NBA_BOOKMAKERS),
         },
         description="Odds API bookmaker keys requested per sport; at most 10 cost one region",
     )
@@ -214,10 +257,12 @@ class AlertConfig(BaseSettings):
         default={
             # Overnight windows (EPL 22-06 UTC, MLB 05-14 UTC, NBA 07-15 UTC) pause these jobs, so the
             # allowed gap is the window plus the polling interval.
-            # The longest gaps between runs: the 48 h opening tier for fetch-odds (the 24 h
-            # no-game check-in is shorter) and the 12 h idle interval for fetch-scores,
-            # each plus 1 h slack. Neither job pauses overnight.
+            # The longest gaps between runs: the 48 h opening tier for fetch-odds-epl, the 24 h
+            # early, opening and no-game interval for fetch-odds-nba plus the 00:00-10:00 UTC
+            # quiet window that can push a run to 10:00 (gaps up to about 33 h), and the 12 h idle
+            # interval for fetch-scores, each plus slack. Only fetch-odds-nba pauses overnight.
             "fetch-odds-epl": 49,
+            "fetch-odds-nba": 35,
             "fetch-scores-epl": 13,
             "fetch-oddsportal-epl": 11,
             "fetch-oddsportal-results-epl": 26,

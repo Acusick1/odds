@@ -270,8 +270,8 @@ async def test_job_self_scheduling_chain(test_session, mock_session_factory):
     for event_id, (test_time, _, expected_hours, tier_name) in enumerate(test_cases, start=1):
         event = Event(
             id=event_id,
-            sport_key="basketball_nba",
-            sport_title="NBA",
+            sport_key="soccer_epl",
+            sport_title="EPL",
             commence_time=GAME_TIME,
             home_team=HOME_TEAM,
             away_team=AWAY_TEAM,
@@ -326,7 +326,7 @@ async def test_job_self_scheduling_chain(test_session, mock_session_factory):
             mock_backend.get_backend_name = lambda: "mock_backend"
             mock_backend_getter.return_value = mock_backend
 
-            await fetch_odds.main(JobContext(sport="basketball_nba"))
+            await fetch_odds.main(JobContext(sport="soccer_epl"))
 
         # fetch_odds pre-schedules then post-reschedules; both land on the same
         # proximity-derived time under frozen clock + unchanged fixtures.

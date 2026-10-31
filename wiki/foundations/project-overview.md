@@ -22,7 +22,7 @@ Design principles `(inferred)`: robust collection and storage before analysis; a
 
 ## Sports
 
-EPL and MLB price collection is active. NBA OddsPortal and Betfair collection is configured and starts once the ESPN NBA schedule supplies fixtures (#725); the Odds API collects EPL only. The agents run by hand on the production host, not autonomously, and are paused. NBA injury, game-log and player-stat code exists but runs only by manual command. `odds_core.sports.SportKey` allows all three. EPL odds are stored under market key `1x2` and MLB under `h2h`; see [Sport, market and bookmaker keys](../collection/sport-and-market-keys.md).
+EPL and MLB price collection is active. NBA OddsPortal and Betfair collection is configured and starts once the ESPN NBA schedule supplies fixtures (#725); the Odds API collects EPL (key 0) and NBA (key 1) ([keys](../collection/odds-api-client.md#retry-and-keys)). The agents run by hand on the production host, not autonomously, and are paused. NBA injury, game-log and player-stat code exists but runs only by manual command. `odds_core.sports.SportKey` allows all three. EPL odds are stored under market key `1x2` and MLB under `h2h`; see [Sport, market and bookmaker keys](../collection/sport-and-market-keys.md).
 
 ## Goal
 

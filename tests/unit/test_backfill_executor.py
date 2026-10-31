@@ -23,7 +23,7 @@ class TestBackfillExecutor:
         progress_updates = []
 
         async with BackfillExecutor(
-            client=mock_client, dry_run=True, rate_limit_seconds=0
+            sport="basketball_nba", client=mock_client, dry_run=True, rate_limit_seconds=0
         ) as executor:
             result = await executor.execute_plan(
                 sample_backfill_plan, progress_callback=lambda p: progress_updates.append(p)
@@ -45,7 +45,7 @@ class TestBackfillExecutor:
         # Client not used in this test, just needs to exist
         mock_client = AsyncMock()
 
-        async with BackfillExecutor(client=mock_client) as executor:
+        async with BackfillExecutor("basketball_nba", client=mock_client) as executor:
             with pytest.raises(ValueError, match="Plan contains no games"):
                 await executor.execute_plan({"games": []})
 
@@ -61,7 +61,7 @@ class TestBackfillExecutor:
         progress_updates = []
 
         async with BackfillExecutor(
-            client=error_client, skip_existing=False, rate_limit_seconds=0
+            sport="basketball_nba", client=error_client, skip_existing=False, rate_limit_seconds=0
         ) as executor:
             result = await executor.execute_plan(
                 sample_backfill_plan, progress_callback=lambda p: progress_updates.append(p)
@@ -80,7 +80,7 @@ class TestBackfillExecutor:
 
         progress_updates = []
 
-        async with BackfillExecutor(client=mock_client, dry_run=True) as executor:
+        async with BackfillExecutor("basketball_nba", client=mock_client, dry_run=True) as executor:
             await executor.execute_plan(
                 sample_backfill_plan, progress_callback=lambda p: progress_updates.append(p)
             )
@@ -110,7 +110,7 @@ class TestBackfillExecutor:
 
         with patch("asyncio.sleep") as mock_sleep:
             async with BackfillExecutor(
-                client=mock_client, dry_run=True, rate_limit_seconds=1.5
+                sport="basketball_nba", client=mock_client, dry_run=True, rate_limit_seconds=1.5
             ) as executor:
                 await executor.execute_plan(sample_backfill_plan)
 
@@ -184,6 +184,7 @@ class TestBackfillExecutor:
                 return mock_session
 
             async with BackfillExecutor(
+                sport="basketball_nba",
                 client=stub_client,
                 session_factory=mock_factory,
                 skip_existing=False,
@@ -218,7 +219,7 @@ class TestBackfillExecutor:
         progress_updates = []
 
         async with BackfillExecutor(
-            client=empty_client, skip_existing=False, rate_limit_seconds=0
+            sport="basketball_nba", client=empty_client, skip_existing=False, rate_limit_seconds=0
         ) as executor:
             result = await executor.execute_plan(
                 sample_backfill_plan, progress_callback=lambda p: progress_updates.append(p)

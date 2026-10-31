@@ -35,7 +35,7 @@ variable "odds_api_key" {
 }
 
 variable "odds_api_keys" {
-  description = "Comma-separated Odds API keys for rotation (overrides odds_api_key)"
+  description = "Comma-separated Odds API keys in index order (overrides odds_api_key); NBA spends index 1"
   type        = string
   sensitive   = true
   default     = ""

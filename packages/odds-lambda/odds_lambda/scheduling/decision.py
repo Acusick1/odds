@@ -79,6 +79,7 @@ class Lead:
 
     before: timedelta
     until: timedelta = timedelta(0)
+    kickoff_lookup: KickoffLookup | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -247,7 +248,9 @@ async def next_lead_run(
     for sport_key in sport_keys:
         for lead in set(leads):
             after = max(started + lead.before + MIN_LEAD_RUN_GAP, now + lead.until)
-            kickoff = await (lookup or get_next_kickoff)(sport_key, now=after)
+            kickoff = await (lead.kickoff_lookup or lookup or get_next_kickoff)(
+                sport_key, now=after
+            )
             if kickoff is not None:
                 runs.append(LeadRun(lead, kickoff, max(kickoff - lead.before, now)))
     return min(runs, key=lambda run: run.at, default=None)

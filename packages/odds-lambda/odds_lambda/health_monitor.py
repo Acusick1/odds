@@ -16,7 +16,7 @@ from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Protocol
+from typing import NamedTuple, Protocol
 
 import structlog
 from odds_core.alerts import job_outage_alerted_at, send_recorded_alert
@@ -162,11 +162,20 @@ def collection_sources() -> tuple[CollectionSource, ...]:
     )
 
 
+class QuotaReading(NamedTuple):
+    """The Odds API quota left on one key and the sports that spend it."""
+
+    key_index: int
+    sports: tuple[str, ...]
+    remaining: int
+    fraction: float
+
+
 class HealthMetrics(BaseModel):
     """Health check metrics."""
 
     hours_since_last_fetch: float | None
-    api_quota_remaining: int | None
+    api_quota_by_key: dict[int, int]
     data_quality_errors_24h: int
     events_scheduled: int
     events_live: int
@@ -436,30 +445,23 @@ class HealthMonitor:
             event_id for context in contexts for event_id in (context or {}).get("event_ids", [])
         }
 
-    async def check_api_quota(self) -> tuple[bool, int | None, float | None]:
+    async def check_api_quota(self) -> list[QuotaReading]:
         """
-        Check API quota levels.
+        Each key's balance as a fraction of ``settings.api.quota``, lowest first.
 
-        Returns:
-            (is_healthy, quota_remaining, quota_fraction)
+        A key no sport has recorded a quota for in the last month has no reading, and two sports
+        sharing a key give one reading.
         """
         from odds_lambda.storage.readers import OddsReader
 
-        reader = OddsReader(self.session)
-        stats = await reader.get_database_stats()
-
-        quota_remaining = stats.get("api_quota_remaining")
-
-        if quota_remaining is None:
-            # No quota data available yet
-            return True, None, None
-
-        quota_fraction = quota_remaining / self.settings.api.quota
-        warning_threshold = self.settings.alerts.quota_warning_threshold
-
-        is_healthy = quota_fraction >= warning_threshold
-
-        return is_healthy, quota_remaining, quota_fraction
+        quotas = await OddsReader(self.session).get_latest_quota_by_key(self.settings.api)
+        readings = [
+            QuotaReading(
+                index, quota.sports, quota.remaining, quota.remaining / self.settings.api.quota
+            )
+            for index, quota in quotas.items()
+        ]
+        return sorted(readings, key=lambda reading: reading.fraction)
 
     async def check_data_quality(self) -> tuple[bool, int]:
         """
@@ -638,7 +640,7 @@ class HealthMonitor:
 
         return HealthMetrics(
             hours_since_last_fetch=hours_since_last_fetch,
-            api_quota_remaining=stats.get("api_quota_remaining"),
+            api_quota_by_key={i: q.remaining for i, q in stats["api_quota_by_key"].items()},
             data_quality_errors_24h=data_quality_errors,
             events_scheduled=stats.get("events_by_status", {}).get("scheduled", 0),
             events_live=stats.get("events_by_status", {}).get("live", 0),
@@ -789,45 +791,44 @@ class HealthMonitor:
                 ):
                     alerts_sent.append(BETFAIR_CLOSE_ALERT_TYPE)
 
-            # Check 2: API quota
-            quota_healthy, quota_remaining, quota_fraction = await self.check_api_quota()
+            # Check 2: API quota, per key
+            for reading in await self.check_api_quota():
+                percentage_remaining = round(reading.fraction * 100, 1)
+                detail = (
+                    f"key {reading.key_index} ({', '.join(reading.sports)}): "
+                    f"{reading.remaining} requests "
+                    f"({percentage_remaining}%)"
+                )
+                context = {
+                    "key_index": reading.key_index,
+                    "sports": list(reading.sports),
+                    "quota_remaining": reading.remaining,
+                    "quota_fraction": reading.fraction,
+                }
 
-            if quota_remaining is not None and quota_fraction is not None:
-                critical_threshold = self.settings.alerts.quota_critical_threshold
-                warning_threshold = self.settings.alerts.quota_warning_threshold
-                percentage_remaining = round(quota_fraction * 100, 1)
-
-                if quota_fraction < critical_threshold:
-                    issue = (
-                        f"API quota critical: {quota_remaining} requests ({percentage_remaining}%)"
-                    )
+                if reading.fraction < self.settings.alerts.quota_critical_threshold:
+                    issue = f"API quota critical: {detail}"
                     issues_detected.append(issue)
-
+                    alert_type = f"quota_critical:key{reading.key_index}"
                     if await self._send_alert(
-                        alert_type="quota_critical",
+                        alert_type=alert_type,
                         severity="critical",
                         message=f"🚨 {issue}",
-                        context={
-                            "quota_remaining": quota_remaining,
-                            "quota_fraction": quota_fraction,
-                        },
+                        context=context,
                     ):
-                        alerts_sent.append("quota_critical")
+                        alerts_sent.append(alert_type)
 
-                elif quota_fraction < warning_threshold:
-                    issue = f"API quota low: {quota_remaining} requests ({percentage_remaining}%)"
+                elif reading.fraction < self.settings.alerts.quota_warning_threshold:
+                    issue = f"API quota low: {detail}"
                     issues_detected.append(issue)
-
+                    alert_type = f"quota_low:key{reading.key_index}"
                     if await self._send_alert(
-                        alert_type="quota_low",
+                        alert_type=alert_type,
                         severity="warning",
                         message=f"⚠️ {issue}",
-                        context={
-                            "quota_remaining": quota_remaining,
-                            "quota_fraction": quota_fraction,
-                        },
+                        context=context,
                     ):
-                        alerts_sent.append("quota_low")
+                        alerts_sent.append(alert_type)
 
             # Check 3: Data quality
             quality_healthy, error_count = await self.check_data_quality()
@@ -907,7 +908,7 @@ class HealthMonitor:
                 overall_healthy=False,
                 metrics=HealthMetrics(
                     hours_since_last_fetch=None,
-                    api_quota_remaining=None,
+                    api_quota_by_key={},
                     data_quality_errors_24h=0,
                     events_scheduled=0,
                     events_live=0,

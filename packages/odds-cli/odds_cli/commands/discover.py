@@ -24,7 +24,7 @@ def games(
     ),
     end: str = typer.Option(today.isoformat(), "--end", help="End date (YYYY-MM-DD)"),
     sport: str = typer.Option(
-        "basketball_nba", "--sport", "-s", help="Sport to discover games for"
+        ..., "--sport", "-s", help="Sport to discover games for (spends its key's units)"
     ),
 ):
     """

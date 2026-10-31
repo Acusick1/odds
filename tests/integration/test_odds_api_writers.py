@@ -633,6 +633,7 @@ class TestBackfill:
         }
 
         async with BackfillExecutor(
+            sport="basketball_nba",
             client=client,  # type: ignore[arg-type]
             session_factory=_Factory(session),
             skip_existing=False,

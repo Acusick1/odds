@@ -18,22 +18,22 @@ Loads historical Odds API snapshots and scores for NBA. It spends paid quota and
 
 1. Discover the events.
    ```bash
-   uv run odds discover games --start 2025-01-01 --end 2025-01-07
+   uv run odds discover games --start 2025-01-01 --end 2025-01-07 --sport basketball_nba
    ```
    - It resolves each listed game to its event: a game already in the database (stored by any source) keeps its status, scores and teams, and a new one is created as SCHEDULED. It commits every 100 games and prints dropped counts.
 2. Build a plan.
    ```bash
-   uv run odds backfill plan --start 2025-01-01 --end 2025-01-07 --games 20 --output plan.json
+   uv run odds backfill plan --start 2025-01-01 --end 2025-01-07 --sport basketball_nba --games 20 --output plan.json
    ```
    - The plan fixes five snapshots per game, so cost is known before you spend it.
    - Each game carries the stored event's integer id (`event_id`) and the Odds API id recorded for it as an `odds_api` external id (`odds_api_id`, null when none is recorded); the executor stores the snapshots on the stored event and skips a game whose `odds_api_id` is null.
 3. Dry-run, then execute.
    ```bash
-   uv run odds backfill execute --plan plan.json --dry-run
-   uv run odds backfill execute --plan plan.json
+   uv run odds backfill execute --plan plan.json --sport basketball_nba --dry-run
+   uv run odds backfill execute --plan plan.json --sport basketball_nba
    ```
    > [!WARNING]
-   > `odds backfill execute` spends paid historical quota, 10 units per region per market per call. `gaps` is not sport-filtered and the executor requests NBA odds for every event, so non-NBA events consume quota and return nothing (#448).
+   > `odds backfill execute` spends paid historical quota, 10 units per region per market per call. `gaps` is not sport-filtered and the executor requests the `--sport` odds for every event, so events of another sport consume that sport's key and return nothing (#448).
 
    - Confirm the prompt only after the dry-run estimate fits the quota; the estimate is a constant 30 units per snapshot (#441).
    - Existing snapshots within 5 minutes are skipped unless you pass `--no-skip-existing`.
@@ -56,7 +56,7 @@ Loads historical Odds API snapshots and scores for NBA. It spends paid quota and
    - Under `--max-quota` games are included whole or not at all, and it errors if even the first game exceeds the cap.
 2. Execute the gap plan.
    ```bash
-   uv run odds backfill execute --plan gap.json --dry-run
+   uv run odds backfill execute --plan gap.json --sport basketball_nba --dry-run
    ```
    - Rerun without `--dry-run` once the estimate fits the quota; the warning above applies.
 

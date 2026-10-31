@@ -11,7 +11,7 @@ if "ODDS_API_KEY" not in os.environ:
 if "DATABASE_URL" not in os.environ:
     os.environ["DATABASE_URL"] = "postgresql://test:test@localhost/test"
 
-from odds_core.config import Settings
+from odds_core.config import APIConfig, Settings
 
 
 class TestSettings:
@@ -117,7 +117,18 @@ class TestSettings:
             ]
 
             assert settings.data_collection.bookmakers_for("baseball_mlb") == expected_bookmakers
-            assert settings.data_collection.bookmakers_for("basketball_nba") == expected_bookmakers
+            assert settings.data_collection.bookmakers_for("basketball_nba") == [
+                "pinnacle",
+                "williamhill",
+                "ladbrokes_uk",
+                "coral",
+                "sport888",
+                "betvictor",
+                "paddypower",
+                "skybet",
+                "unibet_uk",
+                "betway",
+            ]
 
     def test_settings_bookmakers_fit_one_region(self):
         """Each sport names at most 10 bookmakers, which the Odds API bills as one region."""
@@ -267,3 +278,30 @@ class TestAPIConfigKeys:
 
         assert settings.api.key is None
         assert settings.api.keys == "a,b"
+
+    def test_each_sport_spends_the_key_at_its_index(self):
+        api = APIConfig(keys="epl-key, nba-key", _env_file=None)
+
+        assert api.key_for("soccer_epl") == "epl-key"
+        assert api.key_for(None) == "epl-key"
+        assert api.key_for("basketball_nba") == "nba-key"
+
+    def test_single_key_serves_the_sports_at_index_zero(self):
+        api = APIConfig(key="only", _env_file=None)
+
+        assert api.key_for("soccer_epl") == "only"
+
+    def test_a_sport_beyond_the_configured_keys_raises(self):
+        api = APIConfig(key="only", _env_file=None)
+
+        with pytest.raises(ValueError, match="basketball_nba spends Odds API key index 1"):
+            api.key_for("basketball_nba")
+
+    def test_key_index_comes_from_the_environment(self):
+        with patch.dict(
+            os.environ, {"ODDS_API_KEY_INDEX_BY_SPORT": '{"baseball_mlb": 1}'}, clear=True
+        ):
+            api = APIConfig(keys="a,b", _env_file=None)
+
+        assert api.key_for("baseball_mlb") == "b"
+        assert api.key_for("basketball_nba") == "a"

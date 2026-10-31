@@ -51,6 +51,7 @@ class BackfillExecutor:
 
     def __init__(
         self,
+        sport: str,
         client: TheOddsAPIClient | None = None,
         session_factory: Callable | None = None,
         skip_existing: bool = True,
@@ -61,6 +62,7 @@ class BackfillExecutor:
         Initialize backfill executor.
 
         Args:
+            sport: Sport whose games are backfilled; its key pays for the calls
             client: API client (will create one if not provided)
             session_factory: Factory function to create database sessions
                            (defaults to async_session_maker)
@@ -68,13 +70,14 @@ class BackfillExecutor:
             dry_run: If True, simulate execution without API calls
             rate_limit_seconds: Seconds to wait between API requests
         """
+        self.sport = sport
         self._client = client
         self._owns_client = client is None
         self._session_factory = session_factory or async_session_maker
         self.skip_existing = skip_existing
         self.dry_run = dry_run
         self.rate_limit_seconds = rate_limit_seconds
-        # NBA only, so the finder reads no MLB schedule and one serves the whole run
+        # Not MLB, so the finder reads no MLB schedule and one serves the whole run
         self._finder: LiveEventFinder | None = None
         self._dropped_games: list[DroppedGame] = []
 
@@ -269,7 +272,7 @@ class BackfillExecutor:
             raise RuntimeError("BackfillExecutor client not initialized")
 
         response = await client.get_historical_odds(
-            sport="basketball_nba",
+            sport=self.sport,
             date=snapshot_time,
         )
 

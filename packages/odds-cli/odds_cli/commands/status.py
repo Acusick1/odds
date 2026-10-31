@@ -65,15 +65,15 @@ async def _show_status(verbose: bool):
             table.add_row("Price Rows", f"{stats.get('total_price_rows', 0):,}")
             table.add_row("Snapshots", f"{stats.get('total_snapshots', 0):,}")
 
-            # API quota
-            quota_remaining = stats.get("api_quota_remaining")
-            if quota_remaining is not None:
+            # API quota, one row per key
+            for index, key_quota in stats["api_quota_by_key"].items():
+                quota_remaining = key_quota.remaining
                 quota_percent = (quota_remaining / app_settings.api.quota) * 100
                 quota_color = (
                     "green" if quota_percent > 50 else ("yellow" if quota_percent > 20 else "red")
                 )
                 table.add_row(
-                    "API Quota",
+                    f"API Quota (key {index}: {', '.join(key_quota.sports)})",
                     f"[{quota_color}]{quota_remaining:,} / {app_settings.api.quota:,} "
                     f"({quota_percent:.1f}%)[/{quota_color}]",
                 )
@@ -132,6 +132,47 @@ async def _show_status(verbose: bool):
         raise typer.Exit(code=1) from e
 
 
+def _print_quota(label: str, readings: list[tuple[datetime, int]], total_quota: int) -> None:
+    """Print one key's balance and its recent usage; ``readings`` are newest first."""
+    quota_remaining = readings[0][1]
+    quota_used = total_quota - quota_remaining
+    quota_percent = (quota_remaining / total_quota) * 100
+
+    console.print(f"[bold]{label}[/bold]")
+    table = Table(show_header=False, box=None)
+    table.add_column("Metric", style="cyan")
+    table.add_column("Value")
+
+    quota_color = "green" if quota_percent > 50 else ("yellow" if quota_percent > 20 else "red")
+
+    table.add_row("Total Quota", f"{total_quota:,}")
+    table.add_row("Used", f"{quota_used:,}")
+    table.add_row(
+        "Remaining",
+        f"[{quota_color}]{quota_remaining:,} ({quota_percent:.1f}%)[/{quota_color}]",
+    )
+
+    console.print(table)
+
+    console.print("\n[bold]Recent Usage:[/bold]")
+    trend_table = Table()
+    trend_table.add_column("Time")
+    trend_table.add_column("Remaining", justify="right")
+    trend_table.add_column("Used", justify="right")
+
+    for i, (fetch_time, remaining) in enumerate(readings):
+        minutes_ago = int((datetime.now(UTC) - fetch_time).total_seconds() / 60)
+        if i + 1 < len(readings):
+            spent = readings[i + 1][1] - remaining
+            used = f"{spent}" if spent >= 0 else "reset"
+        else:
+            used = ""
+        trend_table.add_row(f"{minutes_ago}m ago", f"{remaining:,}", used)
+
+    console.print(trend_table)
+    console.print()
+
+
 @app.command("quota")
 def show_quota():
     """Show API quota usage."""
@@ -147,54 +188,23 @@ async def _show_quota():
         async with async_session_maker() as session:
             reader = OddsReader(session)
 
-            fetch_logs = await reader.get_fetch_logs(limit=10, with_quota=True)
-            readings = [
-                (log.fetch_time, log.api_quota_remaining)
-                for log in fetch_logs
-                if log.api_quota_remaining is not None
-            ]
-
-            if not readings:
+            quotas = await reader.get_latest_quota_by_key(app_settings.api)
+            if not quotas:
                 console.print("[yellow]No fetch log records an API quota[/yellow]\n")
                 return
 
-            quota_remaining = readings[0][1]
-            quota_used = app_settings.api.quota - quota_remaining
-            quota_percent = (quota_remaining / app_settings.api.quota) * 100
-
-            table = Table(show_header=False, box=None)
-            table.add_column("Metric", style="cyan")
-            table.add_column("Value")
-
-            quota_color = (
-                "green" if quota_percent > 50 else ("yellow" if quota_percent > 20 else "red")
-            )
-
-            table.add_row("Total Quota", f"{app_settings.api.quota:,}")
-            table.add_row("Used", f"{quota_used:,}")
-            table.add_row(
-                "Remaining",
-                f"[{quota_color}]{quota_remaining:,} ({quota_percent:.1f}%)[/{quota_color}]",
-            )
-
-            console.print(table)
-
-            console.print("\n[bold]Recent Usage:[/bold]")
-            trend_table = Table()
-            trend_table.add_column("Time")
-            trend_table.add_column("Remaining", justify="right")
-            trend_table.add_column("Used", justify="right")
-
-            for i, (fetch_time, remaining) in enumerate(readings):
-                minutes_ago = int((datetime.now(UTC) - fetch_time).total_seconds() / 60)
-                if i + 1 < len(readings):
-                    spent = readings[i + 1][1] - remaining
-                    used = f"{spent}" if spent >= 0 else "reset"
-                else:
-                    used = ""
-                trend_table.add_row(f"{minutes_ago}m ago", f"{remaining:,}", used)
-
-            console.print(trend_table)
+            for index, key_quota in quotas.items():
+                fetch_logs = await reader.get_fetch_logs(
+                    sport_keys=key_quota.sports, limit=10, with_quota=True
+                )
+                readings = [
+                    (log.fetch_time, log.api_quota_remaining)
+                    for log in fetch_logs
+                    if log.api_quota_remaining is not None
+                ]
+                _print_quota(
+                    f"key {index}: {', '.join(key_quota.sports)}", readings, app_settings.api.quota
+                )
 
             console.print()
 

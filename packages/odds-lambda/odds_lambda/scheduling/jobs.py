@@ -135,8 +135,8 @@ _JOB_SPORTS: dict[str, tuple[SportKey, ...]] = {
     "fetch-mlb-probables": ("baseball_mlb",),
     # MLB is settled from the MLB Stats API by fetch-mlb-results.
     "fetch-oddsportal-results": ("soccer_epl",),
-    # Odds API quota is spent on EPL only.
-    "fetch-odds": ("soccer_epl",),
+    # EPL and NBA each spend their own Odds API key; NBA results come from ESPN, not fetch-scores.
+    "fetch-odds": ("soccer_epl", "basketball_nba"),
     "fetch-scores": ("soccer_epl",),
 }
 

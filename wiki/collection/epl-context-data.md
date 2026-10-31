@@ -12,12 +12,12 @@ sources:
   - odds_lambda.storage.fpl_availability_reader.FplAvailabilityReader
   - odds_core.epl_data_models.EspnFixture
   - odds_lambda.scheduling.jobs._JOB_CRON_MAP
-  - odds_lambda.scheduling.jobs._JOB_SPORTS
   - odds_mcp.tools.epl._is_final
   - scripts/ingest_espn_lineups.py
   - scripts/ingest_fbref_player_stats.py
   - deployment/aws/terraform/eventbridge.tf
 mentions:
+  - odds_lambda.scheduling.jobs._JOB_SPORTS
   - odds_core.alerts.job_alert_context
 status: stable
 ---

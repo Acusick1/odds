@@ -93,6 +93,7 @@ class TestBackfillIntegration:
 
         # Execute backfill
         async with BackfillExecutor(
+            sport="basketball_nba",
             client=mock_client,
             session_factory=mock_session_factory,
             skip_existing=False,
@@ -144,6 +145,7 @@ class TestBackfillIntegration:
 
         # First execution - insert data
         async with BackfillExecutor(
+            sport="basketball_nba",
             client=mock_client,
             session_factory=mock_session_factory,
             skip_existing=False,
@@ -156,6 +158,7 @@ class TestBackfillIntegration:
         mock_client.get_historical_odds.reset_mock()  # Reset call count
 
         async with BackfillExecutor(
+            sport="basketball_nba",
             client=mock_client,
             session_factory=mock_session_factory,
             skip_existing=True,
@@ -206,6 +209,7 @@ class TestBackfillIntegration:
         )
 
         async with BackfillExecutor(
+            sport="basketball_nba",
             client=mock_client,
             session_factory=mock_session_factory,
             skip_existing=False,
@@ -238,6 +242,7 @@ class TestBackfillIntegration:
 
         # Execute backfill
         async with BackfillExecutor(
+            sport="basketball_nba",
             client=mock_client,
             session_factory=mock_session_factory,
             skip_existing=False,

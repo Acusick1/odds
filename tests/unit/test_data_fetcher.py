@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
-from odds_lambda.api_key_manager import AllKeysExhaustedError, APIKeyManager
 from odds_lambda.data_fetcher import TheOddsAPIClient, canonicalize_bookmaker_keys
 
 
@@ -121,12 +120,8 @@ def _no_retry_wait(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(TheOddsAPIClient._send.retry, "sleep", AsyncMock())
 
 
-def _client(statuses: list[int], keys: list[str] | None = None) -> tuple[TheOddsAPIClient, Any]:
+def _client(statuses: list[int]) -> tuple[TheOddsAPIClient, Any]:
     client = TheOddsAPIClient(api_key="only")
-    if keys:
-        client._key_manager = APIKeyManager(keys)
-        client._key_manager._ssm_available = False
-        client.api_key = client._key_manager.get_active_key()
     session = _StubSession(statuses)
     client.session = session  # type: ignore[assignment]
     return client, session
@@ -135,11 +130,11 @@ def _client(statuses: list[int], keys: list[str] | None = None) -> tuple[TheOdds
 class TestRequestRetries:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("status", [401, 429])
-    async def test_auth_and_quota_errors_fail_fast_without_key_manager(self, status: int):
+    async def test_auth_and_quota_errors_fail_after_one_call(self, status: int):
         client, session = _client([status])
 
         with pytest.raises(aiohttp.ClientResponseError) as exc_info:
-            await client._make_request("sports")
+            await client._make_request("sports", "soccer_epl")
 
         assert exc_info.value.status == status
         assert len(session.api_keys) == 1
@@ -149,7 +144,7 @@ class TestRequestRetries:
         client, session = _client([422])
 
         with pytest.raises(aiohttp.ClientResponseError):
-            await client._make_request("sports")
+            await client._make_request("sports", "soccer_epl")
 
         assert len(session.api_keys) == 1
 
@@ -158,7 +153,7 @@ class TestRequestRetries:
         client, session = _client([500, 500, 500])
 
         with pytest.raises(aiohttp.ClientResponseError) as exc_info:
-            await client._make_request("sports")
+            await client._make_request("sports", "soccer_epl")
 
         assert exc_info.value.status == 500
         assert len(session.api_keys) == 3
@@ -167,29 +162,10 @@ class TestRequestRetries:
     async def test_transient_error_recovers(self):
         client, session = _client([503, 200])
 
-        data, _ = await client._make_request("sports")
+        data, _ = await client._make_request("sports", "soccer_epl")
 
         assert data == []
         assert len(session.api_keys) == 2
-
-    @pytest.mark.asyncio
-    async def test_rotates_key_on_429_without_nested_retries(self):
-        client, session = _client([429, 500, 500, 500], keys=["a", "b"])
-
-        with pytest.raises(aiohttp.ClientResponseError) as exc_info:
-            await client._make_request("sports")
-
-        assert exc_info.value.status == 500
-        assert session.api_keys == ["a", "b", "b", "b"]
-
-    @pytest.mark.asyncio
-    async def test_all_keys_exhausted_stops_after_one_call_per_key(self):
-        client, session = _client([401, 429], keys=["a", "b"])
-
-        with pytest.raises(AllKeysExhaustedError):
-            await client._make_request("sports")
-
-        assert session.api_keys == ["a", "b"]
 
 
 class TestClientKeySource:
@@ -200,13 +176,43 @@ class TestClientKeySource:
             with pytest.raises(ValueError, match="ODDS_API_KEYS or ODDS_API_KEY"):
                 TheOddsAPIClient()
 
-    def test_keys_alone_enable_rotation(self, mock_settings):
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("sport", "expected"), [("soccer_epl", "a"), ("basketball_nba", "b")])
+    async def test_each_sport_spends_its_own_key(self, mock_settings, sport: str, expected: str):
         mock_settings.api.key = None
         mock_settings.api.keys = "a, b"
         with patch("odds_lambda.data_fetcher.get_settings", return_value=mock_settings):
             client = TheOddsAPIClient()
-        assert client._key_manager is not None
-        assert client._key_manager.key_count == 2
+        session = _StubSession([200, 200])
+        client.session = session  # type: ignore[assignment]
+
+        await client._make_request(f"sports/{sport}/events", sport)
+
+        assert session.api_keys == [expected]
+
+    @pytest.mark.asyncio
+    async def test_a_rejected_key_is_not_replaced_by_another_sports_key(self, mock_settings):
+        mock_settings.api.key = None
+        mock_settings.api.keys = "a, b"
+        with patch("odds_lambda.data_fetcher.get_settings", return_value=mock_settings):
+            client = TheOddsAPIClient()
+        session = _StubSession([429])
+        client.session = session  # type: ignore[assignment]
+
+        with pytest.raises(aiohttp.ClientResponseError):
+            await client._make_request("sports/basketball_nba/odds", "basketball_nba")
+
+        assert session.api_keys == ["b"]
+
+    @pytest.mark.asyncio
+    async def test_a_sport_whose_key_index_is_not_configured_raises(self, mock_settings):
+        mock_settings.api.keys = None
+        mock_settings.api.key = "only"
+        with patch("odds_lambda.data_fetcher.get_settings", return_value=mock_settings):
+            client = TheOddsAPIClient()
+
+        with pytest.raises(ValueError, match="basketball_nba spends Odds API key index 1"):
+            await client._make_request("sports/basketball_nba/events", "basketball_nba")
 
 
 class TestQuotaOnErrors:
@@ -215,6 +221,6 @@ class TestQuotaOnErrors:
         client, _ = _client([429])
 
         with pytest.raises(aiohttp.ClientResponseError):
-            await client._make_request("sports")
+            await client._make_request("sports", "soccer_epl")
 
         assert client.quota_remaining == 100

@@ -25,7 +25,16 @@ class TestDiscoverCommand:
         """Test that command validates date format."""
         result = runner.invoke(
             app,
-            ["discover", "games", "--start", "2024/10/01", "--end", "2024-10-31"],
+            [
+                "discover",
+                "games",
+                "--sport",
+                "basketball_nba",
+                "--start",
+                "2024/10/01",
+                "--end",
+                "2024-10-31",
+            ],
         )
 
         assert result.exit_code == 1
@@ -35,7 +44,16 @@ class TestDiscoverCommand:
         """Test that command validates start date is before end date."""
         result = runner.invoke(
             app,
-            ["discover", "games", "--start", "2024-10-31", "--end", "2024-10-01"],
+            [
+                "discover",
+                "games",
+                "--sport",
+                "basketball_nba",
+                "--start",
+                "2024-10-31",
+                "--end",
+                "2024-10-01",
+            ],
         )
 
         assert result.exit_code == 1
@@ -64,6 +82,8 @@ class TestDiscoverCommand:
                         [
                             "discover",
                             "games",
+                            "--sport",
+                            "basketball_nba",
                             "--start",
                             "2024-10-15",
                             "--end",
@@ -109,6 +129,8 @@ class TestDiscoverCommand:
                         [
                             "discover",
                             "games",
+                            "--sport",
+                            "basketball_nba",
                             "--start",
                             "2024-10-15",
                             "--end",
@@ -137,6 +159,8 @@ class TestDiscoverCommand:
                 [
                     "discover",
                     "games",
+                    "--sport",
+                    "basketball_nba",
                     "--start",
                     "2024-10-15",
                     "--end",
@@ -161,6 +185,8 @@ class TestDiscoverCommand:
                 [
                     "discover",
                     "games",
+                    "--sport",
+                    "basketball_nba",
                     "--start",
                     "2024-10-15",
                     "--end",
@@ -190,6 +216,8 @@ class TestDiscoverCommand:
                     [
                         "discover",
                         "games",
+                        "--sport",
+                        "basketball_nba",
                         "--start",
                         "2024-10-15",
                         "--end",
@@ -239,6 +267,8 @@ class TestDiscoverCommand:
                         [
                             "discover",
                             "games",
+                            "--sport",
+                            "basketball_nba",
                             "--start",
                             "2024-10-15",
                             "--end",
@@ -288,6 +318,8 @@ class TestDiscoverCommand:
                     [
                         "discover",
                         "games",
+                        "--sport",
+                        "basketball_nba",
                         "--start",
                         "2024-10-15",
                         "--end",

@@ -61,6 +61,7 @@ class TestBackfillPlanFromDatabase:
         mock_session = AsyncMock()
         mock_reader = AsyncMock(spec=OddsReader)
         mock_reader.get_events_by_date_range = AsyncMock(return_value=sample_db_events)
+        mock_reader.get_latest_quota_by_key = AsyncMock(return_value={})
 
         # Mock GameSelector
         mock_selector = MagicMock()
@@ -93,6 +94,7 @@ class TestBackfillPlanFromDatabase:
                 end_date_str="2024-01-17",
                 target_games=3,
                 output_file="test_plan.json",
+                sport="basketball_nba",
             )
 
             # Verify database was queried
@@ -109,6 +111,7 @@ class TestBackfillPlanFromDatabase:
         mock_session = AsyncMock()
         mock_reader = AsyncMock(spec=OddsReader)
         mock_reader.get_events_by_date_range = AsyncMock(return_value=sample_db_events)
+        mock_reader.get_latest_quota_by_key = AsyncMock(return_value={})
 
         captured_events_by_date = None
 
@@ -144,6 +147,7 @@ class TestBackfillPlanFromDatabase:
                 end_date_str="2024-01-17",
                 target_games=3,
                 output_file="test_plan.json",
+                sport="basketball_nba",
             )
 
             # Verify events were converted to dict format
@@ -172,6 +176,7 @@ class TestBackfillPlanFromDatabase:
         mock_reader = AsyncMock(spec=OddsReader)
         # Return empty list
         mock_reader.get_events_by_date_range = AsyncMock(return_value=[])
+        mock_reader.get_latest_quota_by_key = AsyncMock(return_value={})
 
         with (
             patch("odds_cli.commands.backfill.async_session_maker") as mock_session_maker,
@@ -187,6 +192,51 @@ class TestBackfillPlanFromDatabase:
                     end_date_str="2024-01-17",
                     target_games=3,
                     output_file="test_plan.json",
+                    sport="basketball_nba",
                 )
 
             assert exc_info.value.exit_code == 1
+
+    @pytest.mark.asyncio
+    async def test_remaining_quota_is_the_sports_key_balance_less_the_plan(self, sample_db_events):
+        from io import StringIO
+
+        from odds_cli.commands.backfill import _create_plan_async
+        from odds_lambda.storage.readers import KeyQuota
+        from rich.console import Console
+
+        mock_reader = AsyncMock(spec=OddsReader)
+        mock_reader.get_events_by_date_range = AsyncMock(return_value=sample_db_events)
+        mock_reader.get_latest_quota_by_key = AsyncMock(
+            return_value={0: KeyQuota(("soccer_epl",), 80), 1: KeyQuota(("basketball_nba",), 497)}
+        )
+        mock_selector = MagicMock()
+        mock_selector.generate_backfill_plan = MagicMock(
+            return_value={
+                "total_games": 3,
+                "total_snapshots": 15,
+                "estimated_quota_usage": 450,
+                "games": [],
+            }
+        )
+        out = StringIO()
+
+        with (
+            patch("odds_cli.commands.backfill.async_session_maker") as mock_session_maker,
+            patch("odds_lambda.storage.readers.OddsReader", return_value=mock_reader),
+            patch("odds_cli.commands.backfill.GameSelector", return_value=mock_selector),
+            patch("odds_cli.commands.backfill.console", Console(file=out, width=140)),
+            patch("builtins.open", mock_open()),
+            patch("odds_cli.commands.backfill.Path", MagicMock()),
+        ):
+            mock_session_maker.return_value.__aenter__.return_value = AsyncMock()
+            await _create_plan_async(
+                start_date_str="2024-01-15",
+                end_date_str="2024-01-17",
+                target_games=3,
+                output_file="test_plan.json",
+                sport="basketball_nba",
+            )
+
+        assert "Key 1 remaining after plan" in out.getvalue()
+        assert "47 of 497" in out.getvalue()
