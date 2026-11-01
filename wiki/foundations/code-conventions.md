@@ -54,7 +54,7 @@ Ruff selects only `DTZ003` and `DTZ005` for timezone checks ([Timezones](timezon
 
 structlog configured by `odds_core.logging_setup.configure_logging(settings, json_output)`. Console output is human-readable; the file handler rotates at 10 MB with 5 backups; `json_output=True` renders JSON. An invalid `LOG_LEVEL` falls back to INFO, and an uncreatable log directory falls back to console-only. Config: `LOG_LEVEL`, `LOG_FILE` ([Configuration](configuration.md)).
 
-It is called only from the CLI callback (`odds_cli.main.callback`, text) and the Lambda module (`odds_lambda.lambda_handler`, JSON). The MCP server is launched with `fastmcp run` and standalone scripts never call it, so they get structlog defaults and no log file ([odds-mcp server](../agent/mcp-server.md)).
+Only two callers configure logging: the CLI callback (`odds_cli.main.callback`, text) and the Lambda module (`odds_lambda.lambda_handler`, JSON). The MCP server is launched with `fastmcp run` and standalone scripts never call it, so they get structlog defaults and no log file ([odds-mcp server](../agent/mcp-server.md)).
 
 ## Related
 

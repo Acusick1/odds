@@ -213,13 +213,10 @@ class DataQualityConfig(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     enable_validation: bool = Field(default=True, description="Enable data quality validation")
-    reject_invalid_odds: bool = Field(
-        default=False, description="Reject invalid odds (vs log only)"
-    )
 
 
 class AlertConfig(BaseSettings):
-    """Alert configuration (infrastructure for future use)."""
+    """Alert configuration."""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

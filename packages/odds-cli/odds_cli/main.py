@@ -29,7 +29,7 @@ from odds_cli.commands import (
 
 app = typer.Typer(
     name="odds",
-    help="Betting Odds Data Pipeline - NBA odds collection and analysis",
+    help="Betting Odds Data Pipeline - multi-sport odds collection and analysis",
     add_completion=False,
 )
 
@@ -62,7 +62,7 @@ def callback():
     """
     Betting Odds Data Pipeline
 
-    A single-user NBA betting odds data collection and analysis system.
+    A single-user, multi-sport betting odds data collection and analysis system.
     """
     # Initialize logging for CLI (human-readable output)
     settings = get_settings()
