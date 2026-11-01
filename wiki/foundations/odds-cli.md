@@ -57,7 +57,7 @@ status: stable
 | `odds_cli.commands.discover` (`odds_cli.commands.discover.games` spends units, `odds_cli.commands.discover.upcoming` is free) | required |
 | `odds_cli.commands.backfill.execute_backfill` | the manifest's sport, whose key it spends; `odds_cli.commands.backfill.plan_backfill` takes it too |
 | `odds_cli.commands.quality` | required |
-| `odds_cli.commands.validate` (`daily`, `tier-coverage`) | required; one of the supported sport keys, whose league timezone sets the day ([coverage checks](../storage/coverage-checks.md#tiercoveragevalidator)) |
+| `odds_cli.commands.validate` (`daily`, `tier-coverage`) | required; one of `odds_core.sports.SUPPORTED_SPORTS`, whose league timezone sets the day ([coverage checks](../storage/coverage-checks.md#tiercoveragevalidator)) |
 | `odds_cli.commands.polymarket.discover` | `basketball_nba` |
 | `odds_cli.commands.copy_from_prod` | `soccer_epl` |
 | `odds_cli.commands.train` | optional filter |

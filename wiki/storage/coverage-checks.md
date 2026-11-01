@@ -41,7 +41,7 @@ A day is a calendar day in the league's timezone (`odds_core.sports.LEAGUE_TIMEZ
 
 ## odds validate
 
-`odds_cli.commands.validate`: `daily` (`--sport`, required, `--date`, ISO `YYYY-MM-DD` on the league's calendar, default yesterday's UTC date, `--strict/--no-strict`, `--check-scores`, `--check-discovery`, `--output-json`, `--verbose`), `game <event_id>` (the integer event id), `tier-coverage --sport --start --end` (ISO `YYYY-MM-DD` dates on the league's calendar). `--sport` takes `soccer_epl`, `baseball_mlb` or `basketball_nba`, and `--output-json` records it as `sport_key`. `--no-strict` requires only OPENING and CLOSING. With both scores and discovery checks on, exit code 1 on incomplete games, missing scores or missing games; otherwise only tier incompleteness fails.
+`odds_cli.commands.validate`: `daily` (`--sport`, required, `--date`, ISO `YYYY-MM-DD` on the league's calendar, default yesterday's UTC date, `--strict/--no-strict`, `--check-scores`, `--check-discovery`, `--output-json`, `--verbose`), `game <event_id>` (the integer event id), `tier-coverage --sport --start --end` (ISO `YYYY-MM-DD` dates on the league's calendar). `--sport` takes `soccer_epl`, `baseball_mlb` or `basketball_nba`, and each command's `--output-json` file records it as `sport_key`. `--no-strict` requires only OPENING and CLOSING. With both scores and discovery checks on, exit code 1 on incomplete games, missing scores or missing games; otherwise only tier incompleteness fails.
 
 ## odds quality
 

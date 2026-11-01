@@ -614,6 +614,7 @@ async def _validate_tier_coverage(
     # Save to JSON if requested
     if output_json:
         data = {
+            "sport_key": sport,
             "start_date": str(start_date),
             "end_date": str(end_date),
             "overall_summary": {
