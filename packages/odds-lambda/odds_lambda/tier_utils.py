@@ -41,6 +41,15 @@ def calculate_tier(hours_until: float) -> FetchTier:
     return next(tier for tier in _NEARER_TO_FARTHER if hours_until <= tier.max_hours)
 
 
+def tier_hours_before(tier: FetchTier) -> tuple[float, float]:
+    """The hours before kick-off a pre-game tier covers, as (lower, upper): above the lower
+    bound up to and including the upper, by ``calculate_tier``. CLOSING's lower bound, 0, is
+    included."""
+    nearer = _NEARER_TO_FARTHER.index(tier)
+    lower = _NEARER_TO_FARTHER[nearer - 1].max_hours if nearer else 0.0
+    return lower, tier.max_hours
+
+
 def snapshot_tier(
     snapshot_time: datetime, commence_time: datetime, time_basis: TimeBasis | None
 ) -> FetchTier:
