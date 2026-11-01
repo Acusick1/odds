@@ -36,7 +36,7 @@ status: stable
 | `odds_lambda.storage.tier_validator` | `odds_lambda.storage.tier_validator.TierCoverageValidator` | [Coverage and completeness checks](coverage-checks.md) (tiers from each snapshot's time basis, market and time, `odds_lambda.storage.tier_validator.covered_tiers` over `odds_lambda.tier_utils.snapshot_tiers`, which holds the OddsPortal and `close` rules; discovery matches by `odds_api` external id, for dates within 3 days of the current UTC date) |
 | `espn_*`, `fpl_availability_*` | per-source pairs | [EPL context](../collection/epl-context-data.md) |
 | `mlb_pitcher_*` | `odds_lambda.storage.mlb_pitcher_writer.MlbPitcherWriter` | [MLB pitchers](../collection/mlb-probable-pitchers.md) |
-| `injury_*` | `odds_lambda.storage.injury_writer.InjuryWriter` (teams normalised by `odds_core.team.normalize_team_name`, matched to NBA events only) | [Injuries](../collection/nba-injuries-and-stats.md) |
+| `injury_*` | `odds_lambda.storage.injury_writer.InjuryWriter` (teams normalised by `odds_core.team.normalize_team_name`, matched to NBA events by `odds_lambda.storage.nba_event_match.match_nba_event`, as game logs are) | [Injuries](../collection/nba-injuries-and-stats.md) |
 | `game_log_*`, `pbpstats_*` | per-source pairs | [NBA stats](../collection/nba-injuries-and-stats.md) |
 
 ## Commit contract

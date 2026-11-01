@@ -9,6 +9,7 @@ from odds_analytics.standings_features import (
     build_league_table,
     epl_season_key,
     extract_standings_features,
+    rank_table,
 )
 from odds_core.models import Event, EventStatus
 
@@ -242,6 +243,26 @@ class TestBuildLeagueTable:
         ]
         table = build_league_table(events)
         assert len(table) == 0
+
+
+class TestRankTable:
+    def _record(self, team: str, goals_for: int, goals_against: int) -> TeamRecord:
+        record = TeamRecord(team=team)
+        record.record_result(goals_for, goals_against)
+        return record
+
+    def test_orders_by_points_then_goal_difference_then_goals_for(self) -> None:
+        records = [
+            self._record("Draw", 1, 1),
+            self._record("Narrow", 1, 0),
+            self._record("HighScoring", 4, 3),
+            self._record("Wide", 3, 0),
+        ]
+        assert [r.team for r in rank_table(records)] == ["Wide", "HighScoring", "Narrow", "Draw"]
+
+    def test_full_tie_orders_by_team_name(self) -> None:
+        records = [self._record("Chelsea", 2, 1), self._record("Arsenal", 2, 1)]
+        assert [r.team for r in rank_table(records)] == ["Arsenal", "Chelsea"]
 
 
 class TestExtractStandingsFeatures:

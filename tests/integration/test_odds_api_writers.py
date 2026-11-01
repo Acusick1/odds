@@ -596,7 +596,9 @@ class TestScores:
         monkeypatch.setattr(fetch_scores, "TheOddsAPIClient", _Client)
         monkeypatch.setattr(fetch_scores, "async_session_maker", _Factory(session))
 
-        await fetch_scores._fetch_and_update_scores(["soccer_epl"])
+        result = await fetch_scores.update_scores("soccer_epl")
+
+        assert result == fetch_scores.ScoresUpdate(listed=2, updated=1)
 
         event = await session.get(Event, 1, populate_existing=True)
         assert event is not None

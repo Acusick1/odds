@@ -10,9 +10,10 @@ This job:
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from functools import partial
 
 import structlog
-from odds_core.alerts import job_alert_context, send_outage_warning, send_scheduling_failure
+from odds_core.alerts import job_alert_context, send_outage_warning
 from odds_core.config import Settings, get_settings
 from odds_core.vocabulary import Source
 
@@ -26,13 +27,12 @@ from odds_lambda.scheduling.decision import (
     KickoffLookup,
     Lead,
     OvernightWindow,
-    ScheduleDecision,
     decide_forward_resilient,
 )
 from odds_lambda.scheduling.helpers import (
+    book_next_run,
     get_next_slate_main_tip,
     get_next_slate_start,
-    self_schedule,
 )
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
 
@@ -186,23 +186,12 @@ async def main(ctx: JobContext) -> None:
             severity="critical",
         )
 
-    async def _schedule(decision: ScheduleDecision, *, label: str, final: bool = False) -> bool:
-        if not decision.next_execution:
-            return False
-        try:
-            await self_schedule(
-                job_name=schedule_job_name,
-                next_time=decision.next_execution,
-                dry_run=app_settings.scheduler.dry_run,
-                sport=sport,
-                interval_hours=None,
-                reason=f"{label}: {decision.reason}",
-            )
-        except Exception as e:
-            logger.error("fetch_odds_scheduling_failed", error=str(e), exc_info=True)
-            await send_scheduling_failure(schedule_job_name, e, final=final)
-            return False
-        return True
+    schedule = partial(
+        book_next_run,
+        job_name=schedule_job_name,
+        sport=sport,
+        dry_run=app_settings.scheduler.dry_run,
+    )
 
     # Smart execution gating, scoped to this job's sport(s) — fixes the prior
     # all-sports bug where another sport's fixtures kept this job alive. The
@@ -221,7 +210,7 @@ async def main(ctx: JobContext) -> None:
     )
 
     # Pre-schedule before any work so the chain survives crashes.
-    pre_booked = await _schedule(decision, label="pre-schedule", final=not decision.should_execute)
+    pre_booked = await schedule(decision, label="pre-schedule", final=not decision.should_execute)
 
     async with job_alert_context(schedule_job_name):
         if not decision.should_execute:
@@ -289,7 +278,7 @@ async def main(ctx: JobContext) -> None:
         lead_kickoff_lookup=plan.kickoff_lookup,
         run_started=started,
     )
-    await _schedule(post_decision, label="post-fetch", final=not pre_booked)
+    await schedule(post_decision, label="post-fetch", final=not pre_booked)
     logger.info(
         "fetch_odds_next_scheduled",
         next_time=post_decision.next_execution.isoformat()

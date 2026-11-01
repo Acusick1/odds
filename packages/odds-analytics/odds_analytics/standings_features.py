@@ -8,6 +8,7 @@ produce point-in-time standings with no look-ahead bias.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass, field, fields
 from datetime import datetime
 
@@ -21,6 +22,7 @@ __all__ = [
     "StandingsFeatures",
     "extract_standings_features",
     "build_league_table",
+    "rank_table",
     "TeamRecord",
     "load_season_events_cache",
     "get_prior_events_from_cache",
@@ -141,13 +143,9 @@ def epl_season_key(dt: datetime) -> str:
     return f"{year - 1}-{str(year)[-2:]}"
 
 
-def _sort_table(records: dict[str, TeamRecord]) -> list[TeamRecord]:
-    """Sort league table by points, then goal difference, then goals scored."""
-    return sorted(
-        records.values(),
-        key=lambda r: (r.points, r.goal_difference, r.goals_for),
-        reverse=True,
-    )
+def rank_table(records: Iterable[TeamRecord]) -> list[TeamRecord]:
+    """League table order: points, goal difference and goals scored, highest first, then team name."""
+    return sorted(records, key=lambda r: (-r.points, -r.goal_difference, -r.goals_for, r.team))
 
 
 def build_league_table(
@@ -255,7 +253,7 @@ def extract_standings_features(
         return StandingsFeatures()
 
     table = build_league_table(prior_events, form_window=form_window)
-    sorted_table = _sort_table(table)
+    sorted_table = rank_table(table.values())
 
     # Build position lookup
     positions: dict[str, int] = {}

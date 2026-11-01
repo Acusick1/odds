@@ -12,6 +12,7 @@ import pytest
 from odds_core.config import AlertConfig
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.jobs import fetch_odds, fetch_scores
+from odds_lambda.scheduling import helpers as scheduling_helpers
 from odds_lambda.scheduling.decision import ScheduleDecision
 from odds_lambda.scheduling.jobs import JobContext
 from odds_lambda.scheduling.runner import CHAIN_RETRY_DELAY, run_chain_job
@@ -84,7 +85,7 @@ def odds_job() -> Iterator[SimpleNamespace]:
         patch.object(fetch_odds, "TheOddsAPIClient", return_value=client),
         patch.object(fetch_odds, "build_event_sync_service") as sync,
         patch.object(fetch_odds, "build_ingestion_service", return_value=ingestion),
-        patch.object(fetch_odds, "self_schedule", side_effect=book),
+        patch.object(scheduling_helpers, "self_schedule", side_effect=book),
         patch.object(fetch_odds, "decide_forward_resilient", new_callable=AsyncMock) as decide,
     ):
         sync.return_value.sync_sports = AsyncMock(return_value=[])
@@ -170,8 +171,12 @@ class TestFetchOdds:
         )
 
         with (
-            patch.object(fetch_odds, "self_schedule", side_effect=RuntimeError("no backend")),
-            patch.object(fetch_odds, "send_scheduling_failure", new_callable=AsyncMock) as failure,
+            patch.object(
+                scheduling_helpers, "self_schedule", side_effect=RuntimeError("no backend")
+            ),
+            patch.object(
+                scheduling_helpers, "send_scheduling_failure", new_callable=AsyncMock
+            ) as failure,
         ):
             await fetch_odds.main(JobContext(sport=EPL))
 
@@ -185,8 +190,12 @@ class TestFetchOdds:
         odds_job.decide.return_value = _decision(should_execute=False)
 
         with (
-            patch.object(fetch_odds, "self_schedule", side_effect=RuntimeError("no backend")),
-            patch.object(fetch_odds, "send_scheduling_failure", new_callable=AsyncMock) as failure,
+            patch.object(
+                scheduling_helpers, "self_schedule", side_effect=RuntimeError("no backend")
+            ),
+            patch.object(
+                scheduling_helpers, "send_scheduling_failure", new_callable=AsyncMock
+            ) as failure,
         ):
             await fetch_odds.main(JobContext(sport=EPL))
 
@@ -202,9 +211,11 @@ class TestFetchOdds:
 
         with (
             patch.object(
-                fetch_odds, "self_schedule", side_effect=[None, RuntimeError("no backend")]
+                scheduling_helpers, "self_schedule", side_effect=[None, RuntimeError("no backend")]
             ),
-            patch.object(fetch_odds, "send_scheduling_failure", new_callable=AsyncMock) as failure,
+            patch.object(
+                scheduling_helpers, "send_scheduling_failure", new_callable=AsyncMock
+            ) as failure,
         ):
             await fetch_odds.main(JobContext(sport=EPL))
 
@@ -217,9 +228,9 @@ class TestFetchScores:
     def scores_job(self) -> Iterator[SimpleNamespace]:
         with (
             patch.object(fetch_scores, "get_settings", return_value=_settings()),
-            patch.object(fetch_scores, "self_schedule", new_callable=AsyncMock),
+            patch.object(scheduling_helpers, "self_schedule", new_callable=AsyncMock),
             patch.object(fetch_scores, "_scores_decision", new_callable=AsyncMock) as decide,
-            patch.object(fetch_scores, "_fetch_and_update_scores", new_callable=AsyncMock) as work,
+            patch.object(fetch_scores, "update_scores", new_callable=AsyncMock) as work,
         ):
             decide.return_value = _decision(should_execute=True)
             yield SimpleNamespace(decide=decide, work=work)

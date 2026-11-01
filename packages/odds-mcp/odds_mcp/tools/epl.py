@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastmcp import FastMCP
+from odds_analytics.standings_features import TeamRecord, rank_table
 from odds_core.database import async_session_maker
 from odds_core.epl_data_models import EspnFixture
 from odds_core.team import normalize_team_name
@@ -129,12 +130,10 @@ def _derive_standings(fixtures: list[EspnFixture]) -> dict[str, dict[str, Any]]:
     The input is the set of EspnFixture rows for the target season. Only rows
     where ``competition == "Premier League"`` and state is ``"post"`` (or, for
     legacy rows with no state, a matching fallback status) with parseable
-    scores count. Position is assigned by sorting the team-indexed table by
-    (points desc, goal_diff desc, goals_for desc) — the standard EPL tiebreak
-    chain. Each match contributes to both teams' rows (rows are per team in
-    ``espn_fixtures``).
+    scores count. Each match contributes to both teams' rows (rows are per team
+    in ``espn_fixtures``). Positions follow ``rank_table``.
     """
-    table: dict[str, dict[str, Any]] = {}
+    records: dict[str, TeamRecord] = {}
 
     for fixture in fixtures:
         if fixture.competition != _PREMIER_LEAGUE:
@@ -145,49 +144,25 @@ def _derive_standings(fixtures: list[EspnFixture]) -> dict[str, dict[str, Any]]:
         score_opponent = _parse_score(fixture.score_opponent)
         if score_team is None or score_opponent is None:
             continue
-
-        row = table.setdefault(
-            fixture.team,
-            {
-                "played": 0,
-                "wins": 0,
-                "draws": 0,
-                "losses": 0,
-                "goals_for": 0,
-                "goals_against": 0,
-            },
+        records.setdefault(fixture.team, TeamRecord(team=fixture.team)).record_result(
+            score_team, score_opponent
         )
-        row["played"] += 1
-        row["goals_for"] += score_team
-        row["goals_against"] += score_opponent
-        if score_team > score_opponent:
-            row["wins"] += 1
-        elif score_team < score_opponent:
-            row["losses"] += 1
-        else:
-            row["draws"] += 1
 
-    # Finalise derived fields and assign positions.
-    for row in table.values():
-        row["goal_diff"] = row["goals_for"] - row["goals_against"]
-        row["points"] = row["wins"] * 3 + row["draws"]
-
-    ordered = sorted(
-        table.items(),
-        key=lambda item: (
-            -item[1]["points"],
-            -item[1]["goal_diff"],
-            -item[1]["goals_for"],
-            item[0],
-        ),
-    )
-    for position, (team, row) in enumerate(ordered, start=1):
-        row["position"] = position
-        # Duplicate the team name into the row so callers can flatten via
-        # ``sorted(table.values(), ...)`` without losing the dict key.
-        row["team"] = team
-
-    return table
+    return {
+        record.team: {
+            "team": record.team,
+            "position": position,
+            "played": record.played,
+            "wins": record.won,
+            "draws": record.drawn,
+            "losses": record.lost,
+            "goals_for": record.goals_for,
+            "goals_against": record.goals_against,
+            "goal_diff": record.goal_difference,
+            "points": record.points,
+        }
+        for position, record in enumerate(rank_table(records.values()), start=1)
+    }
 
 
 @epl_mcp.tool()

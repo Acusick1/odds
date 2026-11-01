@@ -4,6 +4,7 @@ title: Self-scheduling
 description: Why jobs book their own next run instead of a fixed cron, the pre-schedule, work and re-schedule pattern, and how each job's failure policy can end its chain.
 sources:
   - odds_lambda.scheduling.helpers.self_schedule
+  - odds_lambda.scheduling.helpers.book_next_run
   - odds_lambda.scheduling.helpers.get_next_kickoff
   - odds_lambda.scheduling.backends.base.SchedulerBackend.schedule_next_execution
   - odds_lambda.scheduling.decision.decide_forward_resilient
@@ -44,14 +45,14 @@ Five different failure behaviours exist across the jobs, and no code states whic
 
 | Job | Scheduling shape | If scheduling fails |
 |---|---|---|
-| `fetch-odds`, `fetch-scores`, `update-status` | pre and post | log and `odds_core.alerts.send_scheduling_failure` (critical when no booking survives, else warning), continue |
+| `fetch-odds`, `fetch-scores`, `update-status` (all through `odds_lambda.scheduling.helpers.book_next_run`) | pre and post | log `job_scheduling_failed` and `odds_core.alerts.send_scheduling_failure` (critical when no booking survives, else warning), continue |
 | `fetch-oddsportal`, `fetch-betfair-exchange` | pre and post | pre-schedule failure raises; post logs only |
 | `fetch-oddsportal-results`, `fetch-mlb-results` (both through `odds_lambda.results_run.run_daily_results_job`) | fixed next-day time in `finally`, no pre-schedule | log and `odds_core.alerts.send_scheduling_failure` (critical unless the run raised and the chain re-books); a run that settles nothing while events are overdue sends a `results_stalled` warning |
 | `check-health` | after the work only, raw backend call | log and `odds_core.alerts.send_scheduling_failure` (critical) |
 
 `fetch-oddsportal-results`, `fetch-mlb-results`, and `check-health` schedule only after their work, so a kill or exception ends the chain (#438). A hard kill skips the results jobs' `finally`. An exception in `odds_lambda.health_monitor.check_system_health` skips the reschedule. The `fetch-oddsportal` and `fetch-betfair-exchange` jobs pre-schedule, so an `odds_lambda.collection_calendar.EmptyCollectionError` or a failed league ends only that run, not the chain. On the local scheduler the health monitor's [schedule chain check](../operations/health-monitor.md#schedule-chain-check) alerts on an ended chain. A rule that was never rescheduled stays `DISABLED` on its `rate(1 day)` placeholder; see [Deployed state](job-deployment-matrix.md#deployed-state) for how to find those. The deploy workflows invoke every job after `terraform apply` to (re)start chains ([Debug the AWS self-scheduling jobs](howto-debug-aws-scheduler.md), [CI/CD workflows](../operations/ci-cd-workflows.md)).
 
-`odds_lambda.jobs.fetch_odds.main`, `odds_lambda.jobs.fetch_scores.main` (both for one required sport, EPL or NBA for fetch-odds; the fetch-odds job also alerts `event_sync_failed:<job>` once per outage and logs a game that failed to ingest by its Odds API id) and `odds_lambda.jobs.update_status.main` each define their own copy of a `_schedule` closure (#463; the fetch-odds copy is in its [flow](../collection/fetch-odds-job.md#flow)).
+`odds_lambda.jobs.fetch_odds.main`, `odds_lambda.jobs.fetch_scores.main` (both for one required sport, EPL or NBA for fetch-odds; the fetch-odds job also alerts `event_sync_failed:<job>` once per outage and logs a game that failed to ingest by its Odds API id) and `odds_lambda.jobs.update_status.main` book both runs through `odds_lambda.scheduling.helpers.book_next_run`, passing whether another booking survives a failure (the fetch-odds use is in its [flow](../collection/fetch-odds-job.md#flow)).
 
 ## Related
 

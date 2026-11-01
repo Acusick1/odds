@@ -5,10 +5,15 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 import structlog
+from odds_core.alerts import send_scheduling_failure
 
 from odds_lambda.scheduling.backends import get_scheduler_backend
+
+if TYPE_CHECKING:
+    from odds_lambda.scheduling.decision import ScheduleDecision
 
 logger = structlog.get_logger()
 
@@ -196,3 +201,34 @@ async def self_schedule(
         reason=reason,
         backend=backend.get_backend_name(),
     )
+
+
+async def book_next_run(
+    decision: ScheduleDecision,
+    *,
+    job_name: str,
+    sport: str | None,
+    dry_run: bool,
+    label: str,
+    final: bool,
+) -> bool:
+    """Book ``decision``'s next run of ``job_name``; whether a run was booked.
+
+    A booking failure is logged and alerted rather than raised, critical when ``final`` says no
+    other booking of the job survives.
+    """
+    if not decision.next_execution:
+        return False
+    try:
+        await self_schedule(
+            job_name=job_name,
+            next_time=decision.next_execution,
+            dry_run=dry_run,
+            sport=sport,
+            reason=f"{label}: {decision.reason}",
+        )
+    except Exception as e:
+        logger.error("job_scheduling_failed", job_name=job_name, error=str(e), exc_info=True)
+        await send_scheduling_failure(job_name, e, final=final)
+        return False
+    return True

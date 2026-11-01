@@ -6,7 +6,7 @@ sources:
   - odds_core.models.EventStatus
   - odds_lambda.storage.writers.OddsWriter.update_event_status
   - odds_lambda.jobs.update_status._update_event_statuses
-  - odds_lambda.jobs.fetch_scores._fetch_and_update_scores
+  - odds_lambda.jobs.fetch_scores.update_scores
   - odds_lambda.jobs.fetch_oddsportal_results.process_results
   - odds_lambda.jobs.fetch_mlb_results.process_results
   - odds_lambda.jobs.fetch_espn_fixtures._mark_postponed_events
@@ -45,7 +45,7 @@ A result is the strongest evidence, so every status but FINAL and UNMATCHED can 
 |---|---|---|
 | (new) → SCHEDULED | `odds_lambda.storage.event_resolver.resolve_event` (only when no event matches, by `gamePk`, source id or teams; the database numbers the new event; an MLB game outside the MLB schedule is dropped, not created), called by the live jobs, Odds API ingestion, the backfill, event sync, `odds discover games` and the NBA ESPN sync (`odds_lambda.espn_nba_schedule.sync_games`) (`odds_lambda.odds_api_events.resolve_odds_api_events`) | default status |
 | SCHEDULED → LIVE | `odds_lambda.jobs.update_status._update_event_statuses` | events already past `commence_time` within `odds_lambda.jobs.update_status.STATUS_WINDOW`; `reader.get_events_by_date_range(status=SCHEDULED)` |
-| → FINAL | `odds_lambda.jobs.fetch_scores._fetch_and_update_scores` | Odds API `/scores` ([results-jobs](results-jobs.md#fetch-scores)), only when `completed` and both scores parse, on the event that holds the entry's id as its Odds API external id (`odds_lambda.odds_api_events.find_event_by_odds_api_id`) |
+| → FINAL | `odds_lambda.jobs.fetch_scores.update_scores` | Odds API `/scores` ([results-jobs](results-jobs.md#fetch-scores)), only when `completed` and both scores parse, on the event that holds the entry's id as its Odds API external id (`odds_lambda.odds_api_events.find_event_by_odds_api_id`) |
 | → FINAL | `odds_lambda.jobs.fetch_oddsportal_results.process_results` | EPL: OddsPortal finished matches for events already past kickoff that are SCHEDULED, LIVE, POSTPONED, or FINAL without scores (`odds_lambda.results_run.get_pending_events`, which also reads each MLB event's `gamePk` from its `mlb_stats_api` external id); a run that settles nothing alerts ([results-jobs](results-jobs.md#fetch-oddsportal-results)) |
 | → CANCELLED | `odds_lambda.jobs.fetch_oddsportal_results.process_results` | EPL: OddsPortal results row with status 5 ("Canceled") matched to a pending SCHEDULED or LIVE event ([results-jobs](results-jobs.md#fetch-oddsportal-results)) |
 | → FINAL, CANCELLED, POSTPONED | `odds_lambda.jobs.fetch_mlb_results.process_results` | MLB: the state of the game a pending event's `gamePk` names in the MLB Stats API schedule; a run that settles nothing alerts ([results-jobs](results-jobs.md#fetch-mlb-results)) |

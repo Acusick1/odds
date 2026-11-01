@@ -5,15 +5,12 @@ from datetime import timedelta
 
 import structlog
 import typer
-from odds_core.api_models import parse_scores_from_api_dict
 from odds_core.config import get_settings
-from odds_core.database import async_session_maker
 from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.ingestion import OddsIngestionCallbacks, OddsIngestionService
 from odds_lambda.jobs import fetch_mlb_results, fetch_oddsportal_results
+from odds_lambda.jobs.fetch_scores import update_scores
 from odds_lambda.mlb_game_resolver import MLB_SPORT_KEY
-from odds_lambda.odds_api_events import find_event_by_odds_api_id
-from odds_lambda.storage.writers import OddsWriter
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
@@ -126,7 +123,7 @@ def fetch_scores(
     asyncio.run(_fetch_scores(sport, days))
 
 
-async def _fetch_scores(sport: str, days: int):
+async def _fetch_scores(sport: str, days: int) -> None:
     """Async implementation of fetch scores."""
     console.print(f"[bold blue]Fetching scores for {sport} (last {days} days)...[/bold blue]")
 
@@ -135,67 +132,16 @@ async def _fetch_scores(sport: str, days: int):
         TextColumn("[progress.description]{task.description}"),
         console=console,
     ) as progress:
-        task = progress.add_task(description="Connecting to API...", total=None)
+        task = progress.add_task(description="Fetching scores data...", total=None)
 
         try:
-            async with TheOddsAPIClient() as client:
-                progress.update(task, description="Fetching scores data...")
-
-                # Fetch scores
-                response = await client.get_scores(sport=sport, days_from=days)
-
-                progress.update(
-                    task,
-                    description=f"Processing {len(response.scores_data)} events...",
-                )
-
-                # Update database
-                async with async_session_maker() as session:
-                    writer = OddsWriter(session)
-                    updated = 0
-
-                    for score_data in response.scores_data:
-                        try:
-                            odds_api_id = score_data.get("id")
-                            completed = score_data.get("completed", False)
-
-                            if completed and odds_api_id:
-                                # Extract scores using helper
-                                home_score, away_score = parse_scores_from_api_dict(score_data)
-
-                                if home_score is not None and away_score is not None:
-                                    from odds_core.models import EventStatus
-
-                                    event = await find_event_by_odds_api_id(session, odds_api_id)
-                                    if event is None:
-                                        logger.warning(
-                                            "score_event_not_found", odds_api_id=odds_api_id
-                                        )
-                                        continue
-                                    await writer.update_event_status(
-                                        event_id=event.id,
-                                        status=EventStatus.FINAL,
-                                        home_score=home_score,
-                                        away_score=away_score,
-                                    )
-                                    updated += 1
-
-                        except Exception as e:
-                            console.print(
-                                f"[yellow]Warning: Failed to process score for "
-                                f"{score_data.get('id')}: {str(e)}[/yellow]"
-                            )
-
-                    await session.commit()
-
-                progress.update(task, description="Complete!", completed=True)
-
-            # Summary
-            console.print("\n[bold green]✓ Scores fetch completed![/bold green]")
-            console.print(f"  Events updated: {updated}")
-            console.print(f"  Total events: {len(response.scores_data)}")
-
+            result = await update_scores(sport, days=days)
+            progress.update(task, description="Complete!", completed=True)
         except Exception as e:
             progress.update(task, description="Failed!", completed=True)
             console.print(f"\n[bold red]✗ Fetch failed: {str(e)}[/bold red]")
             raise typer.Exit(code=1) from e
+
+    console.print("\n[bold green]✓ Scores fetch completed![/bold green]")
+    console.print(f"  Events updated: {result.updated}")
+    console.print(f"  Total events: {result.listed}")

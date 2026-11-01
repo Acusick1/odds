@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import typer
-from odds_analytics.injury_features import date_to_nba_season
+from odds_analytics.injury_features import date_to_nba_season, nba_seasons_through
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
@@ -18,9 +18,6 @@ if TYPE_CHECKING:
 
 app = typer.Typer(help="NBA game log operations")
 console = Console()
-
-# Seasons available for backfill (nba_api data starts 2021-22)
-ALL_SEASONS = ["2021-22", "2022-23", "2023-24", "2024-25", "2025-26"]
 
 
 @app.command("fetch")
@@ -46,7 +43,8 @@ def fetch(
     """
     console.print("\n[bold cyan]NBA Game Log Fetch[/bold cyan]\n")
 
-    seasons = ALL_SEASONS if all_seasons else [season or date_to_nba_season(datetime.now(UTC))]
+    now = datetime.now(UTC)
+    seasons = nba_seasons_through(now) if all_seasons else [season or date_to_nba_season(now)]
     console.print(f"Seasons to fetch: {', '.join(seasons)}\n")
 
     # Playwright sync API cannot run inside an asyncio event loop.
