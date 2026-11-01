@@ -28,7 +28,7 @@ Under the `production` environment settings:
 - ✅ **Required reviewers**: Add yourself (or team members)
   - This forces manual approval before any production deployment
 - Optional: **Wait timer** (e.g., 5 minutes) to prevent accidental immediate deploys
-- Optional: **Deployment branches**: Limit to `master` branch only
+- Optional: **Deployment branches**: Limit to `main` branch only
 
 ### 3. Add Production Secrets
 
@@ -62,7 +62,7 @@ Once setup is complete:
 #### Option A: Manual Deploy (Primary)
 1. Go to: **Actions → Deploy to Production**
 2. Click **"Run workflow"** button
-3. Select branch: `master`
+3. Select branch: `main`
 4. Click **"Run workflow"**
 5. Workflow will pause and request approval
 6. Review the deployment plan
@@ -83,7 +83,7 @@ Once setup is complete:
 ## Workflow Differences
 
 ### Development Workflow
-- **Trigger**: Automatically on push to master (via ci-cd.yml)
+- **Trigger**: Automatically on push to main (via ci-cd.yml)
 - **Environment**: `development` (ephemeral)
 - **Config**: Uses `terraform.tfvars.example` with dev overrides
 - **Project Name**: `odds-scheduler-dev`

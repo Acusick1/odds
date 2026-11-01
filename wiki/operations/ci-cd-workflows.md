@@ -20,7 +20,7 @@ status: stable
 
 # CI/CD workflows
 
-Workflows live in `.github/workflows/`. Secrets come from the `development` and `production` GitHub environments. No workflow deploys to production, which is a single host deployed by [deploy.sh](../scheduling/howto-run-scheduler-service.md#redeploy) ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)). The `production` environment names the dormant AWS stack and its Neon database (secret values are not verifiable from the repo; check Settings, Environments). CI unit and integration tests run on py-pglite with `-m "not live_api"` ([test-suite](../foundations/test-suite.md), [howto-develop-locally](../foundations/howto-develop-locally.md)).
+Workflows live in `.github/workflows/`. Secrets come from the `development` and `production` GitHub environments. No workflow deploys to production, which is a single host deployed by [deploy.sh](../scheduling/howto-run-scheduler-service.md#redeploy) ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)). The `production` environment names the dormant AWS stack and its Neon database (secret values are not verifiable from the repo; check Settings, Environments). `test.yml` and `live-api.yml` install uv with `astral-sh/setup-uv` and set up no Python themselves, so `uv sync` picks an interpreter that satisfies `requires-python` in `pyproject.toml`. CI unit and integration tests run on py-pglite with `-m "not live_api"` ([test-suite](../foundations/test-suite.md), [howto-develop-locally](../foundations/howto-develop-locally.md)).
 
 | Workflow | Trigger | What it does |
 |---|---|---|
