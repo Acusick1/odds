@@ -6,13 +6,16 @@ ensuring ML-ready data completeness across the adaptive sampling spectrum.
 
 from __future__ import annotations
 
+import math
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import structlog
 from odds_core.models import Event, EventExternalId, EventStatus, OddsSnapshot
+from odds_core.sports import SportKey, game_day_window
+from odds_core.time import parse_api_datetime
 from odds_core.vocabulary import Source, TimeBasis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -85,8 +88,9 @@ class TierCoverageReport:
 
 @dataclass(slots=True, frozen=True)
 class DailyValidationReport:
-    """Aggregate validation report for a date (immutable)."""
+    """Aggregate validation report for a sport's day (immutable)."""
 
+    sport_key: SportKey
     target_date: date
     validation_time: datetime
     total_games: int = 0
@@ -257,16 +261,18 @@ class TierCoverageValidator:
 
     async def validate_date(
         self,
-        target_date: date | datetime,
+        target_date: date,
+        sport_key: SportKey,
         required_tiers: set[FetchTier] | None = None,
         check_scores: bool = True,
         check_discovery: bool = False,
     ) -> DailyValidationReport:
         """
-        Validate tier coverage for all games on a specific date.
+        Validate tier coverage for a sport's games on one day.
 
         Args:
-            target_date: Date to validate (by game commence_time)
+            target_date: The league-local calendar day (``odds_core.sports.game_day_window``)
+            sport_key: Sport whose games to validate
             required_tiers: Set of required tiers (defaults to all 5)
             check_scores: Whether to validate final scores exist for FINAL games
             check_discovery: Whether to check for missing games via API
@@ -277,9 +283,7 @@ class TierCoverageValidator:
         Example:
             from datetime import date
             validator = TierCoverageValidator(session)
-            report = await validator.validate_date(
-                target_date=date(2024, 10, 24)
-            )
+            report = await validator.validate_date(date(2024, 10, 24), "soccer_epl")
             print(f"Complete: {report.complete_games}/{report.total_games}")
             if not report.is_valid:
                 print(f"Missing tier breakdown: {report.missing_tier_breakdown}")
@@ -289,7 +293,7 @@ class TierCoverageValidator:
         # Get games for the date
         # Use date-based filtering only - include all past games regardless of status
         # This ensures gap detection finds games that haven't been marked FINAL yet
-        games = await self.reader.get_games_by_date(target_date, status=None)
+        games = await self.reader.get_games_by_date(target_date, sport_key, status=None)
 
         # Temporary collections for building the report
         game_reports_list = []
@@ -341,7 +345,7 @@ class TierCoverageValidator:
         if check_discovery:
             try:
                 # Fetch games from API
-                api_games = await self._fetch_api_games(target_date)
+                api_games = await self._fetch_api_games(target_date, sport_key)
 
                 if api_games is not None:
                     # Check for missing games (not in DB at all)
@@ -365,7 +369,8 @@ class TierCoverageValidator:
 
         # Build immutable report
         report = DailyValidationReport(
-            target_date=target_date if isinstance(target_date, date) else target_date.date(),
+            sport_key=sport_key,
+            target_date=target_date,
             validation_time=datetime.now(UTC),
             total_games=len(games),
             complete_games=complete_count,
@@ -381,6 +386,7 @@ class TierCoverageValidator:
 
         logger.info(
             "daily_validation_completed",
+            sport=sport_key,
             target_date=str(target_date),
             total_games=report.total_games,
             complete_games=report.complete_games,
@@ -389,54 +395,49 @@ class TierCoverageValidator:
 
         return report
 
-    async def _fetch_api_games(self, target_date: date | datetime) -> list[dict] | None:
+    async def _fetch_api_games(self, target_date: date, sport_key: SportKey) -> list[dict] | None:
         """
-        Fetch games from The Odds API for a specific date.
+        The Odds API's games of ``sport_key`` that commence on ``target_date``.
 
         Args:
-            target_date: Date to check
+            target_date: The league-local calendar day
+            sport_key: Sport whose scores to fetch (spends its key's units)
 
         Returns:
-            List of game dictionaries from API, or None if date out of range
+            The day's games from the /scores endpoint, or None when the day starts
+            in the future or more than 3 days ago (the endpoint's ``daysFrom`` range)
         """
         from odds_lambda.data_fetcher import TheOddsAPIClient
 
-        # Get games from API for this date
-        api_client = TheOddsAPIClient()
+        window_start, window_end = game_day_window(sport_key, target_date)
+        days_from = math.ceil((datetime.now(UTC) - window_start) / timedelta(days=1))
 
-        # Calculate days_from parameter for API (0 = today, 1 = yesterday, etc.)
-        if isinstance(target_date, datetime):
-            target_date = target_date.date()
-
-        today = datetime.now(UTC).date()
-        days_from = (today - target_date).days
-
-        # Only check for recent dates (API supports up to 3 days)
-        if days_from < 0 or days_from > 3:
+        if days_from < 1 or days_from > 3:
             logger.warning(
                 "game_discovery_check_skipped",
                 target_date=str(target_date),
+                sport=sport_key,
                 days_from=days_from,
-                reason="Date outside API /scores endpoint range (0-3 days)",
+                reason="Day outside API /scores endpoint range (1-3 days)",
             )
             return None
 
         try:
-            # Fetch scores from API
-            response = await api_client.get_scores(
-                sport="basketball_nba",
-                days_from=days_from,
-            )
-
-            return response.scores_data
-
+            response = await TheOddsAPIClient().get_scores(sport=sport_key, days_from=days_from)
         except Exception as e:
             logger.error(
                 "api_scores_fetch_failed",
                 target_date=str(target_date),
+                sport=sport_key,
                 error=str(e),
             )
             raise
+
+        return [
+            game
+            for game in response.scores_data
+            if window_start <= parse_api_datetime(game["commence_time"]) < window_end
+        ]
 
     async def _by_odds_api_id(self, db_games: Sequence[Event]) -> dict[str, Event]:
         """The events of ``db_games`` that hold an Odds API id, by that id."""
@@ -562,8 +563,9 @@ class TierCoverageValidator:
 
     async def validate_date_range(
         self,
-        start_date: date | datetime,
-        end_date: date | datetime,
+        start_date: date,
+        end_date: date,
+        sport_key: SportKey,
         required_tiers: set[FetchTier] | None = None,
     ) -> list[DailyValidationReport]:
         """
@@ -572,6 +574,7 @@ class TierCoverageValidator:
         Args:
             start_date: Start of date range
             end_date: End of date range (inclusive)
+            sport_key: Sport whose games to validate
             required_tiers: Set of required tiers (defaults to all 5)
 
         Returns:
@@ -581,24 +584,17 @@ class TierCoverageValidator:
             from datetime import date
             validator = TierCoverageValidator(session)
             reports = await validator.validate_date_range(
-                start_date=date(2024, 10, 20),
-                end_date=date(2024, 10, 25)
+                date(2024, 10, 20), date(2024, 10, 25), "baseball_mlb"
             )
             for report in reports:
                 print(f"{report.target_date}: {report.completion_rate:.1f}% complete")
         """
         reports = []
 
-        # Convert to date objects if datetime
-        if isinstance(start_date, datetime):
-            start_date = start_date.date()
-        if isinstance(end_date, datetime):
-            end_date = end_date.date()
-
         # Iterate through each date
         current_date = start_date
         while current_date <= end_date:
-            report = await self.validate_date(current_date, required_tiers)
+            report = await self.validate_date(current_date, sport_key, required_tiers)
             reports.append(report)
 
             # Move to next day

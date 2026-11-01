@@ -8,7 +8,6 @@ sources:
   - .github/workflows/deploy-prod.yml
   - .github/workflows/test.yml
   - .github/workflows/lint.yml
-  - .github/workflows/daily-validation.yml
   - .github/workflows/live-api.yml
   - .pre-commit-config.yaml
   - .github/workflows/schedule-health-check.yml
@@ -29,11 +28,10 @@ Workflows live in `.github/workflows/`. Secrets come from the `development` and 
 | `ci-cd.yml` | push to main touching `packages/**/*.py`, `tests/**`, `migrations/**`, `deployment/aws/**`, workflows or lockfiles | calls `test.yml`, then `deploy-dev.yml` |
 | `deploy-dev.yml` | called by `ci-cd.yml` or manual | ephemeral dev stack |
 | `deploy-prod.yml` | manual, or a published release; `production` environment approval | AWS stack deploy; disabled while AWS is dormant ([Prod deploy](#prod-deploy)) |
-| `daily-validation.yml` | 09:00 UTC cron; disabled | `odds validate daily --check-discovery --output-json validation_<yesterday>.json`, artifact kept 30 days |
 | `live-api.yml` | Monday 06:00 UTC | `pytest -m live_api` against third-party APIs |
 | `schedule-health-check.yml` | 10:00 UTC cron, `production` environment; disabled | `scripts/verify-schedules.sh --rule-prefix odds` |
 
-`daily-validation` checks the previous day, so a file dated 20251103 covers 3 November. It reads the `production` environment's `DATABASE_URL` secret, so it validates the Neon archive rather than the production database unless that secret is changed. `schedule-health-check` fails every disabled rule ([Schedule verification](#schedule-verification)), so it would fail while AWS is dormant. Both workflows, and `deploy-prod.yml`, are disabled in GitHub; that state is not in the repo, so check it with `gh workflow list --all` and restore one with `gh workflow enable`. Its discovery check is NBA-only, so EPL and MLB days are checked against NBA discovery ([coverage-checks](../storage/coverage-checks.md)).
+`schedule-health-check` fails every disabled rule ([Schedule verification](#schedule-verification)), so it would fail while AWS is dormant. It and `deploy-prod.yml` are disabled in GitHub; that state is not in the repo, so check it with `gh workflow list --all` and restore one with `gh workflow enable`.
 
 ## Dev deploy
 

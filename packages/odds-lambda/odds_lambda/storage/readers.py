@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import NamedTuple
 
 import structlog
@@ -16,6 +16,7 @@ from odds_core.models import (
     OddsSnapshot,
     Price,
 )
+from odds_core.sports import SportKey, game_day_window
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -340,41 +341,30 @@ class OddsReader:
         return list(result.scalars().all())
 
     async def get_games_by_date(
-        self, target_date: datetime, status: EventStatus | None = EventStatus.FINAL
+        self,
+        target_date: date,
+        sport_key: SportKey,
+        status: EventStatus | None = EventStatus.FINAL,
     ) -> list[Event]:
         """
-        Get all games for a specific date using a 24-hour window (noon-to-noon UTC).
-
-        This uses noon-to-noon UTC to capture a full NBA "game day" which spans
-        two UTC calendar dates due to US timezones.
+        Get a sport's games on one day of its league's local calendar.
 
         Args:
-            target_date: Start date for the 24-hour window. The window runs from
-                        noon UTC on this date to noon UTC on the following day.
+            target_date: The league-local calendar day (``odds_core.sports.game_day_window``)
+            sport_key: Sport whose games to return
             status: Optional status filter (defaults to FINAL for validation)
 
         Returns:
-            List of Event records with commence_time in the window
-
-        Example:
-            from datetime import date
-            reader = OddsReader(session)
-            # Gets games from noon Oct 24 to noon Oct 25 UTC
-            games = await reader.get_games_by_date(
-                target_date=date(2024, 10, 24),
-                status=EventStatus.FINAL
-            )
+            List of Event records with commence_time in the day, by commence_time
         """
-        # Convert to datetime if date object passed
-        if not isinstance(target_date, datetime):
-            target_date = datetime.combine(target_date, datetime.min.time())
-
-        # 24-hour window: noon UTC on target_date to noon UTC next day
-        window_start = target_date.replace(hour=12, minute=0, second=0, microsecond=0, tzinfo=UTC)
-        window_end = window_start + timedelta(days=1)
+        window_start, window_end = game_day_window(sport_key, target_date)
 
         query = select(Event).where(
-            and_(Event.commence_time >= window_start, Event.commence_time < window_end)
+            and_(
+                Event.sport_key == sport_key,
+                Event.commence_time >= window_start,
+                Event.commence_time < window_end,
+            )
         )
 
         if status is not None:

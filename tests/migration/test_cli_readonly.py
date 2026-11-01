@@ -63,7 +63,16 @@ class TestReadOnlyCLI:
         """
         result = runner.invoke(
             app,
-            ["quality", "coverage", "--start", "2024-10-01", "--end", "2024-10-31"],
+            [
+                "quality",
+                "coverage",
+                "--sport",
+                "soccer_epl",
+                "--start",
+                "2024-10-01",
+                "--end",
+                "2024-10-31",
+            ],
             env=os.environ,
         )
 

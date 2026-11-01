@@ -1,12 +1,15 @@
 """Unit tests for tier coverage validation."""
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from freezegun import freeze_time
 from odds_core.models import Event, EventExternalId, EventStatus, OddsSnapshot
 from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.storage.tier_validator import TierCoverageReport, TierCoverageValidator
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.test_helpers import TIER_HOURS_BEFORE
 
@@ -335,13 +338,13 @@ class TestTierCoverageValidatorDailyValidation:
         """Test daily validation with all games complete."""
         target_date = datetime(2024, 10, 24, tzinfo=UTC)
 
-        # Create 2 complete games in the noon-to-noon window
+        # Create 2 complete games on the day
         for i in range(2):
             event = Event(
                 id=i + 1,
                 sport_key="basketball_nba",
                 sport_title="NBA",
-                # Games at noon and 1 PM UTC (within noon-to-noon window)
+                # Games at noon and 1 PM UTC
                 commence_time=target_date.replace(hour=12) + timedelta(hours=i),
                 home_team=f"Home{i}",
                 away_team=f"Away{i}",
@@ -363,7 +366,7 @@ class TestTierCoverageValidatorDailyValidation:
 
         # Validate
         validator = TierCoverageValidator(test_session)
-        report = await validator.validate_date(target_date.date())
+        report = await validator.validate_date(target_date.date(), "basketball_nba")
 
         assert report.is_valid
         assert report.total_games == 2
@@ -376,14 +379,14 @@ class TestTierCoverageValidatorDailyValidation:
         """Test daily validation with games that have only warning tiers missing."""
         target_date = datetime(2024, 10, 24, tzinfo=UTC)
 
-        # Create 2 games in the noon-to-noon window
+        # Create 2 games on the day
         # First game gets all tiers, second game only gets critical tiers (PREGAME, CLOSING)
         for i in range(2):
             event = Event(
                 id=i + 1,
                 sport_key="basketball_nba",
                 sport_title="NBA",
-                # Games at noon and 1 PM UTC (within noon-to-noon window)
+                # Games at noon and 1 PM UTC
                 commence_time=target_date.replace(hour=12) + timedelta(hours=i),
                 home_team=f"Home{i}",
                 away_team=f"Away{i}",
@@ -407,7 +410,7 @@ class TestTierCoverageValidatorDailyValidation:
 
         # Validate
         validator = TierCoverageValidator(test_session)
-        report = await validator.validate_date(target_date.date())
+        report = await validator.validate_date(target_date.date(), "basketball_nba")
 
         # Both games should be "complete" (have critical tiers)
         # but second game should have warnings
@@ -424,14 +427,14 @@ class TestTierCoverageValidatorDailyValidation:
         """Test daily validation fails when critical tiers are missing."""
         target_date = datetime(2024, 10, 24, tzinfo=UTC)
 
-        # Create 2 games in the noon-to-noon window
+        # Create 2 games on the day
         # Second game missing CLOSING (critical tier)
         for i in range(2):
             event = Event(
                 id=i + 1,
                 sport_key="basketball_nba",
                 sport_title="NBA",
-                # Games at noon and 1 PM UTC (within noon-to-noon window)
+                # Games at noon and 1 PM UTC
                 commence_time=target_date.replace(hour=12) + timedelta(hours=i),
                 home_team=f"Home{i}",
                 away_team=f"Away{i}",
@@ -459,7 +462,7 @@ class TestTierCoverageValidatorDailyValidation:
 
         # Validate
         validator = TierCoverageValidator(test_session)
-        report = await validator.validate_date(target_date.date())
+        report = await validator.validate_date(target_date.date(), "basketball_nba")
 
         # Validation should fail because CLOSING (critical) is missing
         assert not report.is_valid
@@ -473,13 +476,13 @@ class TestTierCoverageValidatorDailyValidation:
         """Test that missing tier breakdown is accurate."""
         target_date = datetime(2024, 10, 24, tzinfo=UTC)
 
-        # Create 3 games in the noon-to-noon window, each missing CLOSING tier
+        # Create 3 games on the day, each missing CLOSING tier
         for i in range(3):
             event = Event(
                 id=i + 1,
                 sport_key="basketball_nba",
                 sport_title="NBA",
-                # Games at noon, 1 PM, 2 PM UTC (within noon-to-noon window)
+                # Games at noon, 1 PM, 2 PM UTC
                 commence_time=target_date.replace(hour=12) + timedelta(hours=i),
                 home_team=f"Home{i}",
                 away_team=f"Away{i}",
@@ -501,7 +504,7 @@ class TestTierCoverageValidatorDailyValidation:
 
         # Validate
         validator = TierCoverageValidator(test_session)
-        report = await validator.validate_date(target_date.date())
+        report = await validator.validate_date(target_date.date(), "basketball_nba")
 
         # All 3 games should be missing CLOSING tier
         assert report.missing_tier_breakdown[FetchTier.CLOSING] == 3
@@ -549,3 +552,84 @@ class TestApiGameChecks:
         )
 
         assert [game["id"] for game in missing] == [held.id]
+
+
+def _event(event_id: int, commence_time: datetime, sport_key: str = "basketball_nba") -> Event:
+    return Event(
+        id=event_id,
+        sport_key=sport_key,
+        sport_title=sport_key,
+        commence_time=commence_time,
+        home_team=f"Home{event_id}",
+        away_team=f"Away{event_id}",
+        status=EventStatus.SCHEDULED,
+    )
+
+
+class TestValidateDateScope:
+    """A daily validation covers one sport's games on its league-local day."""
+
+    async def test_only_the_sports_games_on_its_local_day_are_validated(
+        self, test_session: AsyncSession
+    ) -> None:
+        test_session.add_all(
+            [
+                # 22:00 ET on the 24th
+                _event(1, datetime(2024, 10, 25, 2, 0, tzinfo=UTC)),
+                # 23:30 ET on the 23rd
+                _event(2, datetime(2024, 10, 24, 3, 30, tzinfo=UTC)),
+                _event(3, datetime(2024, 10, 24, 19, 0, tzinfo=UTC), "soccer_epl"),
+            ]
+        )
+        await test_session.commit()
+
+        report = await TierCoverageValidator(test_session).validate_date(
+            date(2024, 10, 24), "basketball_nba"
+        )
+
+        assert [game.event_id for game in report.game_reports] == [1]
+        assert report.sport_key == "basketball_nba"
+
+
+class TestFetchApiGames:
+    """Discovery asks /scores for the sport's games and keeps those on the day."""
+
+    @staticmethod
+    def _client(games: list[dict]) -> MagicMock:
+        client = MagicMock()
+        client.get_scores = AsyncMock(return_value=MagicMock(scores_data=games))
+        return client
+
+    @freeze_time("2024-10-26 15:00:00")
+    async def test_requests_the_sports_scores_and_keeps_the_days_games(
+        self, test_session: AsyncSession
+    ) -> None:
+        games = [
+            {"id": "a", "commence_time": "2024-10-24T23:30:00Z"},  # 00:30 London on the 25th
+            {"id": "b", "commence_time": "2024-10-24T22:59:00Z"},  # 23:59 London on the 24th
+            {"id": "c", "commence_time": "2024-10-25T22:00:00Z"},
+        ]
+        client = self._client(games)
+
+        with patch("odds_lambda.data_fetcher.TheOddsAPIClient", return_value=client):
+            fetched = await TierCoverageValidator(test_session)._fetch_api_games(
+                date(2024, 10, 25), "soccer_epl"
+            )
+
+        client.get_scores.assert_awaited_once_with(sport="soccer_epl", days_from=2)
+        assert [game["id"] for game in fetched] == ["a", "c"]
+
+    @pytest.mark.parametrize("day", [date(2024, 10, 27), date(2024, 10, 22)])
+    @freeze_time("2024-10-26 15:00:00")
+    async def test_a_day_outside_the_scores_range_is_skipped(
+        self, test_session: AsyncSession, day: date
+    ) -> None:
+        client = self._client([])
+
+        with patch("odds_lambda.data_fetcher.TheOddsAPIClient", return_value=client):
+            fetched = await TierCoverageValidator(test_session)._fetch_api_games(
+                day, "baseball_mlb"
+            )
+
+        assert fetched is None
+        client.get_scores.assert_not_awaited()

@@ -51,7 +51,7 @@ The repo is a uv workspace of five packages under `packages/` ([AGENTS.md](../..
 | `.github/workflows/` | [CI/CD workflows](../operations/ci-cd-workflows.md) |
 | `wiki/` | The wiki |
 
-`.claude/`, `worktrees/` and `logs/` are gitignored. The root `pyproject.toml` description reads "NBA betting odds data collection and analysis system" (#465).
+`.claude/`, `worktrees/` and `logs/` are gitignored.
 
 ## Stack
 
@@ -88,7 +88,7 @@ Python 3.12+ (`pyproject.toml`), a uv workspace linted by one root ruff configur
 | `odds_core.betfair_close` | `odds_core.betfair_close.pick_close` and `odds_core.betfair_close.event_close` (the close of an event, within `odds_core.betfair_close.LIVE_CLOSE_WINDOW` else FDUK's) and `odds_core.betfair_close.close_quotes` (the quotes that can be the close): the close that the retail-EV builder, the candidate report and the [Betfair close check](../operations/health-monitor.md#betfair-close-check) share. The outcomes each market prices are in `odds_core.market_prices` |
 | `odds_core.as_of` | `odds_core.as_of.latest_snapshot`: which stored quotes count as known at a decision time ([candidate rules](../evaluation/candidate-rules.md#market-state)) |
 | `utils.py` | `odds_core.utils.relabel_three_way_markets` |
-| `odds_core.sports`, `odds_core.team`, `odds_core.time`, `odds_core.logging_setup` | [Sport keys](../collection/sport-and-market-keys.md), [team-name normalization](../storage/event-matching.md) (EPL, MLB and NBA, one alias map), [timezone helpers](timezones.md) (including `odds_core.time.parse_date`), structlog setup |
+| `odds_core.sports`, `odds_core.team`, `odds_core.time`, `odds_core.logging_setup` | [Sport keys](../collection/sport-and-market-keys.md) and each league's timezone, which sets its game day ([coverage checks](../storage/coverage-checks.md#tiercoveragevalidator)), [team-name normalization](../storage/event-matching.md) (EPL, MLB and NBA, one alias map), [timezone helpers](timezones.md) (including `odds_core.time.parse_date`), structlog setup |
 | `odds_core.api_models` | The Odds API response models and event factories; every response carries the key's remaining and used quota, and a historical response the snapshot's own time and the call's cost |
 
 Importing `odds_core.alerts` builds `odds_core.config.get_settings()` ([Read at import](configuration.md#read-at-import)), and the CLI, the jobs and the MCP server all import it. Every `odds` command therefore needs `ODDS_API_KEY` and `DATABASE_URL` to resolve, even commands that never touch the API or database ([Configuration](configuration.md)).

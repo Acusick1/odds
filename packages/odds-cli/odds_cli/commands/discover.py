@@ -212,9 +212,7 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str):
 
 @app.command()
 def upcoming(
-    sport: str = typer.Option(
-        "basketball_nba", "--sport", "-s", help="Sport to discover games for"
-    ),
+    sport: str = typer.Option(..., "--sport", "-s", help="Sport to discover games for"),
 ):
     """
     Discover and store upcoming games using the free /events endpoint (0 quota units).
@@ -224,8 +222,7 @@ def upcoming(
     without spending quota.
 
     Examples:
-        odds discover upcoming
-        odds discover upcoming --sport basketball_nba
+        odds discover upcoming --sport soccer_epl
     """
     asyncio.run(_discover_upcoming(sport))
 
