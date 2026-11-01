@@ -9,6 +9,7 @@ from odds_core.models import Event, EventExternalId, EventStatus, OddsSnapshot
 from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.storage.tier_validator import TierCoverageReport, TierCoverageValidator
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.test_helpers import TIER_HOURS_BEFORE
 
@@ -568,7 +569,9 @@ def _event(event_id: int, commence_time: datetime, sport_key: str = "basketball_
 class TestValidateDateScope:
     """A daily validation covers one sport's games on its league-local day."""
 
-    async def test_only_the_sports_games_on_its_local_day_are_validated(self, test_session):
+    async def test_only_the_sports_games_on_its_local_day_are_validated(
+        self, test_session: AsyncSession
+    ) -> None:
         test_session.add_all(
             [
                 # 22:00 ET on the 24th
@@ -598,7 +601,9 @@ class TestFetchApiGames:
         return client
 
     @freeze_time("2024-10-26 15:00:00")
-    async def test_requests_the_sports_scores_and_keeps_the_days_games(self, test_session):
+    async def test_requests_the_sports_scores_and_keeps_the_days_games(
+        self, test_session: AsyncSession
+    ) -> None:
         games = [
             {"id": "a", "commence_time": "2024-10-24T23:30:00Z"},  # 00:30 London on the 25th
             {"id": "b", "commence_time": "2024-10-24T22:59:00Z"},  # 23:59 London on the 24th
@@ -616,7 +621,9 @@ class TestFetchApiGames:
 
     @pytest.mark.parametrize("day", [date(2024, 10, 27), date(2024, 10, 22)])
     @freeze_time("2024-10-26 15:00:00")
-    async def test_a_day_outside_the_scores_range_is_skipped(self, test_session, day):
+    async def test_a_day_outside_the_scores_range_is_skipped(
+        self, test_session: AsyncSession, day: date
+    ) -> None:
         client = self._client([])
 
         with patch("odds_lambda.data_fetcher.TheOddsAPIClient", return_value=client):
