@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from datetime import UTC, datetime
 
 import structlog
@@ -16,8 +17,6 @@ class OddsValidator:
     """Validator for odds data quality checks."""
 
     # Validation thresholds
-    MIN_DECIMAL_ODDS = 1.01
-    MAX_DECIMAL_ODDS = 101.0
     MIN_VIG_PERCENT = 2.0  # Minimum expected vig for non-exchange bookmakers
     MAX_VIG_PERCENT = 15.0  # Maximum reasonable vig/juice
 
@@ -120,11 +119,8 @@ class OddsValidator:
         if not isinstance(price, int | float):
             return [f"{bookmaker} {market} {outcome}: Invalid price type {type(price)}"]
 
-        if price < cls.MIN_DECIMAL_ODDS or price > cls.MAX_DECIMAL_ODDS:
-            return [
-                f"{bookmaker} {market} {outcome}: Odds {price} out of valid range "
-                f"({cls.MIN_DECIMAL_ODDS} to {cls.MAX_DECIMAL_ODDS})"
-            ]
+        if not math.isfinite(price) or price <= 1.0:
+            return [f"{bookmaker} {market} {outcome}: Odds {price} not above 1.0"]
         return []
 
     @classmethod

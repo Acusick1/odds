@@ -48,7 +48,7 @@ The envelope a source returns (archived in `odds_core.models.SnapshotPayload`, [
 - The envelopes built by this pipeline hold the source decimal under `price_decimal` and have no `price` key: Betfair (`odds_lambda.betfair.adapter.betfair_book_to_bookmaker_entry`, every market it collects, each totals runner on its spec's line), OddsPortal live (`odds_lambda.oddsportal_adapter.convert_market`, whose spread points are signed per outcome and whose ladder lines each carry their own volumes, [spreads line sign](../storage/price-tables.md#spreads-line-sign)), OddsPortal historical (`odds_lambda.oddsportal_common.build_envelope`, whose `last_update` and `_snapshot_time` come from UTC-aware times) and `scripts/ingest_football_data_uk.py` (kick-off read as UK local time, stored as UTC), which skips a game whose event match is ambiguous.
 - The Odds API's responses keep their integer American `price` unchanged, which `odds_core.odds_math.american_to_decimal` converts exactly.
 
-`odds_core.odds_math.outcome_price_decimal` reads either encoding; `odds_lambda.price_rows.expand_envelope` (which turns an envelope into price rows) and `odds_lambda.storage.validators.OddsValidator`, which validates one event's envelope per call, both go through it.
+`odds_core.odds_math.outcome_price_decimal` reads either encoding; `odds_lambda.price_rows.expand_envelope` (which turns an envelope into price rows) and `odds_lambda.storage.validators.OddsValidator`, which checks that each price in one event's envelope is above 1.0, both go through it.
 
 ## Related
 

@@ -19,7 +19,7 @@ status: stable
 
 # OddsWriter
 
-`odds_lambda.storage.writers.OddsWriter` owns an `AsyncSession` and an `odds_lambda.storage.validators.OddsValidator` (its vig floor skips zero-margin books, `odds_core.bookmakers.ZERO_MARGIN_BOOKMAKERS`), which validates the one envelope being stored. It never commits; storing a snapshot flushes it to give its price rows its id, and callers commit ([Commit contract](storage-layer.md#commit-contract)). The tables it writes are on [Odds snapshots table](odds-tables.md), [Prices and snapshot payloads tables](price-tables.md) and [Events table](events.md). Live jobs find the event a snapshot belongs to through the [event resolver](event-resolver.md) before storing it.
+`odds_lambda.storage.writers.OddsWriter` owns an `AsyncSession` and an `odds_lambda.storage.validators.OddsValidator` (its vig floor skips zero-margin books, `odds_core.bookmakers.ZERO_MARGIN_BOOKMAKERS`), which checks the one envelope being stored and never blocks the write. It never commits; storing a snapshot flushes it to give its price rows its id, and callers commit ([Commit contract](storage-layer.md#commit-contract)). The tables it writes are on [Odds snapshots table](odds-tables.md), [Prices and snapshot payloads tables](price-tables.md) and [Events table](events.md). Live jobs find the event a snapshot belongs to through the [event resolver](event-resolver.md) before storing it.
 
 ## store_envelope
 
