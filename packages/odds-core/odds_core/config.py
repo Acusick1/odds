@@ -64,6 +64,21 @@ class DatabaseConfig(BaseSettings):
 
     url: str = Field(..., description="PostgreSQL connection URL")
     pool_size: int = Field(default=5, description="Database connection pool size")
+    agent_url: str | None = Field(
+        default=None,
+        validation_alias="AGENT_DATABASE_URL",
+        description="DSN of the restricted odds_agent role the agent subprocess runs as",
+    )
+    prod_url: str | None = Field(
+        default=None,
+        validation_alias="PROD_DATABASE_URL",
+        description="Source database of `odds copy from-prod`",
+    )
+    local_url: str | None = Field(
+        default=None,
+        validation_alias="LOCAL_DATABASE_URL",
+        description="Target database of `odds copy from-prod`",
+    )
 
 
 _US_BOOKMAKERS: tuple[str, ...] = (

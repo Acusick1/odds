@@ -8,11 +8,11 @@ local event by its external ids, since event ids are numbered per database.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 import structlog
+from odds_core.config import get_settings
 from odds_core.models import (
     Event,
     EventExternalId,
@@ -397,15 +397,14 @@ async def copy_from_prod(
     )
 
     # Get database URLs
+    database = get_settings().database
+    prod_url = prod_url or database.prod_url
     if not prod_url:
-        prod_url = os.getenv("PROD_DATABASE_URL")
-        if not prod_url:
-            raise ValueError("PROD_DATABASE_URL environment variable or --prod-url required")
+        raise ValueError("PROD_DATABASE_URL setting or --prod-url required")
 
+    local_url = local_url or database.local_url
     if not local_url:
-        local_url = os.getenv("LOCAL_DATABASE_URL")
-        if not local_url:
-            raise ValueError("LOCAL_DATABASE_URL environment variable required")
+        raise ValueError("LOCAL_DATABASE_URL setting or --local-url required")
 
     console.print("[bold]Database Configuration:[/bold]")
     console.print(f"  Production: {prod_url.split('@')[-1] if '@' in prod_url else 'configured'}")

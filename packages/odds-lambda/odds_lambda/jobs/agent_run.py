@@ -124,7 +124,7 @@ def _log_stream_message(msg: dict[str, Any]) -> None:
 def _build_agent_subprocess_env() -> dict[str, str]:
     """Return an environment dict for the agent subprocess.
 
-    When ``AGENT_DATABASE_URL`` is set, its value replaces ``DATABASE_URL``
+    When ``AGENT_DATABASE_URL`` (``DatabaseConfig.agent_url``) is set, its value replaces ``DATABASE_URL``
     so the agent connects as the read-mostly ``odds_agent`` role rather
     than inheriting the scraper/scheduler's write-capable DSN. When it is
     unset the subprocess inherits the parent's ``DATABASE_URL`` and a
@@ -133,7 +133,7 @@ def _build_agent_subprocess_env() -> dict[str, str]:
     operators who haven't provisioned the role yet.
     """
     env = os.environ.copy()
-    agent_dsn = env.get("AGENT_DATABASE_URL")
+    agent_dsn = get_settings().database.agent_url
     if agent_dsn:
         env["DATABASE_URL"] = agent_dsn
     else:

@@ -1,6 +1,8 @@
 """Unit tests for configuration management."""
 
 import os
+import re
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -305,3 +307,66 @@ class TestAPIConfigKeys:
 
         assert api.key_for("baseball_mlb") == "b"
         assert api.key_for("basketball_nba") == "a"
+
+
+class TestEnvExampleTemplate:
+    """`.env.example` copied to `.env` loads, with its commented settings enabled or not."""
+
+    TEMPLATE = Path(__file__).resolve().parents[2] / ".env.example"
+
+    @staticmethod
+    def _load(env_text: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
+        (tmp_path / ".env").write_text(env_text)
+        monkeypatch.chdir(tmp_path)
+        with patch.dict(os.environ, {}, clear=True):
+            return Settings()
+
+    def test_template_loads(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        settings = self._load(self.TEMPLATE.read_text(), tmp_path, monkeypatch)
+
+        assert (
+            settings.database.local_url
+            == "postgresql+asyncpg://postgres:postgres@localhost:5433/odds"
+        )
+
+    def test_template_loads_with_commented_settings_enabled(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        enabled = re.sub(r"(?m)^# ([A-Z][A-Z0-9_]*=)", r"\1", self.TEMPLATE.read_text())
+
+        settings = self._load(enabled, tmp_path, monkeypatch)
+
+        assert settings.data_collection.sports == ["soccer_epl", "baseball_mlb", "basketball_nba"]
+        assert settings.data_collection.markets == ["h2h", "spreads", "totals"]
+        assert settings.data_collection.regions == ["us"]
+        assert "fetch-oddsportal" in settings.scheduler.bootstrap_jobs
+        assert settings.database.agent_url is not None
+
+
+class TestDatabaseURLsFromEnvFile:
+    def test_auxiliary_urls_are_read_from_env_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / ".env").write_text(
+            "DATABASE_URL=postgresql://main/db\n"
+            "AGENT_DATABASE_URL=postgresql://agent/db\n"
+            "PROD_DATABASE_URL=postgresql://prod/db\n"
+            "LOCAL_DATABASE_URL=postgresql://local/db\n"
+        )
+        monkeypatch.chdir(tmp_path)
+
+        with patch.dict(os.environ, {}, clear=True):
+            database = Settings().database
+
+        assert database.url == "postgresql://main/db"
+        assert database.agent_url == "postgresql://agent/db"
+        assert database.prod_url == "postgresql://prod/db"
+        assert database.local_url == "postgresql://local/db"
+
+    def test_auxiliary_urls_default_to_none(self) -> None:
+        with patch.dict(os.environ, {"DATABASE_URL": "postgresql://main/db"}, clear=True):
+            database = Settings(_env_file=None).database
+
+        assert database.agent_url is None
+        assert database.prod_url is None
+        assert database.local_url is None
