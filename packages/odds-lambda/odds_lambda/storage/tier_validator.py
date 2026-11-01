@@ -399,8 +399,6 @@ class TierCoverageValidator:
         Returns:
             List of game dictionaries from API, or None if date out of range
         """
-        from datetime import date as date_type
-
         from odds_lambda.data_fetcher import TheOddsAPIClient
 
         # Get games from API for this date
@@ -410,7 +408,7 @@ class TierCoverageValidator:
         if isinstance(target_date, datetime):
             target_date = target_date.date()
 
-        today = date_type.today()
+        today = datetime.now(UTC).date()
         days_from = (today - target_date).days
 
         # Only check for recent dates (API supports up to 3 days)

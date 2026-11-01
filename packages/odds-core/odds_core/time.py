@@ -1,6 +1,6 @@
 """Time utility helpers for consistent timezone handling."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
 EASTERN = ZoneInfo("America/New_York")
@@ -31,3 +31,8 @@ def to_eastern(dt: datetime) -> datetime:
 def utc_isoformat(dt: datetime) -> str:
     """Serialize datetime as ISO 8601 string with trailing Z."""
     return ensure_utc(dt).isoformat().replace("+00:00", "Z")
+
+
+def parse_date(value: str, fmt: str) -> date:
+    """Parse a calendar date in ``fmt`` without constructing a naive datetime."""
+    return datetime.strptime(value, fmt).replace(tzinfo=UTC).date()

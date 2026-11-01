@@ -281,12 +281,12 @@ class TestLoadFixtures:
             start=datetime(2022, 7, 1, tzinfo=UTC), end=datetime(2023, 7, 1, tzinfo=UTC)
         )
         rows = [
-            (1, "soccer_epl", datetime(2022, 8, 6, 14, 0), EventStatus.FINAL),
-            (2, "soccer_epl", datetime(2022, 8, 6, 11, 30), EventStatus.FINAL),
-            (3, "soccer_epl", datetime(2022, 8, 7, 14, 0), EventStatus.SCHEDULED),
-            (4, "baseball_mlb", datetime(2022, 8, 6, 18, 0), EventStatus.FINAL),
-            (5, "soccer_epl", datetime(2023, 7, 1, 0, 0), EventStatus.FINAL),
-            (6, "soccer_epl", datetime(2022, 7, 1, 0, 0), EventStatus.FINAL),
+            (1, "soccer_epl", datetime(2022, 8, 6, 14, 0, tzinfo=UTC), EventStatus.FINAL),
+            (2, "soccer_epl", datetime(2022, 8, 6, 11, 30, tzinfo=UTC), EventStatus.FINAL),
+            (3, "soccer_epl", datetime(2022, 8, 7, 14, 0, tzinfo=UTC), EventStatus.SCHEDULED),
+            (4, "baseball_mlb", datetime(2022, 8, 6, 18, 0, tzinfo=UTC), EventStatus.FINAL),
+            (5, "soccer_epl", datetime(2023, 7, 1, 0, 0, tzinfo=UTC), EventStatus.FINAL),
+            (6, "soccer_epl", datetime(2022, 7, 1, 0, 0, tzinfo=UTC), EventStatus.FINAL),
         ]
         for event_id, sport, kickoff, status in rows:
             await add_event(
@@ -295,7 +295,7 @@ class TestLoadFixtures:
                     id=event_id,
                     sport_key=sport,
                     sport_title=sport,
-                    commence_time=kickoff.replace(tzinfo=UTC),
+                    commence_time=kickoff,
                     home_team=f"Home {event_id}",
                     away_team=f"Away {event_id}",
                     status=status,

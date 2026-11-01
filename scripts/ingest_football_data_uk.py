@@ -207,9 +207,8 @@ def parse_kickoff(row: dict[str, str]) -> Kickoff:
     date_str = row["Date"]
     time_str = (row.get("Time") or "").strip()
     fmt = "%d/%m/%Y" if len(date_str.split("/")[-1]) == 4 else "%d/%m/%y"
-    parsed_date = datetime.strptime(date_str, fmt).date()
-    kickoff_time = datetime.strptime(time_str, "%H:%M").time() if time_str else DEFAULT_KICKOFF
-    local = datetime.combine(parsed_date, kickoff_time, tzinfo=UK_TZ)
+    kickoff = time_str or DEFAULT_KICKOFF.strftime("%H:%M")
+    local = datetime.strptime(f"{date_str} {kickoff}", f"{fmt} %H:%M").replace(tzinfo=UK_TZ)
     return Kickoff(commence_time=local.astimezone(UTC), time_assumed=not time_str)
 
 

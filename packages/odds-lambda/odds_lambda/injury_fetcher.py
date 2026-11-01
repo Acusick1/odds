@@ -19,7 +19,7 @@ from pathlib import Path
 
 import structlog
 from odds_core.injury_models import InjuryStatus
-from odds_core.time import EASTERN, ensure_utc
+from odds_core.time import EASTERN, ensure_utc, parse_date
 
 logger = structlog.get_logger(__name__)
 
@@ -106,7 +106,7 @@ def _parse_records(raw_json: str, report_time_utc: datetime) -> list[InjuryRecor
         # Parse game date from MM/DD/YYYY
         game_date_str = str(row.get("Game Date", "") or "").strip()
         try:
-            game_date = datetime.strptime(game_date_str, "%m/%d/%Y").date()
+            game_date = parse_date(game_date_str, "%m/%d/%Y")
         except ValueError:
             logger.warning("injury_invalid_game_date", date_str=game_date_str)
             continue

@@ -63,14 +63,14 @@ class TestToNaiveEt:
         """UTC datetime converts to ET (EST, UTC-5) in winter."""
         utc = datetime(2026, 1, 15, 22, 0, tzinfo=UTC)
         result = _to_naive_et(utc)
-        assert result == datetime(2026, 1, 15, 17, 0)
+        assert result == datetime(2026, 1, 15, 17, 0)  # noqa: DTZ001
         assert result.tzinfo is None
 
     def test_utc_to_et_summer(self):
         """UTC datetime converts to ET (EDT, UTC-4) in summer."""
         utc = datetime(2026, 6, 15, 22, 0, tzinfo=UTC)
         result = _to_naive_et(utc)
-        assert result == datetime(2026, 6, 15, 18, 0)
+        assert result == datetime(2026, 6, 15, 18, 0)  # noqa: DTZ001
         assert result.tzinfo is None
 
 

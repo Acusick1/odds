@@ -3,7 +3,7 @@
 import asyncio
 import json
 import sys
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import typer
 from odds_core.database import async_session_maker
@@ -79,7 +79,7 @@ async def _validate_daily(
     # Parse target date (default to yesterday)
     if target_date_str:
         try:
-            target_date = datetime.strptime(target_date_str, "%Y-%m-%d").date()
+            target_date = date.fromisoformat(target_date_str)
         except ValueError:
             console.print(
                 f"[red]Error: Invalid date format '{target_date_str}'. Use YYYY-MM-DD[/red]"
@@ -546,8 +546,8 @@ async def _validate_tier_coverage(start_date_str: str, end_date_str: str, output
     """Async implementation of tier coverage validation."""
     # Parse dates
     try:
-        start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
-        end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
+        start_date = date.fromisoformat(start_date_str)
+        end_date = date.fromisoformat(end_date_str)
     except ValueError:
         console.print("[red]Error: Invalid date format. Use YYYY-MM-DD[/red]")
         sys.exit(1)

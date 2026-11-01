@@ -98,7 +98,7 @@ class TestEvaluationSpec:
 
     def test_rejects_a_naive_window(self) -> None:
         with pytest.raises(ValueError):
-            _spec(window={"start": datetime(2025, 8, 1), "end": datetime(2026, 5, 31)})
+            _spec(window={"start": datetime(2025, 8, 1), "end": datetime(2026, 5, 31)})  # noqa: DTZ001
 
     def test_rejects_a_second_seed_in_the_model(self) -> None:
         with pytest.raises(ValueError, match="seed"):
