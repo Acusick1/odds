@@ -52,7 +52,6 @@ Workflows live in `.github/workflows/`. Secrets come from the `development` and 
 
 ## Known gaps
 
-- `test.yml` and `live-api.yml` set up Python 3.11 (`python-version` in `.github/workflows/test.yml` and `.github/workflows/live-api.yml`), while every package requires `>=3.12` (`pyproject.toml`); `deploy-*` use 3.12 (`.github/workflows/deploy-dev.yml`, `.github/workflows/deploy-prod.yml`; #460).
 - The dev deploy exercises only `check-health` and Betfair; `fetch-odds` is not invoked there.
 - The workflows trigger on main (not `master`), and the scheduler log group is `/aws/lambda/odds-scheduler`.
 
