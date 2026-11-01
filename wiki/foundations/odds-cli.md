@@ -24,7 +24,7 @@ status: stable
 
 # The odds CLI
 
-`odds_cli.main.app` is a Typer app installed as the `odds` script. Each group is a module in `packages/odds-cli/odds_cli/commands/` registered with `add_typer`. Each command's `--help` is authoritative for flags and defaults. Commands are documented on the page that owns their domain (the `polymarket` group's `backfill-odds` included); none is repeated here. `odds_cli.main.callback` configures human-readable logging ([Code conventions](code-conventions.md#logging)). The root help text and banner describe the tool as NBA (#448).
+`odds_cli.main.app` is a Typer app installed as the `odds` script. Each group is a module in `packages/odds-cli/odds_cli/commands/` registered with `add_typer`. Each command's `--help` is authoritative for flags and defaults. Commands are documented on the page that owns their domain (the `polymarket` group's `backfill-odds` included); none is repeated here. `odds_cli.main.callback` configures human-readable logging ([Code conventions](code-conventions.md#logging)).
 
 ## Command groups
 
@@ -72,9 +72,8 @@ Pass `--sport` explicitly. [About the system and its pivots](project-overview.md
 
 ## Help text
 
-The help text disagrees with the code in four places (#448, #466):
+The help text disagrees with the code in two places (#466):
 
-- The root help, banner and callback docstring say "NBA" (`odds_cli.main.app`, `odds_cli.main.callback`).
 - `odds scheduler run-once` help names a sport-suffixed per-sport job and `update-status` of the 14 in `odds_lambda.scheduling.jobs._JOB_MODULE_MAP` (`odds_cli.commands.scheduler.run_once`).
 - `odds scheduler info` has no help text, because its docstring follows a statement (`odds_cli.commands.scheduler.info`). It lists each sport's Odds API bookmakers.
 

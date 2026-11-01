@@ -5,8 +5,6 @@ description: OddsValidator checks, the data_quality_logs rows it produces, and D
 sources:
   - odds_lambda.storage.validators.OddsValidator
   - odds_lambda.storage.validators.OddsValidator.validate_odds_snapshot
-  - odds_lambda.storage.validators.OddsValidator.validate_line_movement
-  - odds_lambda.storage.validators.OddsValidator.validate_event_data
   - odds_lambda.storage.writers.OddsWriter.store_envelope
   - odds_lambda.storage.writers.OddsWriter.store_envelope
   - odds_lambda.storage.readers.OddsReader.get_data_quality_logs
@@ -31,8 +29,6 @@ status: stable
 - Each outcome price, read as a decimal through `odds_core.odds_math.outcome_price_decimal`: missing or unparseable is an error; outside `MIN_DECIMAL_ODDS`..`MAX_DECIMAL_ODDS` (1.01 to 101.0) is an error via `odds_lambda.storage.validators.OddsValidator.validate_odds_value` (the OddsPortal ingest skips prices at or below 1.0 before they reach it).
 - For two-outcome `h2h`/`spreads`/`totals` markets, `odds_lambda.storage.validators.OddsValidator.validate_vig`: vig (from decimal implied probabilities) above `MAX_VIG_PERCENT` (15), negative, or below `MIN_VIG_PERCENT` (2). The floor is skipped for `odds_core.bookmakers.ZERO_MARGIN_BOOKMAKERS`: the exchanges (betfair_exchange, betdaq, smarkets, matchbook) in `odds_core.bookmakers.EXCHANGE_BOOKMAKERS` and `polymarket`. Vig warnings do not affect `is_valid`.
 
-`odds_lambda.storage.validators.OddsValidator.validate_line_movement` (spread over 10, total over 20 points) and `odds_lambda.storage.validators.OddsValidator.validate_event_data` (required fields) have no caller outside tests (#448).
-
 ## What gets logged
 
 If an envelope has any warnings, `odds_lambda.storage.writers.OddsWriter.store_envelope` writes one `odds_core.models.DataQualityLog`: `issue_type="validation_warnings"`, `severity` `"warning"` when `is_valid` else `"error"`, `description` with the count, and `raw_data={"warnings": first 10}`. Columns: `event_id` (integer FK to `events.id`, nullable), `severity`, `issue_type`, `description`, JSON `raw_data`, indexed `created_at`. No other severity or issue type is written, so `critical` never occurs.
@@ -41,7 +37,7 @@ If an envelope has any warnings, `odds_lambda.storage.writers.OddsWriter.store_e
 
 ## Configuration
 
-`odds_core.config.DataQualityConfig` has env `ENABLE_VALIDATION` (default true) and `REJECT_INVALID_ODDS` (default false) ([Configuration](../foundations/configuration.md)). `odds_lambda.ingestion.OddsIngestionService.ingest_sport` is the only reader of `enable_validation`, as the default for its `validate` argument, which it passes to `odds_lambda.storage.writers.OddsWriter.store_envelope` for every event it stores (a game resolved through the event resolver). `reject_invalid_odds` is read by nothing, so invalid odds are always stored (#448).
+`odds_core.config.DataQualityConfig` has one env setting, `ENABLE_VALIDATION` (default true) ([Configuration](../foundations/configuration.md)). `odds_lambda.ingestion.OddsIngestionService.ingest_sport` is the only reader of `enable_validation`, as the default for its `validate` argument, which it passes to `odds_lambda.storage.writers.OddsWriter.store_envelope` for every event it stores (a game resolved through the event resolver). Validation never blocks a write, so invalid odds are always stored.
 
 ## Related
 

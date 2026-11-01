@@ -41,7 +41,7 @@ Helpers:
 
 On AWS, the Lambda handler also sends its own critical on any exception ([lambda-handler](../scheduling/scheduler-backends.md#lambda-handler)).
 
-`odds_core.config.AlertConfig` (no env prefix; its docstring says "infrastructure for future use", yet it drives deployed alerting): `DISCORD_WEBHOOK_URL`, `ALERT_ENABLED` (default false), quota thresholds 0.2 and 0.1, `STALE_DATA_HOURS` 2, `DATA_QUALITY_ERROR_THRESHOLD` 10, `heartbeat_expectations` (hours per compound job name such as `fetch-polymarket-odds-nba`, `fetch-odds-epl`, `fetch-odds-nba`, `fetch-oddsportal-nba`, `fetch-injuries-nba` or `fetch-espn-fixtures-nba`, 2 to 49 by default), `heartbeat_retention_days` 7 ([configuration](../foundations/configuration.md)).
+`odds_core.config.AlertConfig` (no env prefix): `DISCORD_WEBHOOK_URL`, `ALERT_ENABLED` (default false), quota thresholds 0.2 and 0.1, `STALE_DATA_HOURS` 2, `DATA_QUALITY_ERROR_THRESHOLD` 10, `heartbeat_expectations` (hours per compound job name such as `fetch-polymarket-odds-nba`, `fetch-odds-epl`, `fetch-odds-nba`, `fetch-oddsportal-nba`, `fetch-injuries-nba` or `fetch-espn-fixtures-nba`, 2 to 49 by default), `heartbeat_retention_days` 7 ([configuration](../foundations/configuration.md)).
 
 ## Alert history
 

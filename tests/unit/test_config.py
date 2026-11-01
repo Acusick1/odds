@@ -71,7 +71,6 @@ class TestSettings:
                 "run-candidates",
             ]
             assert settings.data_quality.enable_validation is True
-            assert settings.data_quality.reject_invalid_odds is False
             assert settings.alerts.alert_enabled is False
             assert settings.logging.level == "INFO"
 

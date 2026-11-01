@@ -66,7 +66,7 @@ status: stable
 
 ## Warnings and known defects
 
-- State behaviour plainly, in prose, where it belongs. For example: "`reject_invalid_odds` is read by nothing, so invalid odds are always stored."
+- State behaviour plainly, in prose, where it belongs. For example: "`OddsValidator` never blocks a write, so invalid odds are always stored."
 - When the behaviour is a known defect, link its issue (`#438`). The issue tracks the fix. The page states only what the code does today, never a plan to change it.
 - Reserve an alert for real danger: irreversible actions, data loss, the production database, quota spend. Use `> [!WARNING]`, and never two in a row.
 

@@ -20,8 +20,6 @@ class OddsValidator:
     MAX_DECIMAL_ODDS = 101.0
     MIN_VIG_PERCENT = 2.0  # Minimum expected vig for non-exchange bookmakers
     MAX_VIG_PERCENT = 15.0  # Maximum reasonable vig/juice
-    MAX_SPREAD_MOVEMENT = 10.0  # Maximum point spread change
-    MAX_TOTAL_MOVEMENT = 20.0  # Maximum total points change
 
     @classmethod
     def validate_odds_snapshot(cls, data: dict, event_id: int) -> tuple[bool, list[str]]:
@@ -177,78 +175,3 @@ class OddsValidator:
             warnings.append(f"{bookmaker} {market}: Error calculating vig: {str(e)}")
 
         return warnings
-
-    @classmethod
-    def validate_line_movement(
-        cls,
-        old_point: float | None,
-        new_point: float | None,
-        market: str,
-        bookmaker: str,
-    ) -> list[str]:
-        """
-        Validate line movement is not excessive.
-
-        Args:
-            old_point: Previous line value
-            new_point: New line value
-            market: Market key
-            bookmaker: Bookmaker key
-
-        Returns:
-            List of warning messages
-        """
-        warnings = []
-
-        if old_point is None or new_point is None:
-            return warnings
-
-        movement = abs(new_point - old_point)
-
-        if market == "spreads" and movement > cls.MAX_SPREAD_MOVEMENT:
-            warnings.append(
-                f"{bookmaker} {market}: Excessive spread movement "
-                f"({old_point} -> {new_point}, {movement} points)"
-            )
-        elif market == "totals" and movement > cls.MAX_TOTAL_MOVEMENT:
-            warnings.append(
-                f"{bookmaker} {market}: Excessive total movement "
-                f"({old_point} -> {new_point}, {movement} points)"
-            )
-
-        return warnings
-
-    @staticmethod
-    def validate_event_data(event_data: dict) -> tuple[bool, list[str]]:
-        """
-        Validate basic event data structure.
-
-        Args:
-            event_data: Event data dictionary
-
-        Returns:
-            Tuple of (is_valid, list of warning messages)
-        """
-        warnings = []
-        required_fields = ["id", "sport_key", "commence_time", "home_team", "away_team"]
-
-        for field in required_fields:
-            if field not in event_data or event_data[field] is None:
-                warnings.append(f"Missing required field: {field}")
-
-        # Validate commence_time is in future or recent past
-        if "commence_time" in event_data:
-            try:
-                commence_time = parse_api_datetime(event_data["commence_time"])
-                now = datetime.now(UTC)
-
-                # Allow events up to 24 hours in the past (for final results)
-                if commence_time < now.replace(hour=0, minute=0, second=0):
-                    warnings.append(
-                        f"Event commence time is more than 24h in past: {commence_time}"
-                    )
-            except Exception as e:
-                warnings.append(f"Invalid commence_time format: {str(e)}")
-
-        is_valid = len(warnings) == 0
-        return is_valid, warnings
