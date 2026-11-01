@@ -19,18 +19,21 @@ def swap_dbname(url: str, new_db: str) -> str:
 
 
 def override_database_url(new_db: str) -> str:
-    """Swap the dbname in the current DATABASE_URL and reset the settings cache.
+    """Point this process and its subprocesses at database ``new_db``.
 
-    Reads the already-resolved DATABASE_URL via pydantic settings (honouring
-    ``.env``), replaces the dbname segment with ``new_db``, writes it back to
-    ``os.environ`` so subprocesses inherit it, and clears the cached Settings
-    so any later ``get_settings()`` call in this process re-reads the override.
-    Returns the new URL.
+    Swaps the dbname in the resolved ``DATABASE_URL`` (honouring ``.env``),
+    and in ``AGENT_DATABASE_URL`` when set so the agent subprocess keeps its
+    restricted role, writes both to ``os.environ`` so subprocesses inherit
+    them, and clears the cached Settings so later ``get_settings()`` calls and
+    ``odds_core.database`` sessions use the new database. Returns the new
+    ``DATABASE_URL``.
     """
     from odds_core.config import get_settings, reset_settings_cache
 
-    source = get_settings().database.url
-    new_url = swap_dbname(source, new_db)
+    database = get_settings().database
+    new_url = swap_dbname(database.url, new_db)
     os.environ["DATABASE_URL"] = new_url
+    if database.agent_url:
+        os.environ["AGENT_DATABASE_URL"] = swap_dbname(database.agent_url, new_db)
     reset_settings_cache()
     return new_url

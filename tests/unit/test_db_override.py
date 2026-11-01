@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
 import pytest
-from odds_cli.db_override import swap_dbname
+from odds_cli.db_override import override_database_url, swap_dbname
+from odds_core.config import get_settings, reset_settings_cache
+from sqlalchemy.engine import make_url
+
+BASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5433/odds"
 
 
 class TestSwapDbname:
@@ -51,25 +57,53 @@ class TestSwapDbname:
             swap_dbname("postgresql://u:p@h/a", "bad?x=1")
 
 
-class TestOverrideDatabaseUrl:
-    """Tests that the env override reads current settings and clears the cache."""
+@pytest.fixture
+def base_database_url(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    monkeypatch.setenv("DATABASE_URL", BASE_URL)
+    monkeypatch.delenv("AGENT_DATABASE_URL", raising=False)
+    reset_settings_cache()
+    yield
+    reset_settings_cache()
 
-    def test_mutates_env_and_clears_cache(self, monkeypatch: pytest.MonkeyPatch) -> None:
+
+@pytest.mark.usefixtures("base_database_url")
+class TestOverrideDatabaseUrl:
+    """Tests that the override re-points settings, the engine and the agent DSN."""
+
+    def test_mutates_env_and_clears_cache(self) -> None:
         import os
 
-        from odds_cli.db_override import override_database_url
-        from odds_core.config import get_settings, reset_settings_cache
-
-        reset_settings_cache()
-        monkeypatch.setenv(
-            "DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5433/odds"
-        )
-        # Prime the cache with the initial URL
         assert get_settings().database.url.endswith("/odds")
 
         new_url = override_database_url("odds_test")
 
         assert new_url.endswith("/odds_test")
         assert os.environ["DATABASE_URL"].endswith("/odds_test")
-        # Cache should have been cleared so the next get_settings() reflects the override.
         assert get_settings().database.url.endswith("/odds_test")
+
+    async def test_repoints_session_built_before_override(self) -> None:
+        from odds_core.database import async_session_maker
+
+        async with async_session_maker() as session:
+            assert make_url(str(session.bind.url)).database == "odds"
+
+        override_database_url("odds_test")
+
+        async with async_session_maker() as session:
+            assert make_url(str(session.bind.url)).database == "odds_test"
+
+    def test_agent_dsn_keeps_role_and_takes_override_dbname(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from odds_lambda.jobs.agent_run import _build_agent_subprocess_env
+
+        monkeypatch.setenv(
+            "AGENT_DATABASE_URL", "postgresql+asyncpg://odds_agent:pw@localhost:5433/odds"
+        )
+        reset_settings_cache()
+
+        override_database_url("odds_test")
+
+        agent_url = make_url(_build_agent_subprocess_env()["DATABASE_URL"])
+        assert agent_url.username == "odds_agent"
+        assert agent_url.database == "odds_test"

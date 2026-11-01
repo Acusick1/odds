@@ -1,42 +1,68 @@
 """Database connection and session management."""
 
 import os
+from dataclasses import dataclass
 
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlalchemy.pool import NullPool
 from sqlmodel import SQLModel
 
-from odds_core.config import get_settings
+from odds_core.config import DatabaseConfig, get_settings
 
-# Create async engine
-# AWS Lambda requires NullPool to avoid "attached to a different loop" errors because:
-# 1. Lambda may create an event loop during cold start/initialization
-# 2. asyncio.run() in the handler creates a NEW event loop per invocation
-# 3. asyncpg connections attached to the old loop can't be used in the new loop
-# NullPool disables connection pooling, creating a fresh connection per checkout.
-_settings = get_settings()
-_is_lambda = bool(os.getenv("AWS_LAMBDA_FUNCTION_NAME"))
 
-if _is_lambda:
-    # Lambda: Use NullPool to prevent connection reuse across event loops
-    engine = create_async_engine(
-        _settings.database.url,
+@dataclass(frozen=True)
+class _Binding:
+    url: str
+    pool_size: int
+    engine: AsyncEngine
+    session_maker: async_sessionmaker[AsyncSession]
+
+
+_binding: _Binding | None = None
+
+
+def _create_engine(config: DatabaseConfig) -> AsyncEngine:
+    # Lambda runs each invocation in a new event loop (asyncio.run), and asyncpg
+    # connections pooled on an earlier loop cannot be reused on it.
+    if os.getenv("AWS_LAMBDA_FUNCTION_NAME"):
+        return create_async_engine(config.url, echo=False, future=True, poolclass=NullPool)
+    return create_async_engine(
+        config.url,
         echo=False,
         future=True,
-        poolclass=NullPool,
-    )
-else:
-    # Local/Railway: Use connection pooling for better performance
-    engine = create_async_engine(
-        _settings.database.url,
-        echo=False,
-        future=True,
-        pool_size=_settings.database.pool_size,
+        pool_size=config.pool_size,
         max_overflow=10,
     )
 
-# Create async session factory
-async_session_maker = async_sessionmaker(engine, expire_on_commit=False)
+
+def _current_binding() -> _Binding:
+    """Return the engine for the current settings, building it on first use or after they change."""
+    global _binding
+    config = get_settings().database
+    if _binding is None or (_binding.url, _binding.pool_size) != (config.url, config.pool_size):
+        engine = _create_engine(config)
+        _binding = _Binding(
+            url=config.url,
+            pool_size=config.pool_size,
+            engine=engine,
+            session_maker=async_sessionmaker(engine, expire_on_commit=False),
+        )
+    return _binding
+
+
+def get_engine() -> AsyncEngine:
+    """Return the engine for the currently configured ``DATABASE_URL``."""
+    return _current_binding().engine
+
+
+def async_session_maker() -> AsyncSession:
+    """Open a session on the currently configured ``DATABASE_URL``."""
+    return _current_binding().session_maker()
 
 
 async def init_db() -> None:
@@ -46,10 +72,10 @@ async def init_db() -> None:
     Creates all tables defined in SQLModel.
     Note: In production, use Alembic migrations instead.
     """
-    async with engine.begin() as conn:
+    async with get_engine().begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
 
 
 async def close_db() -> None:
     """Close database connections."""
-    await engine.dispose()
+    await get_engine().dispose()

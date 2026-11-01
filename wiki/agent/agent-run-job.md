@@ -60,14 +60,14 @@ The wake-up interval is the `agent-run` row of the [cadence table](../scheduling
 
 ### `odds agent run`
 
-`odds agent run --sport S [--db NAME]` calls `odds_lambda.jobs.agent_run._run_claude_agent` directly: no pre-schedule, no wake-up consumption, no reschedule. `--db` swaps the database name in `DATABASE_URL` (default `odds`, the database the local scheduler writes scraper output to); a timeout exits 1. `odds_cli.commands.agent` imports the underscore-private `odds_lambda.jobs.agent_run._run_claude_agent` across packages ([Workspace packages](../foundations/workspace-packages.md)).
+`odds agent run --sport S [--db NAME]` calls `odds_lambda.jobs.agent_run._run_claude_agent` directly: no pre-schedule, no wake-up consumption, no reschedule. `--db` swaps the database name in `DATABASE_URL` and `AGENT_DATABASE_URL` (default `odds`, the database the local scheduler writes scraper output to); a timeout exits 1. `odds_cli.commands.agent` imports the underscore-private `odds_lambda.jobs.agent_run._run_claude_agent` across packages ([Workspace packages](../foundations/workspace-packages.md)).
 
 ## Database role
 
 > [!WARNING]
 > Without `AGENT_DATABASE_URL`, the agent subprocess runs with `--dangerously-skip-permissions` against the parent's write-capable `DATABASE_URL`.
 
-If `AGENT_DATABASE_URL` is set, the subprocess gets it as `DATABASE_URL`. `.env.example` documents, in comments, how to provision the restricted `odds_agent` role ([Databases and environments](../foundations/databases-and-environments.md#environments)): `SELECT` everywhere, `INSERT, UPDATE` on `paper_trades`, `match_briefs` and `agent_wakeups`, and write access to the APScheduler tables (`(inferred)`: the tables `odds_mcp.server.refresh_scrape` writes to through APScheduler). When unset, the agent runs with the parent's write-capable DSN and a warning is logged. `odds_lambda.jobs.agent_run._build_agent_subprocess_env` reads it as `agent_url` on `odds_core.config.DatabaseConfig`, so `.env` or the shell can set it ([configuration](../foundations/configuration.md#sections)). When it is set, `--db` has no effect, because the subprocess environment replaces `DATABASE_URL` with it (`odds_lambda.jobs.agent_run._build_agent_subprocess_env`, #445).
+If `AGENT_DATABASE_URL` is set, the subprocess gets it as `DATABASE_URL`. `.env.example` documents, in comments, how to provision the restricted `odds_agent` role ([Databases and environments](../foundations/databases-and-environments.md#environments)): `SELECT` everywhere, `INSERT, UPDATE` on `paper_trades`, `match_briefs` and `agent_wakeups`, and write access to the APScheduler tables (`(inferred)`: the tables `odds_mcp.server.refresh_scrape` writes to through APScheduler). When unset, the agent runs with the parent's write-capable DSN and a warning is logged. `odds_lambda.jobs.agent_run._build_agent_subprocess_env` reads it as `agent_url` on `odds_core.config.DatabaseConfig`, so `.env` or the shell can set it ([configuration](../foundations/configuration.md#sections)). `odds agent run --db NAME` swaps the database name in it too, so the agent stays the `odds_agent` role on database `NAME` (`odds_cli.db_override.override_database_url`).
 
 ## Run traces
 

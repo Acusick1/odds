@@ -34,7 +34,7 @@ EventBridge rules are named `{rule_prefix}-{job}[-{sport suffix}]` and `eventbri
 
 ## Constraints
 
-- Database connections use `NullPool` automatically when `AWS_LAMBDA_FUNCTION_NAME` is set, whatever the scheduler backend (`odds_core.database`; [databases-and-environments](../foundations/databases-and-environments.md#engine-creation)).
+- Database engines built while `AWS_LAMBDA_FUNCTION_NAME` is set use `NullPool`, whatever the scheduler backend (`odds_core.database`; [databases-and-environments](../foundations/databases-and-environments.md#engine-creation)).
 - Stateless between invocations.
 
 ## Costs and usage

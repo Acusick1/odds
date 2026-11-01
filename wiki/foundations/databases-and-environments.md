@@ -20,13 +20,13 @@ status: stable
 
 # Databases and environments
 
-All code gets sessions from one module-level factory: `odds_core.database.async_session_maker`, used as `async with async_session_maker() as session`. There is no wrapper layer. A session is never shared across async tasks. Everything is async (`asyncpg` URLs, `AsyncSession`).
+All code gets sessions from one module-level function: `odds_core.database.async_session_maker`, used as `async with async_session_maker() as session`. It opens a session on the engine for the current `odds_core.config.get_settings()`. A session is never shared across async tasks. Everything is async (`asyncpg` URLs, `AsyncSession`).
 
 ## Engine creation
 
-`odds_core.database` builds the engine at import time from `get_settings().database`, so the Lambda-versus-pool choice is fixed at that moment. Replacing the engine later (as `tests/migration/conftest.py` does) does not affect modules that already did `from odds_core.database import async_session_maker`.
+`odds_core.database` builds the engine on the first session, not at import, and builds a new one whenever `DATABASE_URL` or `DATABASE_POOL_SIZE` in `odds_core.config.get_settings()` differs from the engine's (`odds_core.database.get_engine`). The engine it replaces is dropped without being disposed. `tests/migration/conftest.py` replaces the module attribute `odds_core.database.async_session_maker` with a `NullPool` factory, which does not reach modules that already did `from odds_core.database import async_session_maker`.
 
-- If `AWS_LAMBDA_FUNCTION_NAME` is set: `NullPool`. Each handler call runs `asyncio.run`, which makes a new event loop, and pooled asyncpg connections bound to an old loop fail. The switch keys on that env var, not on the scheduler backend.
+- If `AWS_LAMBDA_FUNCTION_NAME` is set when the engine is built: `NullPool`. Each handler call runs `asyncio.run`, which makes a new event loop, and pooled asyncpg connections bound to an old loop fail. The switch keys on that env var, not on the scheduler backend.
 - Otherwise: `pool_size=DatabaseConfig.pool_size` (default 5, env `DATABASE_POOL_SIZE`) with hardcoded `max_overflow=10`, so a process opens up to `DATABASE_POOL_SIZE + 10` connections. No `pool_pre_ping` is set, so stale connections in a long-lived local process are not probed.
 - Sessions use `expire_on_commit=False`.
 
@@ -59,7 +59,7 @@ The betting agent subprocess swaps in `AGENT_DATABASE_URL`, from the shell or `.
 
 ### The `--db` flag
 
-`odds scheduler start --db NAME` and `odds agent run --db NAME` swap the dbname in `DATABASE_URL` through `odds_cli.db_override.override_database_url`. The engine already built in this process keeps the original URL, so in-process `odds_core.database.async_session_maker()` calls still hit the original database; only subprocesses and later `odds_core.config.get_settings()` calls see the swap ([The odds CLI](odds-cli.md#shared-conventions)).
+`odds scheduler start --db NAME` and `odds agent run --db NAME` swap the dbname in `DATABASE_URL`, and in `AGENT_DATABASE_URL` when it is set, through `odds_cli.db_override.override_database_url`. It writes both to `os.environ` and clears the settings cache, so in-process sessions (the engine is rebuilt, see [Engine creation](#engine-creation)), later `odds_core.config.get_settings()` calls and subprocesses all use database `NAME`. The agent subprocess keeps the `odds_agent` role on database `NAME` ([The agent database role](#the-agent-database-role)), so that role needs its grants there ([The odds CLI](odds-cli.md#shared-conventions)).
 
 ## Copying production data
 
