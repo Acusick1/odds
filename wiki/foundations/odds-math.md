@@ -24,6 +24,7 @@ status: stable
 
 - `odds_core.odds_math.american_to_decimal(american_odds)`: positive `a/100 + 1`, negative `100/|a| + 1`.
 - `odds_core.odds_math.decimal_to_american(decimal_odds)`: `>= 2.0` gives `round((d-1)*100)`, otherwise `round(-100/(d-1))`, the nearest integer American quote. `d <= 1.0` raises `ValueError`. Integer American odds cannot represent every decimal price, so this is for display and bet records.
+- `odds_core.odds_math.is_valid_decimal_price(price)`: whether a number can be a decimal price, finite and above 1.0 with no upper bound. Price rows and the odds validator share it.
 - `odds_core.odds_math.decimal_to_implied_probability(decimal_odds)`: `1 / d`. Includes vig.
 - `odds_core.odds_math.outcome_price_decimal(outcome)`: the decimal price of an envelope outcome, reading `price_decimal` if present, else converting the integer `price`; `KeyError` if neither exists.
 - `odds_core.odds_math.calculate_implied_probability(american_odds)`: `decimal_to_implied_probability(american_to_decimal(...))`. Includes vig. `american_odds == 0` raises.
@@ -48,7 +49,7 @@ The envelope a source returns (archived in `odds_core.models.SnapshotPayload`, [
 - The envelopes built by this pipeline hold the source decimal under `price_decimal` and have no `price` key: Betfair (`odds_lambda.betfair.adapter.betfair_book_to_bookmaker_entry`, every market it collects, each totals runner on its spec's line), OddsPortal live (`odds_lambda.oddsportal_adapter.convert_market`, whose spread points are signed per outcome and whose ladder lines each carry their own volumes, [spreads line sign](../storage/price-tables.md#spreads-line-sign)), OddsPortal historical (`odds_lambda.oddsportal_common.build_envelope`, whose `last_update` and `_snapshot_time` come from UTC-aware times) and `scripts/ingest_football_data_uk.py` (kick-off read as UK local time, stored as UTC), which skips a game whose event match is ambiguous.
 - The Odds API's responses keep their integer American `price` unchanged, which `odds_core.odds_math.american_to_decimal` converts exactly.
 
-`odds_core.odds_math.outcome_price_decimal` reads either encoding; `odds_lambda.price_rows.expand_envelope` (which turns an envelope into price rows) and `odds_lambda.storage.validators.OddsValidator`, which checks that each price in one event's envelope is above 1.0, both go through it.
+`odds_core.odds_math.outcome_price_decimal` reads either encoding; `odds_lambda.price_rows.expand_envelope` (which turns an envelope into price rows) and `odds_lambda.storage.validators.OddsValidator`, which checks each price in one event's envelope with `odds_core.odds_math.is_valid_decimal_price`, both go through it.
 
 ## Related
 

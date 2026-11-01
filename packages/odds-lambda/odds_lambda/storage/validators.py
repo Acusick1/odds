@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-import math
 from datetime import UTC, datetime
 
 import structlog
 from odds_core.bookmakers import ZERO_MARGIN_BOOKMAKERS
-from odds_core.odds_math import decimal_to_implied_probability, outcome_price_decimal
+from odds_core.odds_math import (
+    decimal_to_implied_probability,
+    is_valid_decimal_price,
+    outcome_price_decimal,
+)
 from odds_core.time import parse_api_datetime
 
 logger = structlog.get_logger()
@@ -105,7 +108,7 @@ class OddsValidator:
         cls, price: float, bookmaker: str, market: str, outcome: str
     ) -> list[str]:
         """
-        Validate a single decimal odds value.
+        Validate a single decimal odds value against `is_valid_decimal_price`.
 
         Args:
             price: Decimal odds value
@@ -119,7 +122,7 @@ class OddsValidator:
         if not isinstance(price, int | float):
             return [f"{bookmaker} {market} {outcome}: Invalid price type {type(price)}"]
 
-        if not math.isfinite(price) or price <= 1.0:
+        if not is_valid_decimal_price(price):
             return [f"{bookmaker} {market} {outcome}: Odds {price} not above 1.0"]
         return []
 
