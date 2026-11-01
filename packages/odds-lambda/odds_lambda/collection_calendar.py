@@ -8,7 +8,7 @@ from odds_core.database import async_session_maker
 from odds_core.epl_data_models import ESPN_STATUS_POSTPONED, EspnFixture
 from odds_core.mlb_data_models import UNPLAYED_GAME_STATUSES, MlbProbablePitchers
 from odds_core.models import Event, EventStatus, OddsSnapshot
-from odds_core.vocabulary import Source, TimeBasis
+from odds_core.vocabulary import Market, Source, TimeBasis
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -60,8 +60,9 @@ class CollectionSource:
     ``cadence`` is the job's own polling cadence, so the expected gap between
     rows follows the tier of the next fixture. ``fixture_horizons`` is how far
     ahead a scheduled fixture of each sport must be before the source is
-    expected to price it. ``source`` is the ``source`` of the snapshots its job
-    writes, all of them ``observed``.
+    expected to price it, and ``markets`` the markets it writes for each of
+    those sports. ``source`` is the ``source`` of the snapshots its job writes,
+    all of them ``observed``.
     """
 
     key: str
@@ -69,7 +70,12 @@ class CollectionSource:
     source: Source
     cadence: CadenceConfig
     fixture_horizons: Mapping[str, timedelta]
+    markets: Mapping[str, tuple[Market, ...]]
     skips_overnight: bool
+
+    def __post_init__(self) -> None:
+        if set(self.markets) != set(self.fixture_horizons) or not all(self.markets.values()):
+            raise ValueError(f"{self.key}: every sport with a fixture horizon needs its markets")
 
     def fixture_horizon(self, sport_key: str) -> timedelta:
         return self.fixture_horizons[sport_key]
@@ -259,9 +265,9 @@ async def decide_collection_run(
 
 
 async def latest_snapshot_time(
-    session: AsyncSession, sport_key: str, source: Source
+    session: AsyncSession, sport_key: str, source: Source, market: Market
 ) -> datetime | None:
-    """The time of the latest ``observed`` snapshot ``source`` wrote for the sport."""
+    """The time of the latest ``observed`` snapshot ``source`` wrote for the sport's market."""
     return (
         await session.execute(
             select(OddsSnapshot.snapshot_time)
@@ -269,6 +275,7 @@ async def latest_snapshot_time(
             .where(
                 Event.sport_key == sport_key,
                 OddsSnapshot.source == source,
+                OddsSnapshot.market == market,
                 OddsSnapshot.time_basis == TimeBasis.OBSERVED,
             )
             .order_by(OddsSnapshot.snapshot_time.desc())

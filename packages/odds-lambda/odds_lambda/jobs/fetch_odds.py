@@ -15,7 +15,7 @@ from functools import partial
 import structlog
 from odds_core.alerts import job_alert_context, send_outage_warning
 from odds_core.config import Settings, get_settings
-from odds_core.vocabulary import Source
+from odds_core.vocabulary import Market, Source
 
 from odds_lambda.collection_calendar import CollectionSource, require_rows_for_fixtures
 from odds_lambda.data_fetcher import TheOddsAPIClient
@@ -56,6 +56,7 @@ SOURCE = CollectionSource(
     source=Source.ODDS_API,
     cadence=CADENCE,
     fixture_horizons={"soccer_epl": timedelta(hours=48)},
+    markets={"soccer_epl": (Market.ONE_X_TWO, Market.SPREADS, Market.TOTALS)},
     skips_overnight=False,
 )
 
@@ -98,6 +99,7 @@ NBA_SOURCE = CollectionSource(
     source=Source.ODDS_API,
     cadence=NBA_CADENCE,
     fixture_horizons={"basketball_nba": timedelta(hours=14)},
+    markets={"basketball_nba": (Market.H2H, Market.SPREADS, Market.TOTALS)},
     skips_overnight=False,
 )
 

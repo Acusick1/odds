@@ -23,7 +23,7 @@ status: stable
 
 Use when data looks stale or a tier is missing. Background: [Self-scheduling](self-scheduling.md), [Where each job runs](job-deployment-matrix.md), [Scheduler backends](scheduler-backends.md#aws-eventbridge-backend).
 
-Deployed Lambda and rule state cannot be verified from the repo; every command below checks the live account. The AWS stack is dormant, with its rules disabled, and production runs on a single local host ([Where each job runs](job-deployment-matrix.md#dormant-aws-rules)); a disabled rule is the expected state, not a dead chain. For stale data in production, start from `odds scheduler list-jobs` on the production host and any `dead_schedule_chain` alert ([Local scheduler](local-scheduler.md#cli)).
+Deployed Lambda and rule state cannot be verified from the repo; every command below checks the live account. The AWS stack is dormant, with its rules disabled, and production runs on a single local host ([Where each job runs](job-deployment-matrix.md#dormant-aws-rules)); a disabled rule is the expected state, not a dead chain. For stale data in production, start from `odds scheduler list-jobs` on the production host and any `stale_data:<source>:<sport>:<market>` or `dead_schedule_chain` alert ([Local scheduler](local-scheduler.md#cli)).
 
 **Safety:** against production use only read-only commands: `scripts/check_games_in_database.py` and `odds validate`. Never run migrations, `odds fetch` or any write there ([Databases and environments](../foundations/databases-and-environments.md)). The Lambdas' database is the Neon archive, which `PROD_DATABASE_URL` names on existing machines; point a script at it with `DATABASE_URL="<archive_url>"` ([environments](../foundations/databases-and-environments.md#environments)).
 

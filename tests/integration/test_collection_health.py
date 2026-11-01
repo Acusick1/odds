@@ -13,7 +13,7 @@ from odds_core.config import get_settings
 from odds_core.mlb_data_models import MlbProbablePitchers
 from odds_core.models import AlertHistory, Event, EventStatus, OddsSnapshot
 from odds_core.paper_trade_models import PaperTrade
-from odds_core.vocabulary import Source, TimeBasis
+from odds_core.vocabulary import Market, Source, TimeBasis
 from odds_lambda import collection_calendar, results_run
 from odds_lambda.betfair.client import BetfairBook, BetfairRunner
 from odds_lambda.betfair.constants import SPORT_CONFIG
@@ -42,6 +42,12 @@ NOW = datetime(2026, 10, 19, 12, 0, tzinfo=UTC)
 OP = Source.ODDSPORTAL
 BETFAIR = Source.BETFAIR
 ODDS_API = Source.ODDS_API
+ONE_X_TWO = Market.ONE_X_TWO
+PRIMARY_MARKET = {
+    "soccer_epl": Market.ONE_X_TWO,
+    "baseball_mlb": Market.H2H,
+    "basketball_nba": Market.H2H,
+}
 
 
 class SessionMaker:
@@ -73,6 +79,7 @@ def seed(pglite_async_session: Any) -> Callable[..., Any]:
         sport_key: str = "soccer_epl",
         status: EventStatus = EventStatus.SCHEDULED,
         snapshots: tuple[tuple[Source, datetime], ...] = (),
+        market: Market | None = None,
         time_basis: TimeBasis = TimeBasis.OBSERVED,
     ) -> None:
         nonlocal counter
@@ -95,6 +102,7 @@ def seed(pglite_async_session: Any) -> Callable[..., Any]:
                     event_id=counter,
                     snapshot_time=taken,
                     source=source,
+                    market=market or PRIMARY_MARKET[sport_key],
                     time_basis=time_basis,
                 )
             )
@@ -172,10 +180,27 @@ class TestLatestSnapshotTime:
             snapshots=((OP, NOW - timedelta(minutes=5)),),
         )
 
-        assert await latest_snapshot_time(pglite_async_session, "soccer_epl", OP) == (
+        assert await latest_snapshot_time(pglite_async_session, "soccer_epl", OP, ONE_X_TWO) == (
             NOW - timedelta(hours=9)
         )
-        assert await latest_snapshot_time(pglite_async_session, "soccer_epl", ODDS_API) is None
+        assert (
+            await latest_snapshot_time(pglite_async_session, "soccer_epl", ODDS_API, ONE_X_TWO)
+            is None
+        )
+
+    async def test_is_scoped_to_market(
+        self, pglite_async_session: Any, seed: Callable[..., Any]
+    ) -> None:
+        await seed(NOW + timedelta(hours=5), snapshots=((OP, NOW - timedelta(hours=9)),))
+        await seed(
+            NOW + timedelta(hours=5),
+            snapshots=((OP, NOW - timedelta(minutes=5)),),
+            market=Market.TOTALS,
+        )
+
+        assert await latest_snapshot_time(pglite_async_session, "soccer_epl", OP, ONE_X_TWO) == (
+            NOW - timedelta(hours=9)
+        )
 
     async def test_leaves_out_backfilled_history(
         self, pglite_async_session: Any, seed: Callable[..., Any]
@@ -186,7 +211,7 @@ class TestLatestSnapshotTime:
             time_basis=TimeBasis.SOURCE_STAMPED,
         )
 
-        assert await latest_snapshot_time(pglite_async_session, "soccer_epl", OP) is None
+        assert await latest_snapshot_time(pglite_async_session, "soccer_epl", OP, ONE_X_TWO) is None
 
 
 @pytest.mark.usefixtures("guard_session")
@@ -322,9 +347,29 @@ class TestCheckStaleSources:
 
         stale = await self._monitor(pglite_async_session).check_stale_sources(NOW)
 
-        assert [(s.source, s.sport_key) for s in stale] == [("oddsportal", "soccer_epl")]
+        assert [(s.source, s.sport_key, s.market) for s in stale] == [
+            ("oddsportal", "soccer_epl", ONE_X_TWO)
+        ]
         assert stale[0].active_hours == pytest.approx(5.0)
         assert stale[0].threshold_hours == 3.0
+
+    async def test_a_fresh_market_does_not_mask_a_dead_one(
+        self, pglite_async_session: Any, seed: Callable[..., Any]
+    ) -> None:
+        await seed(NOW + timedelta(hours=4), snapshots=((OP, NOW - timedelta(hours=5)),))
+        await seed(
+            NOW + timedelta(hours=4),
+            snapshots=((OP, NOW - timedelta(minutes=10)),),
+            market=Market.TOTALS,
+        )
+
+        stale = await self._monitor(pglite_async_session).check_stale_sources(NOW)
+
+        assert [(s.source, s.sport_key, s.market) for s in stale] == [
+            ("oddsportal", "soccer_epl", ONE_X_TWO)
+        ]
+        assert stale[0].alert_type == "stale_data:oddsportal:soccer_epl:1x2"
+        assert "soccer_epl 1x2 snapshot" in stale[0].describe()
 
     async def test_a_fresh_feed_does_not_mask_a_dead_one(
         self, pglite_async_session: Any, seed: Callable[..., Any]

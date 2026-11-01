@@ -47,7 +47,7 @@ status: stable
 |---|---|---|
 | OddsPortal live (`odds_lambda.jobs.fetch_oddsportal.ingest_league`) | `observed` | a list of the run's envelopes, one payload per league run |
 | Betfair (`odds_lambda.jobs.fetch_betfair_exchange.ingest_sport`) | `observed` | a list of the run's envelopes (one per event, all its markets), one payload per sport run (EPL, MLB and NBA) |
-| Polymarket live (`odds_lambda.jobs.fetch_polymarket_odds`, EPL and NBA) | `observed` | a list of the run's envelopes |
+| Polymarket live (`odds_lambda.jobs.fetch_polymarket_odds`, EPL `1x2` and NBA `h2h`) | `observed` | a list of the run's envelopes |
 | Odds API ingestion (`odds_lambda.ingestion.OddsIngestionService.ingest_sport`) | `observed` | the response's list of event envelopes, one payload per run, beside its `fetch_logs` row |
 | Odds API backfill (`odds_analytics.backfill_executor.BackfillExecutor`) | `observed`: the time is the historical endpoint's own snapshot time, the latest at or before the requested time | the response's list of event envelopes, one payload per call |
 | Polymarket history (`odds_lambda.polymarket_odds_backfill.backfill_sport`, EPL and NBA) | `observed` | one envelope per grid point |
