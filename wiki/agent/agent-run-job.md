@@ -20,6 +20,7 @@ sources:
   - odds_mcp.server.refresh_scrape
   - .mcp.json
   - .gitignore
+  - .claude/skills/agent/SKILL.md
 status: stable
 ---
 
@@ -29,7 +30,7 @@ The runtime of the [betting agent](betting-agent.md) lives in `odds_lambda.jobs.
 
 ## Runtime
 
-`odds_lambda.jobs.agent_run.run_claude_agent` spawns `claude -p "/agent {sport}"` with `--model claude-sonnet-4-6` (hard-coded in the function, #414), `--output-format stream-json --verbose` and `--dangerously-skip-permissions`, working directory the repo root, a 15-minute timeout (`odds_lambda.jobs.agent_run.AGENT_TIMEOUT_SECONDS`). A cancelled run (the scheduler's own 20-minute limit, or shutdown) kills the subprocess before the cancellation propagates. The `/agent` slash command is not in the repository; `.gitignore` excludes the whole `.claude/` directory (#479). The function passes the full sport key (`soccer_epl`, `baseball_mlb`), and what the command does with it cannot be reviewed from the repo. The subprocess:
+`odds_lambda.jobs.agent_run.run_claude_agent` spawns `claude -p "/agent {sport}"` with `--model claude-sonnet-4-6` (hard-coded in the function, #414), `--output-format stream-json --verbose` and `--dangerously-skip-permissions`, working directory the repo root, a 15-minute timeout (`odds_lambda.jobs.agent_run.AGENT_TIMEOUT_SECONDS`). A cancelled run (the scheduler's own 20-minute limit, or shutdown) kills the subprocess before the cancellation propagates. `/agent` is the project skill `.claude/skills/agent/SKILL.md`, the one `.claude/` path `.gitignore` does not exclude. The function passes the full sport key; the skill maps `soccer_epl` (or `epl`) to `packages/odds-mcp/agents/epl/` and `baseball_mlb` (or `mlb`) to `packages/odds-mcp/agents/mlb/`, has the agent read that directory's `base.md` after `packages/odds-mcp/agents/common.md`, and stops for any other sport key; with no sport it runs EPL. A further `review` argument summarises recent briefs and paper trades without research or bets. The subprocess:
 
 - reaches the pipeline through the `odds` MCP server registered in `.mcp.json` (`uv run fastmcp run odds_mcp.server`), see [odds-mcp server](mcp-server.md);
 - researches with web search and Playwright;

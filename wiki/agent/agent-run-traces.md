@@ -37,6 +37,6 @@ Each run of the [agent runtime](agent-run-job.md#runtime) writes its full `strea
 - `--sport` takes the short names `epl` or `mlb`.
 - One file can hold several sessions; the script tracks a session index per `result` line.
 - `FILENAME_RE` in the viewer expects `{sport_key}_{timestamp}_{pid}.jsonl`, the same pattern the producer writes, so the two are coupled only by filename.
-- `--since` filters on the file's start time taken from its name, so every session in a file that started before the cutoff is dropped (#479).
+- Each session's time span runs from its first to its last entry `timestamp`. `--since` keeps a session whose last entry is at or after the cutoff, and the header shows the session's first entry time. A session with no timestamped entries takes the file's start time from its name.
 
 Other report channels are in [reporting](../operations/reporting-surfaces.md).

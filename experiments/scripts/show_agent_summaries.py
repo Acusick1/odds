@@ -13,9 +13,11 @@ import argparse
 import json
 import re
 import sys
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 LOG_DIR = Path(__file__).resolve().parents[2] / "logs" / "agent_runs"
 
@@ -33,6 +35,8 @@ class SessionSummary:
     sport: str
     file_start: datetime
     session_idx: int  # 0-based position within the file
+    session_start: datetime
+    session_end: datetime
     duration_ms: int | None
     num_turns: int | None
     total_cost_usd: float | None
@@ -66,15 +70,33 @@ def parse_since(raw: str) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
-def iter_result_entries(path: Path):
+def parse_timestamp(raw: str) -> datetime:
+    dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
+
+
+def iter_sessions(path: Path) -> Iterator[tuple[dict[str, Any], datetime | None, datetime | None]]:
+    """Yield each session's `result` entry with its first and last entry timestamps."""
+    first: datetime | None = None
+    last: datetime | None = None
     with path.open() as fh:
-        for idx, line in enumerate(fh):
+        for line in fh:
             try:
                 entry = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            raw_ts = entry.get("timestamp")
+            if isinstance(raw_ts, str):
+                try:
+                    ts = parse_timestamp(raw_ts)
+                except ValueError:
+                    ts = None
+                if ts is not None:
+                    first = ts if first is None else min(first, ts)
+                    last = ts if last is None else max(last, ts)
             if entry.get("type") == "result":
-                yield idx, entry
+                yield entry, first, last
+                first = last = None
 
 
 def load_summaries(
@@ -96,20 +118,16 @@ def load_summaries(
         sport, file_start = parsed
         if sport_filter is not None and sport != sport_filter:
             continue
-        if since is not None and file_start < since:
-            # Filename = first session start. Later sessions in a multi-session
-            # file could still fall after `since`; walk the file anyway.
-            pass
 
-        session_idx = 0
-        for _line_no, entry in iter_result_entries(path):
+        for session_idx, (entry, first_ts, last_ts) in enumerate(iter_sessions(path)):
             result_text = entry.get("result") or ""
             if not result_text:
-                session_idx += 1
                 continue
-            # Time-filter by file start when no per-session timestamp is available.
-            if since is not None and file_start < since:
-                session_idx += 1
+            # The filename timestamp is the file's first session start; a session
+            # with no timestamped entries is placed there.
+            session_start = first_ts or file_start
+            session_end = last_ts or session_start
+            if since is not None and session_end < since:
                 continue
             summaries.append(
                 SessionSummary(
@@ -117,6 +135,8 @@ def load_summaries(
                     sport=sport,
                     file_start=file_start,
                     session_idx=session_idx,
+                    session_start=session_start,
+                    session_end=session_end,
                     duration_ms=entry.get("duration_ms"),
                     num_turns=entry.get("num_turns"),
                     total_cost_usd=entry.get("total_cost_usd"),
@@ -125,9 +145,8 @@ def load_summaries(
                     result=result_text,
                 )
             )
-            session_idx += 1
 
-    summaries.sort(key=lambda s: (s.file_start, s.session_idx), reverse=True)
+    summaries.sort(key=lambda s: (s.session_start, s.file_start, s.session_idx), reverse=True)
     return summaries
 
 
@@ -146,7 +165,7 @@ def fmt_cost(cost: float | None) -> str:
 def print_summary(s: SessionSummary) -> None:
     tag = f" session#{s.session_idx}" if s.session_idx > 0 else ""
     header = (
-        f"[{s.file_start.strftime('%Y-%m-%d %H:%M UTC')}] {s.sport}{tag}  "
+        f"[{s.session_start.strftime('%Y-%m-%d %H:%M UTC')}] {s.sport}{tag}  "
         f"turns={s.num_turns}  {fmt_duration(s.duration_ms)}  {fmt_cost(s.total_cost_usd)}"
     )
     if s.is_error:
@@ -166,7 +185,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sport", choices=sorted(SPORT_KEYS), help="Filter by sport")
     parser.add_argument(
         "--since",
-        help="Time filter: `24h`, `7d`, or ISO date (e.g. 2026-04-20).",
+        help=(
+            "Show sessions with activity at or after this time: `24h`, `7d`, or ISO date "
+            "(e.g. 2026-04-20)."
+        ),
     )
     parser.add_argument("--limit", type=int, default=10, help="Max sessions to show (default 10).")
     parser.add_argument("--full", action="store_true", help="Print the full result text.")
