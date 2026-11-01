@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from datetime import datetime
+from datetime import UTC, datetime
 
 from odds_core.models import Event, OddsSnapshot, Price
 from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.fetch_tier import FetchTier
-from odds_lambda.tier_utils import snapshot_tiers
+from odds_lambda.results_run import awaiting_result
+from odds_lambda.tier_utils import snapshot_tiers, tier_hours_before
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -289,7 +290,7 @@ class QualityMetrics:
         sport_key: str | None = None,
     ) -> list[GameMissingScoresResult]:
         """
-        Get games that are missing final score data.
+        Get games awaiting a result (``odds_lambda.results_run.awaiting_result``) in the range.
 
         Args:
             start_date: Start of date range (inclusive)
@@ -319,7 +320,7 @@ class QualityMetrics:
             and_(
                 Event.commence_time >= start_date,
                 Event.commence_time <= end_date,
-                (Event.home_score.is_(None)) | (Event.away_score.is_(None)),
+                awaiting_result(datetime.now(UTC)),
             )
         )
 
@@ -475,24 +476,13 @@ class QualityMetrics:
 
     @staticmethod
     def _get_tier_hours_range(tier: FetchTier) -> str:
-        """
-        Get human-readable hours range for a fetch tier.
-
-        Args:
-            tier: FetchTier enum value
-
-        Returns:
-            Human-readable string describing the time window
-        """
-        ranges = {
-            FetchTier.IN_PLAY: "After game start",
-            FetchTier.CLOSING: "0-3 hours before",
-            FetchTier.PREGAME: "3-12 hours before",
-            FetchTier.SHARP: "12-24 hours before",
-            FetchTier.EARLY: "1-3 days before",
-            FetchTier.OPENING: "3+ days before",
-        }
-        return ranges[tier]
+        """Human-readable hours-before-kick-off window of a fetch tier."""
+        if tier is FetchTier.IN_PLAY:
+            return "After game start"
+        lower, upper = tier_hours_before(tier)
+        if upper == float("inf"):
+            return f"{lower:g}+ hours before"
+        return f"{lower:g}-{upper:g} hours before"
 
     async def get_bookmaker_coverage(
         self,

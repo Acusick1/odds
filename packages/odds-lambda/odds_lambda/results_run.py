@@ -12,7 +12,7 @@ from odds_core.database import async_session_maker
 from odds_core.models import AlertHistory, Event, EventExternalId, EventStatus
 from odds_core.sports import SportKey
 from odds_core.vocabulary import Source
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import ColumnElement, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.scheduling.helpers import self_schedule
@@ -57,13 +57,11 @@ class PendingEvent:
     game_pk: int | None = None
 
 
-async def get_pending_events(
-    session: AsyncSession, sport_key: SportKey, since: datetime | None = None
-) -> list[PendingEvent]:
-    """Events of the sport past kick-off (and not before ``since``) that are not FINAL with scores."""
-    conditions = [
-        Event.sport_key == sport_key,
-        Event.commence_time < datetime.now(UTC),
+def awaiting_result(now: datetime) -> ColumnElement[bool]:
+    """Events past kick-off at ``now`` that are SCHEDULED, LIVE, POSTPONED, or FINAL without
+    both scores: the events whose result is still owed."""
+    return and_(
+        Event.commence_time < now,
         or_(
             Event.status.in_([EventStatus.SCHEDULED, EventStatus.LIVE, EventStatus.POSTPONED]),
             and_(
@@ -71,7 +69,14 @@ async def get_pending_events(
                 or_(Event.home_score.is_(None), Event.away_score.is_(None)),
             ),
         ),
-    ]
+    )
+
+
+async def get_pending_events(
+    session: AsyncSession, sport_key: SportKey, since: datetime | None = None
+) -> list[PendingEvent]:
+    """Events of the sport awaiting a result (``awaiting_result``), not before ``since``."""
+    conditions = [Event.sport_key == sport_key, awaiting_result(datetime.now(UTC))]
     if since is not None:
         conditions.append(Event.commence_time >= since)
     result = await session.execute(

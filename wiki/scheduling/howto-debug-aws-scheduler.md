@@ -11,7 +11,8 @@ sources:
   - deployment/aws/terraform/lambda.tf
   - deployment/aws/terraform/eventbridge.tf
   - odds_lambda.fetch_tier
-  - odds_lambda.tier_utils
+  - odds_lambda.tier_utils.snapshot_tier
+  - odds_lambda.tier_utils.snapshot_tiers
   - odds_lambda.storage.tier_validator.TierCoverageValidator
   - odds_lambda.jobs.fetch_odds
   - odds_lambda.storage.writers.OddsWriter.store_envelope

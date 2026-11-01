@@ -17,6 +17,8 @@ sources:
   - odds_analytics.quality_metrics.QualityMetrics
   - odds_analytics.quality_metrics.QualityMetrics.get_games_missing_scores
   - odds_analytics.quality_metrics.QualityMetrics._get_tier_hours_range
+  - odds_lambda.results_run.awaiting_result
+  - odds_lambda.tier_utils.tier_hours_before
   - odds_lambda.fetch_tier.FetchTier.max_hours
   - odds_cli.commands.validate
   - odds_cli.commands.quality
@@ -47,8 +49,8 @@ A day is a calendar day in the league's timezone (`odds_core.sports.LEAGUE_TIMEZ
 
 `odds quality coverage` (`odds_cli.commands.quality`): `--sport` (required), `--start`, `--end` (`YYYY-MM-DD`, midnight UTC). Uses `odds_analytics.quality_metrics.QualityMetrics` for game counts, snapshot counts as distinct snapshot times, odds/score presence, per-tier and per-bookmaker coverage. Per-tier coverage counts each event's distinct snapshot times under the tiers `odds_lambda.tier_utils.snapshot_tiers` derives for its snapshots. Per-bookmaker coverage reads the price rows ([prices](price-tables.md#prices)): the events and the snapshots in which each canonical book key has a price.
 
-- `odds_analytics.quality_metrics.QualityMetrics.get_games_missing_scores` has no status filter, so unplayed games in the range count as missing scores (#467).
-- `odds_analytics.quality_metrics.QualityMetrics._get_tier_hours_range` hardcodes tier hour ranges as display strings rather than deriving them from `odds_lambda.fetch_tier.FetchTier.max_hours` (#467).
+- Games missing scores (`odds_analytics.quality_metrics.QualityMetrics.get_games_missing_scores`) are the range's games whose result is still owed, by the rule the [results jobs](../collection/results-jobs.md#fetch-oddsportal-results) settle from (`odds_lambda.results_run.awaiting_result`): past kick-off and SCHEDULED, LIVE, POSTPONED, or FINAL without both scores. Games yet to kick off, CANCELLED and UNMATCHED games are not counted.
+- Each tier's window label (`odds_analytics.quality_metrics.QualityMetrics._get_tier_hours_range`) is the hours before kick-off it covers, from `odds_lambda.tier_utils.tier_hours_before` (for example `3-12 hours before`, `72+ hours before`), and `After game start` for IN_PLAY.
 
 ## Read-only diagnostics
 

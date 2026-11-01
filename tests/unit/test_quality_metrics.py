@@ -1,6 +1,6 @@
 """Unit tests for QualityMetrics module."""
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from odds_analytics.quality_metrics import (
@@ -621,6 +621,45 @@ class TestQualityMetricsGamesMissingScores:
         assert result[0].sport_key == "basketball_nba"
         assert result[0].event_id == 1
 
+    async def test_only_games_awaiting_a_result_are_missing_scores(
+        self, test_session: AsyncSession
+    ):
+        """Unplayed, cancelled and unmatched games have no score to miss."""
+        now = datetime.now(UTC)
+        past = now - timedelta(days=2)
+        future = now + timedelta(days=2)
+        statuses = {
+            1: (past, EventStatus.SCHEDULED),
+            2: (past, EventStatus.LIVE),
+            3: (past, EventStatus.POSTPONED),
+            4: (past, EventStatus.FINAL),
+            5: (past, EventStatus.CANCELLED),
+            6: (past, EventStatus.UNMATCHED),
+            7: (future, EventStatus.SCHEDULED),
+            8: (future, EventStatus.POSTPONED),
+        }
+        for event_id, (commence_time, status) in statuses.items():
+            test_session.add(
+                Event(
+                    id=event_id,
+                    sport_key="basketball_nba",
+                    sport_title="NBA",
+                    commence_time=commence_time,
+                    home_team=f"Home {event_id}",
+                    away_team=f"Away {event_id}",
+                    status=status,
+                )
+            )
+        await test_session.commit()
+
+        metrics = QualityMetrics(test_session)
+        result = await metrics.get_games_missing_scores(
+            start_date=now - timedelta(days=7),
+            end_date=now + timedelta(days=7),
+        )
+
+        assert {r.event_id for r in result} == {1, 2, 3, 4}
+
 
 @pytest.mark.asyncio
 class TestQualityMetricsEdgeCases:
@@ -856,7 +895,7 @@ class TestQualityMetricsTierCoverage:
         # Check early tier (event3 has 1 snapshot)
         early = tier_map["early"]
         assert early.tier == "early"
-        assert early.hours_range == "1-3 days before"
+        assert early.hours_range == "24-72 hours before"
         assert early.expected_interval_hours == 24.0
         assert early.games_in_tier_range == 3
         assert early.games_with_tier_snapshots == 1
@@ -865,7 +904,7 @@ class TestQualityMetricsTierCoverage:
         # Check opening tier (event3 has 1 snapshot)
         opening = tier_map["opening"]
         assert opening.tier == "opening"
-        assert opening.hours_range == "3+ days before"
+        assert opening.hours_range == "72+ hours before"
         assert opening.expected_interval_hours == 48.0
         assert opening.games_in_tier_range == 3
         assert opening.games_with_tier_snapshots == 1
