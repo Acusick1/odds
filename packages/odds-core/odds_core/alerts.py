@@ -17,6 +17,7 @@ from odds_core.config import Settings, get_settings
 logger = structlog.get_logger()
 
 ALERT_SEND_TIMEOUT_SECONDS = 30
+DEAD_MANS_SWITCH_TIMEOUT_SECONDS = 10
 
 
 class AlertBase(ABC):
@@ -90,6 +91,26 @@ class DiscordAlert(AlertBase):
 
     async def send_embed(self, embed: dict) -> None:
         await self._post({"embeds": [embed]}, "discord_embed")
+
+
+async def ping_dead_mans_switch(settings: Settings | None = None) -> None:
+    """Ping the external monitor that alerts when this host stops pinging it."""
+    settings = settings or get_settings()
+    url = settings.alerts.dead_mans_switch_url
+    # A deploy smoke runs under dry run and is not a scheduled run.
+    if not url or settings.scheduler.dry_run:
+        return
+    try:
+        timeout = aiohttp.ClientTimeout(total=DEAD_MANS_SWITCH_TIMEOUT_SECONDS)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url) as response:
+                if response.status >= 400:
+                    logger.warning("dead_mans_switch_ping_failed", status=response.status)
+                    return
+        logger.info("dead_mans_switch_pinged")
+    except Exception as e:
+        # A missed ping is what the monitor alerts on, so it must not fail the job.
+        logger.warning("dead_mans_switch_ping_error", error=str(e))
 
 
 class AlertManager:

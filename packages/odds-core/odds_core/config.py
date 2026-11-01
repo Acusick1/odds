@@ -222,6 +222,10 @@ class AlertConfig(BaseSettings):
 
     discord_webhook_url: str | None = Field(default=None, description="Discord webhook URL")
     alert_enabled: bool = Field(default=False, description="Enable alerts")
+    dead_mans_switch_url: str | None = Field(
+        default=None,
+        description="Ping URL of an external monitor that alerts when check-health stops pinging",
+    )
 
     # Quota monitoring thresholds
     quota_warning_threshold: float = Field(

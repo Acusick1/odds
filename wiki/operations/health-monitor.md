@@ -32,6 +32,8 @@ sources:
   - odds_lambda.health_monitor.HealthMetrics
   - odds_lambda.health_monitor.HealthStatus
   - odds_lambda.jobs.check_health.main
+  - odds_core.alerts.ping_dead_mans_switch
+  - odds_core.config.AlertConfig.dead_mans_switch_url
   - odds_core.config.AlertConfig
   - odds_core.config.SchedulerConfig.bootstrap_jobs
   - odds_core.config.BetfairConfig.enabled
@@ -47,7 +49,7 @@ status: stable
 
 # Health monitor, check-health job and odds status
 
-`odds_lambda.jobs.check_health.main` runs `odds_lambda.health_monitor.check_system_health` inside `job_alert_context("check-health")` and then books itself 60 minutes ahead through a raw backend call (no pre-schedule; a failed booking sends a `scheduling_failure:check-health` critical; see [self-scheduling](../scheduling/self-scheduling.md)). It is global and in the default production `odds_core.config.SchedulerConfig.bootstrap_jobs` (the same list that holds the per-sport jobs), so it runs on the production host against the production database, where every job's heartbeat lands ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). Nothing alerts when the host itself stops (#489). `odds_lambda.health_monitor.check_system_health` collects `odds_lambda.health_monitor.HealthMetrics`, then runs, in order:
+`odds_lambda.jobs.check_health.main` runs `odds_lambda.health_monitor.check_system_health` inside `job_alert_context("check-health")`, pings the external [dead-man's switch](#dead-mans-switch), and then books itself 60 minutes ahead through a raw backend call (no pre-schedule; a failed booking sends a `scheduling_failure:check-health` critical; see [self-scheduling](../scheduling/self-scheduling.md)). It is global and in the default production `odds_core.config.SchedulerConfig.bootstrap_jobs` (the same list that holds the per-sport jobs), so it runs on the production host against the production database, where every job's heartbeat lands ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). `odds_lambda.health_monitor.check_system_health` collects `odds_lambda.health_monitor.HealthMetrics`, then runs, in order:
 
 1. `odds_lambda.health_monitor.HealthMonitor.check_stale_sources`: per collection source and sport, active hours without a new snapshot versus a threshold derived from the source's cadence, only while the database has fixtures the source should price. Each stale source sends its own critical `stale_data:<source>:<sport>` ([Stale-data check](#stale-data-check)). It is followed by the MLB schedule check and by `odds_lambda.health_monitor.HealthMonitor.check_missing_betfair_closes`, one critical `missing_betfair_close` listing EPL events whose Betfair close was not collected ([Betfair close check](#betfair-close-check)).
 2. `odds_lambda.health_monitor.HealthMonitor.check_api_quota`: for each Odds API key, `api_quota_remaining` of the latest `fetch_logs` row of the sports that spend it (`odds_lambda.storage.readers.OddsReader.get_latest_quota_by_key`; rows over 31 days old or without `api_quota_used` are ignored, so an off-season key raises nothing), as a fraction of the key's plan, `api_quota_used` plus `api_quota_remaining` of that row; below 0.1 alert `quota_critical:key<N>`, below 0.2 `quota_low:key<N>`, N the key's index ([keys](../collection/odds-api-client.md#retry-and-keys)). It is the only quota alert; it fires when the condition starts and reminds every `stale_reminder_minutes` ([odds-api-quota](../collection/odds-api-quota.md)).
@@ -58,6 +60,16 @@ status: stable
 7. `odds_lambda.health_monitor.HealthMonitor.check_unsettled_events`: per sport in `odds_lambda.health_monitor.UNSETTLED_SPORTS` (EPL, MLB and NBA), current-season events still SCHEDULED or LIVE more than 24 h after kick-off (`odds_lambda.storage.unsettled_events.find_unsettled_events`), one warning `unsettled_events:<sport>` naming them, repeated once a day. The season starts on 1 August for EPL and on 1 January for MLB (`odds_lambda.storage.unsettled_events.season_start`). POSTPONED and CANCELLED events are not pending, so a postponed MLB game waiting on its replay stays quiet, and neither are UNMATCHED ones, the MLB events with no game in MLB's schedule, which no results job can settle ([results jobs](../collection/results-jobs.md), [no game in the schedule](../storage/event-resolver.md#no-game-in-the-schedule)).
 
 Then `odds_lambda.health_monitor.HealthMonitor.purge_old_heartbeats` runs on every health check, and it deletes `heartbeat:%` rows older than `heartbeat_retention_days` (7) and is the only retention sweep in the system.
+
+## Dead-man's switch
+
+Every check above runs on the production host, so none of them can report that the host or its scheduler has stopped. An external monitor covers that: it expects a ping every hour and alerts by its own channels (email or Discord) when pings stop.
+
+- After a run leaves `job_alert_context("check-health")` without raising, `odds_lambda.jobs.check_health.main` calls `odds_core.alerts.ping_dead_mans_switch`, which sends a GET to `odds_core.config.AlertConfig.dead_mans_switch_url` (`DEAD_MANS_SWITCH_URL`) with a 10 s timeout. A run that found issues still pings, since those reach Discord already and the monitor answers only whether the host is running. A run that raised does not ping.
+- It sends nothing when the URL is unset or empty, or under `SCHEDULER_DRY_RUN` (the deploy smoke is not a scheduled run).
+- A failed ping (error status, timeout, no connection) is logged as `dead_mans_switch_ping_failed` or `dead_mans_switch_ping_error` and never fails the job; the missed ping is what the monitor alerts on.
+
+The monitor is a [healthchecks.io](https://healthchecks.io/docs/) check (the free tier allows 20) with a period of 1 h and a grace time of 1 h, so a stopped scheduler or host alerts within about 2 h of its last ping. Its ping URL goes in the production host's `.env` ([add a setting](../foundations/howto-add-setting.md)); the check's period, grace and notification channels live in the healthchecks.io account, not in the repo.
 
 ## Schedule chain check
 

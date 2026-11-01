@@ -4,7 +4,8 @@ Health check job - standalone executable or Lambda handler.
 This job:
 1. Checks system health metrics (stale data, failures, quota, quality)
 2. Sends alerts when thresholds are breached
-3. Self-schedules next execution (60-minute intervals)
+3. Pings the external dead-man's switch
+4. Self-schedules next execution (60-minute intervals)
 """
 
 import asyncio
@@ -25,9 +26,10 @@ async def main(ctx: JobContext) -> None:
     Flow:
     1. Run health checks
     2. Log results
-    3. Schedule next execution (60 minutes)
+    3. Ping the external dead-man's switch
+    4. Schedule next execution (60 minutes)
     """
-    from odds_core.alerts import job_alert_context
+    from odds_core.alerts import job_alert_context, ping_dead_mans_switch
 
     app_settings = get_settings()
 
@@ -51,6 +53,8 @@ async def main(ctx: JobContext) -> None:
                 issues=health_status.issues_detected,
                 alerts_sent=health_status.alerts_sent,
             )
+
+    await ping_dead_mans_switch(app_settings)
 
     # Self-schedule next execution (60 minutes from now)
     try:
