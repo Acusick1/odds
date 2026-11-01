@@ -9,6 +9,8 @@ sources:
   - odds_core.time.to_eastern
   - odds_core.time.EASTERN
   - odds_core.time.parse_date
+  - odds_core.sports.LEAGUE_TIMEZONES
+  - odds_core.sports.game_day_window
   - odds_core.models.utc_now
   - odds_lambda.scheduling.backends.aws.AWSEventBridgeBackend
   - odds_lambda.scheduling.backends.aws._format_aws_schedule
@@ -46,6 +48,8 @@ Helpers in `odds_core.time`:
 | `odds_core.time.parse_date` | Parses a calendar date in a `strptime` format into a `date`, without a naive datetime in between |
 
 `Z`-suffix ISO parsing is inlined in `odds_lambda.espn_fixture_fetcher` (team-schedule and month-scoreboard events, whose status text is stored as ESPN gives it), `odds_lambda.mlb_stats_fetcher` (MLB game start times, for probables, results and single-game lookups; a game with `startTimeTBD` carries a placeholder time), and the MCP EPL tools instead of calling `odds_core.time.parse_api_datetime`. Time-window correctness for historical analysis is a separate rule: [Decision time and look-ahead bias](../modelling/look-ahead-bias.md).
+
+`odds_core.sports.LEAGUE_TIMEZONES` holds each league's timezone (Europe/London for EPL, America/New_York for MLB and NBA), and `odds_core.sports.game_day_window` gives a calendar day's bounds in it; `odds validate` counts a sport's games by that league-local day ([coverage checks](../storage/coverage-checks.md#tiercoveragevalidator)).
 
 `odds_cli.commands.quality` reads its `--start` and `--end` dates (`YYYY-MM-DD`) as midnight UTC, with `strptime` and an explicit `tzinfo=UTC` rather than these helpers. `odds_cli.commands.nba_stats` and `odds_cli.commands.pbpstats` default to the NBA season of the current UTC date, from `odds_analytics.injury_features.date_to_nba_season`, and their `--all` runs through that season.
 

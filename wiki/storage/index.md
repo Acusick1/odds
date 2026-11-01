@@ -36,7 +36,7 @@ Every table is a SQLModel class in `packages/odds-core/odds_core/`; migrations a
 <!-- pages:start -->
 ### Reference
 
-- [Coverage and completeness checks](coverage-checks.md) — TierCoverageValidator, odds validate, odds quality, QualityMetrics, the daily-validation workflow and the read-only scripts/check_games_in_database.py.
+- [Coverage and completeness checks](coverage-checks.md) — TierCoverageValidator, a sport's league-local game day, odds validate, odds quality, QualityMetrics and the read-only scripts/check_games_in_database.py.
 - [Event matching across sources](event-matching.md) — The matcher each ingest path uses to find its events row (window, team comparison, ambiguity rule) and the duplicates and NULL event ids that follow.
 - [Event merge](event-merge.md) — How events for one match are merged into one event, which event is kept, who merges, how twins and rescheduled duplicates are detected, how stored MLB events get their gamePk, and the odds events merge-twins, repair-names, assign-game-pks, set-game-pk and mark-unassignable commands.
 - [Event resolver](event-resolver.md) — How resolve_event finds or creates the one event of a listed game (lock, lookup order, ±2 h match, creation) and records the source's id, and which ids it refuses.

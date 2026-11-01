@@ -4,9 +4,11 @@ import asyncio
 import json
 import sys
 from datetime import UTC, date, datetime, timedelta
+from typing import Annotated
 
 import typer
 from odds_core.database import async_session_maker
+from odds_core.sports import SportKey
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.storage.tier_validator import TierCoverageValidator
 from rich.console import Console
@@ -15,14 +17,17 @@ from rich.table import Table
 app = typer.Typer()
 console = Console()
 
+SportOption = Annotated[SportKey, typer.Option("--sport", help="Sport whose games to validate")]
+
 
 @app.command("daily")
 def validate_daily(
+    sport: SportOption,
     target_date: str = typer.Option(
         None,
         "--date",
         "-d",
-        help="Date to validate (YYYY-MM-DD). Uses 24-hour window from noon UTC on this date to noon UTC next day. Defaults to yesterday.",
+        help="Day to validate (YYYY-MM-DD) on the league's local calendar. Defaults to yesterday (UTC).",
     ),
     strict: bool = typer.Option(
         True, "--strict/--no-strict", help="Require all 5 tiers (default: strict)"
@@ -39,35 +44,34 @@ def validate_daily(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed game breakdown"),
 ):
     """
-    Validate tier coverage for a specific date.
+    Validate tier coverage for a sport's games on one day.
 
-    Uses a 24-hour window from noon UTC to noon UTC (next day) to capture a full
-    NBA "game day" which spans two UTC calendar dates. For example, --date 2024-10-24
-    validates games from noon Oct 24 to noon Oct 25 UTC, capturing all evening games
-    played on Oct 24 in US timezones.
+    The day is a calendar day in the league's timezone (London for EPL, New York
+    for MLB and NBA), so --date 2024-10-24 --sport basketball_nba covers every game
+    tipping off on 24 October Eastern time.
 
     Examples:
-        # Validate yesterday's data (with score validation)
-        odds validate daily
+        # Validate yesterday's EPL data (with score validation)
+        odds validate daily --sport soccer_epl
 
-        # Validate specific date with game discovery check
-        odds validate daily --date 2024-10-24 --check-discovery
+        # Validate a specific day with game discovery check
+        odds validate daily --sport baseball_mlb --date 2024-10-24 --check-discovery
 
         # Allow partial coverage (just show warnings)
-        odds validate daily --date 2024-10-24 --no-strict
-
-        # Skip score validation
-        odds validate daily --no-check-scores
+        odds validate daily --sport baseball_mlb --date 2024-10-24 --no-strict
 
         # Save results to JSON
-        odds validate daily --date 2024-10-24 --output-json results.json
+        odds validate daily --sport soccer_epl --date 2024-10-24 --output-json results.json
     """
     asyncio.run(
-        _validate_daily(target_date, strict, check_scores, check_discovery, output_json, verbose)
+        _validate_daily(
+            sport, target_date, strict, check_scores, check_discovery, output_json, verbose
+        )
     )
 
 
 async def _validate_daily(
+    sport: SportKey,
     target_date_str: str | None,
     strict: bool,
     check_scores: bool,
@@ -88,7 +92,7 @@ async def _validate_daily(
     else:
         target_date = (datetime.now(UTC) - timedelta(days=1)).date()
 
-    console.print(f"\n[bold blue]Tier Coverage Validation - {target_date}[/bold blue]\n")
+    console.print(f"\n[bold blue]Tier Coverage Validation - {sport} {target_date}[/bold blue]\n")
 
     # Determine required tiers
     if strict:
@@ -102,7 +106,7 @@ async def _validate_daily(
         validator = TierCoverageValidator(session)
         try:
             report = await validator.validate_date(
-                target_date, required_tiers, check_scores, check_discovery
+                target_date, sport, required_tiers, check_scores, check_discovery
             )
         except Exception as e:
             console.print(f"\n[red]Validation failed with error: {e}[/red]")
@@ -383,6 +387,7 @@ def _display_warning_games(report, verbose):
 def _save_to_json(report, output_path: str, check_scores=True, check_discovery=False):
     """Save validation report to JSON file."""
     data = {
+        "sport_key": report.sport_key,
         "target_date": str(report.target_date),
         "validation_time": report.validation_time.isoformat(),
         "summary": {
@@ -529,6 +534,7 @@ async def _validate_game(event_id: int, show_snapshots: bool):
 
 @app.command("tier-coverage")
 def validate_tier_coverage(
+    sport: SportOption,
     start_date: str = typer.Option(..., "--start", "-s", help="Start date (YYYY-MM-DD)"),
     end_date: str = typer.Option(..., "--end", "-e", help="End date (YYYY-MM-DD)"),
     output_json: str = typer.Option(None, "--output-json", "-o", help="Save results to JSON"),
@@ -537,12 +543,14 @@ def validate_tier_coverage(
     Validate tier coverage for a date range.
 
     Example:
-        odds validate tier-coverage --start 2024-10-01 --end 2024-10-31
+        odds validate tier-coverage --sport soccer_epl --start 2024-10-01 --end 2024-10-31
     """
-    asyncio.run(_validate_tier_coverage(start_date, end_date, output_json))
+    asyncio.run(_validate_tier_coverage(sport, start_date, end_date, output_json))
 
 
-async def _validate_tier_coverage(start_date_str: str, end_date_str: str, output_json: str | None):
+async def _validate_tier_coverage(
+    sport: SportKey, start_date_str: str, end_date_str: str, output_json: str | None
+):
     """Async implementation of tier coverage validation."""
     # Parse dates
     try:
@@ -552,12 +560,14 @@ async def _validate_tier_coverage(start_date_str: str, end_date_str: str, output
         console.print("[red]Error: Invalid date format. Use YYYY-MM-DD[/red]")
         sys.exit(1)
 
-    console.print(f"\n[bold blue]Tier Coverage Analysis - {start_date} to {end_date}[/bold blue]\n")
+    console.print(
+        f"\n[bold blue]Tier Coverage Analysis - {sport} {start_date} to {end_date}[/bold blue]\n"
+    )
 
     # Run validation
     async with async_session_maker() as session:
         validator = TierCoverageValidator(session)
-        reports = await validator.validate_date_range(start_date, end_date)
+        reports = await validator.validate_date_range(start_date, end_date, sport)
 
     # Display summary table
     table = Table(show_header=True)

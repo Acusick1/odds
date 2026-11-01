@@ -73,9 +73,7 @@ def _get_status_symbol(coverage_pct: float) -> str:
 def coverage(
     start: str = typer.Option(..., "--start", "-s", help="Start date (YYYY-MM-DD)"),
     end: str = typer.Option(..., "--end", "-e", help="End date (YYYY-MM-DD)"),
-    sport: str = typer.Option(
-        "basketball_nba", "--sport", help="Sport key (default: basketball_nba)"
-    ),
+    sport: str = typer.Option(..., "--sport", help="Sport key"),
 ):
     """
     Display comprehensive data quality coverage report.
@@ -84,14 +82,11 @@ def coverage(
     and bookmaker availability across a specified date range.
 
     Examples:
-        # Analyze coverage for October 2024
-        odds quality coverage --start 2024-10-01 --end 2024-10-31
+        # Analyze EPL coverage for October 2024
+        odds quality coverage --sport soccer_epl --start 2024-10-01 --end 2024-10-31
 
-        # Analyze specific week
-        odds quality coverage --start 2024-11-01 --end 2024-11-07
-
-        # Different sport (when supported)
-        odds quality coverage --start 2024-10-01 --end 2024-10-31 --sport basketball_ncaa
+        # Analyze an MLB week
+        odds quality coverage --sport baseball_mlb --start 2024-07-01 --end 2024-07-07
     """
     asyncio.run(_coverage(start, end, sport))
 
@@ -103,7 +98,7 @@ async def _coverage(start_date_str: str, end_date_str: str, sport_key: str):
     Args:
         start_date_str: Start date string (YYYY-MM-DD)
         end_date_str: End date string (YYYY-MM-DD)
-        sport_key: Sport filter (e.g., "basketball_nba")
+        sport_key: Sport filter (e.g., "soccer_epl")
     """
     # Parse dates
     start_date = _parse_date(start_date_str, "start")

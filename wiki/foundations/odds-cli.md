@@ -49,14 +49,15 @@ status: stable
 
 ## Sport defaults
 
-`--sport` takes a [sport key](../collection/sport-and-market-keys.md); defaults differ per group (#465):
+`--sport` takes a [sport key](../collection/sport-and-market-keys.md); defaults differ per group:
 
 | Command | Default |
 |---|---|
 | `odds_cli.commands.fetch` (`current`, `scores`; `scores` runs the fetch-scores job's `odds_lambda.jobs.fetch_scores.update_scores`, which finds each event by its Odds API id and logs `score_event_not_found` for an unknown one) | required, since each sport spends its own Odds API key; `results` defaults to `soccer_epl`, settles `baseball_mlb` from the MLB Stats API and prints the settled, cancelled, postponed, moved and unresolved counts ([results jobs](../collection/results-jobs.md#fetch-oddsportal-results)) |
-| `odds_cli.commands.discover` (`odds_cli.commands.discover.games` spends units) | it is required by `odds_cli.commands.discover.games`; `odds_cli.commands.discover.upcoming` (free) defaults to `basketball_nba` |
+| `odds_cli.commands.discover` (`odds_cli.commands.discover.games` spends units, `odds_cli.commands.discover.upcoming` is free) | required |
 | `odds_cli.commands.backfill.execute_backfill` | the manifest's sport, whose key it spends; `odds_cli.commands.backfill.plan_backfill` takes it too |
-| `odds_cli.commands.quality` | `basketball_nba` |
+| `odds_cli.commands.quality` | required |
+| `odds_cli.commands.validate` (`daily`, `tier-coverage`) | required; one of the supported sport keys, whose league timezone sets the day ([coverage checks](../storage/coverage-checks.md#tiercoveragevalidator)) |
 | `odds_cli.commands.polymarket.discover` | `basketball_nba` |
 | `odds_cli.commands.copy_from_prod` | `soccer_epl` |
 | `odds_cli.commands.train` | optional filter |

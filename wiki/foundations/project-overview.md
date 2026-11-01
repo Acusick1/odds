@@ -6,10 +6,8 @@ sources:
   - odds_core.sports.SportKey
   - odds_core.config.SchedulerConfig.bootstrap_jobs
   - odds_core.config.PolymarketConfig
-  - odds_cli.main.app
   - odds_cli.commands.backfill
   - odds_analytics.backfill_executor.BackfillExecutor
-  - odds_lambda.storage.tier_validator.TierCoverageValidator
   - odds_lambda.polymarket_fetcher.PolymarketClient
 status: stable
 ---
@@ -46,9 +44,7 @@ The repo carries the residue of three pivots (PRs `#214`, `#217`, `#267`, `#387`
 
 Each fails quietly on EPL and MLB data: the symptom is an empty result (no events, zero opportunities), not an error, so an NBA default and an empty EPL window look alike. The reference page for each states the default:
 
-- CLI `--sport` defaults to `basketball_nba` in several commands ([Sport defaults](odds-cli.md#sport-defaults)), though the root help (`odds_cli.main.app`) describes the tool as multi-sport.
 - `backfill scores` hardcodes `sport_key="basketball_nba"` (`odds_cli.commands.backfill`) and spends no Odds API units. `odds_analytics.backfill_executor.BackfillExecutor` takes its sport from the acquisition manifest and stores every game a call returns on the event the game resolves to through the [event resolver](../storage/event-resolver.md), reporting a game the resolver drops ([Odds API historical backfill](../collection/odds-api-backfill.md)).
-- Completeness checks discover NBA games only, and `odds_lambda.storage.readers.OddsReader.get_games_by_date` buckets days noon-to-noon UTC "to capture a full NBA game day" and has no sport filter, so it serves all sports (`odds_lambda.storage.tier_validator.TierCoverageValidator`, which counts snapshots as distinct snapshot times, tiers them by time basis and market, and finds discovered games by their `odds_api` external ids, for dates 0 to 3 days before the current UTC date; [Coverage and completeness checks](../storage/coverage-checks.md), [OddsReader](../storage/odds-reader.md)).
 - `odds polymarket discover` lists NBA events (`odds_cli.commands.polymarket.discover`); EPL and NBA match prices (fetched with `odds_lambda.polymarket_fetcher.PolymarketClient`) are stored as `polymarket` snapshots ([Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md)).
 - Alert intervals and per-job heartbeat hours are `odds_core.config.AlertConfig` fields with no template variable ([Alerts](../operations/alerts.md#alert-history)).
 

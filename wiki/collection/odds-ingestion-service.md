@@ -54,7 +54,7 @@ status: stable
 
 ## Manual event discovery
 
-`odds discover upcoming [--sport]` (`odds_cli.commands.discover.upcoming`) runs the same free `/events` sync as the job's first step without fetching odds; it costs 0 quota units. `--sport` defaults to `basketball_nba`, so pass `--sport soccer_epl` for EPL.
+`odds discover upcoming --sport` (`odds_cli.commands.discover.upcoming`) runs the same free `/events` sync as the job's first step for the given sport without fetching odds; it costs 0 quota units.
 
 ## Related
 

@@ -10,7 +10,7 @@ members = [
 [project]
 name = "betting-odds-pipeline"
 version = "0.1.0"
-description = "NBA betting odds data collection and analysis system"
+description = "Sport-agnostic betting odds data collection and analysis system"
 authors = [{name = "Andrew"}]
 requires-python = ">=3.12"
 
