@@ -53,7 +53,7 @@ class TestMainOrchestration:
         with (
             patch(_KICKOFF_PATCH, new_callable=AsyncMock) as mk,
             patch("odds_lambda.jobs.agent_run.self_schedule", side_effect=mock_schedule),
-            patch("odds_lambda.jobs.agent_run._run_claude_agent", side_effect=mock_run),
+            patch("odds_lambda.jobs.agent_run.run_claude_agent", side_effect=mock_run),
             patch(
                 "odds_lambda.jobs.agent_run._check_agent_requested_wakeup",
                 new_callable=AsyncMock,
@@ -80,7 +80,7 @@ class TestMainOrchestration:
             patch(_KICKOFF_PATCH, new_callable=AsyncMock) as mk,
             patch("odds_lambda.jobs.agent_run.self_schedule", side_effect=track_schedule),
             patch(
-                "odds_lambda.jobs.agent_run._run_claude_agent",
+                "odds_lambda.jobs.agent_run.run_claude_agent",
                 new_callable=AsyncMock,
                 return_value=0,
             ),
@@ -112,7 +112,7 @@ class TestMainOrchestration:
             patch(_KICKOFF_PATCH, new_callable=AsyncMock) as mk,
             patch("odds_lambda.jobs.agent_run.self_schedule", side_effect=track_schedule),
             patch(
-                "odds_lambda.jobs.agent_run._run_claude_agent",
+                "odds_lambda.jobs.agent_run.run_claude_agent",
                 new_callable=AsyncMock,
                 return_value=0,
             ),
@@ -145,7 +145,7 @@ class TestMainOrchestration:
             patch(_KICKOFF_PATCH, new_callable=AsyncMock) as mk,
             patch("odds_lambda.jobs.agent_run.self_schedule", side_effect=track_schedule),
             patch(
-                "odds_lambda.jobs.agent_run._run_claude_agent",
+                "odds_lambda.jobs.agent_run.run_claude_agent",
                 new_callable=AsyncMock,
                 return_value=0,
             ),
@@ -195,7 +195,7 @@ class TestOvernightWindowPerSport:
             patch(_KICKOFF_PATCH, new_callable=AsyncMock) as mk,
             patch("odds_lambda.jobs.agent_run.self_schedule", side_effect=track_schedule),
             patch(
-                "odds_lambda.jobs.agent_run._run_claude_agent",
+                "odds_lambda.jobs.agent_run.run_claude_agent",
                 new_callable=AsyncMock,
                 return_value=0,
             ),
@@ -233,7 +233,7 @@ class TestOvernightWindowPerSport:
             patch(_KICKOFF_PATCH, new_callable=AsyncMock) as mk,
             patch("odds_lambda.jobs.agent_run.self_schedule", side_effect=track_schedule),
             patch(
-                "odds_lambda.jobs.agent_run._run_claude_agent",
+                "odds_lambda.jobs.agent_run.run_claude_agent",
                 new_callable=AsyncMock,
                 return_value=0,
             ),
@@ -485,7 +485,7 @@ class TestRunClaudeAgentCancellation:
         import asyncio
         from unittest.mock import MagicMock
 
-        from odds_lambda.jobs.agent_run import _run_claude_agent
+        from odds_lambda.jobs.agent_run import run_claude_agent
 
         class HangingStdout:
             def __aiter__(self) -> HangingStdout:
@@ -507,7 +507,7 @@ class TestRunClaudeAgentCancellation:
                 new=AsyncMock(return_value=proc),
             ),
         ):
-            task = asyncio.create_task(_run_claude_agent("soccer_epl"))
+            task = asyncio.create_task(run_claude_agent("soccer_epl"))
             await asyncio.sleep(0.1)
             task.cancel()
             with pytest.raises(asyncio.CancelledError):

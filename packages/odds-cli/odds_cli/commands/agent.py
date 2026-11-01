@@ -34,10 +34,10 @@ def run(
     """
     override_database_url(db)
 
-    from odds_lambda.jobs.agent_run import _run_claude_agent
+    from odds_lambda.jobs.agent_run import run_claude_agent
 
     console.print(f"[bold blue]Running agent for {sport} against db={db}...[/bold blue]")
-    exit_code = asyncio.run(_run_claude_agent(sport))
+    exit_code = asyncio.run(run_claude_agent(sport))
 
     if exit_code < 0:
         console.print("[bold red]Agent timed out[/bold red]")

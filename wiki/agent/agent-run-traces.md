@@ -3,7 +3,7 @@ type: reference
 title: Agent run traces
 description: Where each agent run's stream-json trace is written, how files are named, limited and pruned, which messages reach structlog, and what the summary viewer reads.
 sources:
-  - odds_lambda.jobs.agent_run._run_claude_agent
+  - odds_lambda.jobs.agent_run.run_claude_agent
   - odds_lambda.jobs.agent_run._log_stream_message
   - odds_lambda.jobs.agent_run._prune_agent_run_logs
   - odds_lambda.jobs.agent_run.AGENT_RUN_LOG_KEEP
@@ -16,7 +16,7 @@ status: stable
 
 # Agent run traces
 
-Each run of the [agent runtime](agent-run-job.md#runtime) writes its full `stream-json` output to a file. The file is the only durable record of the run's reasoning and has no database component: `odds_lambda.jobs.agent_run._run_claude_agent` writes the file only, and the agent's persistent memory is `odds_core.match_brief_models.MatchBrief`, one row per researched event keyed by its integer id ([match briefs](match-briefs.md)). Deleting `logs/agent_runs/` loses the traces.
+Each run of the [agent runtime](agent-run-job.md#runtime) writes its full `stream-json` output to a file. The file is the only durable record of the run's reasoning and has no database component: `odds_lambda.jobs.agent_run.run_claude_agent` writes the file only, and the agent's persistent memory is `odds_core.match_brief_models.MatchBrief`, one row per researched event keyed by its integer id ([match briefs](match-briefs.md)). Deleting `logs/agent_runs/` loses the traces.
 
 ## Files
 

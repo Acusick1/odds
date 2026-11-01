@@ -147,7 +147,7 @@ def _build_agent_subprocess_env() -> dict[str, str]:
     return env
 
 
-async def _run_claude_agent(sport: SportKey) -> int:
+async def run_claude_agent(sport: SportKey) -> int:
     """Spawn ``claude -p`` subprocess and return exit code.
 
     Full stream-json trace is written to
@@ -323,7 +323,7 @@ async def main(ctx: JobContext) -> None:
     result = await schedule_next(sport)
 
     # --- Run the agent ---
-    exit_code = await _run_claude_agent(sport)
+    exit_code = await run_claude_agent(sport)
 
     if exit_code != 0:
         logger.warning("agent_run_nonzero_exit", exit_code=exit_code, sport=sport)

@@ -3,7 +3,7 @@ type: reference
 title: Agent runtime and the agent-run job
 description: The claude subprocess, the agent-run job flow and cadence, agent_wakeups, odds agent run and the database role.
 sources:
-  - odds_lambda.jobs.agent_run._run_claude_agent
+  - odds_lambda.jobs.agent_run.run_claude_agent
   - odds_lambda.jobs.agent_run._build_agent_subprocess_env
   - odds_lambda.jobs.agent_run.CADENCE
   - odds_lambda.jobs.agent_run.AGENT_TIMEOUT_SECONDS
@@ -29,7 +29,7 @@ The runtime of the [betting agent](betting-agent.md) lives in `odds_lambda.jobs.
 
 ## Runtime
 
-`odds_lambda.jobs.agent_run._run_claude_agent` spawns `claude -p "/agent {sport}"` with `--model claude-sonnet-4-6` (hard-coded in the function, #414), `--output-format stream-json --verbose` and `--dangerously-skip-permissions`, working directory the repo root, a 15-minute timeout (`odds_lambda.jobs.agent_run.AGENT_TIMEOUT_SECONDS`). A cancelled run (the scheduler's own 20-minute limit, or shutdown) kills the subprocess before the cancellation propagates. The `/agent` slash command is not in the repository; `.gitignore` excludes the whole `.claude/` directory (#479). The function passes the full sport key (`soccer_epl`, `baseball_mlb`), and what the command does with it cannot be reviewed from the repo. The subprocess:
+`odds_lambda.jobs.agent_run.run_claude_agent` spawns `claude -p "/agent {sport}"` with `--model claude-sonnet-4-6` (hard-coded in the function, #414), `--output-format stream-json --verbose` and `--dangerously-skip-permissions`, working directory the repo root, a 15-minute timeout (`odds_lambda.jobs.agent_run.AGENT_TIMEOUT_SECONDS`). A cancelled run (the scheduler's own 20-minute limit, or shutdown) kills the subprocess before the cancellation propagates. The `/agent` slash command is not in the repository; `.gitignore` excludes the whole `.claude/` directory (#479). The function passes the full sport key (`soccer_epl`, `baseball_mlb`), and what the command does with it cannot be reviewed from the repo. The subprocess:
 
 - reaches the pipeline through the `odds` MCP server registered in `.mcp.json` (`uv run fastmcp run odds_mcp.server`), see [odds-mcp server](mcp-server.md);
 - researches with web search and Playwright;
@@ -46,7 +46,7 @@ The job is opt-in and local-only: no EventBridge rule exists for it, and the def
 
 1. Requires `ctx.sport`; otherwise raises `ValueError`.
 2. `schedule_next(sport)` pre-schedules the next wake-up before any work, so a crash does not break the chain ([self-scheduling](../scheduling/self-scheduling.md)). It calls `odds_lambda.scheduling.decision.decide_forward_resilient` with `odds_lambda.jobs.agent_run.CADENCE`, the sport's overnight window and no leads (so no `run_started`), and uses only `next_execution` (the run gate is ignored: the agent always wakes); kickoffs are the stored events' `commence_time`. Its off-season check-in does not apply the overnight skip ([decision engine](../scheduling/decision-engine.md#forward-decisions)). It raises `ValueError` for a sport missing from `odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS` (EPL 22:00-06:00 UTC, MLB 05:00-14:00, NBA 07:00-15:00).
-3. `odds_lambda.jobs.agent_run._run_claude_agent(sport)` runs the subprocess; a non-zero exit is logged, not raised.
+3. `odds_lambda.jobs.agent_run.run_claude_agent(sport)` runs the subprocess; a non-zero exit is logged, not raised.
 4. `_check_agent_requested_wakeup(sport)` reads and consumes the `agent_wakeups` row; a failure is logged and swallowed.
 5. A requested time in the past is ignored; otherwise `odds_lambda.scheduling.helpers.self_schedule` overrides the pre-scheduled time.
 
@@ -60,7 +60,7 @@ The wake-up interval is the `agent-run` row of the [cadence table](../scheduling
 
 ### `odds agent run`
 
-`odds agent run --sport S [--db NAME]` calls `odds_lambda.jobs.agent_run._run_claude_agent` directly: no pre-schedule, no wake-up consumption, no reschedule. `--db` swaps the database name in `DATABASE_URL` and `AGENT_DATABASE_URL` (default `odds`, the database the local scheduler writes scraper output to); a timeout exits 1. `odds_cli.commands.agent` imports the underscore-private `odds_lambda.jobs.agent_run._run_claude_agent` across packages ([Workspace packages](../foundations/workspace-packages.md)).
+`odds agent run --sport S [--db NAME]` calls `odds_lambda.jobs.agent_run.run_claude_agent` directly: no pre-schedule, no wake-up consumption, no reschedule. `--db` swaps the database name in `DATABASE_URL` and `AGENT_DATABASE_URL` (default `odds`, the database the local scheduler writes scraper output to); a timeout exits 1.
 
 ## Database role
 

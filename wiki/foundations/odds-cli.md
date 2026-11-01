@@ -60,7 +60,7 @@ status: stable
 | `odds_cli.commands.polymarket.discover` | `basketball_nba` |
 | `odds_cli.commands.copy_from_prod` | `soccer_epl` |
 | `odds_cli.commands.train` | optional filter |
-| `odds_cli.commands.agent.run` | required |
+| `odds_cli.commands.agent.run` ([`odds agent run`](../agent/agent-run-job.md#odds-agent-run)) | required |
 
 Pass `--sport` explicitly. [About the system and its pivots](project-overview.md#nba-era-defaults-still-in-live-code) lists the other NBA-era defaults.
 
