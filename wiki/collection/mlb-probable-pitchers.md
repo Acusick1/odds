@@ -34,7 +34,7 @@ The job raises unless `ctx.sport` is set and is `baseball_mlb`. Inside [`odds_co
 
 ## Where it runs
 
-It runs on the fixed cron `0 6 * * *` UTC (`odds_lambda.scheduling.jobs._JOB_CRON_MAP`), MLB only (the NBA ESPN sync and the NBA injury-report job are different jobs) through its `odds_lambda.scheduling.jobs._JOB_SPORTS` allowlist, in the default local bootstrap, so it runs on the production host ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). `deployment/aws/terraform/eventbridge.tf` declares no rule for it (its fixed-schedule rule list is empty). It keeps running through the MLB off-season (#487). The MLB overnight window (05:00-14:00 UTC) belongs to the self-scheduling jobs, not this cron ([decision-engine](../scheduling/decision-engine.md#overnight-windows)).
+It runs on the fixed cron `0 6 * * *` UTC (`odds_lambda.scheduling.jobs._JOB_CRON_MAP`), MLB only (the NBA ESPN sync and the NBA injury-report job are different jobs) through its `odds_lambda.scheduling.jobs._JOB_SPORTS` allowlist, in the default local bootstrap, so it runs on the production host and is the only writer of `mlb_probable_pitchers` ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). `deployment/aws/terraform/eventbridge.tf` declares no rule for it (its fixed-schedule rule list is empty). It keeps running through the MLB off-season (#487). The MLB overnight window (05:00-14:00 UTC) belongs to the self-scheduling jobs, not this cron ([decision-engine](../scheduling/decision-engine.md#overnight-windows)).
 
 ## Reading
 

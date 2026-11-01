@@ -15,8 +15,7 @@ class TestToolNamespace:
     """Guard against silent name shadowing across mounted sub-servers.
 
     FastMCP's unprefixed mount surfaces both colliding tools through
-    ``list_tools`` without raising — see ``_assert_unique_tool_names``. This
-    test catches a duplicate before it ships.
+    ``list_tools`` without raising, so this test is the only check.
     """
 
     @pytest.mark.asyncio
@@ -27,12 +26,6 @@ class TestToolNamespace:
         names = [t.name for t in tools]
         duplicates = sorted({n for n in names if names.count(n) > 1})
         assert not duplicates, f"Duplicate MCP tool names: {duplicates}"
-
-    @pytest.mark.asyncio
-    async def test_assert_unique_tool_names_helper_passes(self) -> None:
-        from odds_mcp.server import _assert_unique_tool_names
-
-        await _assert_unique_tool_names()
 
 
 class TestCoerceBookmakerList:

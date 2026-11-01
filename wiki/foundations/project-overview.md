@@ -45,7 +45,7 @@ The repo carries the residue of three pivots (PRs `#214`, `#217`, `#267`, `#387`
 Each fails quietly on EPL and MLB data: the symptom is an empty result (no events, zero opportunities), not an error, so an NBA default and an empty EPL window look alike. The reference page for each states the default:
 
 - `backfill scores` hardcodes `sport_key="basketball_nba"` (`odds_cli.commands.backfill`) and spends no Odds API units. `odds_analytics.backfill_executor.BackfillExecutor` takes its sport from the acquisition manifest and stores every game a call returns on the event the game resolves to through the [event resolver](../storage/event-resolver.md), reporting a game the resolver drops ([Odds API historical backfill](../collection/odds-api-backfill.md)).
-- `odds polymarket discover` lists NBA events (`odds_cli.commands.polymarket.discover`); EPL and NBA match prices (fetched with `odds_lambda.polymarket_fetcher.PolymarketClient`) are stored as `polymarket` snapshots ([Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md)).
+- `odds polymarket discover` lists NBA events (`odds_cli.commands.polymarket.discover`); EPL and NBA match prices (fetched from Polymarket's public Gamma and CLOB APIs with `odds_lambda.polymarket_fetcher.PolymarketClient`) are stored as `polymarket` snapshots ([Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md)).
 - Alert intervals and per-job heartbeat hours are `odds_core.config.AlertConfig` fields with no template variable ([Alerts](../operations/alerts.md#alert-history)).
 
 ## Related

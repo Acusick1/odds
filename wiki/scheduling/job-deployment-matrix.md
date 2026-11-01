@@ -24,7 +24,7 @@ Every scheduled job runs on one host: the production host, under the [local sche
 Three lists in code decide what the production scheduler runs:
 
 - `odds_core.config.SchedulerConfig.bootstrap_jobs` names the jobs `odds scheduler start` bootstraps. `agent-run` is commented out there, so it runs only when added to `SCHEDULER_BOOTSTRAP_JOBS`.
-- `odds_lambda.scheduling.jobs._JOB_CRON_MAP` gives the jobs installed as a fixed cron. Every other bootstrapped job self-schedules ([Self-scheduling](self-scheduling.md)); a restart keeps its pending run, and only a job without one runs its bootstrap function ([bootstrap](local-scheduler.md#bootstrap-jobs-and-cron-table)).
+- `odds_lambda.scheduling.jobs._JOB_CRON_MAP` gives the jobs installed as a fixed cron: `fetch-espn-fixtures` and `fetch-mlb-probables`. Every other bootstrapped job self-schedules ([Self-scheduling](self-scheduling.md)); a restart keeps its pending run, and only a job without one runs its bootstrap function ([bootstrap](local-scheduler.md#bootstrap-jobs-and-cron-table)).
 - `odds_lambda.scheduling.jobs._JOB_SPORTS` limits a per-sport job, cron or self-scheduling, to the configured sports in its allowlist. A per-sport job absent from it runs for every sport in `data_collection.sports` (`odds_lambda.scheduling.jobs.resolve_target_sports`).
 
 | Job | Bootstrapped by default | Sports | Schedule |

@@ -238,7 +238,7 @@ def start_local(
 def run_once(
     job: str = typer.Argument(
         ...,
-        help="Job name: a per-sport job with its sport suffix (fetch-odds-epl) or update-status",
+        help="Job name: a per-sport job with its sport suffix (fetch-odds-epl) or a global job (update-status)",
     ),
 ):
     """
@@ -490,8 +490,6 @@ def smoke(
 
 @app.command("info")
 def info():
-    app_settings = get_settings()
-
     """
     Display current scheduler configuration.
 
@@ -500,6 +498,8 @@ def info():
     - Configuration settings
     - Environment variables
     """
+    app_settings = get_settings()
+
     console.print("[bold blue]Scheduler Configuration[/bold blue]\n")
 
     # Create configuration table
