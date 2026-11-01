@@ -8,8 +8,7 @@ sources:
   - odds_lambda.storage.event_merge.find_historical_candidates
   - odds_lambda.storage.event_resolver.MatchWindow
   - odds_lambda.odds_api_events
-  - odds_lambda.storage.injury_writer.InjuryWriter._match_event
-  - odds_lambda.storage.game_log_writer.GameLogWriter._match_event
+  - odds_lambda.storage.nba_event_match.match_nba_event
   - odds_lambda.polymarket_matching.NBA_ABBREV_MAP
   - odds_lambda.storage.event_resolver.attach_event
   - odds_lambda.polymarket_sports.PolymarketSportConfig
@@ -36,8 +35,7 @@ There is no shared matcher for deciding which `events` row a piece of incoming d
 |---|---|---|---|---|
 | `odds_lambda.storage.event_resolver.resolve_event` with `odds_lambda.storage.event_resolver.MatchWindow.HISTORICAL` | historical OddsPortal and FDUK ingest scripts | commence time ±24 h | `odds_core.team.normalize_team_name` applied first; same sport | one candidate matches; several match only through the nearest within ±2 h, else, with none within ±2 h, `odds_lambda.storage.event_resolver.AmbiguousHistoricalMatch` is raised before anything is written and the ingest script skips the row (logged `ambiguous_historical_match`); with no candidate at all the row creates its own event (logged) ([Event resolver](event-resolver.md#steps)) |
 | `odds_lambda.storage.event_resolver.resolve_event` | live OddsPortal scrape and Betfair jobs and the Odds API writers, through `odds_lambda.live_events.LiveEventFinder` | MLB: the event holding the row's `gamePk`, else the source's id, else ±2 h among events with none; other sports: the source's id, else ±2 h | `odds_core.team.normalize_team_name` applied first; sport filter | the nearest candidate, ties to the one stored first ([Event resolver](event-resolver.md#steps)) |
-| `odds_lambda.storage.injury_writer.InjuryWriter._match_event` | [NBA injury reports](../collection/nba-injuries-and-stats.md) | ET `game_date` 10:00 to next day 06:00, converted to UTC | NBA events; team (through `odds_core.team.normalize_team_name`) is home or away | `None`; the writer returns the unmatched pairs and `fetch-injuries-nba` warns about them |
-| `odds_lambda.storage.game_log_writer.GameLogWriter._match_event` | [NBA game logs](../collection/nba-injuries-and-stats.md) | same ET window (a verbatim copy) | team is home or away | `None` |
+| `odds_lambda.storage.nba_event_match.match_nba_event` | [NBA injury reports and game logs](../collection/nba-injuries-and-stats.md) | ET `game_date` 10:00 to next day 06:00, converted to UTC | NBA events; team (through `odds_core.team.normalize_team_name` for injury reports, the nba_api abbreviation for game logs) is home or away | `None`, logged as `nba_event_ambiguous_match` when several match; the injury writer returns the unmatched pairs and `fetch-injuries-nba` warns about them |
 | `odds_lambda.storage.event_resolver.attach_event` | `odds polymarket backfill-odds` and the fetch-polymarket-odds job | the source's id, else ±2 h | the sport's `team_name` (`odds_lambda.polymarket_sports.PolymarketSportConfig`; NBA by ticker abbreviation, and a match whose team has no name is dropped before attaching); sport filter | the nearest candidate; with no candidate, or a refused id, it returns `None` and creates no event ([Event resolver](event-resolver.md#attaching-without-creating)) |
 
 ## Consequences of the differences

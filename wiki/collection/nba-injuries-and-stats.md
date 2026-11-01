@@ -23,6 +23,7 @@ sources:
   - odds_lambda.pbpstats_fetcher.fetch_player_season_stats
   - odds_lambda.storage.game_log_writer.GameLogWriter
   - odds_lambda.storage.game_log_reader.GameLogReader
+  - odds_lambda.storage.nba_event_match.match_nba_event
   - odds_lambda.storage.pbpstats_writer.PbpStatsWriter
   - odds_lambda.storage.pbpstats_reader.PbpStatsReader
   - odds_core.game_log_models.NbaTeamGameLog
@@ -30,6 +31,7 @@ sources:
   - odds_cli.commands.injuries
   - odds_cli.commands.nba_stats
   - odds_cli.commands.pbpstats
+  - odds_analytics.injury_features.nba_seasons_through
   - odds_cli.commands.backfill
 status: stable
 ---
@@ -71,16 +73,17 @@ stats.nba.com blocks raw HTTP (Akamai), so `odds_lambda.game_log_fetcher.fetch_g
 
 ## Player stats
 
-`odds_lambda.pbpstats_fetcher.PlayerSeasonRecord` carries on/off ratings, minutes, games played and box totals, regular season only. `odds_lambda.pbpstats_fetcher.convert_name` turns "First Last" into "Last, First" (suffix-aware) to match injury-report names. Traded players appear once, under the final team. `odds_lambda.storage.pbpstats_reader.PbpStatsReader.get_players_for_teams` returns a dict keyed by `player_name`, which the injury features use for impact weighting ([feature-groups](../modelling/feature-groups.md)). The NBA CLIs derive the season from `date.today()` (local date, not UTC).
+`odds_lambda.pbpstats_fetcher.PlayerSeasonRecord` carries on/off ratings, minutes, games played and box totals, regular season only. `odds_lambda.pbpstats_fetcher.convert_name` turns "First Last" into "Last, First" (suffix-aware) to match injury-report names. Traded players appear once, under the final team. `odds_lambda.storage.pbpstats_reader.PbpStatsReader.get_players_for_teams` returns a dict keyed by `player_name`, which the injury features use for impact weighting ([feature-groups](../modelling/feature-groups.md)).
+
+`odds nba-stats fetch` (`odds_cli.commands.nba_stats.fetch`) and `odds pbpstats fetch` (`odds_cli.commands.pbpstats.fetch`) fetch `--season`, by default the season of the current UTC time (`odds_analytics.injury_features.date_to_nba_season`), or with `--all` every season from 2021-22 through that one (`odds_analytics.injury_features.nba_seasons_through`). `odds pbpstats backfill` is `fetch --all`.
 
 ## Event matching
 
-Both writers link rows to `events` with the same ET window rule: events whose `commence_time` is in game_date 10:00 ET to next day 06:00 ET with the team as home or away; exactly one candidate sets `event_id` (its integer id), otherwise NULL (ambiguous logs a warning). Injury teams are canonicalised with `odds_core.team.normalize_team_name` and the candidate events are NBA only; the game-log writer maps `team_abbreviation` through a hardcoded `_ABBREV_TO_CANONICAL`. A report lists only the teams playing on its game dates, so each of its `(team, game_date)` pairs should link: in the reports of 2026-10-21 to 2026-10-30 all 152 pairs, covering all 30 teams, matched an event. Unmatched rows are invisible to per-event readers such as `odds_lambda.storage.injury_reader.InjuryReader.get_injuries_for_event` ([event-matching](../storage/event-matching.md)).
+Both writers link rows to `events` through `odds_lambda.storage.nba_event_match.match_nba_event`: NBA events whose `commence_time` is in game_date 10:00 ET to next day 06:00 ET with the team as home or away; exactly one candidate sets `event_id` (its integer id), otherwise NULL (ambiguous logs `nba_event_ambiguous_match` with the feed as `source`). Injury teams are canonicalised with `odds_core.team.normalize_team_name`; the game-log writer maps `team_abbreviation` through a hardcoded `_ABBREV_TO_CANONICAL`. A report lists only the teams playing on its game dates, so each of its `(team, game_date)` pairs should link: in the reports of 2026-10-21 to 2026-10-30 all 152 pairs, covering all 30 teams, matched an event. Unmatched rows are invisible to per-event readers such as `odds_lambda.storage.injury_reader.InjuryReader.get_injuries_for_event` ([event-matching](../storage/event-matching.md)).
 
 ## Scope and known gaps
 
 - NBA-only: `odds backfill scores` (a game-log backfill that spends no Odds API units) and the stats lookup use `Event.sport_key == "basketball_nba"` in the CLI, and `odds_lambda.polymarket_matching.CANONICAL_TO_ABBREV` in `odds_analytics.feature_groups.collect_event_data`, which loads the NBA-only data beside the market's quotes and each source's raw-target close (the `injuries` and `rest` groups are NBA-only but valid names for any sport's delta targets). `odds backfill scores` hardcodes `sport_key="basketball_nba"` with no `--sport` option ([odds-api-backfill](odds-api-backfill.md)).
-- `odds_cli.commands.nba_stats.ALL_SEASONS` ends at 2025-26 and `odds_cli.commands.pbpstats.ALL_SEASONS` at 2024-25, and `odds pbpstats backfill` is `fetch --all` over that shorter list. 2025-26 player stats need `--season` (#463). Without `--season` or `--all`, `odds_cli.commands.nba_stats.fetch` and `odds_cli.commands.pbpstats.fetch` use `odds_analytics.injury_features.date_to_nba_season` of the current UTC time. Both `--all` help strings say "2021-22 through current", which is false for PBPStats (#466).
 - An alias gap leaves `event_id` NULL, as a team with no event does; the job warns about those pairs ([event-matching](../storage/event-matching.md)).
 
 ## Related

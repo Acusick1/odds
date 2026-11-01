@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import date
 
 import structlog
 from odds_core.game_log_models import NbaTeamGameLog
-from odds_core.models import Event
 from odds_core.team import normalize_team_name
-from sqlalchemy import and_, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.game_log_fetcher import GameLogRecord
+from odds_lambda.storage.nba_event_match import match_nba_event
 
 logger = structlog.get_logger(__name__)
 
@@ -71,7 +70,7 @@ class GameLogWriter:
         if not records:
             return 0
 
-        event_cache: dict[tuple[str, date], str | None] = {}
+        event_cache: dict[tuple[str, date], int | None] = {}
 
         log_dicts: list[dict] = []
         for record in records:
@@ -81,7 +80,9 @@ class GameLogWriter:
             cache_key = (canonical, record.game_date)
 
             if cache_key not in event_cache:
-                event_cache[cache_key] = await self._match_event(cache_key[0], record.game_date)
+                event_cache[cache_key] = await match_nba_event(
+                    self.session, cache_key[0], record.game_date, source="game_log"
+                )
 
             log_dicts.append(
                 {
@@ -138,41 +139,3 @@ class GameLogWriter:
             events_unmatched=len(event_cache) - matched,
         )
         return len(log_dicts)
-
-    async def _match_event(self, team_name: str, game_date: date) -> str | None:
-        """Match a team + game_date to a sportsbook Event record.
-
-        Uses the same ET window logic as InjuryWriter: game_date 10:00 ET
-        to game_date+1 06:00 ET to handle timezone rollovers.
-
-        Returns:
-            event_id if exactly one match found, None otherwise.
-        """
-        from odds_core.time import EASTERN
-
-        day_start_et = datetime(game_date.year, game_date.month, game_date.day, 10, tzinfo=EASTERN)
-        day_end_et = day_start_et + timedelta(hours=20)
-        window_start = day_start_et.astimezone(UTC)
-        window_end = day_end_et.astimezone(UTC)
-
-        query = select(Event.id).where(
-            and_(
-                Event.commence_time >= window_start,
-                Event.commence_time <= window_end,
-                or_(Event.home_team == team_name, Event.away_team == team_name),
-            )
-        )
-        result = await self.session.execute(query)
-        candidates = list(result.scalars().all())
-
-        if len(candidates) == 1:
-            return candidates[0]
-
-        if len(candidates) > 1:
-            logger.warning(
-                "game_log_event_ambiguous_match",
-                team=team_name,
-                game_date=str(game_date),
-                candidates=len(candidates),
-            )
-        return None

@@ -20,6 +20,7 @@ __all__ = [
     "InjuryFeatures",
     "extract_injury_features",
     "date_to_nba_season",
+    "nba_seasons_through",
 ]
 
 _GTD_STATUSES = frozenset({InjuryStatus.QUESTIONABLE, InjuryStatus.DOUBTFUL})
@@ -74,6 +75,19 @@ def date_to_nba_season(dt: datetime) -> str:
     if dt.month >= 10:
         return f"{year}-{str(year + 1)[-2:]}"
     return f"{year - 1}-{str(year)[-2:]}"
+
+
+# The first season the stats.nba.com game logs and PBPStats player stats are collected from.
+FIRST_COLLECTED_NBA_SEASON_START = 2021
+
+
+def nba_seasons_through(dt: datetime) -> list[str]:
+    """Every NBA season from the first collected one through the season of ``dt``."""
+    last_start = int(date_to_nba_season(dt)[:4])
+    return [
+        f"{year}-{str(year + 1)[-2:]}"
+        for year in range(FIRST_COLLECTED_NBA_SEASON_START, last_start + 1)
+    ]
 
 
 def _compute_player_impact(stats: NbaPlayerSeasonStats | None) -> float:

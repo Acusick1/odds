@@ -8,10 +8,12 @@ This job:
 4. Self-schedules next execution
 """
 
+from dataclasses import dataclass
 from datetime import timedelta
+from functools import partial
 
 import structlog
-from odds_core.alerts import job_alert_context, send_scheduling_failure
+from odds_core.alerts import job_alert_context
 from odds_core.api_models import parse_scores_from_api_dict
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
@@ -20,7 +22,7 @@ from odds_core.models import EventStatus
 from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.odds_api_events import find_event_by_odds_api_id
 from odds_lambda.scheduling.decision import ScheduleDecision, decide_backward_resilient
-from odds_lambda.scheduling.helpers import self_schedule
+from odds_lambda.scheduling.helpers import book_next_run
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
 from odds_lambda.storage.writers import OddsWriter
 
@@ -69,28 +71,18 @@ async def main(ctx: JobContext) -> None:
     # Self-scheduling uses the sport-suffixed job name to match Terraform rules
     schedule_job_name = make_compound_job_name("fetch-scores", sport)
 
-    async def _schedule(decision: ScheduleDecision, *, label: str, final: bool = False) -> bool:
-        if not decision.next_execution:
-            return False
-        try:
-            await self_schedule(
-                job_name=schedule_job_name,
-                next_time=decision.next_execution,
-                dry_run=app_settings.scheduler.dry_run,
-                sport=sport,
-                reason=f"{label}: {decision.reason}",
-            )
-        except Exception as e:
-            logger.error("fetch_scores_scheduling_failed", error=str(e), exc_info=True)
-            await send_scheduling_failure(schedule_job_name, e, final=final)
-            return False
-        return True
+    schedule = partial(
+        book_next_run,
+        job_name=schedule_job_name,
+        sport=sport,
+        dry_run=app_settings.scheduler.dry_run,
+    )
 
     # Smart execution gating, scoped to this job's sport(s).
     decision = await _scores_decision(sports)
 
     # Pre-schedule before any work so the chain survives crashes.
-    pre_booked = await _schedule(decision, label="pre-schedule", final=not decision.should_execute)
+    pre_booked = await schedule(decision, label="pre-schedule", final=not decision.should_execute)
 
     async with job_alert_context(schedule_job_name):
         if not decision.should_execute:
@@ -104,7 +96,7 @@ async def main(ctx: JobContext) -> None:
         logger.info("fetch_scores_executing", reason=decision.reason)
 
         try:
-            await _fetch_and_update_scores(sports)
+            await update_scores(sport)
             logger.info("fetch_scores_completed")
 
         except Exception as e:
@@ -113,7 +105,7 @@ async def main(ctx: JobContext) -> None:
 
     # Re-evaluate and reschedule after fetching scores.
     post_decision = await _scores_decision(sports)
-    await _schedule(post_decision, label="post-fetch", final=not pre_booked)
+    await schedule(post_decision, label="post-fetch", final=not pre_booked)
     logger.info(
         "fetch_scores_next_scheduled",
         next_time=post_decision.next_execution.isoformat()
@@ -122,53 +114,49 @@ async def main(ctx: JobContext) -> None:
     )
 
 
-async def _fetch_and_update_scores(sports: list[str]) -> None:
-    """Core score fetching and update logic."""
+@dataclass(frozen=True, slots=True)
+class ScoresUpdate:
+    """Events the Odds API listed with scores, and how many of them were stored as final."""
+
+    listed: int
+    updated: int
+
+
+async def update_scores(sport: str, *, days: int = SCORES_WINDOW.days) -> ScoresUpdate:
+    """Store the final score of every game of ``sport`` the Odds API lists as completed in the
+    last ``days`` days.
+
+    A game whose Odds API id names no stored event, or whose update fails, is logged and skipped.
+    """
+    logger.info("fetching_scores", sport=sport, days=days)
+    async with TheOddsAPIClient() as client:
+        response = await client.get_scores(sport=sport, days_from=days)
+
+    updated = 0
     async with async_session_maker() as session:
         writer = OddsWriter(session)
-
-        for sport_key in sports:
-            logger.info("fetching_scores", sport=sport_key)
-
-            async with TheOddsAPIClient() as client:
-                # Fetch scores from last 3 days
-                response = await client.get_scores(sport=sport_key, days_from=3)
-
-            updated_count = 0
-            for score_data in response.scores_data:
-                try:
-                    odds_api_id = score_data.get("id")
-                    completed = score_data.get("completed", False)
-
-                    if completed and odds_api_id:
-                        # Extract home and away scores using helper
-                        home_score, away_score = parse_scores_from_api_dict(score_data)
-
-                        if home_score is not None and away_score is not None:
-                            event = await find_event_by_odds_api_id(session, odds_api_id)
-                            if event is None:
-                                logger.warning("score_event_not_found", odds_api_id=odds_api_id)
-                                continue
-                            await writer.update_event_status(
-                                event_id=event.id,
-                                status=EventStatus.FINAL,
-                                home_score=home_score,
-                                away_score=away_score,
-                            )
-                            updated_count += 1
-
-                except Exception as e:
-                    logger.error(
-                        "score_update_failed",
-                        event_id=score_data.get("id"),
-                        error=str(e),
-                    )
+        for score_data in response.scores_data:
+            odds_api_id = score_data.get("id")
+            if not (score_data.get("completed", False) and odds_api_id):
+                continue
+            try:
+                home_score, away_score = parse_scores_from_api_dict(score_data)
+                if home_score is None or away_score is None:
                     continue
+                event = await find_event_by_odds_api_id(session, odds_api_id)
+                if event is None:
+                    logger.warning("score_event_not_found", odds_api_id=odds_api_id)
+                    continue
+                await writer.update_event_status(
+                    event_id=event.id,
+                    status=EventStatus.FINAL,
+                    home_score=home_score,
+                    away_score=away_score,
+                )
+                updated += 1
+            except Exception as e:
+                logger.error("score_update_failed", odds_api_id=odds_api_id, error=str(e))
+        await session.commit()
 
-            await session.commit()
-
-            logger.info(
-                "sport_scores_completed",
-                sport=sport_key,
-                updated=updated_count,
-            )
+    logger.info("sport_scores_completed", sport=sport, updated=updated)
+    return ScoresUpdate(listed=len(response.scores_data), updated=updated)

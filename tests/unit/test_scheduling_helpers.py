@@ -7,7 +7,13 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from odds_lambda.scheduling.helpers import apply_overnight_skip, get_next_kickoff, self_schedule
+from odds_lambda.scheduling.decision import ScheduleDecision
+from odds_lambda.scheduling.helpers import (
+    apply_overnight_skip,
+    book_next_run,
+    get_next_kickoff,
+    self_schedule,
+)
 
 
 class TestApplyOvernightSkip:
@@ -135,6 +141,80 @@ class TestSelfSchedule:
 
         call_kwargs = mock_backend.schedule_next_execution.call_args.kwargs
         assert call_kwargs["payload"] is None
+
+
+class TestBookNextRun:
+    @staticmethod
+    def _decision(next_execution: datetime | None) -> ScheduleDecision:
+        return ScheduleDecision(
+            should_execute=True, reason="kickoff soon", next_execution=next_execution, tier=None
+        )
+
+    @pytest.mark.asyncio
+    async def test_books_the_decision_with_its_label(self) -> None:
+        next_time = datetime(2026, 11, 1, 12, 0, tzinfo=UTC)
+        with patch(
+            "odds_lambda.scheduling.helpers.self_schedule", new_callable=AsyncMock
+        ) as schedule:
+            booked = await book_next_run(
+                self._decision(next_time),
+                job_name="fetch-odds-epl",
+                sport="soccer_epl",
+                dry_run=False,
+                label="pre-schedule",
+                final=False,
+            )
+
+        assert booked is True
+        schedule.assert_awaited_once_with(
+            job_name="fetch-odds-epl",
+            next_time=next_time,
+            dry_run=False,
+            sport="soccer_epl",
+            reason="pre-schedule: kickoff soon",
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_next_execution_books_nothing(self) -> None:
+        with patch(
+            "odds_lambda.scheduling.helpers.self_schedule", new_callable=AsyncMock
+        ) as schedule:
+            booked = await book_next_run(
+                self._decision(None),
+                job_name="fetch-odds-epl",
+                sport="soccer_epl",
+                dry_run=False,
+                label="pre-schedule",
+                final=False,
+            )
+
+        assert booked is False
+        schedule.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_failure_alerts_and_reports_no_booking(self) -> None:
+        with (
+            patch(
+                "odds_lambda.scheduling.helpers.self_schedule",
+                side_effect=RuntimeError("no backend"),
+            ),
+            patch(
+                "odds_lambda.scheduling.helpers.send_scheduling_failure", new_callable=AsyncMock
+            ) as failure,
+        ):
+            booked = await book_next_run(
+                self._decision(datetime(2026, 11, 1, 12, 0, tzinfo=UTC)),
+                job_name="fetch-odds-epl",
+                sport="soccer_epl",
+                dry_run=False,
+                label="post-fetch",
+                final=True,
+            )
+
+        assert booked is False
+        failure.assert_awaited_once()
+        assert failure.call_args.args[0] == "fetch-odds-epl"
+        assert failure.call_args.kwargs["final"] is True
 
 
 class TestSmokeTags:

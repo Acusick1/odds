@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import typer
-from odds_analytics.injury_features import date_to_nba_season
+from odds_analytics.injury_features import date_to_nba_season, nba_seasons_through
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
@@ -18,8 +18,6 @@ if TYPE_CHECKING:
 
 app = typer.Typer(help="PBPStats player season statistics")
 console = Console()
-
-ALL_SEASONS = ["2021-22", "2022-23", "2023-24", "2024-25"]
 
 
 @app.command("fetch")
@@ -43,7 +41,8 @@ def fetch(
     """
     console.print("\n[bold cyan]PBPStats Player Season Stats Fetch[/bold cyan]\n")
 
-    seasons = ALL_SEASONS if all_seasons else [season or date_to_nba_season(datetime.now(UTC))]
+    now = datetime.now(UTC)
+    seasons = nba_seasons_through(now) if all_seasons else [season or date_to_nba_season(now)]
     console.print(f"Seasons to fetch: {', '.join(seasons)}\n")
 
     from odds_lambda.pbpstats_fetcher import fetch_player_season_stats
@@ -90,7 +89,7 @@ def fetch(
 
 @app.command("backfill")
 def backfill() -> None:
-    """Backfill all seasons (2021-22 through 2024-25).
+    """Backfill all seasons (2021-22 through current).
 
     Equivalent to: odds pbpstats fetch --all
     """

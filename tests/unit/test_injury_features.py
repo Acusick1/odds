@@ -9,6 +9,7 @@ from odds_analytics.injury_features import (
     _compute_player_impact,
     date_to_nba_season,
     extract_injury_features,
+    nba_seasons_through,
 )
 from odds_core.injury_models import InjuryReport, InjuryStatus
 from odds_core.models import Event
@@ -188,6 +189,23 @@ class TestDateToNbaSeason:
     def test_december_game(self) -> None:
         dt = datetime(2024, 12, 25, 0, 0, tzinfo=UTC)
         assert date_to_nba_season(dt) == "2024-25"
+
+
+class TestNbaSeasonsThrough:
+    def test_runs_from_first_collected_season_to_current(self) -> None:
+        dt = datetime(2026, 11, 1, tzinfo=UTC)
+        assert nba_seasons_through(dt) == [
+            "2021-22",
+            "2022-23",
+            "2023-24",
+            "2024-25",
+            "2025-26",
+            "2026-27",
+        ]
+
+    def test_offseason_ends_at_last_season(self) -> None:
+        dt = datetime(2026, 9, 1, tzinfo=UTC)
+        assert nba_seasons_through(dt)[-1] == "2025-26"
 
 
 class TestExtractInjuryFeatures:

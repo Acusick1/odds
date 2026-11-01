@@ -47,7 +47,7 @@ Helpers in `odds_core.time`:
 
 `Z`-suffix ISO parsing is inlined in `odds_lambda.espn_fixture_fetcher` (team-schedule and month-scoreboard events, whose status text is stored as ESPN gives it), `odds_lambda.mlb_stats_fetcher` (MLB game start times, for probables, results and single-game lookups; a game with `startTimeTBD` carries a placeholder time), and the MCP EPL tools instead of calling `odds_core.time.parse_api_datetime`. Time-window correctness for historical analysis is a separate rule: [Decision time and look-ahead bias](../modelling/look-ahead-bias.md).
 
-`odds_cli.commands.quality` reads its `--start` and `--end` dates (`YYYY-MM-DD`) as midnight UTC, with `strptime` and an explicit `tzinfo=UTC` rather than these helpers. `odds_cli.commands.nba_stats` and `odds_cli.commands.pbpstats` default to the NBA season of the current UTC date, from `odds_analytics.injury_features.date_to_nba_season`.
+`odds_cli.commands.quality` reads its `--start` and `--end` dates (`YYYY-MM-DD`) as midnight UTC, with `strptime` and an explicit `tzinfo=UTC` rather than these helpers. `odds_cli.commands.nba_stats` and `odds_cli.commands.pbpstats` default to the NBA season of the current UTC date, from `odds_analytics.injury_features.date_to_nba_season`, and their `--all` runs through that season.
 
 ## Naive datetimes in current code
 
