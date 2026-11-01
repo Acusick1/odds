@@ -4,12 +4,13 @@ import asyncio
 from datetime import UTC, date, datetime, timedelta
 
 import typer
+from odds_core.time import EASTERN
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
 # nbainjuries switched from hourly to 15-minute report intervals on this date
-_NEW_ERA_CUTOFF_ET = datetime(2025, 12, 22, 9, 0)
+_NEW_ERA_CUTOFF = datetime(2025, 12, 22, 9, 0, tzinfo=EASTERN)
 
 app = typer.Typer(help="NBA injury report operations")
 console = Console()
@@ -151,7 +152,6 @@ async def _backfill_async(
     """Async implementation of backfill command."""
     from odds_core.database import async_session_maker
     from odds_core.models import Event
-    from odds_core.time import EASTERN
     from odds_lambda.injury_fetcher import latest_report_slot
     from sqlalchemy import and_, select
 
@@ -186,7 +186,7 @@ async def _backfill_async(
     for event in events:
         for hours in target_hours:
             target_utc = event.commence_time - timedelta(hours=hours)
-            if target_utc.astimezone(EASTERN).replace(tzinfo=None) < _NEW_ERA_CUTOFF_ET:
+            if target_utc < _NEW_ERA_CUTOFF:
                 rounded = target_utc.replace(minute=0, second=0, microsecond=0)
             else:
                 rounded = latest_report_slot(target_utc)

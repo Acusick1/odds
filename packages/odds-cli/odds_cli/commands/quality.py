@@ -30,9 +30,7 @@ def _parse_date(date_str: str, param_name: str) -> datetime:
         SystemExit: If date format is invalid
     """
     try:
-        # Parse to datetime and set to start of day in UTC
-        dt = datetime.strptime(date_str, "%Y-%m-%d")
-        return dt.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=UTC)
+        return datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=UTC)
     except ValueError:
         console.print(
             f"[red]Error: Invalid {param_name} date format '{date_str}'. Use YYYY-MM-DD[/red]"

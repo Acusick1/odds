@@ -8,7 +8,7 @@ import pytest
 
 # Import directly from script (it's on sys.path via the repo root)
 from odds_core.team import team_abbrev
-from odds_lambda.oddsportal_common import build_envelope
+from odds_lambda.oddsportal_common import build_envelope, fix_odds_timestamp, parse_odds_timestamp
 
 
 def _make_bookmaker(
@@ -211,3 +211,15 @@ class TestTeamAbbrev:
 
     def test_manchester_derby_unique(self) -> None:
         assert team_abbrev("Manchester United") != team_abbrev("Manchester City")
+
+
+class TestOddsTimestamp:
+    def test_parses_as_utc(self) -> None:
+        assert parse_odds_timestamp("2026-01-15T14:30:00") == datetime(
+            2026, 1, 15, 14, 30, tzinfo=UTC
+        )
+
+    def test_fix_moves_the_year_to_the_match_season(self) -> None:
+        odds_ts = datetime(2026, 12, 30, 18, 0, tzinfo=UTC)
+        match_dt = datetime(2025, 1, 2, 20, 0, tzinfo=UTC)
+        assert fix_odds_timestamp(odds_ts, match_dt) == datetime(2024, 12, 30, 18, 0, tzinfo=UTC)

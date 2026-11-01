@@ -513,6 +513,7 @@ class AWSEventBridgeBackend(SchedulerBackend):
                 day=int(day),
                 hour=int(hour),
                 minute=int(minute),
+                tzinfo=UTC,
             )
         except ValueError as e:
             logger.warning(

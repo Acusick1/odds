@@ -93,8 +93,8 @@ def parse_match_date(date_str: str) -> datetime:
 
 
 def parse_odds_timestamp(ts_str: str) -> datetime:
-    """Parse OddsPortal odds_history timestamp (naive, wrong year)."""
-    return datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%S")
+    """Parse OddsPortal odds_history timestamp as UTC (its year is wrong)."""
+    return datetime.strptime(ts_str, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=UTC)
 
 
 def fix_odds_timestamp(odds_ts: datetime, match_dt: datetime) -> datetime:
@@ -103,25 +103,22 @@ def fix_odds_timestamp(odds_ts: datetime, match_dt: datetime) -> datetime:
     OddsPortal records timestamps with the scrape year (e.g. 2026) instead
     of the actual game year. Month/day/time are correct.
 
-    Returns a naive datetime (caller adds tzinfo as needed).
     """
-    match_naive = match_dt.replace(tzinfo=None)
-
     try:
-        fixed = odds_ts.replace(year=match_naive.year)
+        fixed = odds_ts.replace(year=match_dt.year)
     except ValueError:
-        fixed = odds_ts.replace(year=match_naive.year, day=28)
+        fixed = odds_ts.replace(year=match_dt.year, day=28)
 
-    if (fixed - match_naive).days > 60:
+    if (fixed - match_dt).days > 60:
         try:
-            fixed = fixed.replace(year=match_naive.year - 1)
+            fixed = fixed.replace(year=match_dt.year - 1)
         except ValueError:
-            fixed = fixed.replace(year=match_naive.year - 1, day=28)
-    elif (match_naive - fixed).days > 60:
+            fixed = fixed.replace(year=match_dt.year - 1, day=28)
+    elif (match_dt - fixed).days > 60:
         try:
-            fixed = fixed.replace(year=match_naive.year + 1)
+            fixed = fixed.replace(year=match_dt.year + 1)
         except ValueError:
-            fixed = fixed.replace(year=match_naive.year + 1, day=28)
+            fixed = fixed.replace(year=match_dt.year + 1, day=28)
 
     return fixed
 
@@ -210,7 +207,7 @@ def build_envelope(
             {
                 "key": bk_key,
                 "title": bk_name,
-                "last_update": fixed_ts.replace(tzinfo=UTC).isoformat().replace("+00:00", "Z"),
+                "last_update": fixed_ts.isoformat().replace("+00:00", "Z"),
                 "markets": [{"key": db_market, "outcomes": outcomes}],
             }
         )
@@ -221,7 +218,7 @@ def build_envelope(
     return {
         "bookmakers": bookmakers,
         "source": "oddsportal",
-        "_snapshot_time": snapshot_time.replace(tzinfo=UTC).isoformat() if snapshot_time else None,
+        "_snapshot_time": snapshot_time.isoformat() if snapshot_time else None,
     }
 
 

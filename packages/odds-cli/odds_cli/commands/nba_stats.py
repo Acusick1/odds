@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import typer
+from odds_analytics.injury_features import date_to_nba_season
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
@@ -44,7 +46,7 @@ def fetch(
     """
     console.print("\n[bold cyan]NBA Game Log Fetch[/bold cyan]\n")
 
-    seasons = ALL_SEASONS if all_seasons else [season or _current_season()]
+    seasons = ALL_SEASONS if all_seasons else [season or date_to_nba_season(datetime.now(UTC))]
     console.print(f"Seasons to fetch: {', '.join(seasons)}\n")
 
     # Playwright sync API cannot run inside an asyncio event loop.
@@ -90,20 +92,6 @@ def fetch(
     if errors:
         console.print(f"[yellow]Errors: {errors} season(s) failed[/yellow]")
     console.print()
-
-
-def _current_season() -> str:
-    """Derive current NBA season string from today's date."""
-    from datetime import date
-
-    today = date.today()
-    # NBA season spans Oct-Jun: if before October, it's the previous year's season
-    if today.month >= 10:
-        start_year = today.year
-    else:
-        start_year = today.year - 1
-    end_year_short = (start_year + 1) % 100
-    return f"{start_year}-{end_year_short:02d}"
 
 
 async def _store_game_logs(

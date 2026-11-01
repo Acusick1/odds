@@ -1,8 +1,15 @@
 """Tests for core.time utilities."""
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
-from odds_core.time import EASTERN, ensure_utc, parse_api_datetime, to_eastern, utc_isoformat
+from odds_core.time import (
+    EASTERN,
+    ensure_utc,
+    parse_api_datetime,
+    parse_date,
+    to_eastern,
+    utc_isoformat,
+)
 
 
 class TestTimeUtils:
@@ -17,7 +24,7 @@ class TestTimeUtils:
 
     def test_ensure_utc_converts_naive(self):
         """Naive datetimes should be promoted to UTC-aware values."""
-        naive = datetime(2024, 1, 15, 19, 0, 0)
+        naive = datetime(2024, 1, 15, 19, 0, 0)  # noqa: DTZ001
         ensured = ensure_utc(naive)
         assert ensured.tzinfo == UTC
         assert ensured.hour == 19
@@ -46,7 +53,12 @@ class TestTimeUtils:
 
     def test_to_eastern_naive_treated_as_utc(self):
         """Naive datetimes should be treated as UTC then converted."""
-        naive = datetime(2025, 1, 4, 0, 0, 0)
+        naive = datetime(2025, 1, 4, 0, 0, 0)  # noqa: DTZ001
         eastern = to_eastern(naive)
         assert eastern.weekday() == 4  # Friday
         assert eastern.hour == 19
+
+
+class TestParseDate:
+    def test_returns_the_calendar_date(self) -> None:
+        assert parse_date("03/15/2025", "%m/%d/%Y") == date(2025, 3, 15)

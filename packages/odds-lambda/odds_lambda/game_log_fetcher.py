@@ -8,9 +8,10 @@ then makes API calls from the browser context.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date
 
 import structlog
+from odds_core.time import parse_date
 
 logger = structlog.get_logger(__name__)
 
@@ -88,7 +89,7 @@ def _parse_game_date(date_str: str) -> date:
     """Parse 'APR 13, 2025' or '2025-04-13' format game dates."""
     for fmt in ("%b %d, %Y", "%Y-%m-%d"):
         try:
-            return datetime.strptime(date_str, fmt).date()
+            return parse_date(date_str, fmt)
         except ValueError:
             continue
     msg = f"Cannot parse game date: {date_str!r}"

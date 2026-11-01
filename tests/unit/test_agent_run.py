@@ -208,7 +208,7 @@ class TestOvernightWindowPerSport:
             patch("odds_lambda.scheduling.decision.datetime") as mock_dt,
         ):
             mock_dt.now.return_value = fake_now
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)  # noqa: DTZ001
             mk.return_value = next_ko
             await main(JobContext(sport="baseball_mlb"))
 
@@ -246,7 +246,7 @@ class TestOvernightWindowPerSport:
             patch("odds_lambda.scheduling.decision.datetime") as mock_dt,
         ):
             mock_dt.now.return_value = fake_now
-            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)  # noqa: DTZ001
             mk.return_value = next_ko
             await main(JobContext(sport="soccer_epl"))
 
