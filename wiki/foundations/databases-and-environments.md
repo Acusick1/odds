@@ -36,7 +36,7 @@ All code gets sessions from one module-level function: `odds_core.database.async
 
 | Environment | Database | Notes |
 |---|---|---|
-| Test | in-process PostgreSQL (py-pglite) on TCP port 5434 | `tests/conftest.py` creates tables once per session, truncates all tables before each test, disables Discord alerts and holds the shared fixtures (Gamma EPL and NBA event builders and mocked session and API client factories among them). Used by `tests/unit` and `tests/integration` ([Test suite](test-suite.md)). |
+| Test | in-process PostgreSQL (py-pglite) on TCP port 5434 | `tests/conftest.py` creates tables once per session, truncates all tables before each test, disables Discord alerts and the dead-man's switch ping, and holds the shared fixtures (Gamma EPL and NBA event builders and mocked session and API client factories among them). Used by `tests/unit` and `tests/integration` ([Test suite](test-suite.md)). |
 | Local | `odds` in Docker Compose `postgres:15`, host port 5433 | `docker compose up -d postgres`; `postgres/postgres` (`docker-compose.yml`) |
 | Dev | remote managed Postgres, a Neon dev branch | CI/CD only, via `secrets.DATABASE_URL` |
 | Production | `odds` in the production host's Docker Compose `postgres:15`, host port 5433 | written by the production host's scheduler and by the agent as `odds_agent` ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)) |

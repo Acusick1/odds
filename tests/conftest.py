@@ -15,6 +15,7 @@ from sqlalchemy.orm import sessionmaker
 os.environ.setdefault("ODDS_API_KEY", "test_api_key")
 # Overwritten, not defaulted: a developer's shell or .env can carry the real webhook.
 os.environ["DISCORD_WEBHOOK_URL"] = ""
+os.environ["DEAD_MANS_SWITCH_URL"] = ""
 os.environ["ALERT_ENABLED"] = "false"
 
 

@@ -10,6 +10,7 @@ sources:
   - odds_lambda.collection_calendar.require_rows_for_fixtures
   - odds_lambda.collection_calendar.EmptyCollectionError
   - odds_lambda.jobs.check_health.main
+  - odds_core.alerts.ping_dead_mans_switch
 status: stable
 ---
 
@@ -39,7 +40,7 @@ A collection job that has run cleanly can still have collected nothing. `odds_la
 
 ## Blind spots
 
-- All three mechanisms run on the production host, and nothing else runs scheduled jobs. If the host or the scheduler stops, nothing runs to raise an alert; #489 tracks an external dead-man's switch ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)).
+- All three mechanisms run on the production host, and nothing else runs scheduled jobs ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)). If the host or the scheduler stops, nothing on it raises an alert; the external [dead-man's switch](health-monitor.md#dead-mans-switch) that `check-health` pings through `odds_core.alerts.ping_dead_mans_switch` alerts instead, about 2 h after the last completed run, and only when `DEAD_MANS_SWITCH_URL` is set.
 - Delivery depends on the environment that runs the job: on the dormant AWS stack, see the alert variables per function on [aws-infrastructure](aws-infrastructure.md).
 - `fetch_logs` records no failed API call, and no check reads it for outages: a fetch-odds failure reaches Discord only through the job's own critical and the stale-data check ([fetch logs](../collection/odds-ingestion-service.md#fetch-logs)).
 - Discord is the only channel and a failed post is still recorded, so a failed delivery suppresses retries for the window ([alerts](alerts.md#delivery)).
