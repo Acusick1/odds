@@ -623,12 +623,12 @@ class TestQualityMetricsGamesMissingScores:
 
     async def test_only_games_awaiting_a_result_are_missing_scores(
         self, test_session: AsyncSession
-    ):
+    ) -> None:
         """Unplayed, cancelled and unmatched games have no score to miss."""
         now = datetime.now(UTC)
         past = now - timedelta(days=2)
         future = now + timedelta(days=2)
-        statuses = {
+        statuses: dict[int, tuple[datetime, EventStatus]] = {
             1: (past, EventStatus.SCHEDULED),
             2: (past, EventStatus.LIVE),
             3: (past, EventStatus.POSTPONED),
