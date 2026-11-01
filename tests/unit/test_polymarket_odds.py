@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
+import aiohttp
 import pytest
 from odds_core.vocabulary import PriceOutcome, Source
 from odds_core.vocabulary import Side as PriceSide
@@ -307,6 +308,22 @@ class TestSportConfig:
         assert nba.match_slug.match("nba-dal-mil-2026-01-25")
         assert not nba.match_slug.match("epl-bou-che-2025-12-06")
         assert EPL.match_slug.match("epl-bou-che-2025-12-06")
+
+
+class TestRequestRetries:
+    async def test_exhausted_retries_reraise_the_client_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(PolymarketClient._make_request.retry, "sleep", AsyncMock())
+        client = PolymarketClient()
+        session = MagicMock()
+        session.get.side_effect = aiohttp.ClientConnectionError("down")
+        client.session = session
+
+        with pytest.raises(aiohttp.ClientConnectionError):
+            await client._make_request("https://gamma.example", "/events")
+
+        assert session.get.call_count == 3
 
 
 class TestPriceSeries:

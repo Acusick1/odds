@@ -4,7 +4,6 @@ title: odds-mcp server
 description: How the FastMCP server is launched and mounted, the 16-tool catalogue and owning pages, sport sub-servers, shared vocabulary, and the scrape and scheduling tools (refresh_scrape, get_scrape_status, get_scheduled_jobs, schedule_next_wakeup).
 sources:
   - odds_mcp.server.mcp
-  - odds_mcp.server._assert_unique_tool_names
   - odds_mcp.server._coerce_bookmaker_list
   - odds_mcp.server.MarketKey
   - odds_mcp.server.refresh_scrape
@@ -34,7 +33,7 @@ status: stable
 
 `packages/odds-mcp/pyproject.toml` declares fastmcp, httpx, apscheduler, structlog, sqlalchemy and pydantic besides the workspace packages, each because `odds_mcp` imports it directly.
 
-`.mcp.json` registers a stdio server named `odds` that runs `uv run fastmcp run odds_mcp.server`. Running the file directly (`python server.py`) first awaits `odds_mcp.server._assert_unique_tool_names`, then `mcp.run()`. The `fastmcp run` path never calls `odds_core.logging_setup.configure_logging` (nothing in `odds_mcp.server` does) and skips `odds_mcp.server._assert_unique_tool_names`, which is only invoked under `if __name__ == "__main__"` ([code conventions](../foundations/code-conventions.md)). Unprefixed mounts let a child tool silently shadow a parent tool with the same name; under `fastmcp run` the uniqueness assertion does not run, and `tests/unit/test_mcp_server.py` checks uniqueness.
+`.mcp.json` registers a stdio server named `odds` that runs `uv run fastmcp run odds_mcp.server`; running the file directly (`python server.py`) calls `mcp.run()`. Neither path calls `odds_core.logging_setup.configure_logging` (nothing in `odds_mcp.server` does). Unprefixed mounts let a child tool silently shadow a parent tool with the same name, and FastMCP lists both without an error; no startup check catches this, so `tests/unit/test_mcp_server.py` asserts that tool names are unique.
 
 ## Tool catalogue (16)
 

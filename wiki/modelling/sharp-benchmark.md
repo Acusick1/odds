@@ -24,7 +24,7 @@ The sharp benchmark is the price treated as closest to fair: Pinnacle, with Betf
 
 The [retail-EV target](clv-target.md#the-retail-ev-target) does not use this priority list for its close: ADR-0012 fixes the close and the baseline to Betfair Exchange, and its retail rows come from the UK roster `odds_core.bookmakers.UK_RETAIL_BOOKMAKERS` rather than from every non-sharp book ([target functions](clv-target-functions.md#retail-ev-rows)).
 
-The sharp reference anchors the `retail_sharp_diff` feature, the retail-sharp divergence, and the agent's retail screener ([MCP market tools](../agent/mcp-market-tools.md#retail-edges)). The agent sees the same quantity directly through `odds_mcp.server.find_retail_edges` (an event by integer id; [betting agent](../agent/betting-agent.md)).
+The sharp reference anchors the `retail_sharp_diff` feature, the retail-sharp divergence, and the agent's retail screener ([MCP market tools](../agent/mcp-market-tools.md#retail-edges)). The agent sees the same quantity, vig-inclusive on both sides, directly through `odds_mcp.server.find_retail_edges` (an event by integer id; [betting agent](../agent/betting-agent.md)).
 
 ## Priority semantics
 

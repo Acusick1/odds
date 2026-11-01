@@ -4,7 +4,6 @@ Thin wrappers over existing DB queries, jobs, and paper trading logic.
 All tools are stateless and use async_session_maker() for DB access.
 """
 
-import asyncio
 import json
 import math
 import statistics
@@ -871,7 +870,10 @@ async def find_retail_edges(
     ``retail_edges`` list ranked by divergence (most negative first). Signs
     follow the convention ``divergence = retail_implied_prob - sharp_implied_prob``
     — **negative means the retail book is pricing that outcome longer than
-    sharp**, and that is what ``retail_edges`` contains.
+    sharp**, and that is what ``retail_edges`` contains. Both probabilities are
+    raw ``1 / decimal price``, with each book's margin left in, so
+    ``divergence`` mixes the price difference with the two books' margins;
+    ``market_hold`` reports the retail book's margin separately.
 
     Sharp prices are resolved via a time-windowed lookback across recent
     snapshots so a missing sharp book in the latest scrape does not discard
@@ -1253,17 +1255,5 @@ mcp.mount(epl_mcp)
 mcp.mount(mlb_mcp)
 
 
-async def _assert_unique_tool_names() -> None:
-    # Unprefixed mounts mean a child server can silently shadow a parent tool
-    # of the same name — FastMCP returns both entries from ``list_tools`` with
-    # no warning. Fail loudly at startup instead.
-    tools = await mcp.list_tools()
-    names = [t.name for t in tools]
-    duplicates = sorted({n for n in names if names.count(n) > 1})
-    if duplicates:
-        raise RuntimeError(f"Duplicate MCP tool names across mounted servers: {duplicates}")
-
-
 if __name__ == "__main__":
-    asyncio.run(_assert_unique_tool_names())
     mcp.run()

@@ -118,8 +118,9 @@ _PER_SPORT_JOBS: frozenset[str] = frozenset(
 # would replace the job's pending run under the shared schedule id.
 _JOB_CRON_MAP: dict[str, str] = {
     "fetch-espn-fixtures": "0 6 * * *",
-    # MLB probable pitchers — once daily at 06:00 UTC. Backstop only:
-    # the MCP ``get_probable_pitchers`` tool writes through every call.
+    # MLB probable pitchers — once daily at 06:00 UTC. The only writer of
+    # ``mlb_probable_pitchers``: the MCP ``get_probable_pitchers`` tool reads
+    # live without persisting and falls back to this snapshot.
     "fetch-mlb-probables": "0 6 * * *",
 }
 

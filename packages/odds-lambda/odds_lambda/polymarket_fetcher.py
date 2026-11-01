@@ -61,6 +61,7 @@ class PolymarketClient:
         retry=retry_if_exception_type((aiohttp.ClientError, TimeoutError)),
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
+        reraise=True,
     )
     async def _make_request(
         self, base_url: str, endpoint: str, params: dict | None = None
@@ -77,7 +78,7 @@ class PolymarketClient:
             Tuple of (response data, response time in ms)
 
         Raises:
-            aiohttp.ClientError: On request failure after retries
+            aiohttp.ClientError | TimeoutError: On request failure after retries
         """
         if not self.session:
             self.session = aiohttp.ClientSession()

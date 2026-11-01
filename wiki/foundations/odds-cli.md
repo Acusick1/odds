@@ -1,7 +1,7 @@
 ---
 type: reference
 title: The odds CLI
-description: The Typer app, its command groups and owning pages, shared flags (--sport defaults per command, --db), and help-text facts.
+description: The Typer app, its command groups and owning pages, shared flags (--sport defaults per command, --db).
 sources:
   - odds_cli.main.app
   - odds_cli.main.callback
@@ -12,8 +12,6 @@ sources:
   - odds_cli.commands.polymarket
   - odds_cli.commands.quality
   - odds_cli.commands.discover
-  - odds_cli.commands.scheduler.run_once
-  - odds_cli.commands.scheduler.info
   - odds_cli.commands.validate
   - odds_cli.commands.train
   - odds_cli.commands.evaluate
@@ -70,13 +68,6 @@ Pass `--sport` explicitly. [About the system and its pivots](project-overview.md
 - **Database override.** `scheduler start` and `agent run` accept `--db NAME`, which calls `odds_cli.db_override.override_database_url`: it swaps the dbname in `DATABASE_URL`, and in `AGENT_DATABASE_URL` when set, writes `os.environ`, and clears the settings cache (`odds_cli.db_override.swap_dbname` rejects names containing `/` or `?`). In-process sessions and subprocesses, the agent included, then use the new database ([The `--db` flag](databases-and-environments.md#the---db-flag), [Database role](../agent/agent-run-job.md#database-role)).
 - **Async.** Commands wrap async code in `asyncio.run()`.
 - **Exit codes.** Most groups exit with `typer.Exit(code=...)`; `odds_cli.commands.validate` (10 sites, among them a date that is not ISO `YYYY-MM-DD`) and `odds_cli.commands.quality` (3, among them a date that is not `YYYY-MM-DD`) call `sys.exit(1)`. `odds_cli.commands.copy_from_prod` exits 1 on a date that the `strptime` format `%Y-%m-%d` does not parse and when `odds_lambda.copy_from_production.CopyStats.events_failed` is non-zero.
-
-## Help text
-
-The help text disagrees with the code in two places (#466):
-
-- `odds scheduler run-once` help names a sport-suffixed per-sport job and `update-status` of the 14 in `odds_lambda.scheduling.jobs._JOB_MODULE_MAP` (`odds_cli.commands.scheduler.run_once`).
-- `odds scheduler info` has no help text, because its docstring follows a statement (`odds_cli.commands.scheduler.info`). It lists each sport's Odds API bookmakers.
 
 ## Related
 
