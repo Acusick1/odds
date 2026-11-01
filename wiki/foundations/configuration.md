@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Configuration (Settings)
-description: The Settings sections and env names, what is read at import, and the variables read with os.getenv outside Settings.
+description: The Settings sections and env names, the JSON list fields, what is read at import, and the variables read with os.getenv outside Settings.
 sources:
   - odds_core.config.Settings
   - odds_core.config.get_settings
@@ -31,7 +31,7 @@ Model and feature settings (`target_type`, `sharp_bookmakers`) are not here: the
 | Attribute | Class | Env names | Owning page |
 |---|---|---|---|
 | `api` | `odds_core.config.APIConfig` | `ODDS_API_KEY`, `ODDS_API_KEYS`, `ODDS_API_KEY_INDEX_BY_SPORT`, `ODDS_API_BASE_URL` | [Odds API client](../collection/odds-api-client.md) |
-| `database` | `odds_core.config.DatabaseConfig` | `DATABASE_URL`, `DATABASE_POOL_SIZE` | [Databases and environments](databases-and-environments.md) |
+| `database` | `odds_core.config.DatabaseConfig` | `DATABASE_URL`, `DATABASE_POOL_SIZE`; `AGENT_DATABASE_URL` as `agent_url` ([Database role](../agent/agent-run-job.md#database-role)), `PROD_DATABASE_URL` and `LOCAL_DATABASE_URL` as `prod_url` and `local_url` ([copy production data](howto-copy-production-data.md)) | [Databases and environments](databases-and-environments.md) |
 | `data_collection` | `odds_core.config.DataCollectionConfig` | `SPORTS` (default: EPL, MLB and NBA), `BOOKMAKERS`, `MARKETS`, `REGIONS` (bare) | [Sport, market and bookmaker keys](../collection/sport-and-market-keys.md) |
 | `scheduler` | `odds_core.config.SchedulerConfig` | `SCHEDULER_BACKEND`, `_DRY_RUN`, `_LOOKAHEAD_DAYS`, `_BOOTSTRAP_JOBS` | [Local scheduler](../scheduling/local-scheduler.md) |
 | `aws` | `odds_core.config.AWSConfig` | `AWS_REGION`, `AWS_LAMBDA_ARN`, `AWS_RULE_PREFIX` | [Scheduler backends](../scheduling/scheduler-backends.md) |
@@ -44,7 +44,7 @@ Seven sections carry an env prefix and three are bare (`SPORTS`, `ALERT_ENABLED`
 
 ## List fields and the template
 
-List fields (`SPORTS`, `MARKETS`, `REGIONS`, `SCHEDULER_BOOTSTRAP_JOBS`) are parsed as JSON arrays, and `BOOKMAKERS` as a JSON object of sport key to bookmaker list that replaces the whole default map. `.env.example` writes the lists comma-separated, and it sets `SPORTS=basketball_nba`, so copying it unchanged makes `odds_core.config.get_settings()` raise `SettingsError` on `sports` (#444). The code default for `SCHEDULER_BOOTSTRAP_JOBS` is `odds_core.config.SchedulerConfig`'s: the production job set, which includes `run-candidates`, `fetch-injuries` and `fetch-mlb-results`, with `agent-run` commented out ([Where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs)).
+List fields (`SPORTS`, `MARKETS`, `REGIONS`, `SCHEDULER_BOOTSTRAP_JOBS`) are parsed as JSON arrays, and `BOOKMAKERS` as a JSON object of sport key to bookmaker list that replaces the whole default map; a comma-separated value makes `odds_core.config.get_settings()` raise `SettingsError`. `.env.example` leaves these fields commented out with JSON examples, so a copy of it uses the code defaults; the configuration unit tests load the template with and without its commented assignments enabled. The code default for `SCHEDULER_BOOTSTRAP_JOBS` is `odds_core.config.SchedulerConfig`'s: the production job set, which includes `run-candidates`, `fetch-injuries` and `fetch-mlb-results`, with `agent-run` commented out ([Where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs)).
 
 ## Read at import
 
@@ -53,9 +53,8 @@ List fields (`SPORTS`, `MARKETS`, `REGIONS`, `SCHEDULER_BOOTSTRAP_JOBS`) are par
 
 ## Variables read outside Settings
 
-These are read with `os.getenv`. pydantic-settings reads `.env` relative to the working directory but never exports it to the process environment, so they must be exported in the shell (#444):
+These are read with `os.getenv`. pydantic-settings reads `.env` relative to the working directory but never exports it to the process environment, so they must be exported in the shell:
 
-- `AGENT_DATABASE_URL` ([Database role](../agent/agent-run-job.md#database-role)), `PROD_DATABASE_URL` and `LOCAL_DATABASE_URL` ([copy production data](howto-copy-production-data.md)).
 - `LAMBDA_ARN` and `RULE_PREFIX` on the deployed Lambdas (`odds_lambda.scheduling.backends.aws`); a local `odds scheduler list-jobs --backend aws` uses the prefixed `AWS_LAMBDA_ARN` and `AWS_RULE_PREFIX` through `odds_core.config.AWSConfig`.
 - `AWS_LAMBDA_FUNCTION_NAME` (`odds_core.database`), which switches the engine to `NullPool` ([Engine creation](databases-and-environments.md#engine-creation)).
 

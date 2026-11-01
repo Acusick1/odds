@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, patch
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from odds_core.config import reset_settings_cache
 from odds_lambda.jobs.agent_run import (
     OVERNIGHT_WINDOWS,
     ScheduleResult,
@@ -405,75 +407,76 @@ class TestLogStreamMessage:
 class TestBuildAgentSubprocessEnv:
     """Tests for the AGENT_DATABASE_URL override behaviour."""
 
-    def test_unset_inherits_parent_dsn_and_warns(self) -> None:
-        """When AGENT_DATABASE_URL is unset, inherit parent DATABASE_URL + warn."""
-        parent_env = {
-            "DATABASE_URL": "postgresql://parent:pw@host/db",
-            "PATH": "/usr/bin",
-        }
+    PARENT_ENV = {"DATABASE_URL": "postgresql://parent:pw@host/db", "PATH": "/usr/bin"}
+
+    @staticmethod
+    def _settings(agent_url: str | None) -> MagicMock:
+        settings = MagicMock()
+        settings.database.agent_url = agent_url
+        return settings
+
+    @pytest.mark.parametrize("agent_url", [None, ""])
+    def test_unset_inherits_parent_dsn_and_warns(self, agent_url: str | None) -> None:
         with (
-            patch.dict("os.environ", parent_env, clear=True),
+            patch.dict("os.environ", self.PARENT_ENV, clear=True),
+            patch(
+                "odds_lambda.jobs.agent_run.get_settings", return_value=self._settings(agent_url)
+            ),
             patch("odds_lambda.jobs.agent_run.logger") as mock_logger,
         ):
             env = _build_agent_subprocess_env()
 
-        assert env["DATABASE_URL"] == "postgresql://parent:pw@host/db"
-        assert "PATH" in env  # other env inherited
+        assert env == self.PARENT_ENV
         mock_logger.warning.assert_called_once()
         assert mock_logger.warning.call_args[0][0] == "agent_database_url_not_set"
 
     def test_set_overrides_parent_dsn(self) -> None:
-        """When AGENT_DATABASE_URL is set, it replaces DATABASE_URL without warning."""
-        parent_env = {
-            "DATABASE_URL": "postgresql://parent:pw@host/db",
-            "AGENT_DATABASE_URL": "postgresql://odds_agent:pw@host/db",
-            "PATH": "/usr/bin",
-        }
+        agent_url = "postgresql://odds_agent:pw@host/db"
         with (
-            patch.dict("os.environ", parent_env, clear=True),
+            patch.dict("os.environ", self.PARENT_ENV, clear=True),
+            patch(
+                "odds_lambda.jobs.agent_run.get_settings", return_value=self._settings(agent_url)
+            ),
             patch("odds_lambda.jobs.agent_run.logger") as mock_logger,
         ):
             env = _build_agent_subprocess_env()
 
-        assert env["DATABASE_URL"] == "postgresql://odds_agent:pw@host/db"
-        assert env["AGENT_DATABASE_URL"] == "postgresql://odds_agent:pw@host/db"
+        assert env["DATABASE_URL"] == agent_url
+        assert env["PATH"] == "/usr/bin"
         mock_logger.warning.assert_not_called()
 
-    def test_empty_string_treated_as_unset(self) -> None:
-        """An empty AGENT_DATABASE_URL is treated the same as missing."""
-        parent_env = {
-            "DATABASE_URL": "postgresql://parent:pw@host/db",
-            "AGENT_DATABASE_URL": "",
-        }
-        with (
-            patch.dict("os.environ", parent_env, clear=True),
-            patch("odds_lambda.jobs.agent_run.logger") as mock_logger,
-        ):
-            env = _build_agent_subprocess_env()
+    def test_reads_agent_url_from_env_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A value set only in `.env` reaches the subprocess, not only an exported one."""
+        (tmp_path / ".env").write_text("AGENT_DATABASE_URL=postgresql://odds_agent:pw@host/db\n")
+        monkeypatch.chdir(tmp_path)
+        reset_settings_cache()
+        try:
+            with (
+                patch.dict("os.environ", self.PARENT_ENV, clear=True),
+                patch("odds_lambda.jobs.agent_run.logger"),
+            ):
+                env = _build_agent_subprocess_env()
+        finally:
+            reset_settings_cache()
 
-        assert env["DATABASE_URL"] == "postgresql://parent:pw@host/db"
-        mock_logger.warning.assert_called_once()
-        assert mock_logger.warning.call_args[0][0] == "agent_database_url_not_set"
+        assert env["DATABASE_URL"] == "postgresql://odds_agent:pw@host/db"
 
     def test_returned_env_is_a_copy(self) -> None:
         """Mutating the returned env dict must not affect ``os.environ``."""
         import os
 
-        parent_env = {
-            "DATABASE_URL": "postgresql://parent:pw@host/db",
-            "EXISTING_KEY": "original",
-        }
         with (
-            patch.dict("os.environ", parent_env, clear=True),
+            patch.dict("os.environ", {"EXISTING_KEY": "original"}, clear=True),
+            patch("odds_lambda.jobs.agent_run.get_settings", return_value=self._settings("x")),
             patch("odds_lambda.jobs.agent_run.logger"),
         ):
             env = _build_agent_subprocess_env()
             env["EXISTING_KEY"] = "mutated"
-            env["NEW_KEY"] = "added_in_copy"
 
-            # os.environ is untouched.
             assert os.environ["EXISTING_KEY"] == "original"
-            assert "NEW_KEY" not in os.environ
+            assert "DATABASE_URL" not in os.environ
 
 
 class TestRunClaudeAgentCancellation:
