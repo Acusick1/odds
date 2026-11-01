@@ -55,7 +55,7 @@ On AWS, the Lambda handler also sends its own critical on any exception ([lambda
 | `scheduling_warning:<job>` (a booking failed but another one survives; fetch-odds, fetch-scores, update-status, fetch-oddsportal-results, fetch-mlb-results) | `odds_core.alerts.send_scheduling_failure` | warning |
 | `heartbeat:<job>` | `odds_core.alerts.job_alert_context` on success | info, never sent to Discord |
 | `job_empty:<job>` | `odds_core.alerts.send_job_warning` in the Polymarket odds job | warning |
-| `stale_data:<source>:<sport>` (same rule as every monitor alert; `<source>` is the collection source's key; threshold from the job's cadence at the next kickoff's tier) | `odds_lambda.health_monitor.HealthMonitor.check_stale_sources` | critical |
+| `stale_data:<source>:<sport>:<market>` (same rule as every monitor alert; `<source>` is the collection source's key and `<market>` one of the markets it declares for the sport; threshold from the job's cadence at the next kickoff's tier) | `odds_lambda.health_monitor.HealthMonitor.check_stale_sources` | critical |
 | `missing_betfair_close` (EPL events without a live Betfair close on the three-way market or the line of a totals paper trade, checked once Betfair has stored an EPL snapshot, sent after kick-off as a coverage record; one alert per run listing events not already alerted in the lookback, so it ignores the reminder interval) | `odds_lambda.health_monitor.HealthMonitor.check_missing_betfair_closes` | critical |
 | `quota_low:key<N>`, `quota_critical:key<N>` | `odds_lambda.health_monitor.HealthMonitor.check_api_quota` (fraction of the key's plan) | warning, critical |
 | `data_quality_errors` | `odds_lambda.health_monitor.HealthMonitor.check_data_quality` | warning |

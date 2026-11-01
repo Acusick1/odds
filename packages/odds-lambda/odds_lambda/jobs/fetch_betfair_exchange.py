@@ -95,6 +95,10 @@ SOURCE = CollectionSource(
         "baseball_mlb": timedelta(hours=6),
         "basketball_nba": timedelta(hours=6),
     },
+    markets={
+        sport_key: tuple(spec.market for spec in config.markets)
+        for sport_key, config in SPORT_CONFIG.items()
+    },
     skips_overnight=True,
 )
 

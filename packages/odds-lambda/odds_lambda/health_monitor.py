@@ -33,7 +33,7 @@ from odds_core.models import (
     OddsSnapshot,
 )
 from odds_core.paper_trade_models import PaperTrade
-from odds_core.vocabulary import HealthCheck, Source
+from odds_core.vocabulary import HealthCheck, Market, Source
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -104,21 +104,23 @@ class DeadChain:
 
 @dataclass(frozen=True, slots=True)
 class StaleSource:
-    """A collection source that has written no rows for longer than its cadence allows."""
+    """A collection source that has written no rows of one market for longer than its cadence
+    allows."""
 
     source: str
     sport_key: str
+    market: Market
     last_snapshot: datetime
     active_hours: float
     threshold_hours: float
 
     @property
     def alert_type(self) -> str:
-        return f"stale_data:{self.source}:{self.sport_key}"
+        return f"stale_data:{self.source}:{self.sport_key}:{self.market}"
 
     def describe(self) -> str:
         return (
-            f"{self.source} has written no {self.sport_key} snapshot in "
+            f"{self.source} has written no {self.sport_key} {self.market} snapshot in "
             f"{self.active_hours:.1f} active hours (threshold: {self.threshold_hours:.1f}h, "
             f"last: {self.last_snapshot.isoformat()})"
         )
@@ -257,19 +259,20 @@ class HealthMonitor:
         return alerted is not None and alerted > now - 2 * reminder
 
     async def check_stale_sources(self, now: datetime | None = None) -> list[StaleSource]:
-        """Find sources that stopped writing while fixtures they should price are scheduled.
+        """Find sources that stopped writing a market while fixtures they should price are
+        scheduled.
 
-        Only sources whose job is bootstrapped are checked, per sport, and only when
-        a scheduled fixture lies inside the source's horizon for that sport and the
-        source has written before, so international breaks, off-seasons and jobs
-        that were never enabled raise nothing. A source whose job is already
-        failing is left to that job's own alert. The gap is the time since the
-        later of the last snapshot and the moment the next fixture entered the
-        horizon, counted without the sport's overnight window. It is compared with
-        the largest of ``stale_data_hours``, ``stale_cadence_multiplier`` polling
-        intervals at the tier of the next kickoff, and 1.5 intervals at the tier
-        the next kickoff had when the last snapshot was written (the interval the
-        job then chose to wait).
+        Only sources whose job is bootstrapped are checked, per sport and per market the
+        source declares for it, and only when a scheduled fixture lies inside the source's
+        horizon for that sport and the source has written that market before, so
+        international breaks, off-seasons and jobs that were never enabled raise nothing.
+        A source whose job is already failing is left to that job's own alert. The gap is
+        the time since the later of the market's last snapshot and the moment the next
+        fixture entered the horizon, counted without the sport's overnight window. It is
+        compared with the largest of ``stale_data_hours``, ``stale_cadence_multiplier``
+        polling intervals at the tier of the next kickoff, and 1.5 intervals at the tier
+        the next kickoff had when the last snapshot was written (the interval the job then
+        chose to wait).
         """
         moment = now or datetime.now(UTC)
         alerts = self.settings.alerts
@@ -289,37 +292,53 @@ class HealthMonitor:
                 )
                 if calendar.next_kickoff is None or not calendar.kickoffs_in_horizon:
                     continue
-                last = await latest_snapshot_time(self.session, sport_key, source.source)
-                if last is None:
-                    logger.info("stale_check_no_history", source=source.key, sport=sport_key)
-                    continue
                 hours_to_kickoff = (calendar.next_kickoff - moment).total_seconds() / 3600
-                hours_at_last = (calendar.next_kickoff - last).total_seconds() / 3600
-                threshold = max(
-                    alerts.stale_data_hours,
-                    alerts.stale_cadence_multiplier
-                    * source.cadence.interval_for(calculate_tier(hours_to_kickoff)),
-                    alerts.stale_last_interval_multiplier
-                    * source.cadence.interval_for(calculate_tier(hours_at_last)),
-                )
-                reference = max(last, calendar.next_kickoff - horizon)
-                active = active_hours_between(reference, moment, source.overnight_window(sport_key))
-                if active <= threshold:
-                    continue
-                if await self._job_is_failing(
-                    make_compound_job_name(source.job_name, sport_key), moment
-                ):
-                    logger.info("stale_source_job_failing", source=source.key, sport=sport_key)
-                    continue
-                stale.append(
-                    StaleSource(
-                        source=source.key,
-                        sport_key=sport_key,
-                        last_snapshot=last,
-                        active_hours=active,
-                        threshold_hours=threshold,
+                for market in source.markets[sport_key]:
+                    last = await latest_snapshot_time(
+                        self.session, sport_key, source.source, market
                     )
-                )
+                    if last is None:
+                        logger.info(
+                            "stale_check_no_history",
+                            source=source.key,
+                            sport=sport_key,
+                            market=market,
+                        )
+                        continue
+                    hours_at_last = (calendar.next_kickoff - last).total_seconds() / 3600
+                    threshold = max(
+                        alerts.stale_data_hours,
+                        alerts.stale_cadence_multiplier
+                        * source.cadence.interval_for(calculate_tier(hours_to_kickoff)),
+                        alerts.stale_last_interval_multiplier
+                        * source.cadence.interval_for(calculate_tier(hours_at_last)),
+                    )
+                    reference = max(last, calendar.next_kickoff - horizon)
+                    active = active_hours_between(
+                        reference, moment, source.overnight_window(sport_key)
+                    )
+                    if active <= threshold:
+                        continue
+                    if await self._job_is_failing(
+                        make_compound_job_name(source.job_name, sport_key), moment
+                    ):
+                        logger.info(
+                            "stale_source_job_failing",
+                            source=source.key,
+                            sport=sport_key,
+                            market=market,
+                        )
+                        continue
+                    stale.append(
+                        StaleSource(
+                            source=source.key,
+                            sport_key=sport_key,
+                            market=market,
+                            last_snapshot=last,
+                            active_hours=active,
+                            threshold_hours=threshold,
+                        )
+                    )
         return stale
 
     async def check_missing_betfair_closes(

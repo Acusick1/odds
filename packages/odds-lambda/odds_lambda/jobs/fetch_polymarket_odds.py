@@ -18,7 +18,7 @@ from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, FetchLog
 from odds_core.sports import SportKey
-from odds_core.vocabulary import Source, TimeBasis
+from odds_core.vocabulary import Market, Source, TimeBasis
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -73,6 +73,9 @@ SOURCE = CollectionSource(
     source=Source.POLYMARKET,
     cadence=CADENCE,
     fixture_horizons=dict.fromkeys(POLYMARKET_SPORTS, LISTING_CHECK_HORIZON),
+    markets={
+        sport_key: (Market(config.market_key),) for sport_key, config in POLYMARKET_SPORTS.items()
+    },
     skips_overnight=True,
 )
 

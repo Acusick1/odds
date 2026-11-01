@@ -16,7 +16,7 @@ from odds_core.models import (
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.test_helpers import make_tagged_snapshot, store_tagged
+from tests.test_helpers import make_tagged_snapshot, store_tagged, three_way_bookmaker
 
 
 def _h2h_book() -> dict:
@@ -106,7 +106,10 @@ async def _create_stale_oddsportal_source(session, *, hours_ago: float = 40) -> 
     await store_tagged(
         session,
         make_tagged_snapshot(
-            event.id, now - timedelta(hours=hours_ago), [_h2h_book()], "oddsportal_live"
+            event.id,
+            now - timedelta(hours=hours_ago),
+            [three_way_bookmaker("bet365", (2.0, 3.4, 3.6))],
+            "oddsportal_live",
         ),
     )
     await session.commit()
@@ -174,7 +177,10 @@ class TestHealthCheckIntegration:
 
         assert health_status.overall_healthy is False
         assert len(health_status.issues_detected) > 0
-        assert any("oddsportal has written no" in issue for issue in health_status.issues_detected)
+        assert any(
+            "oddsportal has written no soccer_epl 1x2" in issue
+            for issue in health_status.issues_detected
+        )
 
     @pytest.mark.asyncio
     async def test_health_check_detects_low_quota(self, test_session):
@@ -347,7 +353,7 @@ class TestHealthCheckIntegration:
         alert_records = list(result.scalars().all())
         assert len(alert_records) > 0
         assert any(
-            record.alert_type == "stale_data:oddsportal:soccer_epl" for record in alert_records
+            record.alert_type == "stale_data:oddsportal:soccer_epl:1x2" for record in alert_records
         )
 
     @pytest.mark.asyncio

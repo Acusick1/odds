@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from odds_core.config import AlertConfig, APIConfig, SchedulerConfig, Settings
+from odds_core.vocabulary import Market
 from odds_lambda.health_monitor import (
     HealthMetrics,
     HealthMonitor,
@@ -224,6 +225,7 @@ class TestHealthMonitor:
                         StaleSource(
                             source="oddsportal",
                             sport_key="soccer_epl",
+                            market=Market.ONE_X_TWO,
                             last_snapshot=datetime.now(UTC) - timedelta(hours=9),
                             active_hours=9.0,
                             threshold_hours=3.0,
@@ -249,7 +251,7 @@ class TestHealthMonitor:
             assert status.overall_healthy is False
             assert len(status.issues_detected) > 0
             # Should have attempted to send alerts
-            assert "oddsportal has written no soccer_epl snapshot" in status.issues_detected[0]
+            assert "oddsportal has written no soccer_epl 1x2 snapshot" in status.issues_detected[0]
 
     @pytest.mark.asyncio
     async def test_check_system_health_handles_errors_gracefully(self, mock_session, mock_settings):

@@ -29,7 +29,7 @@ from datetime import UTC, datetime, timedelta
 import structlog
 from odds_core.candidates import candidates_dir, load_candidates
 from odds_core.database import async_session_maker
-from odds_core.vocabulary import Source, TimeBasis
+from odds_core.vocabulary import Market, Source, TimeBasis
 
 from odds_lambda.candidate_rules import decision_leads
 from odds_lambda.collection_calendar import (
@@ -47,7 +47,7 @@ from odds_lambda.live_events import (
 )
 from odds_lambda.mlb_game_resolver import GameRow
 from odds_lambda.oddsportal_adapter import MatchOdds, convert_market
-from odds_lambda.oddsportal_client import OddsPortalClient, OddsPortalError
+from odds_lambda.oddsportal_client import FEED_MARKETS, OddsPortalClient, OddsPortalError
 from odds_lambda.scheduling.decision import (
     OVERNIGHT_WINDOWS,
     CadenceConfig,
@@ -76,19 +76,6 @@ CADENCE = CadenceConfig(
 # this long before a decision time has stored its snapshots by then. An NBA scrape with its
 # ladders took about 6 minutes (22 games), so an NBA candidate needs a longer lead.
 SCRAPE_LEAD = timedelta(minutes=5)
-
-SOURCE = CollectionSource(
-    key="oddsportal",
-    job_name="fetch-oddsportal",
-    source=Source.ODDSPORTAL,
-    cadence=CADENCE,
-    fixture_horizons={
-        "soccer_epl": timedelta(hours=48),
-        "baseball_mlb": timedelta(hours=48),
-        "basketball_nba": timedelta(hours=48),
-    },
-    skips_overnight=True,
-)
 
 
 @dataclass
@@ -137,6 +124,23 @@ _LEAGUE_SPEC_BY_SPORT: dict[str, LeagueSpec] = {spec.sport_key: spec for spec in
 
 # Index by league name for fast lookup from scrape commands / MCP tools
 LEAGUE_SPEC_BY_NAME: dict[str, LeagueSpec] = {spec.league: spec for spec in LEAGUE_SPECS}
+
+SOURCE = CollectionSource(
+    key="oddsportal",
+    job_name="fetch-oddsportal",
+    source=Source.ODDSPORTAL,
+    cadence=CADENCE,
+    fixture_horizons={
+        "soccer_epl": timedelta(hours=48),
+        "baseball_mlb": timedelta(hours=48),
+        "basketball_nba": timedelta(hours=48),
+    },
+    markets={
+        spec.sport_key: tuple(Market(FEED_MARKETS[key].pipeline_key) for key in spec.markets)
+        for spec in LEAGUE_SPECS
+    },
+    skips_overnight=True,
+)
 
 
 @dataclass
