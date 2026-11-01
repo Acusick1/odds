@@ -435,21 +435,3 @@ async def copy_from_prod(
     finally:
         await prod_engine.dispose()
         await local_engine.dispose()
-
-
-if __name__ == "__main__":
-    # Example usage
-    import sys
-
-    if len(sys.argv) < 3:
-        console.print("Usage: python copy_from_production.py START_DATE END_DATE [--dry-run]")
-        console.print("Example: python copy_from_production.py 2025-10-23 2025-11-07")
-        sys.exit(1)
-
-    import asyncio
-
-    start = sys.argv[1]
-    end = sys.argv[2]
-    dry_run = "--dry-run" in sys.argv
-
-    asyncio.run(copy_from_prod(start, end, dry_run=dry_run))
