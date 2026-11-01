@@ -36,7 +36,7 @@ Pre-commit (`.pre-commit-config.yaml`) runs on every commit; the `Lint` workflow
 
 The `claim-issue` hook (`.githooks/claim-issue.sh`) is a plain `post-checkout` git hook outside pre-commit, installed as in [Set up and run locally](howto-develop-locally.md#set-up).
 
-Ruff selects only `DTZ003` and `DTZ005` for timezone checks ([Timezones](timezones.md)).
+Ruff selects the whole `DTZ` family for timezone checks ([Timezones](timezones.md#lint-coverage)).
 
 ### Dependency checks
 

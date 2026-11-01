@@ -1,7 +1,7 @@
 """CLI commands for copying data from production database."""
 
 import asyncio
-from datetime import date
+from datetime import UTC, datetime
 
 import typer
 from odds_lambda.copy_from_production import copy_from_prod
@@ -34,8 +34,8 @@ def copy_from_production(
         odds copy from-prod 2025-08-01 2026-04-10 --overwrite
     """
     try:
-        date.fromisoformat(start)
-        date.fromisoformat(end)
+        datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=UTC)
+        datetime.strptime(end, "%Y-%m-%d").replace(tzinfo=UTC)
     except ValueError as e:
         console.print("[red]Error: Dates must be in YYYY-MM-DD format[/red]")
         raise typer.Exit(code=1) from e

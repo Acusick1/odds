@@ -68,7 +68,7 @@ Pass `--sport` explicitly. [About the system and its pivots](project-overview.md
 
 - **Database override.** `scheduler start` and `agent run` accept `--db NAME`, which calls `odds_cli.db_override.override_database_url`: it swaps the dbname in `DATABASE_URL`, and in `AGENT_DATABASE_URL` when set, writes `os.environ`, and clears the settings cache (`odds_cli.db_override.swap_dbname` rejects names containing `/` or `?`). In-process sessions and subprocesses, the agent included, then use the new database ([The `--db` flag](databases-and-environments.md#the---db-flag), [Database role](../agent/agent-run-job.md#database-role)).
 - **Async.** Commands wrap async code in `asyncio.run()`.
-- **Exit codes.** Most groups exit with `typer.Exit(code=...)`; `odds_cli.commands.validate` (10 sites, among them a date that is not ISO `YYYY-MM-DD`) and `odds_cli.commands.quality` (3, among them a date that is not `YYYY-MM-DD`) call `sys.exit(1)`. `odds_cli.commands.copy_from_prod` exits 1 on a date that is not ISO `YYYY-MM-DD` and when `odds_lambda.copy_from_production.CopyStats.events_failed` is non-zero.
+- **Exit codes.** Most groups exit with `typer.Exit(code=...)`; `odds_cli.commands.validate` (10 sites, among them a date that is not ISO `YYYY-MM-DD`) and `odds_cli.commands.quality` (3, among them a date that is not `YYYY-MM-DD`) call `sys.exit(1)`. `odds_cli.commands.copy_from_prod` exits 1 on a date not written exactly `YYYY-MM-DD` and when `odds_lambda.copy_from_production.CopyStats.events_failed` is non-zero.
 
 ## Help text
 
