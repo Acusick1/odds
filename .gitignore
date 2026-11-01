@@ -42,8 +42,11 @@ secrets/
 *.swo
 *~
 
-# Claude Code
-.claude/
+# Claude Code: only the agent-run skill is shared
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/agent/
 
 # Git worktrees
 worktrees/

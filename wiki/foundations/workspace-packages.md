@@ -51,7 +51,7 @@ The repo is a uv workspace of five packages under `packages/` ([AGENTS.md](../..
 | `.github/workflows/` | [CI/CD workflows](../operations/ci-cd-workflows.md) |
 | `wiki/` | The wiki |
 
-`.claude/`, `worktrees/` and `logs/` are gitignored.
+`worktrees/`, `logs/` and `.claude/` are gitignored, except the betting agent's skill `.claude/skills/agent/` ([agent runtime](../agent/agent-run-job.md#runtime)).
 
 ## Stack
 
