@@ -18,7 +18,7 @@ How settings are structured and which variables bypass them is in [Configuration
    - A section with an `env_prefix` reads `<PREFIX><FIELD>`; a bare section reads the upper-cased field name; `odds_core.config.PolymarketConfig.enabled` is `POLYMARKET_ENABLED` ([Sections](configuration.md#sections)).
 2. **Add it to `.env.example`**, which documents settings and is not their source of defaults. Remove a setting from it in the same change that removes the field.
    - Write list fields as JSON arrays and dict fields (such as `BOOKMAKERS` or `ODDS_API_KEY_INDEX_BY_SPORT`) as JSON objects; a comma-separated list makes `odds_core.config.get_settings` raise. A setting with a usable default goes in commented out, so a copy of the template keeps the code default ([List fields and the template](configuration.md#list-fields-and-the-template)).
-   - `tests/unit/test_config.py` loads the template with and without its commented assignments enabled; run it.
+   - The configuration unit tests load the template with and without its commented assignments enabled, so run them after editing it.
 3. **Set it on the production host** if it needs a non-default value: add it to the `.env` in the production host's repo checkout, which `odds-scheduler.service` reads, then redeploy ([Run the scheduler as a systemd service](../scheduling/howto-run-scheduler-service.md)).
 4. **Read it through Settings.**
    - A variable read with `os.getenv` bypasses `.env` ([Configuration](configuration.md#variables-read-outside-settings)). A variable without the section's prefix, such as `AGENT_DATABASE_URL` on `odds_core.config.DatabaseConfig`, takes its full name as the field's `validation_alias`.

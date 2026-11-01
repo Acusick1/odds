@@ -44,7 +44,7 @@ Seven sections carry an env prefix and three are bare (`SPORTS`, `ALERT_ENABLED`
 
 ## List fields and the template
 
-List fields (`SPORTS`, `MARKETS`, `REGIONS`, `SCHEDULER_BOOTSTRAP_JOBS`) are parsed as JSON arrays, and `BOOKMAKERS` as a JSON object of sport key to bookmaker list that replaces the whole default map; a comma-separated value makes `odds_core.config.get_settings()` raise `SettingsError`. `.env.example` leaves these fields commented out with JSON examples, so a copy of it uses the code defaults; `tests/unit/test_config.py` loads the template with and without its commented assignments enabled. The code default for `SCHEDULER_BOOTSTRAP_JOBS` is `odds_core.config.SchedulerConfig`'s: the production job set, which includes `run-candidates`, `fetch-injuries` and `fetch-mlb-results`, with `agent-run` commented out ([Where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs)).
+List fields (`SPORTS`, `MARKETS`, `REGIONS`, `SCHEDULER_BOOTSTRAP_JOBS`) are parsed as JSON arrays, and `BOOKMAKERS` as a JSON object of sport key to bookmaker list that replaces the whole default map; a comma-separated value makes `odds_core.config.get_settings()` raise `SettingsError`. `.env.example` leaves these fields commented out with JSON examples, so a copy of it uses the code defaults; the configuration unit tests load the template with and without its commented assignments enabled. The code default for `SCHEDULER_BOOTSTRAP_JOBS` is `odds_core.config.SchedulerConfig`'s: the production job set, which includes `run-candidates`, `fetch-injuries` and `fetch-mlb-results`, with `agent-run` commented out ([Where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs)).
 
 ## Read at import
 

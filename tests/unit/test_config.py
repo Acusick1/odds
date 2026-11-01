@@ -13,7 +13,7 @@ if "ODDS_API_KEY" not in os.environ:
 if "DATABASE_URL" not in os.environ:
     os.environ["DATABASE_URL"] = "postgresql://test:test@localhost/test"
 
-from odds_core.config import APIConfig, Settings
+from odds_core.config import APIConfig, DatabaseConfig, Settings
 
 
 class TestSettings:
@@ -365,7 +365,7 @@ class TestDatabaseURLsFromEnvFile:
 
     def test_auxiliary_urls_default_to_none(self) -> None:
         with patch.dict(os.environ, {"DATABASE_URL": "postgresql://main/db"}, clear=True):
-            database = Settings(_env_file=None).database
+            database = DatabaseConfig(_env_file=None)
 
         assert database.agent_url is None
         assert database.prod_url is None
