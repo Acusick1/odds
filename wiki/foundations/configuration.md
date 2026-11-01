@@ -48,7 +48,6 @@ List fields (`SPORTS`, `MARKETS`, `REGIONS`, `SCHEDULER_BOOTSTRAP_JOBS`) are par
 
 ## Read at import
 
-- `odds_core.database` builds the engine from settings on import of the module, with `NullPool` keyed on `AWS_LAMBDA_FUNCTION_NAME` (#445). `odds_cli.db_override.override_database_url` (the CLI `--db` flag) therefore does not reach it: see [Engine creation](databases-and-environments.md#engine-creation).
 - `odds_core.alerts.alert_manager` snapshots `ALERT_ENABLED` and the webhook at import (#457).
 
 ## Variables read outside Settings
@@ -56,7 +55,7 @@ List fields (`SPORTS`, `MARKETS`, `REGIONS`, `SCHEDULER_BOOTSTRAP_JOBS`) are par
 These are read with `os.getenv`. pydantic-settings reads `.env` relative to the working directory but never exports it to the process environment, so they must be exported in the shell:
 
 - `LAMBDA_ARN` and `RULE_PREFIX` on the deployed Lambdas (`odds_lambda.scheduling.backends.aws`); a local `odds scheduler list-jobs --backend aws` uses the prefixed `AWS_LAMBDA_ARN` and `AWS_RULE_PREFIX` through `odds_core.config.AWSConfig`.
-- `AWS_LAMBDA_FUNCTION_NAME` (`odds_core.database`), which switches the engine to `NullPool` ([Engine creation](databases-and-environments.md#engine-creation)).
+- `AWS_LAMBDA_FUNCTION_NAME` (`odds_core.database`), which switches an engine built while it is set to `NullPool` ([Engine creation](databases-and-environments.md#engine-creation)).
 
 ## Related
 

@@ -13,7 +13,7 @@ from odds_core.api_models import (
     parse_scores_from_api_dict,
 )
 from odds_core.config import Settings, get_settings
-from odds_core.database import async_session_maker, engine
+from odds_core.database import async_session_maker, get_engine
 from odds_core.models import (
     DataQualityLog,
     Event,
@@ -35,7 +35,7 @@ __all__ = [
     "PaperTrade",
     "TradeResult",
     # Database
-    "engine",
+    "get_engine",
     "async_session_maker",
     # Config
     "Settings",

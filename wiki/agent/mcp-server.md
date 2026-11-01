@@ -28,7 +28,7 @@ status: stable
 
 # odds-mcp server
 
-`odds_mcp.server` defines `mcp = FastMCP("odds-mcp", ...)`, the tool interface the [betting agent](betting-agent.md) uses. Tools are thin wrappers around `odds_lambda.storage.readers.OddsReader` event queries, price reads through `odds_core.quotes.quotes` ([market tools](mcp-market-tools.md)), job code and the paper-trading service (the agent's bets carry a bankroll; flat-stake candidate trades come from the [run-candidates job](../evaluation/run-candidates-job.md)); they return JSON-safe dicts, open their own sessions with `odds_core.database.async_session_maker()` and report many failures as `{"error": ...}` dicts. All times are UTC. The `@mcp.tool()` definitions are the source of truth for the toolset (`odds_mcp.server.mcp`).
+`odds_mcp.server` defines `mcp = FastMCP("odds-mcp", ...)`, the tool interface the [betting agent](betting-agent.md) uses. Tools are thin wrappers around `odds_lambda.storage.readers.OddsReader` event queries, price reads through `odds_core.quotes.quotes` ([market tools](mcp-market-tools.md)), job code and the paper-trading service (the agent's bets carry a bankroll; flat-stake candidate trades come from the [run-candidates job](../evaluation/run-candidates-job.md)); they return JSON-safe dicts, open their own sessions with `odds_core.database.async_session_maker()` (on the database the current settings name) and report many failures as `{"error": ...}` dicts. All times are UTC. The `@mcp.tool()` definitions are the source of truth for the toolset (`odds_mcp.server.mcp`).
 
 ## Launch
 

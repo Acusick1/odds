@@ -39,7 +39,6 @@ def pytest_configure(config):
     test_session_maker = async_sessionmaker(test_engine, expire_on_commit=False)
 
     # Replace module-level objects
-    odds_core.database.engine = test_engine
     odds_core.database.async_session_maker = test_session_maker
 
 
