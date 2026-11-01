@@ -51,7 +51,7 @@ League-wide injury report snapshots parsed from the official PDFs by `nbainjurie
 
 - `odds_lambda.injury_fetcher.fetch_injury_report(target_time_utc)` is synchronous. It converts to naive ET (`odds_lambda.injury_fetcher._to_naive_et`, deliberate because the `nbainjuries` API requires it; [timezones](../foundations/timezones.md)), checks `check_reportvalid`, parses via `odds_lambda.injury_fetcher._parse_records`, and drops "NOT YET SUBMITTED" rows and unknown statuses. `nbainjuries` is imported lazily because it starts a JVM (tabula via jpype).
 - `odds_lambda.storage.injury_writer.InjuryWriter.upsert_injury_reports` matches each `(team, game_date)` to an `events` row (see [Event matching](#event-matching)) and returns an `odds_lambda.storage.injury_writer.UpsertResult`: the rows written and the canonical `(team, game_date)` pairs that matched no event.
-- `odds injuries fetch|backfill|status` (`odds_cli.commands.injuries`). Backfill is event-driven: for NBA events in the season window it subtracts each `--hours-before` offset (default `8,2`), rounds down to the report slot (hourly before 2025-12-22 09:00 ET, quarter-hourly after, `_NEW_ERA_CUTOFF_ET`), dedupes, and sleeps `--delay-ms` (default 500).
+- `odds injuries fetch|backfill|status` (`odds_cli.commands.injuries`). Backfill is event-driven: for NBA events in the season window it subtracts each `--hours-before` offset (default `8,2`), rounds down to the report slot (hourly before 2025-12-22 09:00 ET, quarter-hourly after, `odds_cli.commands.injuries._NEW_ERA_CUTOFF`, an Eastern-aware datetime compared directly with the UTC target time), dedupes, and sleeps `--delay-ms` (default 500).
 
 ## The fetch-injuries job
 
@@ -80,7 +80,7 @@ Both writers link rows to `events` with the same ET window rule: events whose `c
 ## Scope and known gaps
 
 - NBA-only: `odds backfill scores` (a game-log backfill that spends no Odds API units) and the stats lookup use `Event.sport_key == "basketball_nba"` in the CLI, and `odds_lambda.polymarket_matching.CANONICAL_TO_ABBREV` in `odds_analytics.feature_groups.collect_event_data`, which loads the NBA-only data beside the market's quotes and each source's raw-target close (the `injuries` and `rest` groups are NBA-only but valid names for any sport's delta targets). `odds backfill scores` hardcodes `sport_key="basketball_nba"` with no `--sport` option ([odds-api-backfill](odds-api-backfill.md)).
-- `odds_cli.commands.nba_stats.ALL_SEASONS` ends at 2025-26 and `odds_cli.commands.pbpstats.ALL_SEASONS` at 2024-25, and `odds pbpstats backfill` is `fetch --all` over that shorter list. 2025-26 player stats need `--season` (#463). Both `--all` help strings say "2021-22 through current", which is false for PBPStats (#466).
+- `odds_cli.commands.nba_stats.ALL_SEASONS` ends at 2025-26 and `odds_cli.commands.pbpstats.ALL_SEASONS` at 2024-25, and `odds pbpstats backfill` is `fetch --all` over that shorter list. 2025-26 player stats need `--season` (#463). Without `--season` or `--all`, `odds_cli.commands.nba_stats.fetch` and `odds_cli.commands.pbpstats.fetch` use `odds_analytics.injury_features.date_to_nba_season` of the current UTC time. Both `--all` help strings say "2021-22 through current", which is false for PBPStats (#466).
 - An alias gap leaves `event_id` NULL, as a team with no event does; the job warns about those pairs ([event-matching](../storage/event-matching.md)).
 
 ## Related

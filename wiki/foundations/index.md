@@ -16,7 +16,7 @@ Repo-wide material that every other area assumes: what the system is and which s
 - [Odds arithmetic helpers](odds-math.md) — The odds_core.odds_math functions, their edge cases, their consumers, and the two envelope price encodings.
 - [Test suite](test-suite.md) — The test directories, pytest configuration, fixtures (py-pglite), markers, and which suites CI and the deploy workflows run.
 - [The odds CLI](odds-cli.md) — The Typer app, its command groups and owning pages, shared flags (--sport defaults per command, --db), and help-text facts.
-- [Timezones and time helpers](timezones.md) — The UTC rule, the odds_core.time helpers, which ruff DTZ rules apply, and the naive-datetime sites in current code.
+- [Timezones and time helpers](timezones.md) — The UTC rule, the odds_core.time helpers, the ruff DTZ lint gate, and the naive-datetime sites in current code.
 - [Workspace packages and repository layout](workspace-packages.md) — The five uv workspace packages, their modules and declared dependencies, the repo layout and stack.
 
 ### Explanation

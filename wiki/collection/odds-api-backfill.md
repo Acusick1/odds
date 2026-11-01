@@ -64,7 +64,7 @@ Any exception from a call stops the run after it is reported, since every call i
 - `basketball_nba` is still literal in `odds backfill scores` (`odds_cli.commands.backfill`, which reads game logs and spends no units) and in the tier validator's game-discovery check (`odds validate daily --check-discovery`, which spends NBA's key). `odds discover games` requires `--sport`. `odds backfill plan` and `odds backfill execute` take the manifest's sport, and `odds backfill plan --cost` and `odds backfill execute` print that sport's key balance (the key's newest recorded quota, reported as unknown when no recent fetch recorded one).
 - Historical responses for soccer carry the three-way market as `1x2`, relabelled, and bookmaker keys renamed to pipeline keys, by `odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_odds` ([sport-and-market-keys](sport-and-market-keys.md#market-key-dialects)).
 - Final scores are not available from the Odds API for games older than 3 days (`odds_cli.commands.discover` docstring), hence `backfill scores`.
-- `odds validate` reports which fetch tiers a game's snapshots cover (`odds_lambda.storage.tier_validator.TierCoverageValidator`; [fetch-tier](../storage/fetch-tier.md#the-tier-a-snapshot-covers)).
+- `odds validate` reports which fetch tiers a game's snapshots cover (`odds_lambda.storage.tier_validator.TierCoverageValidator`, whose discovery check counts days against the UTC date; [fetch-tier](../storage/fetch-tier.md#the-tier-a-snapshot-covers)).
 
 ## Related
 

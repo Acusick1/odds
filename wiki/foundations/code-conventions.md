@@ -28,7 +28,7 @@ Pre-commit (`.pre-commit-config.yaml`) runs on every commit; the `Lint` workflow
 
 | Hook | Scope | Enforces |
 |---|---|---|
-| ruff `--fix`, ruff-format | all Python | Rules `E W F I B C4 UP DTZ003 DTZ005`, line length 100, target py312, `E501` ignored (root `pyproject.toml`). `UP` enforces `str | None` and `list[T]` |
+| ruff `--fix`, ruff-format | all Python | Rules `E W F I B C4 UP DTZ`, line length 100, target py312, `E501` ignored (root `pyproject.toml`). `UP` enforces `str | None` and `list[T]` |
 | vale | [README.md](../../README.md), [AGENTS.md](../../AGENTS.md), `wiki/` and the Markdown under docs (hook `files` in `.pre-commit-config.yaml`; rules in `.vale.ini`) | `Temporal.Narration` (error on change narration) and `Temporal.TimeRelative` (warning on moment-in-time words) in `.vale/styles/Temporal/` |
 | wiki-lint | whole repo, every commit (`always_run`; `--no-write --fail-stale`) | Frontmatter, links, machine-specific terms outside fenced blocks and link targets, citations, unqualified symbols, index blocks, coverage and staleness of cited symbols, re-export imports and files, counting only page edits that survive a squash onto `origin/main` (`scripts/wiki_lint.py`; rules in [SCHEMA](../SCHEMA.md)) |
 | candidate-versions | `candidates/*.yaml`, every commit (`always_run`) | No candidate file deleted or renamed, and no version decrease or change beyond the status and description without a higher version once the candidate's start date has arrived; see [version check](../evaluation/candidate-registry.md#version-check) (`scripts/check_candidate_versions.py`) |
