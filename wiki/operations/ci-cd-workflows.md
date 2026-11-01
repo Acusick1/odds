@@ -20,7 +20,7 @@ status: stable
 
 # CI/CD workflows
 
-Workflows live in `.github/workflows/`. Secrets come from the `development` and `production` GitHub environments. No workflow deploys to production, which is a single host deployed by [deploy.sh](../scheduling/howto-run-scheduler-service.md#redeploy) ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)). The `production` environment names the dormant AWS stack and its Neon database (secret values are not verifiable from the repo; check Settings, Environments). CI unit and integration tests run on py-pglite with `-m "not live_api"` ([test-suite](../foundations/test-suite.md), [howto-develop-locally](../foundations/howto-develop-locally.md)).
+Workflows live in `.github/workflows/`. Secrets come from the `development` and `production` GitHub environments. No workflow deploys to production, which is a single host deployed by [deploy.sh](../scheduling/howto-run-scheduler-service.md#redeploy) ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)). The `production` environment names the dormant AWS stack and its Neon database (secret values are not verifiable from the repo; check Settings, Environments). `test.yml` and `live-api.yml` install uv with `astral-sh/setup-uv` and set up no Python themselves, so `uv sync` picks an interpreter that satisfies `requires-python` in `pyproject.toml`. CI unit and integration tests run on py-pglite with `-m "not live_api"` ([test-suite](../foundations/test-suite.md), [howto-develop-locally](../foundations/howto-develop-locally.md)).
 
 | Workflow | Trigger | What it does |
 |---|---|---|
@@ -52,7 +52,6 @@ Workflows live in `.github/workflows/`. Secrets come from the `development` and 
 
 ## Known gaps
 
-- `test.yml` and `live-api.yml` set up Python 3.11 (`python-version` in `.github/workflows/test.yml` and `.github/workflows/live-api.yml`), while every package requires `>=3.12` (`pyproject.toml`); `deploy-*` use 3.12 (`.github/workflows/deploy-dev.yml`, `.github/workflows/deploy-prod.yml`; #460).
 - The dev deploy exercises only `check-health` and Betfair; `fetch-odds` is not invoked there.
 - The workflows trigger on main (not `master`), and the scheduler log group is `/aws/lambda/odds-scheduler`.
 
