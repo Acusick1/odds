@@ -32,6 +32,7 @@ from odds_lambda.jobs import (
     fetch_oddsportal,
     fetch_oddsportal_results,
 )
+from odds_lambda.scheduling import helpers as scheduling_helpers
 from odds_lambda.scheduling.decision import ScheduleDecision
 from odds_lambda.scheduling.jobs import JobContext
 
@@ -1098,7 +1099,9 @@ def _schedule_stubs(
         should_execute=True, reason="test", next_execution=NOW + timedelta(hours=1), tier=None
     )
     monkeypatch.setattr(module, decider, AsyncMock(return_value=decision))
-    monkeypatch.setattr(module, "self_schedule", AsyncMock())
+    monkeypatch.setattr(scheduling_helpers, "self_schedule", AsyncMock())
+    if hasattr(module, "self_schedule"):
+        monkeypatch.setattr(module, "self_schedule", AsyncMock())
 
 
 @pytest.mark.usefixtures("guard_session")
