@@ -5,6 +5,7 @@ description: The test directories, pytest configuration, fixtures (py-pglite), m
 sources:
   - pyproject.toml
   - tests/conftest.py
+  - tests/unit/conftest.py
   - tests/migration/conftest.py
   - tests/integration/conftest.py
   - tests/test_helpers.py
@@ -38,7 +39,7 @@ tests/fixtures/     sample Odds API JSON
 
 ## Unit and integration databases
 
-`tests/unit` and `tests/integration` use an in-process PostgreSQL (py-pglite) on TCP port 5434. `tests/conftest.py` forces TCP; the session fixture creates all SQLModel tables once; `pglite_async_session` truncates every table (`RESTART IDENTITY CASCADE`) before each test and restarts the events identity at 1,000,001, so a test can give an event a small literal id, and yields an `AsyncSession` with `expire_on_commit=False`. Aliases `test_engine` and `test_session` exist for older tests, and `gamma_event` and `gamma_nba_event` build a Gamma EPL and NBA match event for Polymarket tests. Run one pytest process at a time, since the port is fixed ([AGENTS.md](../../AGENTS.md#tests)). Fixtures for Odds API payloads live under `tests/fixtures/`.
+`tests/unit` and `tests/integration` use an in-process PostgreSQL (py-pglite) on TCP port 5434. `tests/conftest.py` forces TCP; the session fixture creates all SQLModel tables once; `pglite_async_session` truncates every table (`RESTART IDENTITY CASCADE`) before each test and restarts the events identity at 1,000,001, so a test can give an event a small literal id, and yields an `AsyncSession` with `expire_on_commit=False`. Aliases `test_engine` and `test_session` exist for older tests, and `gamma_event` and `gamma_nba_event` build a Gamma EPL and NBA match event for Polymarket tests. Run one pytest process at a time, since the port is fixed ([AGENTS.md](../../AGENTS.md#tests)). Fixtures for Odds API payloads live under `tests/fixtures/`. The legacy snapshot conversion tests use `tests/unit/conftest.py`’s separate pglite engine on a free TCP port, with a transaction-scoped legacy schema and the migration operations bound directly to that connection. They never use `DATABASE_URL` as their connection target.
 
 ## Migration tests
 

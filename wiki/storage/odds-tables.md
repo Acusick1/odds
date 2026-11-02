@@ -10,6 +10,7 @@ sources:
   - odds_lambda.polymarket_odds.build_envelope
   - scripts/ingest_football_data_uk.py
   - migrations/versions/a6f3c1e9d2b4_shape_orphan_odds_rows.py
+  - migrations/versions/c7d9e1f3a5b6_convert_legacy_snapshots.py
   - migrations/versions/b8e2d5f7a1c3_drop_old_odds_representations.py
 mentions:
   - odds_lambda.price_rows.expand_envelope
@@ -33,6 +34,8 @@ status: stable
 | `time_basis` | what `snapshot_time` means (`odds_core.vocabulary.TimeBasis`): `observed` (the fetch time), `source_stamped` (the source's own stamp), `upper_bound` (taken at or before it) or `close` (the closing price) |
 | `in_play`, `market_status`, `total_matched`, `market_start_time` | the exchange market's state (Betfair only, `odds_core.vocabulary.MarketStatus` a closed set) |
 | `payload_id` | FK `snapshot_payloads.id`, the archived envelope ([snapshot_payloads](price-tables.md#snapshot_payloads)) |
+
+`migrations/versions/c7d9e1f3a5b6_convert_legacy_snapshots.py` converts source-null legacy Odds API and Betfair API envelopes before the old representations are dropped. It archives each original envelope unchanged with its original creation time, preserves the snapshot and creation times, keeps the original id for the first market, and creates sibling markets sharing the payload. Old `odds` rows move to their market’s snapshot. Untagged Odds API envelopes use `upper_bound` when created more than one hour after their snapshot time, otherwise `observed`; Betfair uses `observed`. Unsupported or malformed envelopes, parser issues, partial shaped state, key collisions and candidate decisions referencing a split snapshot stop conversion before writes. Downgrade preserves the converted data. Databases already past the drop migration skip this inserted ancestor.
 
 `source`, `market`, `time_basis` and `market_status` are CHECKed closed sets ([closed sets](price-tables.md#closed-sets)). `source` and `time_basis` are nullable in the schema, but every writer sets them, and `migrations/versions/b8e2d5f7a1c3_drop_old_odds_representations.py` refuses to run while a stored snapshot lacks either, or while its snapshot holds fewer matching price rows than an `odds` row's price needs (team outcomes counted as home and away together).
 
