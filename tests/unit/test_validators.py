@@ -1,6 +1,7 @@
 """Unit tests for data validators."""
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from odds_core.bookmakers import ZERO_MARGIN_BOOKMAKERS
 from odds_lambda.storage.validators import OddsValidator
@@ -14,18 +15,18 @@ class TestOddsValidator:
         assert OddsValidator.validate_odds_value(1.91, "fanduel", "h2h", "Lakers") == []
         assert OddsValidator.validate_odds_value(2.5, "draftkings", "h2h", "Celtics") == []
 
-    def test_validate_odds_value_accepts_long_shots(self):
+    def test_validate_odds_value_accepts_long_shots(self) -> None:
         for price in (101.5, 930.0, 1000.0):
             assert OddsValidator.validate_odds_value(price, "betfair_exchange", "h2h", "Hull") == []
 
-    def test_validate_odds_value_rejects_price_at_or_below_one(self):
+    def test_validate_odds_value_rejects_price_at_or_below_one(self) -> None:
         for price in (1.0, 0.5, 0.0, -2.0, float("nan"), float("inf")):
             warnings = OddsValidator.validate_odds_value(price, "fanduel", "h2h", "Lakers")
             assert len(warnings) == 1
             assert "not above 1.0" in warnings[0]
 
-    def test_exchange_lay_long_shots_leave_snapshot_valid(self):
-        data = {
+    def test_exchange_lay_long_shots_leave_snapshot_valid(self) -> None:
+        data: dict[str, Any] = {
             "id": "e1",
             "bookmakers": [
                 {
@@ -47,8 +48,8 @@ class TestOddsValidator:
         assert is_valid
         assert warnings == []
 
-    def test_price_at_one_invalidates_snapshot(self):
-        data = {
+    def test_price_at_one_invalidates_snapshot(self) -> None:
+        data: dict[str, Any] = {
             "id": "e1",
             "bookmakers": [
                 {
