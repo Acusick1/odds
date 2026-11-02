@@ -15,7 +15,7 @@ import re
 import signal
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import structlog
@@ -28,6 +28,9 @@ logger = structlog.get_logger()
 
 JOB_NAME = "backup-database"
 LABEL = "nightly"
+
+# How long a cancelled command gets to exit on SIGTERM before it is killed.
+STOP_GRACE = timedelta(seconds=10)
 
 _NIGHTLY_NAME = re.compile(rf"^odds-{LABEL}-(\d{{8}}T\d{{4}}Z)\.dump$")
 
@@ -96,7 +99,12 @@ async def _run(*args: str, env: dict[str, str] | None = None) -> str:
         # including the script's pg_dump pipeline.
         with contextlib.suppress(ProcessLookupError):
             os.killpg(process.pid, signal.SIGTERM)
-        await process.wait()
+        try:
+            await asyncio.wait_for(process.wait(), STOP_GRACE.total_seconds())
+        except TimeoutError:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGKILL)
+            await process.wait()
         raise
     if process.returncode != 0:
         raise RuntimeError(

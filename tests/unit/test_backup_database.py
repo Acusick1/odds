@@ -201,13 +201,20 @@ class TestBackupJob:
         alerts.failure.assert_awaited_once()
         alerts.record.assert_not_called()
 
+    @pytest.mark.parametrize("trap", ["", "trap '' TERM\n"], ids=["terminated", "killed"])
     async def test_timeout_stops_the_dump_and_its_children(
-        self, host: SimpleNamespace, alerts: SimpleNamespace, tmp_path: Path
+        self,
+        host: SimpleNamespace,
+        alerts: SimpleNamespace,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        trap: str,
     ) -> None:
+        monkeypatch.setattr(backup_database, "STOP_GRACE", timedelta(seconds=0.5))
         pid_file = tmp_path / "child.pid"
         _executable(
             host.settings.project_root / "scripts" / "backup-prod-db.sh",
-            f"#!/usr/bin/env bash\nsleep 60 &\necho $! >{pid_file}\nwait\n",
+            f"#!/usr/bin/env bash\n{trap}sleep 60 &\necho $! >{pid_file}\nwait\n",
         )
 
         with pytest.raises(TimeoutError):
