@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
-from odds_core.betfair_close import close_quotes, event_close
+from odds_core.close import close_quotes, event_close
 from odds_core.models import (
     DataQualityLog,
     Event,

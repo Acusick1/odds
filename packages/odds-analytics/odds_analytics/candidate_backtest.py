@@ -14,8 +14,8 @@ from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
 
-from odds_core.betfair_close import close_quotes
 from odds_core.candidates import MechanicalCandidate
+from odds_core.close import close_grace, close_quotes
 from odds_core.models import Event, EventStatus
 from odds_core.odds_math import calculate_profit_from_decimal, selection_won
 from odds_lambda.candidate_rules import (
@@ -169,8 +169,8 @@ async def _decide(
                 counts.with_bet += bool(intents)
                 decided.append((event, t, intents))
 
-        has_close = {e.id: e for e, _, intents in decided if intents}
-        closes = await close_quotes(session, list(has_close.values()), market)
+        betting = {e.id: e for e, _, intents in decided if intents}
+        closes = await close_quotes(session, list(betting.values()), market)
         for event, t, intents in decided:
             assert event.home_score is not None and event.away_score is not None  # noqa: S101
             for intent in intents:
@@ -200,6 +200,7 @@ async def _decide(
                             closes.get(event.id, []),
                         ),
                         placed_at=t,
+                        close_grace=close_grace(event.sport_key, market),
                     )
                 )
     return bets

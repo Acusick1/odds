@@ -125,7 +125,7 @@ def raw_closes(
 
     A decision snapshot is compared with its own source's close, so the target never mixes
     one source's books with another's. This is a multi-book snapshot for the line-movement
-    target, not the Betfair Exchange close ``odds_core.betfair_close`` defines.
+    target, not the Betfair Exchange close ``odds_core.close`` defines.
     """
     closes: dict[Source, SnapshotQuotes] = {}
     for snapshot, tier in zip(snapshots, tiers_of(snapshots, kickoff), strict=True):

@@ -6,7 +6,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from odds_analytics.candidate_report import (
-    CLOSE_GRACE,
     ScoredBet,
     Verdict,
     candidate_report,
@@ -18,8 +17,8 @@ from odds_analytics.candidate_report import (
     summarize_candidates,
 )
 from odds_cli.main import app
-from odds_core.betfair_close import close_quotes, event_close
 from odds_core.candidates import AgentCandidate, CandidateStatus
+from odds_core.close import close_quotes, event_close
 from odds_core.models import Event, EventStatus
 from odds_core.paper_trade_models import PaperTrade, TradeResult
 from odds_core.quotes import quotes
@@ -40,6 +39,7 @@ from tests.test_helpers import (
 N_BOOT = 400
 NOW = datetime(2026, 6, 1, tzinfo=UTC)
 LONG_AGO = NOW - timedelta(days=30)
+FDUK_GRACE = timedelta(days=7)
 
 
 def one(_when: datetime) -> int:
@@ -56,6 +56,7 @@ def trade(
     name: str = "cand",
     version: int = 1,
     commence_time: datetime = LONG_AGO,
+    close_grace: timedelta = FDUK_GRACE,
 ) -> ScoredBet:
     """A trade at price 3.0 whose EV is ``ev`` (p_close = (1 + ev) / 3), None for no close."""
     return ScoredBet(
@@ -68,6 +69,7 @@ def trade(
         price_decimal=3.0,
         p_close=None if ev is None else (1 + ev) / 3,
         placed_at=LONG_AGO + timedelta(minutes=index),
+        close_grace=close_grace,
     )
 
 
@@ -99,7 +101,16 @@ def registry_entry(name: str = "cand", version: int = 1) -> AgentCandidate:
 class TestEv:
     def test_ev_is_close_probability_times_price_minus_one(self) -> None:
         t = ScoredBet(
-            "c", 1, 1, LONG_AGO, 2.0, 0.0, price_decimal=2.5, p_close=0.5, placed_at=LONG_AGO
+            "c",
+            1,
+            1,
+            LONG_AGO,
+            2.0,
+            0.0,
+            price_decimal=2.5,
+            p_close=0.5,
+            placed_at=LONG_AGO,
+            close_grace=FDUK_GRACE,
         )
         assert t.ev == pytest.approx(0.25)
 
@@ -212,9 +223,16 @@ class TestPrefix:
         assert (waiting.bets_with_close, waiting.bets_without_close) == (60, 0)
         assert waiting.pending_bets == 61
 
-        later = summary_of(sequence, now=kickoff + CLOSE_GRACE)
+        later = summary_of(sequence, now=kickoff + FDUK_GRACE)
         assert (later.bets_with_close, later.bets_without_close) == (120, 1)
         assert later.pending_bets == 0
+
+    def test_a_recent_no_close_is_final_where_no_fallback_arrives_late(self) -> None:
+        kickoff = NOW - timedelta(days=3)
+        no_wait = trade(60, None, commence_time=kickoff, close_grace=timedelta(0))
+        summary = summary_of(trades(60) + [no_wait] + trades(60, start=61))
+        assert (summary.bets_with_close, summary.bets_without_close) == (120, 1)
+        assert summary.pending_bets == 0
 
     def test_trades_placed_earlier_count_first(self) -> None:
         """A later-placed bet that settles first never takes an earlier bet's place."""

@@ -54,7 +54,7 @@ The boundaries in the table are `odds_lambda.fetch_tier.FetchTier.max_hours` and
 - **OddsPortal history closing.** A market's latest OddsPortal `source_stamped` time is its history closing price, so it is CLOSING however near or after kick-off the stamp (the latest change among the books) lies. A market with a single stamp before kick-off may hold only an opening whose closing was never scraped, so that stamp keeps its own tier; an opening is never stamped after kick-off.
 - **A source's `close` is its only closing.** When a source has a `close` snapshot for a market, none of the source's other snapshots of that market is CLOSING; one that would be covers PREGAME. An FDUK opening stamped under 3 h before kick-off therefore stays in the pregame pool the [tier sampler](../modelling/feature-pipeline.md) draws decision rows from.
 
-Every tier in the system comes from `odds_lambda.tier_utils.snapshot_tier` or `odds_lambda.tier_utils.snapshot_tiers`: the coverage check (`odds_lambda.storage.tier_validator.covered_tiers`), the coverage metrics (`odds_analytics.quality_metrics.QualityMetrics`), the training sampler and `raw` close (`odds_analytics.feature_groups.TierSampler`, `odds_analytics.feature_groups.raw_closes`).
+Every tier in the system comes from `odds_lambda.tier_utils.snapshot_tier` or `odds_lambda.tier_utils.snapshot_tiers`: the coverage check (`odds_lambda.storage.tier_validator.covered_tiers`), the coverage metrics (`odds_analytics.quality_metrics.QualityMetrics`), the training sampler and the `raw` close, which is not the retail-EV close of `odds_core.close` (`odds_analytics.feature_groups.TierSampler`, `odds_analytics.feature_groups.raw_closes`).
 
 ## Where tiers are read
 

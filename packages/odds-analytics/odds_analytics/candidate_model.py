@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from odds_core.as_of import by_snapshot
-from odds_core.betfair_close import close_quotes, event_close
+from odds_core.close import close_quotes, event_close
 from odds_core.market_prices import Outcome, market_outcomes
 from odds_core.models import Event
 from odds_core.quotes import Quote
