@@ -68,7 +68,7 @@ Python 3.12+ (`pyproject.toml`), a uv workspace linted by one root ruff configur
 | CLI | Typer, Rich | `packages/odds-cli/pyproject.toml` |
 | MCP server | FastMCP | `packages/odds-mcp/pyproject.toml` |
 | Modelling | XGBoost | `packages/odds-analytics/pyproject.toml` |
-| Tests | pytest, pytest-asyncio, py-pglite | `pyproject.toml` |
+| Tests | pytest, pytest-asyncio, pytest-env, py-pglite ([Test suite](test-suite.md)) | `pyproject.toml` |
 
 ## odds-core
 

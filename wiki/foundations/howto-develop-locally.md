@@ -43,15 +43,15 @@ Every `odds` command builds settings on import, so a missing `ODDS_API_KEY` or `
 
 ## Run the tests
 
-> [!WARNING]
-> `uv run pytest` with no path also runs `tests/migration`, whose write tests hit whatever `DATABASE_URL` points at (#429). Pass `tests/unit tests/integration`.
-
 ```bash
-uv run pytest tests/unit tests/integration
+uv run pytest
 uv run pytest tests/unit/test_paper_trading.py -v
 ```
 
-Run unit and integration tests together; leave `tests/migration` to the deploy workflows ([AGENTS.md](../../AGENTS.md#tests)). What the suites run against, the shared fixtures in `tests/conftest.py` (among them the `pglite_async_session` database session, which hands each test empty tables, and the Gamma event builders), the markers and the layout are in [Test suite](test-suite.md). A webhook or dead-man's switch URL exported in your shell or `.env` is safe: tests never post to or ping it.
+A bare `uv run pytest` runs `tests/unit` and `tests/integration` without the `live_api` tests, which is what CI runs. Two suites run only when asked for ([AGENTS.md](../../AGENTS.md#tests)):
+
+- `uv run pytest -m live_api -v` calls third-party HTTP APIs.
+- `uv run pytest tests/migration -v` connects to whatever `DATABASE_URL` points at and includes write tests, so run it only against the local database ([Create and apply a database migration](howto-database-migration.md)); otherwise leave it to the deploy workflows. What the suites run against, the shared fixtures in `tests/conftest.py` (among them the `pglite_async_session` database session, which hands each test empty tables, and the Gamma event builders), the markers and the layout are in [Test suite](test-suite.md). A webhook or dead-man's switch URL exported in your shell or `.env` is safe: tests never post to or ping it.
 
 ## Related
 

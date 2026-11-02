@@ -29,17 +29,11 @@ jobs:
             (cd "$pkg" && uv run --project ../.. --with deptry deptry .)
           done
 
-      - name: Run unit tests
+      - name: Run unit and integration tests
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
-        run: uv run pytest tests/unit -v
-
-      - name: Run integration tests
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
-        run: uv run pytest tests/integration -v -m "not live_api"
+        run: uv run pytest -v
 
       - name: Upload logs on failure
         if: failure()
