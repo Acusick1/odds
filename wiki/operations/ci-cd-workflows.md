@@ -19,11 +19,11 @@ status: stable
 
 # CI/CD workflows
 
-Workflows live in `.github/workflows/`. Secrets come from the `development` and `production` GitHub environments. No workflow deploys to production, which is a single host deployed by [deploy.sh](../scheduling/howto-run-scheduler-service.md#redeploy) ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)). The `production` environment names the dormant AWS stack and its Neon database (secret values are not verifiable from the repo; check Settings, Environments). `test.yml` and `live-api.yml` install uv with `astral-sh/setup-uv` and set up no Python themselves, so `uv sync` picks an interpreter that satisfies `requires-python` in `pyproject.toml`. CI unit and integration tests run on py-pglite with `-m "not live_api"` ([test-suite](../foundations/test-suite.md), [howto-develop-locally](../foundations/howto-develop-locally.md)).
+Workflows live in `.github/workflows/`. Secrets come from the `development` and `production` GitHub environments. No workflow deploys to production, which is a single host deployed by [deploy.sh](../scheduling/howto-run-scheduler-service.md#redeploy) ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)). The `production` environment names the dormant AWS stack and its Neon database (secret values are not verifiable from the repo; check Settings, Environments). `test.yml` and `live-api.yml` install uv with `astral-sh/setup-uv` and set up no Python themselves, so `uv sync` picks an interpreter that satisfies `requires-python` in `pyproject.toml`. CI runs the default `uv run pytest` on py-pglite ([test-suite](../foundations/test-suite.md), [howto-develop-locally](../foundations/howto-develop-locally.md)).
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `test.yml` | push to any branch but main; `workflow_call` | `deptry` per package, `uv run pytest tests/unit`, then `tests/integration -m "not live_api"` |
+| `test.yml` | push to any branch but main; `workflow_call` | `deptry` per package, then `uv run pytest` (`tests/unit` and `tests/integration` without `live_api`) |
 | `lint.yml` | push to non-main branches | `uvx pre-commit run --all-files` (ruff with all `DTZ` datetime rules, per the root `pyproject.toml`; Vale, lychee, wiki-lint, candidate-versions, which compares against the merge-base with `origin/main`) ([code-conventions](../foundations/code-conventions.md)) |
 | `ci-cd.yml` | push to main touching `packages/**/*.py`, `tests/**`, `migrations/**`, `deployment/aws/**`, workflows or lockfiles | calls `test.yml`, then `deploy-dev.yml` |
 | `deploy-dev.yml` | called by `ci-cd.yml` or manual | ephemeral dev stack |

@@ -87,14 +87,15 @@ indent-style = "space"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
+testpaths = ["tests/unit", "tests/integration"]
+addopts = "-m 'not live_api'"
 pythonpath = ["scripts"]
 python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
 markers = [
     "integration: hits live external APIs — may be skipped in offline CI",
-    "live_api: hits live third-party HTTP APIs — run only in the scheduled live-api workflow",
+    "live_api: hits live third-party HTTP APIs — deselected by default (addopts); select with `-m live_api`",
 ]
 env = [
     "ODDS_API_KEY=",
