@@ -28,14 +28,22 @@ done
 
 image="$(docker compose config --images postgres)"
 container="odds-restore-check-$$"
-trap 'docker rm -f "$container" >/dev/null 2>&1 || true' EXIT
+trap 'docker rm -f -v "$container" >/dev/null 2>&1 || true' EXIT
 
 docker run -d --name "$container" -e POSTGRES_PASSWORD=scratch -e POSTGRES_DB=odds "$image" >/dev/null
 # The entrypoint runs a temporary server while it initialises, so wait for the final one.
-until docker logs "$container" 2>&1 | grep -q 'PostgreSQL init process complete'; do sleep 1; done
-until docker exec "$container" pg_isready -U postgres -d odds >/dev/null 2>&1; do sleep 1; done
+deadline=$((SECONDS + 120))
+until docker logs "$container" 2>&1 | grep -q 'PostgreSQL init process complete' &&
+    docker exec "$container" pg_isready -U postgres -d odds >/dev/null 2>&1; do
+    if [[ "$(docker inspect -f '{{.State.Running}}' "$container")" != true || $SECONDS -ge $deadline ]]; then
+        echo "restore-check.sh: scratch Postgres did not start" >&2
+        docker logs --tail 20 "$container" >&2
+        exit 1
+    fi
+    sleep 1
+done
 
-docker exec -i "$container" pg_restore -U postgres -d odds --no-owner --exit-on-error <"$dump"
+docker exec -i "$container" pg_restore -U postgres -d odds --no-owner --no-acl --exit-on-error <"$dump"
 
 restored="$(docker exec "$container" psql -U postgres -d odds -AtF' ' -c "$query")"
 production="$(docker compose exec -T postgres psql -U postgres -d odds -AtF' ' -c "$query")"

@@ -13,6 +13,7 @@ Repo-wide material that every other area assumes: what the system is and which s
 - [Code conventions and lint gates](code-conventions.md) — The pre-commit hooks and lint workflow, review-only conventions (type hints, async DB, model types, job entry points), and logging setup.
 - [Configuration (Settings)](configuration.md) — The Settings sections and env names, the JSON list fields, what is read at import, and the variables read with os.getenv outside Settings.
 - [Databases and environments](databases-and-environments.md) — The session factory and engine (NullPool in Lambda, pool sizes), the test, local, dev and production databases and the Neon archive, which variable points where, and the --db override.
+- [Nightly database backup job](database-backup-job.md) — What the backup-database job does each night, its settings, which dumps its retention keeps and prunes, and how a failed or missing backup is reported.
 - [Odds arithmetic helpers](odds-math.md) — The odds_core.odds_math functions, their edge cases, their consumers, and the two envelope price encodings.
 - [Test suite](test-suite.md) — The test directories, pytest configuration, fixtures (py-pglite), markers, and which suites CI and the deploy workflows run.
 - [The odds CLI](odds-cli.md) — The Typer app, its command groups and owning pages, shared flags (--sport defaults per command, --db).
@@ -29,7 +30,7 @@ Repo-wide material that every other area assumes: what the system is and which s
 ### How-to guides
 
 - [Add a setting](howto-add-setting.md) — Steps to add a configuration setting so it loads from .env and reaches the production host.
-- [Back up and restore the production database](howto-back-up-production-database.md) — How to dump the production database before a migration or any other write to it, where the dumps go, and how to restore one.
+- [Back up and restore the production database](howto-back-up-production-database.md) — How to set up the nightly off-host copy, dump the production database before a write, check that a dump restores, and restore one from the host or the off-host copy.
 - [Copy production data locally](howto-copy-production-data.md) — Steps to copy one sport and date range from production into the local database, with the command's options and copy behaviour.
 - [Create and apply a database migration](howto-database-migration.md) — How to change a model, autogenerate and review an Alembic migration, and promote it local, then CI dev, then production without breaking the running release.
 - [Set up and run locally](howto-develop-locally.md) — Install, write a working .env, start Postgres, migrate, make a first fetch, enable the pre-commit hooks and issue claiming, and run the offline tests.

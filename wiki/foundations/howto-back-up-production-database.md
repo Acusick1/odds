@@ -38,7 +38,7 @@ Once, on the production host. Until these steps are done the nightly job does no
 
 ## Check a dump restores
 
-`./scripts/restore-check.sh <file>.dump` restores the dump into a throwaway Postgres container of the compose `postgres` image and prints its row counts of `events`, `odds_snapshots`, `prices`, `candidate_decisions` and `paper_trades` beside production's. It publishes no port, removes the container on exit and only reads production. Production keeps collecting after a dump is taken, so its counts exceed the dump's by the rows written since; a nightly dump checked the next morning differs by those rows only.
+`./scripts/restore-check.sh <file>.dump` restores the dump into a throwaway Postgres container of the compose `postgres` image without owners or grants (the scratch server has no `odds_agent` role) and prints its row counts of `events`, `odds_snapshots`, `prices`, `candidate_decisions` and `paper_trades` beside production's. It publishes no port, removes the container on exit and only reads production. Production keeps collecting after a dump is taken, so its counts exceed the dump's by the rows written since; a nightly dump checked the next morning differs by those rows only.
 
 ## Restore from the off-host copy
 

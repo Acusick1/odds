@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import stat
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -91,7 +92,7 @@ class TestSelectKept:
         assert len(kept) == 14 + len(weekly)
         assert len(weeks) == 8
         # 2026-11-01 is a Sunday, so the newest dump of each earlier week is a Sunday too.
-        assert all(datetime.strptime(n[13:21], "%Y%m%d").weekday() == 6 for n in weekly)
+        assert all(d.taken_at.weekday() == 6 for d in dumps[14:] if d.name in weekly)
 
     def test_counts_only_days_that_have_a_dump(self) -> None:
         dumps = [_nightly(START - timedelta(days=30 + n)) for n in range(20)]
@@ -199,6 +200,27 @@ class TestBackupJob:
 
         alerts.failure.assert_awaited_once()
         alerts.record.assert_not_called()
+
+    async def test_timeout_stops_the_dump_and_its_children(
+        self, host: SimpleNamespace, alerts: SimpleNamespace, tmp_path: Path
+    ) -> None:
+        pid_file = tmp_path / "child.pid"
+        _executable(
+            host.settings.project_root / "scripts" / "backup-prod-db.sh",
+            f"#!/usr/bin/env bash\nsleep 60 &\necho $! >{pid_file}\nwait\n",
+        )
+
+        with pytest.raises(TimeoutError):
+            async with asyncio.timeout(1):
+                await backup_database.main(JobContext())
+
+        stat_file = Path("/proc") / pid_file.read_text().strip() / "stat"
+        for _ in range(50):
+            if not stat_file.exists() or stat_file.read_text().split()[2] == "Z":
+                break
+            await asyncio.sleep(0.1)
+        else:
+            pytest.fail("the dump's child process outlived the timeout")
 
     async def test_does_nothing_until_a_remote_is_configured(
         self, host: SimpleNamespace, alerts: SimpleNamespace

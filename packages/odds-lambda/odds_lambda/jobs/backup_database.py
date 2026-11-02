@@ -9,8 +9,10 @@ locally. Only ``odds-nightly-*`` dumps are pruned, so hand-labelled dumps such a
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import re
+import signal
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -85,8 +87,17 @@ async def _run(*args: str, env: dict[str, str] | None = None) -> str:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         env=env,
+        start_new_session=True,
     )
-    stdout, stderr = await process.communicate()
+    try:
+        stdout, stderr = await process.communicate()
+    except asyncio.CancelledError:
+        # The scheduler's run timeout cancels the job; stop the dump or upload with it,
+        # including the script's pg_dump pipeline.
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGTERM)
+        await process.wait()
+        raise
     if process.returncode != 0:
         raise RuntimeError(
             f"{Path(args[0]).name} {args[1]} exited {process.returncode}: "
