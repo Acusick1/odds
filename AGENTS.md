@@ -28,7 +28,7 @@ A PR that replaces code deletes what it replaces, with its tests and wiki pages;
 
 ## Tests
 
-- `uv run pytest` runs the offline suite: `tests/unit` and `tests/integration`, without `live_api` tests (`[tool.pytest.ini_options]` in `pyproject.toml`). `tests/migration` writes to whatever `DATABASE_URL` points at, so only the deploy workflows run it, by explicit path. `-m live_api` calls third-party APIs.
+- `uv run pytest` runs the offline suite: `tests/unit` and `tests/integration`, without `live_api` tests (`[tool.pytest.ini_options]` in `pyproject.toml`). `tests/migration` writes to whatever `DATABASE_URL` points at, so leave it to the deploy workflows, or run it by path (`uv run pytest tests/migration -v`) only with `DATABASE_URL` pointing at the local database. `uv run pytest -m live_api` calls third-party APIs.
 - Unit and integration tests run on in-process PostgreSQL (py-pglite) on a fixed port. Run one pytest process at a time.
 - Settings need some `DATABASE_URL` to import. Export a placeholder when no `.env` is present.
 
