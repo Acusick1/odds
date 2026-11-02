@@ -1146,14 +1146,17 @@ async def find_retail_edges(
 async def get_scheduled_jobs(
     sport: SportKey | None = None,
 ) -> dict[str, Any]:
-    """List all currently scheduled jobs from the scheduler backend.
+    """List all currently scheduled jobs from the local APScheduler store.
+
+    Reads the local Postgres-backed APScheduler store regardless of
+    ``SCHEDULER_BACKEND``; AWS EventBridge rules are not listed.
 
     Returns job name, next run time, and status for each job. Optionally
     filter by sport key — matches the registered sport suffix (e.g.
     ``soccer_epl`` matches ``...-epl`` job ids).
 
-    If the scheduler backend is not running (e.g. local APScheduler not
-    started), returns an informative message rather than an error.
+    If the store cannot be queried, returns an informative message rather
+    than an error.
 
     Args:
         sport: Optional sport key to filter jobs (e.g. "soccer_epl").
@@ -1205,7 +1208,7 @@ async def schedule_next_wakeup(
 
     Writes an upsert to the agent_wakeups table (one active row per sport).
     The agent_run job module reads this after the agent subprocess exits and
-    reschedules if the requested time is sooner than the default.
+    reschedules to the requested time, whether later or sooner than the default.
 
     Args:
         sport: Sport key (e.g. "soccer_epl", "baseball_mlb").

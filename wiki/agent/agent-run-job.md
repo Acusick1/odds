@@ -57,7 +57,7 @@ The wake-up interval is the `agent-run` row of the [cadence table](../scheduling
 
 ## Wake-up requests
 
-`odds_core.agent_wakeup_models.AgentWakeup` has one row per sport (`uq_agent_wakeup_sport_key`). The MCP tool `odds_mcp.server.schedule_next_wakeup` upserts it, clamps the delay to 0.5-168 hours and resets `consumed_at` ([scheduling tools](mcp-server.md#scrape-and-scheduling-tools)). The job reads rows where `consumed_at IS NULL`. Any future requested time overrides the proximity schedule, later as well as sooner (#449).
+`odds_core.agent_wakeup_models.AgentWakeup` has one row per sport (`uq_agent_wakeup_sport_key`). The MCP tool `odds_mcp.server.schedule_next_wakeup` upserts it, clamps the delay to 0.5-168 hours and resets `consumed_at` ([scheduling tools](mcp-server.md#scrape-and-scheduling-tools)). The job reads rows where `consumed_at IS NULL`. Any future requested time overrides the proximity schedule, later as well as sooner.
 
 ### `odds agent run`
 

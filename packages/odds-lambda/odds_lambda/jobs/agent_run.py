@@ -4,7 +4,7 @@ Scheduling strategy: query DB for next kickoff, compute the wake interval via
 the unified decision engine (proximity → cadence on canonical FetchTier
 boundaries), pre-schedule before launching the agent subprocess (survives
 crashes). After the agent exits, check the agent_wakeups table for an
-agent-requested override and reschedule if it's sooner.
+agent-requested override and reschedule to it, whether later or sooner.
 
 Wake cadence (canonical FetchTier boundaries, see ``CADENCE`` below):
   72h+ to KO    -> 24h  (far out)
