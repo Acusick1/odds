@@ -15,7 +15,7 @@ from enum import StrEnum
 from typing import Any
 
 from odds_core.bookmakers import canonical_bookmaker
-from odds_core.odds_math import outcome_price_decimal
+from odds_core.odds_math import is_valid_decimal_price, outcome_price_decimal
 from odds_core.team import normalize_team_name
 from odds_core.time import parse_api_datetime
 from odds_core.vocabulary import Market, MarketStatus, PriceOutcome, Side, Source
@@ -180,7 +180,7 @@ class _Reader:
     ) -> Decimal | None:
         """``value`` as a decimal price above 1.0; anything else is logged and dropped."""
         number = _finite(value)
-        if number is not None and number > 1.0:
+        if number is not None and is_valid_decimal_price(number):
             return _decimal(number)
         self.log_issue(
             RowIssueType.INVALID_PRICE,

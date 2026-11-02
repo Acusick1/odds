@@ -8,11 +8,17 @@ call them without pulling in numpy, pandas, etc.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from typing import Any
 
 PRICE_DECIMAL_KEY = "price_decimal"
 PRICE_AMERICAN_KEY = "price"
+
+
+def is_valid_decimal_price(price: float) -> bool:
+    """Whether ``price`` can be a decimal price: finite and above 1.0, with no upper bound."""
+    return math.isfinite(price) and price > 1.0
 
 
 def american_to_decimal(american_odds: int) -> float:

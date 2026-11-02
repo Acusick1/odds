@@ -6,7 +6,11 @@ from datetime import UTC, datetime
 
 import structlog
 from odds_core.bookmakers import ZERO_MARGIN_BOOKMAKERS
-from odds_core.odds_math import decimal_to_implied_probability, outcome_price_decimal
+from odds_core.odds_math import (
+    decimal_to_implied_probability,
+    is_valid_decimal_price,
+    outcome_price_decimal,
+)
 from odds_core.time import parse_api_datetime
 
 logger = structlog.get_logger()
@@ -16,8 +20,6 @@ class OddsValidator:
     """Validator for odds data quality checks."""
 
     # Validation thresholds
-    MIN_DECIMAL_ODDS = 1.01
-    MAX_DECIMAL_ODDS = 101.0
     MIN_VIG_PERCENT = 2.0  # Minimum expected vig for non-exchange bookmakers
     MAX_VIG_PERCENT = 15.0  # Maximum reasonable vig/juice
 
@@ -106,7 +108,7 @@ class OddsValidator:
         cls, price: float, bookmaker: str, market: str, outcome: str
     ) -> list[str]:
         """
-        Validate a single decimal odds value.
+        Validate a single decimal odds value against `is_valid_decimal_price`.
 
         Args:
             price: Decimal odds value
@@ -120,11 +122,8 @@ class OddsValidator:
         if not isinstance(price, int | float):
             return [f"{bookmaker} {market} {outcome}: Invalid price type {type(price)}"]
 
-        if price < cls.MIN_DECIMAL_ODDS or price > cls.MAX_DECIMAL_ODDS:
-            return [
-                f"{bookmaker} {market} {outcome}: Odds {price} out of valid range "
-                f"({cls.MIN_DECIMAL_ODDS} to {cls.MAX_DECIMAL_ODDS})"
-            ]
+        if not is_valid_decimal_price(price):
+            return [f"{bookmaker} {market} {outcome}: Odds {price} not above 1.0"]
         return []
 
     @classmethod

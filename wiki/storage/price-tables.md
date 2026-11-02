@@ -89,7 +89,7 @@ A writer builds one envelope per event ([envelope format](odds-tables.md#envelop
 
 - **Outcomes** are matched once, here: a name equal to the event's home or away team after `odds_core.team.normalize_team_name`, `Draw` on 1x2, `Over` and `Under` on totals. Spreads and totals carry the outcome's `point` in `line`. An unmatched name is logged as `unmatched_outcome`; the payload keeps it for a re-parse.
 - **Bookmakers** are canonicalised through the source's alias map, `odds_core.bookmakers.BOOKMAKER_ALIASES_BY_SOURCE` (`odds_core.bookmakers.canonical_bookmaker`): every source takes `odds_core.bookmakers.BOOKMAKER_ALIASES`, and the Odds API also `odds_core.bookmakers.ODDS_API_BOOKMAKER_KEY_MAP` (its regional Betfair keys, which the fetch already rewrites) and `odds_core.bookmakers.ODDS_API_KEY_ALIASES` (US BetMGM is `betmgm_us`). When two entries of one envelope name one book in a market (`7bet` and `7betuk`), the first is kept and the second logged as `bookmaker_alias_collision`. A second quote for the same book, outcome, line and side is logged as `duplicate_price`.
-- **Invalid prices**, a decimal price not above 1.0 (or not a number) or a probability not strictly between 0 and 1, are not stored and are logged as `invalid_price`. An unknown market key is logged as `unknown_market`.
+- **Invalid prices**, a decimal price that fails `odds_core.odds_math.is_valid_decimal_price` (not a finite number above 1.0) or a probability not strictly between 0 and 1, are not stored and are logged as `invalid_price`. An unknown market key is logged as `unknown_market`.
 
 ### Spreads line sign
 
