@@ -1,7 +1,7 @@
 """drop the old odds representations: odds, the legacy snapshot and event columns, polymarket_*
 
 Revision ID: b8e2d5f7a1c3
-Revises: a6f3c1e9d2b4
+Revises: c7d9e1f3a5b6
 Create Date: 2026-10-28 16:30:00.000000
 
 Prices live in ``prices`` rows, archived envelopes in ``snapshot_payloads``, gamePks in
@@ -26,7 +26,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "b8e2d5f7a1c3"
-down_revision = "a6f3c1e9d2b4"
+down_revision = "c7d9e1f3a5b6"
 branch_labels = None
 depends_on = None
 

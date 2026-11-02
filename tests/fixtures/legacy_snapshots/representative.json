@@ -1,0 +1,463 @@
+{
+  "snapshots": [
+    {
+      "id": 1,
+      "event_id": "abc123def456",
+      "snapshot_time": "2026-04-14 14:10:45.013916+00:00",
+      "raw_data": {
+        "id": "abc123def456",
+        "sport_key": "basketball_nba",
+        "sport_title": "NBA",
+        "commence_time": "2024-10-20T00:00:00Z",
+        "home_team": "Los Angeles Lakers",
+        "away_team": "Boston Celtics",
+        "bookmakers": [
+          {
+            "key": "fanduel",
+            "title": "FanDuel",
+            "last_update": "2024-10-19T18:30:00Z",
+            "markets": [
+              {
+                "key": "h2h",
+                "outcomes": [
+                  {
+                    "name": "Los Angeles Lakers",
+                    "price": -110
+                  },
+                  {
+                    "name": "Boston Celtics",
+                    "price": -110
+                  }
+                ]
+              },
+              {
+                "key": "spreads",
+                "outcomes": [
+                  {
+                    "name": "Los Angeles Lakers",
+                    "price": -110,
+                    "point": -2.5
+                  },
+                  {
+                    "name": "Boston Celtics",
+                    "price": -110,
+                    "point": 2.5
+                  }
+                ]
+              },
+              {
+                "key": "totals",
+                "outcomes": [
+                  {
+                    "name": "Over",
+                    "price": -110,
+                    "point": 218.5
+                  },
+                  {
+                    "name": "Under",
+                    "price": -110,
+                    "point": 218.5
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "key": "draftkings",
+            "title": "DraftKings",
+            "last_update": "2024-10-19T18:32:00Z",
+            "markets": [
+              {
+                "key": "h2h",
+                "outcomes": [
+                  {
+                    "name": "Los Angeles Lakers",
+                    "price": -115
+                  },
+                  {
+                    "name": "Boston Celtics",
+                    "price": -105
+                  }
+                ]
+              },
+              {
+                "key": "spreads",
+                "outcomes": [
+                  {
+                    "name": "Los Angeles Lakers",
+                    "price": -108,
+                    "point": -2.5
+                  },
+                  {
+                    "name": "Boston Celtics",
+                    "price": -112,
+                    "point": 2.5
+                  }
+                ]
+              },
+              {
+                "key": "totals",
+                "outcomes": [
+                  {
+                    "name": "Over",
+                    "price": -112,
+                    "point": 219.0
+                  },
+                  {
+                    "name": "Under",
+                    "price": -108,
+                    "point": 219.0
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "bookmaker_count": 2,
+      "api_request_id": null,
+      "created_at": "2026-04-14 14:10:48.034662+00:00",
+      "fetch_tier": "in_play",
+      "hours_until_commence": -12998.179170532223,
+      "source": null,
+      "market": null,
+      "time_basis": null,
+      "in_play": null,
+      "market_status": null,
+      "total_matched": null,
+      "market_start_time": null,
+      "payload_id": null,
+      "home_team": "Los Angeles Lakers",
+      "away_team": "Boston Celtics",
+      "sport_key": "basketball_nba"
+    },
+    {
+      "id": 17,
+      "event_id": "op_live_LEE_BUR_2026-05-01T1900",
+      "snapshot_time": "2026-04-28 11:39:20.230478+00:00",
+      "raw_data": {
+        "bookmakers": [
+          {
+            "key": "betfair_exchange",
+            "title": "Betfair Exchange",
+            "last_update": "2026-04-28T11:39:20.230478+00:00",
+            "markets": [
+              {
+                "key": "1x2",
+                "outcomes": [
+                  {
+                    "name": "Leeds",
+                    "price_decimal": 1.47
+                  },
+                  {
+                    "name": "Burnley",
+                    "price_decimal": 8.2
+                  },
+                  {
+                    "name": "Draw",
+                    "price_decimal": 4.9
+                  }
+                ]
+              }
+            ],
+            "betfair_meta": {
+              "market_id": "1.257017165",
+              "market_status": "OPEN",
+              "inplay": false,
+              "total_matched": 10486.35,
+              "runners": [
+                {
+                  "selection_id": 48317,
+                  "runner_name": "Leeds",
+                  "best_back": 1.47,
+                  "best_lay": 1.48,
+                  "back_size": 195.21,
+                  "lay_size": 251.31,
+                  "last_price_traded": 1.47
+                },
+                {
+                  "selection_id": 56299,
+                  "runner_name": "Burnley",
+                  "best_back": 8.2,
+                  "best_lay": 8.6,
+                  "back_size": 84.11,
+                  "lay_size": 82.78,
+                  "last_price_traded": 8.4
+                },
+                {
+                  "selection_id": 58805,
+                  "runner_name": "The Draw",
+                  "best_back": 4.9,
+                  "best_lay": 5.0,
+                  "back_size": 107.76,
+                  "lay_size": 15.12,
+                  "last_price_traded": 5.0
+                }
+              ]
+            }
+          }
+        ],
+        "source": "betfair_api",
+        "betfair_event_id": "35507351"
+      },
+      "bookmaker_count": 1,
+      "api_request_id": "betfair_api_2026-04-28T11:39:20.230478+00:00",
+      "created_at": "2026-04-28 11:39:21.237328+00:00",
+      "fetch_tier": "opening",
+      "hours_until_commence": 79.34438042277777,
+      "source": null,
+      "market": null,
+      "time_basis": null,
+      "in_play": null,
+      "market_status": null,
+      "total_matched": null,
+      "market_start_time": null,
+      "payload_id": null,
+      "home_team": "Leeds",
+      "away_team": "Burnley",
+      "sport_key": "soccer_epl"
+    }
+  ],
+  "odds": [
+    {
+      "id": 1,
+      "event_id": "abc123def456",
+      "bookmaker_key": "fanduel",
+      "bookmaker_title": "FanDuel",
+      "market_key": "h2h",
+      "outcome_name": "Los Angeles Lakers",
+      "point": null,
+      "odds_timestamp": "2026-04-14 14:10:45.013916+00:00",
+      "last_update": "2024-10-19 18:30:00+00:00",
+      "created_at": "2026-04-14 14:10:48.034891+00:00",
+      "is_valid": true,
+      "validation_notes": null,
+      "price_decimal": 1.9090909090909092,
+      "snapshot_id": 1
+    },
+    {
+      "id": 2,
+      "event_id": "abc123def456",
+      "bookmaker_key": "fanduel",
+      "bookmaker_title": "FanDuel",
+      "market_key": "h2h",
+      "outcome_name": "Boston Celtics",
+      "point": null,
+      "odds_timestamp": "2026-04-14 14:10:45.013916+00:00",
+      "last_update": "2024-10-19 18:30:00+00:00",
+      "created_at": "2026-04-14 14:10:48.035047+00:00",
+      "is_valid": true,
+      "validation_notes": null,
+      "price_decimal": 1.9090909090909092,
+      "snapshot_id": 1
+    },
+    {
+      "id": 3,
+      "event_id": "abc123def456",
+      "bookmaker_key": "fanduel",
+      "bookmaker_title": "FanDuel",
+      "market_key": "spreads",
+      "outcome_name": "Los Angeles Lakers",
+      "point": -2.5,
+      "odds_timestamp": "2026-04-14 14:10:45.013916+00:00",
+      "last_update": "2024-10-19 18:30:00+00:00",
+      "created_at": "2026-04-14 14:10:48.035148+00:00",
+      "is_valid": true,
+      "validation_notes": null,
+      "price_decimal": 1.9090909090909092,
+      "snapshot_id": 1
+    },
+    {
+      "id": 4,
+      "event_id": "abc123def456",
+      "bookmaker_key": "fanduel",
+      "bookmaker_title": "FanDuel",
+      "market_key": "spreads",
+      "outcome_name": "Boston Celtics",
+      "point": 2.5,
+      "odds_timestamp": "2026-04-14 14:10:45.013916+00:00",
+      "last_update": "2024-10-19 18:30:00+00:00",
+      "created_at": "2026-04-14 14:10:48.035237+00:00",
+      "is_valid": true,
+      "validation_notes": null,
+      "price_decimal": 1.9090909090909092,
+      "snapshot_id": 1
+    },
+    {
+      "id": 5,
+      "event_id": "abc123def456",
+      "bookmaker_key": "fanduel",
+      "bookmaker_title": "FanDuel",
+      "market_key": "totals",
+      "outcome_name": "Over",
+      "point": 218.5,
+      "odds_timestamp": "2026-04-14 14:10:45.013916+00:00",
+      "last_update": "2024-10-19 18:30:00+00:00",
+      "created_at": "2026-04-14 14:10:48.035323+00:00",
+      "is_valid": true,
+      "validation_notes": null,
+      "price_decimal": 1.9090909090909092,
+      "snapshot_id": 1
+    },
+    {
+      "id": 6,
+      "event_id": "abc123def456",
+      "bookmaker_key": "fanduel",
+      "bookmaker_title": "FanDuel",
+      "market_key": "totals",
+      "outcome_name": "Under",
+      "point": 218.5,
+      "odds_timestamp": "2026-04-14 14:10:45.013916+00:00",
+      "last_update": "2024-10-19 18:30:00+00:00",
+      "created_at": "2026-04-14 14:10:48.035404+00:00",
+      "is_valid": true,
+      "validation_notes": null,
+      "price_decimal": 1.9090909090909092,
+      "snapshot_id": 1
+    },
+    {
+      "id": 7,
+      "event_id": "abc123def456",
+      "bookmaker_key": "draftkings",
+      "bookmaker_title": "DraftKings",
+      "market_key": "h2h",
+      "outcome_name": "Los Angeles Lakers",
+      "point": null,
+      "odds_timestamp": "2026-04-14 14:10:45.013916+00:00",
+      "last_update": "2024-10-19 18:32:00+00:00",
+      "created_at": "2026-04-14 14:10:48.035491+00:00",
+      "is_valid": true,
+      "validation_notes": null,
+      "price_decimal": 1.8695652173913044,
+      "snapshot_id": 1
+    },
+    {
+      "id": 8,
+      "event_id": "abc123def456",
+      "bookmaker_key": "draftkings",
+      "bookmaker_title": "DraftKings",
+      "market_key": "h2h",
+      "outcome_name": "Boston Celtics",
+      "point": null,
+      "odds_timestamp": "2026-04-14 14:10:45.013916+00:00",
+      "last_update": "2024-10-19 18:32:00+00:00",
+      "created_at": "2026-04-14 14:10:48.035603+00:00",
+      "is_valid": true,
+      "validation_notes": null,
+      "price_decimal": 1.9523809523809523,
+      "snapshot_id": 1
+    },
+    {
+      "id": 9,
+      "event_id": "abc123def456",
+      "bookmaker_key": "draftkings",
+      "bookmaker_title": "DraftKings",
+      "market_key": "spreads",
+      "outcome_name": "Los Angeles Lakers",
+      "point": -2.5,
+      "odds_timestamp": "2026-04-14 14:10:45.013916+00:00",
+      "last_update": "2024-10-19 18:32:00+00:00",
+      "created_at": "2026-04-14 14:10:48.035689+00:00",
+      "is_valid": true,
+      "validation_notes": null,
+      "price_decimal": 1.9259259259259258,
+      "snapshot_id": 1
+    },
+    {
+      "id": 10,
+      "event_id": "abc123def456",
+      "bookmaker_key": "draftkings",
+      "bookmaker_title": "DraftKings",
+      "market_key": "spreads",
+      "outcome_name": "Boston Celtics",
+      "point": 2.5,
+      "odds_timestamp": "2026-04-14 14:10:45.013916+00:00",
+      "last_update": "2024-10-19 18:32:00+00:00",
+      "created_at": "2026-04-14 14:10:48.035769+00:00",
+      "is_valid": true,
+      "validation_notes": null,
+      "price_decimal": 1.8928571428571428,
+      "snapshot_id": 1
+    },
+    {
+      "id": 11,
+      "event_id": "abc123def456",
+      "bookmaker_key": "draftkings",
+      "bookmaker_title": "DraftKings",
+      "market_key": "totals",
+      "outcome_name": "Over",
+      "point": 219.0,
+      "odds_timestamp": "2026-04-14 14:10:45.013916+00:00",
+      "last_update": "2024-10-19 18:32:00+00:00",
+      "created_at": "2026-04-14 14:10:48.035852+00:00",
+      "is_valid": true,
+      "validation_notes": null,
+      "price_decimal": 1.8928571428571428,
+      "snapshot_id": 1
+    },
+    {
+      "id": 12,
+      "event_id": "abc123def456",
+      "bookmaker_key": "draftkings",
+      "bookmaker_title": "DraftKings",
+      "market_key": "totals",
+      "outcome_name": "Under",
+      "point": 219.0,
+      "odds_timestamp": "2026-04-14 14:10:45.013916+00:00",
+      "last_update": "2024-10-19 18:32:00+00:00",
+      "created_at": "2026-04-14 14:10:48.035929+00:00",
+      "is_valid": true,
+      "validation_notes": null,
+      "price_decimal": 1.9259259259259258,
+      "snapshot_id": 1
+    },
+    {
+      "id": 193,
+      "event_id": "op_live_LEE_BUR_2026-05-01T1900",
+      "bookmaker_key": "betfair_exchange",
+      "bookmaker_title": "Betfair Exchange",
+      "market_key": "1x2",
+      "outcome_name": "Leeds",
+      "point": null,
+      "odds_timestamp": "2026-04-28 11:39:20.230478+00:00",
+      "last_update": "2026-04-28 11:39:20.230478+00:00",
+      "created_at": "2026-04-28 11:39:21.237582+00:00",
+      "is_valid": true,
+      "validation_notes": null,
+      "price_decimal": 1.47,
+      "snapshot_id": 17
+    },
+    {
+      "id": 194,
+      "event_id": "op_live_LEE_BUR_2026-05-01T1900",
+      "bookmaker_key": "betfair_exchange",
+      "bookmaker_title": "Betfair Exchange",
+      "market_key": "1x2",
+      "outcome_name": "Burnley",
+      "point": null,
+      "odds_timestamp": "2026-04-28 11:39:20.230478+00:00",
+      "last_update": "2026-04-28 11:39:20.230478+00:00",
+      "created_at": "2026-04-28 11:39:21.237786+00:00",
+      "is_valid": true,
+      "validation_notes": null,
+      "price_decimal": 8.2,
+      "snapshot_id": 17
+    },
+    {
+      "id": 195,
+      "event_id": "op_live_LEE_BUR_2026-05-01T1900",
+      "bookmaker_key": "betfair_exchange",
+      "bookmaker_title": "Betfair Exchange",
+      "market_key": "1x2",
+      "outcome_name": "Draw",
+      "point": null,
+      "odds_timestamp": "2026-04-28 11:39:20.230478+00:00",
+      "last_update": "2026-04-28 11:39:20.230478+00:00",
+      "created_at": "2026-04-28 11:39:21.237905+00:00",
+      "is_valid": true,
+      "validation_notes": null,
+      "price_decimal": 4.9,
+      "snapshot_id": 17
+    }
+  ]
+}
