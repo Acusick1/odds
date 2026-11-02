@@ -6,7 +6,6 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from odds_analytics.candidate_report import (
-    CLOSE_GRACE,
     ScoredBet,
     Verdict,
     candidate_report,
@@ -18,8 +17,8 @@ from odds_analytics.candidate_report import (
     summarize_candidates,
 )
 from odds_cli.main import app
-from odds_core.betfair_close import close_quotes, event_close
 from odds_core.candidates import AgentCandidate, CandidateStatus
+from odds_core.close import close_quotes, event_close
 from odds_core.models import Event, EventStatus
 from odds_core.paper_trade_models import PaperTrade, TradeResult
 from odds_core.quotes import quotes
@@ -30,6 +29,7 @@ from typer.testing import CliRunner
 from tests.test_helpers import (
     betfair_exchange_bookmaker,
     make_epl_event,
+    make_nba_event,
     make_tagged_snapshot,
     store_tagged,
     three_way_bookmaker,
@@ -39,6 +39,7 @@ from tests.test_helpers import (
 N_BOOT = 400
 NOW = datetime(2026, 6, 1, tzinfo=UTC)
 LONG_AGO = NOW - timedelta(days=30)
+FDUK_GRACE = timedelta(days=7)
 
 
 def one(_when: datetime) -> int:
@@ -55,6 +56,7 @@ def trade(
     name: str = "cand",
     version: int = 1,
     commence_time: datetime = LONG_AGO,
+    close_grace: timedelta = FDUK_GRACE,
 ) -> ScoredBet:
     """A trade at price 3.0 whose EV is ``ev`` (p_close = (1 + ev) / 3), None for no close."""
     return ScoredBet(
@@ -67,6 +69,7 @@ def trade(
         price_decimal=3.0,
         p_close=None if ev is None else (1 + ev) / 3,
         placed_at=LONG_AGO + timedelta(minutes=index),
+        close_grace=close_grace,
     )
 
 
@@ -98,7 +101,16 @@ def registry_entry(name: str = "cand", version: int = 1) -> AgentCandidate:
 class TestEv:
     def test_ev_is_close_probability_times_price_minus_one(self) -> None:
         t = ScoredBet(
-            "c", 1, 1, LONG_AGO, 2.0, 0.0, price_decimal=2.5, p_close=0.5, placed_at=LONG_AGO
+            "c",
+            1,
+            1,
+            LONG_AGO,
+            2.0,
+            0.0,
+            price_decimal=2.5,
+            p_close=0.5,
+            placed_at=LONG_AGO,
+            close_grace=FDUK_GRACE,
         )
         assert t.ev == pytest.approx(0.25)
 
@@ -211,9 +223,16 @@ class TestPrefix:
         assert (waiting.bets_with_close, waiting.bets_without_close) == (60, 0)
         assert waiting.pending_bets == 61
 
-        later = summary_of(sequence, now=kickoff + CLOSE_GRACE)
+        later = summary_of(sequence, now=kickoff + FDUK_GRACE)
         assert (later.bets_with_close, later.bets_without_close) == (120, 1)
         assert later.pending_bets == 0
+
+    def test_a_recent_no_close_is_final_where_no_fallback_arrives_late(self) -> None:
+        kickoff = NOW - timedelta(days=3)
+        no_wait = trade(60, None, commence_time=kickoff, close_grace=timedelta(0))
+        summary = summary_of(trades(60) + [no_wait] + trades(60, start=61))
+        assert (summary.bets_with_close, summary.bets_without_close) == (120, 1)
+        assert summary.pending_bets == 0
 
     def test_trades_placed_earlier_count_first(self) -> None:
         """A later-placed bet that settles first never takes an earlier bet's place."""
@@ -549,6 +568,60 @@ class TestLoadScoredBets:
         assert under.p_close is None
 
     @pytest.mark.asyncio
+    async def test_nba_h2h_trades_are_scored_against_the_nba_close(
+        self, test_session: AsyncSession
+    ) -> None:
+        from odds_analytics.candidate_report import load_scored_trades
+
+        session = test_session
+        with_betfair = make_nba_event(1, KICKOFF, status=EventStatus.FINAL)
+        with_polymarket = make_nba_event(2, KICKOFF, status=EventStatus.FINAL)
+        with_neither = make_nba_event(3, KICKOFF, status=EventStatus.FINAL)
+        mlb = make_nba_event(4, KICKOFF, status=EventStatus.FINAL, sport_key="baseball_mlb")
+        session.add_all([with_betfair, with_polymarket, with_neither, mlb])
+        await session.flush()
+        names = (with_betfair.home_team, with_betfair.away_team)
+        runners = [
+            {"runner_name": name, "best_back": price}
+            for name, price in zip(names, (2.0, 2.0), strict=True)
+        ]
+        betfair_entry = {
+            "key": "betfair_exchange",
+            "markets": [{"key": "h2h", "outcomes": []}],
+            "betfair_meta": {"inplay": False, "market_status": "OPEN", "runners": runners},
+        }
+        polymarket_entry = {
+            "key": "polymarket",
+            "markets": [{"key": "h2h", "outcomes": []}],
+            "polymarket_meta": {"yes_probabilities": {"home": 0.6, "away": 0.41}},
+        }
+        for event in (with_betfair, mlb):
+            await store_tagged(
+                session,
+                make_tagged_snapshot(
+                    event.id, KICKOFF - timedelta(minutes=5), [betfair_entry], "betfair_api"
+                ),
+            )
+        for event in (with_polymarket, mlb):
+            await store_tagged(
+                session,
+                make_tagged_snapshot(
+                    event.id, KICKOFF - timedelta(minutes=2), [polymarket_entry], "polymarket"
+                ),
+            )
+        for event_id, minutes in ((1, 1), (2, 2), (3, 3), (4, 4)):
+            session.add(_paper_trade(event_id, minutes, market="h2h", price_decimal=2.1))
+        await session.flush()
+
+        betfair, polymarket, neither, mlb_trade = await load_scored_trades(session)
+
+        assert betfair.p_close == pytest.approx(0.5)
+        assert betfair.ev == pytest.approx(0.5 * 2.1 - 1)
+        assert polymarket.p_close == pytest.approx(0.6 / 1.01)
+        assert neither.p_close is None
+        assert mlb_trade.p_close is None
+
+    @pytest.mark.asyncio
     async def test_close_quotes_give_the_close_of_all_quotes(
         self, test_session: AsyncSession
     ) -> None:
@@ -596,9 +669,9 @@ class TestLoadScoredBets:
             full = await quotes(session, [event.id], "1x2")
             kept = restricted[event.id]
             assert len(kept) < len(full)
-            expected = event_close(full, KICKOFF, "1x2")
+            expected = event_close(full, KICKOFF, "soccer_epl", "1x2")
             assert expected is not None
-            assert event_close(kept, KICKOFF, "1x2") == expected
+            assert event_close(kept, KICKOFF, "soccer_epl", "1x2") == expected
 
 
 class TestReportCommand:

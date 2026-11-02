@@ -779,6 +779,7 @@ class TestValidateCandidateRules:
             ("soccer_epl", "totals"),
             ("baseball_mlb", "h2h"),
             ("baseball_mlb", "totals"),
+            ("basketball_nba", "h2h"),
         ],
     )
     def test_each_sport_decides_its_markets(self, sport: str, market: str) -> None:
@@ -786,7 +787,7 @@ class TestValidateCandidateRules:
 
     @pytest.mark.parametrize(
         ("sport", "market"),
-        [("soccer_epl", "h2h"), ("baseball_mlb", "1x2"), ("basketball_nba", "h2h")],
+        [("soccer_epl", "h2h"), ("baseball_mlb", "1x2"), ("basketball_nba", "totals")],
     )
     def test_a_market_the_sport_does_not_decide_fails(self, sport: str, market: str) -> None:
         with pytest.raises(ValueError, match=f"no rule decides market '{market}' for sport"):
@@ -939,7 +940,7 @@ class TestRuleSha256:
             "odds_analytics.candidate_model",
             "odds_analytics.retail_ev",
             "odds_analytics.xgboost_line_movement",
-            "odds_core.betfair_close",
+            "odds_core.close",
             "odds_analytics.retail_ev_metrics",
         ],
     )

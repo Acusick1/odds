@@ -16,6 +16,7 @@ from odds_lambda.candidate_rules import rule_sha256
 from tests.test_helpers import (
     betfair_exchange_bookmaker,
     make_epl_event,
+    make_nba_event,
     make_tagged_snapshot,
     polymarket_bookmaker,
     store_tagged,
@@ -282,6 +283,48 @@ class TestReplay:
         over_close = (1 / 2.1) / (1 / 2.1 + 1 / 1.9)
         assert result.overall is not None
         assert result.overall.mean_ev == pytest.approx(over_close * 2.3 - 1)
+
+    async def test_an_nba_h2h_candidate_is_scored_against_its_polymarket_close(
+        self, pglite_async_session
+    ) -> None:
+        session = pglite_async_session
+        event = make_nba_event(1, KICKOFF, status=EventStatus.FINAL, home_score=110, away_score=100)
+        session.add(event)
+
+        def two_way(key: str, home: float, away: float) -> dict[str, Any]:
+            outcomes = [
+                {"name": event.home_team, "price_decimal": home},
+                {"name": event.away_team, "price_decimal": away},
+            ]
+            return {"key": key, "title": key, "markets": [{"key": "h2h", "outcomes": outcomes}]}
+
+        await store_tagged(
+            session,
+            make_tagged_snapshot(
+                1,
+                T - timedelta(minutes=5),
+                [two_way("bet365", 2.2, 1.7), two_way("betfair_exchange", 2.0, 2.0)],
+                "oddsportal_live",
+            ),
+        )
+        polymarket = {
+            "key": "polymarket",
+            "markets": [{"key": "h2h", "outcomes": []}],
+            "polymarket_meta": {"yes_probabilities": {"home": 0.55, "away": 0.46}},
+        }
+        await store_tagged(
+            session,
+            make_tagged_snapshot(1, KICKOFF - timedelta(minutes=2), [polymarket], "polymarket"),
+        )
+        await session.commit()
+
+        result = await run(session, candidate(market="h2h", sport="basketball_nba"))
+
+        assert result.coverage.bets == 1 and result.coverage.bets_with_close == 1
+        # The home side won at 2.2.
+        assert result.summary.pnl == pytest.approx(1.2)
+        assert result.overall is not None
+        assert result.overall.mean_ev == pytest.approx(0.55 / 1.01 * 2.2 - 1)
 
     async def test_empty_range_has_no_verdict(self, pglite_async_session) -> None:
         result = await run(pglite_async_session)

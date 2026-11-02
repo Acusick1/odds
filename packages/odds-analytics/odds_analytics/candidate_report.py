@@ -16,8 +16,8 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
 import numpy as np
-from odds_core.betfair_close import close_quotes, event_close
 from odds_core.candidates import Candidate, CandidateStatus, MechanicalCandidate
+from odds_core.close import close_grace, close_quotes, event_close
 from odds_core.market_prices import Outcome
 from odds_core.models import Event
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade, TradeResult
@@ -37,10 +37,6 @@ KILL_LEVEL = 0.95
 # The family's promote levels put the interval tails at a few resamples when this is 2000.
 DEFAULT_BOOTSTRAP_SAMPLES = 10_000
 BOOTSTRAP_SEED = 0
-# The FDUK closing price can arrive days after the match, so a missing close is final only later.
-CLOSE_GRACE = timedelta(days=7)
-# Markets with a Betfair Exchange close; MLB's two-way market has none.
-CLOSE_MARKETS: frozenset[Market] = frozenset({Market.ONE_X_TWO, Market.TOTALS})
 
 
 class Verdict(StrEnum):
@@ -64,6 +60,8 @@ class ScoredBet:
     price_decimal: float
     p_close: float | None
     placed_at: datetime
+    # How long after kick-off a missing close may still arrive (``odds_core.close.close_grace``).
+    close_grace: timedelta
 
     @property
     def settled(self) -> bool:
@@ -113,12 +111,10 @@ def selection_close_probability(
     market: Market, selection: str, line: float | None, event: Event, quoted: Sequence[Quote]
 ) -> float | None:
     """Close probability of the selection on ``line`` from the event's close quotes
-    (``odds_core.betfair_close.close_quotes``), the close on that line; None where no close is
-    defined (a market outside ``CLOSE_MARKETS``) or exists.
+    (``odds_core.close.close_quotes``), the close on that line; None where no close is
+    defined (``odds_core.close.CLOSES``) or exists.
     """
-    if market not in CLOSE_MARKETS:
-        return None
-    close = event_close(quoted, event.commence_time, market, line=line)
+    close = event_close(quoted, event.commence_time, event.sport_key, market, line=line)
     if close is None:
         return None
     return close.fair[Outcome(selection)]
@@ -215,7 +211,7 @@ def scoreable_prefix(trades: Sequence[ScoredBet], now: datetime) -> tuple[list[S
     """The bets with a close in the settled, final prefix of ``trades``, and its length.
 
     ``trades`` must be in placement order. The prefix stops at the first trade that is
-    unsettled, or has no close and kicked off less than ``CLOSE_GRACE`` ago. Final
+    unsettled, or has no close and kicked off less than its ``close_grace`` ago. Final
     no-close trades inside it are skipped.
     """
     with_close: list[ScoredBet] = []
@@ -223,7 +219,7 @@ def scoreable_prefix(trades: Sequence[ScoredBet], now: datetime) -> tuple[list[S
     for trade in trades:
         if not trade.settled:
             break
-        if trade.p_close is None and now - trade.commence_time < CLOSE_GRACE:
+        if trade.p_close is None and now - trade.commence_time < trade.close_grace:
             break
         if trade.p_close is not None:
             with_close.append(trade)
@@ -322,8 +318,7 @@ async def load_scored_trades(session: AsyncSession) -> list[ScoredBet]:
     rows = (await session.execute(stmt)).all()
     events: dict[str, dict[int, Event]] = defaultdict(dict)
     for trade, event in rows:
-        if trade.market in CLOSE_MARKETS:
-            events[trade.market][event.id] = event
+        events[trade.market][event.id] = event
     closes = {
         market: await close_quotes(session, list(by_id.values()), market)
         for market, by_id in events.items()
@@ -349,6 +344,7 @@ async def load_scored_trades(session: AsyncSession) -> list[ScoredBet]:
                     closes.get(trade.market, {}).get(event.id, []),
                 ),
                 placed_at=trade.placed_at,
+                close_grace=close_grace(event.sport_key, trade.market),
             )
         )
     return scored

@@ -25,7 +25,7 @@ import pandas as pd
 import structlog
 import xgboost
 import yaml
-from odds_core.betfair_close import LIVE_CLOSE_WINDOW
+from odds_core.close import LIVE_CLOSE_WINDOW
 from odds_core.market_prices import THREE_WAY_MARKET, market_outcomes
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.vocabulary import Source, TimeBasis

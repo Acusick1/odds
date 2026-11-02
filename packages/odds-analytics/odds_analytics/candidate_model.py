@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from odds_core.as_of import by_snapshot
-from odds_core.betfair_close import close_quotes, event_close
+from odds_core.close import close_quotes, event_close
 from odds_core.market_prices import Outcome, market_outcomes
 from odds_core.models import Event
 from odds_core.quotes import Quote
@@ -110,7 +110,7 @@ def training_rows(event: Event, market: Market, quoted: Sequence[Quote]) -> list
     ``quoted`` holds the event's retail quotes and its close quotes. An event without a live
     Betfair close has none.
     """
-    close = event_close(quoted, event.commence_time, market)
+    close = event_close(quoted, event.commence_time, event.sport_key, market)
     if close is None or close.source is not Source.BETFAIR:
         return []
     first = event.commence_time - DECISION_WINDOW

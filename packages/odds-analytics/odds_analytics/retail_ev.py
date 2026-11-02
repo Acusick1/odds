@@ -17,8 +17,8 @@ from typing import TYPE_CHECKING, Any, cast, get_args
 import numpy as np
 import structlog
 from odds_core.as_of import by_snapshot
-from odds_core.betfair_close import pick_close
 from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS
+from odds_core.close import close_spec, pick_close
 from odds_core.exchange_price import (
     MAX_EXCHANGE_OVERROUND,
     ExchangePrice,
@@ -366,7 +366,7 @@ def build_event_rows(
 ) -> tuple[list[RetailEvRow], DropCounts]:
     """Build every decision row for one event from its quotes of ``market``, in time order.
 
-    The close is ``odds_core.betfair_close.pick_close`` over the event's exchange prices. The
+    The close is ``odds_core.close.pick_close`` over the event's exchange prices. The
     exchange price at t comes
     only from live Betfair or FDUK opening snapshots at or before t, so nothing after t
     enters a row's inputs. Exchange prices whose back overround exceeds
@@ -402,7 +402,12 @@ def build_event_rows(
         if price.time_basis is not TimeBasis.CLOSE and price.time < kickoff:
             exchange_at_t.append(price)
 
-    close = pick_close(exchange_prices, kickoff, max_exchange_overround)
+    spec = close_spec(event.sport_key, market)
+    close = (
+        None
+        if spec is None
+        else pick_close(exchange_prices, kickoff, spec.fallback, max_exchange_overround)
+    )
     if close is None:
         drops.events_without_close = 1
         return [], drops

@@ -39,6 +39,7 @@ Selection = tuple[Outcome, Line]
 SPORT_MARKETS: dict[str, frozenset[Market]] = {
     "soccer_epl": frozenset({Market.ONE_X_TWO, Market.TOTALS}),
     "baseball_mlb": frozenset({Market.H2H, Market.TOTALS}),
+    "basketball_nba": frozenset({Market.H2H}),
 }
 # The markets a candidate's rule can decide, in a fixed order.
 RULE_MARKETS: tuple[Market, ...] = tuple(
@@ -259,7 +260,7 @@ RULES: dict[str, RuleSpec | ModelRuleSpec] = {
             "odds_analytics.retail_ev",
             "odds_analytics.xgboost_line_movement",
             # The close every training target is measured against.
-            "odds_core.betfair_close",
+            "odds_core.close",
             # The tuning objective, the search-space draws and the search-space model.
             "odds_analytics.retail_ev_metrics",
             "odds_analytics.training.tuner",

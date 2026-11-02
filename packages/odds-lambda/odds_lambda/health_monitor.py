@@ -20,7 +20,7 @@ from typing import NamedTuple, Protocol
 
 import structlog
 from odds_core.alerts import job_outage_alerted_at, send_recorded_alert
-from odds_core.betfair_close import LIVE_CLOSE_WINDOW, event_close, live_close_quotes
+from odds_core.close import LIVE_CLOSE_WINDOW, event_close, live_close_quotes
 from odds_core.config import Settings, get_settings
 from odds_core.database import async_session_maker
 from odds_core.market_prices import THREE_WAY_MARKET, TOTALS_MARKET
@@ -352,7 +352,7 @@ class HealthMonitor:
         has no live Betfair snapshot in the ``BETFAIR_HISTORY_WINDOW`` before
         kick-off (a ghost, a twin that carries the prices, or an unannounced
         postponement). It is missing when it has no live close
-        (``odds_core.betfair_close.event_close`` over its ``live_close_quotes``), the close
+        (``odds_core.close.event_close`` over its ``live_close_quotes``), the close
         the candidate report scores against. Events already named in an alert inside the
         lookback are not reported again.
         """
@@ -432,12 +432,17 @@ class HealthMonitor:
             if betfair_before is None:
                 continue
             closes = await live_close_quotes(self.session, [event.id], THREE_WAY_MARKET)
-            three_way_missing = event_close(closes, kickoff, THREE_WAY_MARKET) is None
+            three_way_missing = (
+                event_close(closes, kickoff, BETFAIR_CLOSE_SPORT, THREE_WAY_MARKET) is None
+            )
             totals_closes = await live_close_quotes(self.session, [event.id], TOTALS_MARKET)
             totals_missing = tuple(
                 line
                 for line in totals_lines.get(event.id, [])
-                if event_close(totals_closes, kickoff, TOTALS_MARKET, line=line) is None
+                if event_close(
+                    totals_closes, kickoff, BETFAIR_CLOSE_SPORT, TOTALS_MARKET, line=line
+                )
+                is None
             )
             if not three_way_missing and not totals_missing:
                 continue
