@@ -58,7 +58,7 @@ class TestWriteCLI:
         )
 
         # Run the CLI command
-        result = runner.invoke(app, ["fetch", "current"])
+        result = runner.invoke(app, ["fetch", "current", "--sport", "basketball_nba"])
 
         assert result.exit_code == 0, (
             f"'odds fetch current' command failed with exit code {result.exit_code}\n"
