@@ -141,6 +141,7 @@ A job inside [`odds_core.alerts.job_alert_context`](alerts.md#delivery) inserts 
 | fetch-odds (EPL) | yes | 49 h (48 h opening-tier interval plus 1 h; no overnight pause) |
 | fetch-odds (NBA) | yes | 35 h (24 h interval pushed to 10:00 UTC by the 00:00-10:00 quiet window, about 33 h, plus slack) |
 | fetch-scores (EPL) | yes | 13 h (12 h idle interval plus 1 h; no overnight pause) |
+| backup-database | yes, once the dump reached the remote | 26 h (daily cron plus slack; [backup job](../foundations/database-backup-job.md#missing-backups)) |
 | agent-run | no: not wrapped in `odds_core.alerts.job_alert_context` (#438) | none |
 
 ## Failure handling

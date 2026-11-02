@@ -61,6 +61,7 @@ _JOB_MODULE_MAP: dict[str, tuple[str, str]] = {
     "fetch-mlb-probables": ("odds_lambda.jobs.fetch_mlb_probables", "main"),
     "fetch-injuries": ("odds_lambda.jobs.fetch_injuries", "main"),
     "run-candidates": ("odds_lambda.jobs.run_candidates", "main"),
+    "backup-database": ("odds_lambda.jobs.backup_database", "main"),
 }
 
 # Bootstrap entry-point overrides: jobs listed here use a different function
@@ -122,6 +123,7 @@ _JOB_CRON_MAP: dict[str, str] = {
     # ``mlb_probable_pitchers``: the MCP ``get_probable_pitchers`` tool reads
     # live without persisting and falls back to this snapshot.
     "fetch-mlb-probables": "0 6 * * *",
+    "backup-database": "0 5 * * *",
 }
 
 # Sport allowlists for per-sport jobs, cron or event-driven. A job absent

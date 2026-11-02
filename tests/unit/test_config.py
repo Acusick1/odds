@@ -69,6 +69,7 @@ class TestSettings:
                 "fetch-mlb-probables",
                 "fetch-injuries",
                 "run-candidates",
+                "backup-database",
             ]
             assert settings.data_quality.enable_validation is True
             assert settings.alerts.alert_enabled is False

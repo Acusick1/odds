@@ -21,7 +21,7 @@ How settings are structured and which variables bypass them is in [Configuration
    - The configuration unit tests load the template with and without its commented assignments enabled, so run them after editing it.
 3. **Set it on the production host** if it needs a non-default value (such as `DEAD_MANS_SWITCH_URL`): add it to the `.env` in the production host's repo checkout, which `odds-scheduler.service` reads, then redeploy ([Run the scheduler as a systemd service](../scheduling/howto-run-scheduler-service.md)).
 4. **Read it through Settings.**
-   - A variable read with `os.getenv` bypasses `.env` ([Configuration](configuration.md#variables-read-outside-settings)). A variable without the section's prefix, such as `AGENT_DATABASE_URL` on `odds_core.config.DatabaseConfig`, takes its full name as the field's `validation_alias`.
+   - A variable read with `os.getenv` bypasses `.env` ([Configuration](configuration.md#variables-read-outside-settings)). A variable without the section's prefix, such as `AGENT_DATABASE_URL` on `odds_core.config.DatabaseConfig` or `ODDS_BACKUP_DIR` on `odds_core.config.BackupConfig` (shared with a shell script), takes its full name as the field's `validation_alias`.
 
 ## Related
 
