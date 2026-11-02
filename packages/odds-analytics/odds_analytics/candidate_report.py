@@ -39,8 +39,6 @@ DEFAULT_BOOTSTRAP_SAMPLES = 10_000
 BOOTSTRAP_SEED = 0
 # The FDUK closing price can arrive days after the match, so a missing close is final only later.
 CLOSE_GRACE = timedelta(days=7)
-# Markets with a Betfair Exchange close; MLB's two-way market has none.
-CLOSE_MARKETS: frozenset[Market] = frozenset({Market.ONE_X_TWO, Market.TOTALS})
 
 
 class Verdict(StrEnum):
@@ -114,11 +112,9 @@ def selection_close_probability(
 ) -> float | None:
     """Close probability of the selection on ``line`` from the event's close quotes
     (``odds_core.betfair_close.close_quotes``), the close on that line; None where no close is
-    defined (a market outside ``CLOSE_MARKETS``) or exists.
+    defined (``odds_core.betfair_close.CLOSE_FALLBACKS``) or exists.
     """
-    if market not in CLOSE_MARKETS:
-        return None
-    close = event_close(quoted, event.commence_time, market, line=line)
+    close = event_close(quoted, event.commence_time, event.sport_key, market, line=line)
     if close is None:
         return None
     return close.fair[Outcome(selection)]
@@ -322,8 +318,7 @@ async def load_scored_trades(session: AsyncSession) -> list[ScoredBet]:
     rows = (await session.execute(stmt)).all()
     events: dict[str, dict[int, Event]] = defaultdict(dict)
     for trade, event in rows:
-        if trade.market in CLOSE_MARKETS:
-            events[trade.market][event.id] = event
+        events[trade.market][event.id] = event
     closes = {
         market: await close_quotes(session, list(by_id.values()), market)
         for market, by_id in events.items()

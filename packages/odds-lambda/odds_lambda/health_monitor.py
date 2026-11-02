@@ -432,12 +432,17 @@ class HealthMonitor:
             if betfair_before is None:
                 continue
             closes = await live_close_quotes(self.session, [event.id], THREE_WAY_MARKET)
-            three_way_missing = event_close(closes, kickoff, THREE_WAY_MARKET) is None
+            three_way_missing = (
+                event_close(closes, kickoff, BETFAIR_CLOSE_SPORT, THREE_WAY_MARKET) is None
+            )
             totals_closes = await live_close_quotes(self.session, [event.id], TOTALS_MARKET)
             totals_missing = tuple(
                 line
                 for line in totals_lines.get(event.id, [])
-                if event_close(totals_closes, kickoff, TOTALS_MARKET, line=line) is None
+                if event_close(
+                    totals_closes, kickoff, BETFAIR_CLOSE_SPORT, TOTALS_MARKET, line=line
+                )
+                is None
             )
             if not three_way_missing and not totals_missing:
                 continue

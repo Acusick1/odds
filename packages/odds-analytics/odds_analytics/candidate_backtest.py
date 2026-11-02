@@ -36,7 +36,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from odds_analytics.candidate_model import ModelReplay, Refit, Tuning, library_versions
 from odds_analytics.candidate_report import (
     BOOTSTRAP_SEED,
-    CLOSE_MARKETS,
     DEFAULT_BOOTSTRAP_SAMPLES,
     CandidateSummary,
     Checkpoint,
@@ -170,7 +169,7 @@ async def _decide(
                 counts.with_bet += bool(intents)
                 decided.append((event, t, intents))
 
-        has_close = {e.id: e for e, _, intents in decided if intents and market in CLOSE_MARKETS}
+        has_close = {e.id: e for e, _, intents in decided if intents}
         closes = await close_quotes(session, list(has_close.values()), market)
         for event, t, intents in decided:
             assert event.home_score is not None and event.away_score is not None  # noqa: S101

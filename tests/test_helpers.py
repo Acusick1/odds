@@ -149,6 +149,25 @@ def make_epl_event(
     )
 
 
+def make_nba_event(
+    event_id: int,
+    commence_time: datetime = TWIN_KICKOFF,
+    home_team: str = "Boston Celtics",
+    away_team: str = "New York Knicks",
+    **fields,
+) -> Event:
+    fields.setdefault("status", EventStatus.SCHEDULED)
+    fields.setdefault("sport_key", "basketball_nba")
+    return Event(
+        id=event_id,
+        sport_title="NBA",
+        commence_time=commence_time,
+        home_team=home_team,
+        away_team=away_team,
+        **fields,
+    )
+
+
 def polymarket_bookmaker(
     probabilities: tuple[float, float, float], spread: float = 0.02
 ) -> dict[str, Any]:

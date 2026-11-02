@@ -516,12 +516,12 @@ class TestBetfairTotals:
         [event] = await _all(job_session, Event)
 
         quoted = (await close_quotes(job_session, [event], "totals"))[event.id]
-        close = event_close(quoted, event.commence_time, "totals", line=2.5)
+        close = event_close(quoted, event.commence_time, event.sport_key, "totals", line=2.5)
 
         assert close is not None
         assert close.source is Source.BETFAIR
         assert close.fair[PriceOutcome.OVER] == pytest.approx(0.5)
-        assert event_close(quoted, event.commence_time, "totals", line=3.5) is None
+        assert event_close(quoted, event.commence_time, event.sport_key, "totals", line=3.5) is None
 
     async def test_totals_ride_only_with_stored_match_odds(self, job_session: AsyncSession) -> None:
         stats = await _ingest_betfair(

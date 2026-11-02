@@ -110,7 +110,7 @@ def training_rows(event: Event, market: Market, quoted: Sequence[Quote]) -> list
     ``quoted`` holds the event's retail quotes and its close quotes. An event without a live
     Betfair close has none.
     """
-    close = event_close(quoted, event.commence_time, market)
+    close = event_close(quoted, event.commence_time, event.sport_key, market)
     if close is None or close.source is not Source.BETFAIR:
         return []
     first = event.commence_time - DECISION_WINDOW
