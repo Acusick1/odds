@@ -25,7 +25,7 @@ The Odds API bookmakers and markets are config (`bookmakers`, a per-sport map, a
 1. Add the sport to `odds_core.sports.SportKey`.
    - It becomes the `sport` argument of jobs, MCP tools and CLI commands ([sport-and-market-keys](sport-and-market-keys.md#sport-keys)).
 2. Add a suffix in `odds_lambda.scheduling.jobs._SPORT_SUFFIX_MAP`.
-   - The suffix names EventBridge rules, heartbeat keys and `odds_mcp.server.get_scheduled_jobs` filters; without one, compound job names stay bare ([job-registry](../scheduling/job-registry.md#compound-job-names)).
+   - The suffix names EventBridge rules, heartbeat keys and the sport filter of `odds_mcp.server.get_scheduled_jobs`; without one, compound job names stay bare ([job-registry](../scheduling/job-registry.md#compound-job-names)).
 3. Add an entry to `odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS`.
    - The decision engine skips runs inside the window ([decision-engine](../scheduling/decision-engine.md#overnight-windows)).
 4. If OddsPortal covers it, add a `odds_lambda.jobs.fetch_oddsportal.LeagueSpec` to `odds_lambda.jobs.fetch_oddsportal.LEAGUE_SPECS`, with the sport's OddsPortal `league` slug, `listing_path`, `sport_key`, `sport_title` and markets that are keys of `odds_lambda.oddsportal_client.FEED_MARKETS` (a market not in that table needs a new `odds_lambda.oddsportal_client.FeedMarketSpec` row first; a sport whose totals or spreads line differs per game uses a ladder row, and its feed scopes and line values (`handicapValue`, not the lossy key) are probed on a live game first, [ladder markets](oddsportal-scraper.md#ladder-markets)).
