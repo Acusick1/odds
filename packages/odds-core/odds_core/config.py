@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from odds_core.sports import SportKey
@@ -184,6 +184,7 @@ class SchedulerConfig(BaseSettings):
             "fetch-mlb-probables",
             "fetch-injuries",
             "run-candidates",
+            "backup-database",
         ],
         description="Jobs to bootstrap when starting the local scheduler",
     )
@@ -299,6 +300,8 @@ class AlertConfig(BaseSettings):
             # 14 h, plus 1 h slack.
             "fetch-injuries-nba": 15,
             "check-health": 2,
+            # Daily cron, plus slack.
+            "backup-database": 26,
         },
         description="Max hours between job completions before alerting (job_name -> hours)",
     )
@@ -386,6 +389,37 @@ class BetfairConfig(BaseSettings):
         return self
 
 
+class BackupConfig(BaseSettings):
+    """Nightly production database backup and its off-host copy."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="BACKUP_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+        populate_by_name=True,
+    )
+
+    remote: str | None = Field(
+        default=None,
+        description="rclone destination for nightly dumps, e.g. 'r2:odds-backups'; unset skips the job",
+    )
+    dir: Path = Field(
+        default=Path.home() / "backups",
+        validation_alias="ODDS_BACKUP_DIR",
+        description="Local directory scripts/backup-prod-db.sh writes dumps to",
+    )
+    keep_daily: int = Field(default=14, ge=1, description="Days whose newest nightly dump is kept")
+    keep_weekly: int = Field(
+        default=8, ge=0, description="ISO weeks whose newest nightly dump is kept"
+    )
+
+    @field_validator("dir", mode="after")
+    @classmethod
+    def _expand_home(cls, value: Path) -> Path:
+        return value.expanduser()
+
+
 class LoggingConfig(BaseSettings):
     """Logging configuration."""
 
@@ -431,6 +465,7 @@ class Settings(BaseSettings):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     polymarket: PolymarketConfig = Field(default_factory=PolymarketConfig)
     betfair: BetfairConfig = Field(default_factory=BetfairConfig)
+    backup: BackupConfig = Field(default_factory=BackupConfig)
 
     @property
     def alerts_deliverable(self) -> bool:
