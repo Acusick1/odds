@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
@@ -31,6 +32,17 @@ class TradeResult(str, Enum):
     LOSS = "loss"
     PUSH = "push"
     VOID = "void"
+
+
+@dataclass(frozen=True)
+class SharpReading:
+    """The sharp market's devigged probability of a selection, with the book and snapshot time of
+    the selection's own sharp price; the other outcomes it is devigged against may come from
+    another book or snapshot."""
+
+    bookmaker: str
+    snapshot_time: datetime
+    probability: float
 
 
 class CandidateDecision(SQLModel, table=True):
@@ -126,6 +138,23 @@ class PaperTrade(SQLModel, table=True):
         foreign_key="candidate_decisions.id",
         index=True,
         description="The scheduled-run decision that placed this bet; null for the agent's bets",
+    )
+
+    # Sharp market at placement; null when no sharp reading was taken or none was found
+    sharp_probability: float | None = Field(
+        default=None, description="Devigged sharp probability of the selection at placement"
+    )
+    sharp_bookmaker: str | None = Field(
+        default=None, description="Sharp book that priced the selection"
+    )
+    sharp_snapshot_time: datetime | None = Field(
+        sa_column=Column(DateTime(timezone=True)),
+        default=None,
+        description="Time of the snapshot the sharp book's price is from",
+    )
+    sharp_spread: float | None = Field(
+        default=None,
+        description="Implied probability of price_decimal minus sharp_probability",
     )
 
     # Agent reasoning

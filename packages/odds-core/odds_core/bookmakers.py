@@ -15,6 +15,8 @@ PREDICTION_MARKET_BOOKMAKERS: frozenset[str] = frozenset({"polymarket"})
 ZERO_MARGIN_BOOKMAKERS: frozenset[str] = EXCHANGE_BOOKMAKERS | PREDICTION_MARKET_BOOKMAKERS
 # Venues a UK bettor cannot bet on, so never a retail price to find edges against.
 NON_BETTABLE_BOOKMAKERS: frozenset[str] = frozenset({"pinnacle", "polymarket"})
+# The sharp books the agent's tools read a sharp price from, in priority order.
+SHARP_BOOKMAKERS: tuple[str, ...] = ("pinnacle", "betfair_exchange")
 
 # Keys different sources use for one book, mapped to the key used everywhere else.
 BOOKMAKER_ALIASES: dict[str, str] = {

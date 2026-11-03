@@ -15,7 +15,7 @@ from fastmcp import FastMCP
 from odds_analytics.candidate_report import CandidateSummary, candidate_report
 from odds_analytics.utils import per_book_market_holds
 from odds_core.agent_wakeup_models import AgentWakeup
-from odds_core.bookmakers import NON_BETTABLE_BOOKMAKERS
+from odds_core.bookmakers import NON_BETTABLE_BOOKMAKERS, SHARP_BOOKMAKERS
 from odds_core.candidates import candidates_dir, load_candidates
 from odds_core.database import async_session_maker
 from odds_core.match_brief_models import BriefDecision, MatchBrief, SharpPriceMap
@@ -42,6 +42,7 @@ from odds_mcp.prices import (
     latest_book_prices,
     latest_priced_snapshot,
     resolve_sharp_prices,
+    selection_sharp_reading,
 )
 from odds_mcp.tools.epl import epl_mcp
 from odds_mcp.tools.mlb import mlb_mcp
@@ -62,9 +63,8 @@ mcp = FastMCP(
 # Re-export canonical lookup built where LEAGUE_SPECS is defined
 _LEAGUE_SPEC_BY_NAME = LEAGUE_SPEC_BY_NAME
 
-# Hybrid sharp reference matching production defaults.
-# Duplicated from feature_extraction.py DEFAULT_SHARP_BOOKMAKERS with EPL-specific overrides — keep in sync.
-_DEFAULT_SHARP_BOOKMAKERS = ["pinnacle", "betfair_exchange"]
+# How far before placement paper_bet looks for the sharp price it records.
+PLACEMENT_SHARP_LOOKBACK_HOURS = 24.0
 
 
 def _coerce_bookmaker_list(value: str | list[str] | None) -> list[str] | None:
@@ -148,6 +148,12 @@ def _trade_to_dict(trade: PaperTrade) -> dict[str, Any]:
         "candidate_name": trade.candidate_name,
         "candidate_version": trade.candidate_version,
         "git_sha": trade.git_sha,
+        "sharp_probability": trade.sharp_probability,
+        "sharp_bookmaker": trade.sharp_bookmaker,
+        "sharp_snapshot_time": (
+            trade.sharp_snapshot_time.isoformat() if trade.sharp_snapshot_time else None
+        ),
+        "sharp_spread": trade.sharp_spread,
     }
 
 
@@ -552,6 +558,17 @@ async def paper_bet(
             portfolio = await get_portfolio_summary(session)
             bankroll = portfolio.current_bankroll
 
+        sharp = await selection_sharp_reading(
+            session,
+            event,
+            market,
+            selection,
+            None,
+            SHARP_BOOKMAKERS,
+            PLACEMENT_SHARP_LOOKBACK_HOURS,
+            datetime.now(UTC),
+        )
+
         try:
             trade = await place_trade(
                 session,
@@ -566,6 +583,7 @@ async def paper_bet(
                 confidence=confidence,
                 candidate_name=candidate_name,
                 candidate_version=candidate_version,
+                sharp=sharp,
             )
             await session.commit()
         except ValueError as e:
@@ -710,7 +728,7 @@ async def save_match_brief(
                 session,
                 event,
                 Market(market),
-                _DEFAULT_SHARP_BOOKMAKERS,
+                SHARP_BOOKMAKERS,
                 24.0,
                 latest_snapshot.snapshot_time,
             )
@@ -926,7 +944,7 @@ async def find_retail_edges(
         by ``z_score`` ascending — more-negative first — then ``book``,
         ``outcome``, and ``point`` for full determinism).
     """
-    sharp_bms = _coerce_bookmaker_list(sharp_bookmakers) or _DEFAULT_SHARP_BOOKMAKERS
+    sharp_bms = _coerce_bookmaker_list(sharp_bookmakers) or list(SHARP_BOOKMAKERS)
 
     async with async_session_maker() as session:
         reader = OddsReader(session)
