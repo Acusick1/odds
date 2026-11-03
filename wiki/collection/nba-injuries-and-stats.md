@@ -1,8 +1,15 @@
 ---
 type: reference
-title: NBA injury reports, game logs and player stats
+title: NBA schedule, injury reports, game logs and player stats
 description: "The NBA injury-report job and the manual feeds (stats.nba.com game logs, PBPStats player stats): sources, CLIs, writers and event matching."
 sources:
+  - odds_lambda.espn_nba_schedule
+  - odds_lambda.espn_nba_schedule.sync_schedule
+  - odds_lambda.espn_nba_schedule.sync_upcoming
+  - odds_lambda.espn_nba_schedule.SETTLE_DAYS
+  - odds_lambda.espn_nba_schedule.UPCOMING_DAYS
+  - odds_lambda.jobs.fetch_espn_fixtures.main
+  - odds_cli.commands.events.sync_nba_games
   - odds_core.injury_models.InjuryReport
   - odds_lambda.injury_fetcher.fetch_injury_report
   - odds_lambda.injury_fetcher.fetch_latest_injury_report
@@ -36,9 +43,9 @@ sources:
 status: stable
 ---
 
-# NBA injury reports, game logs and player stats
+# NBA schedule, injury reports, game logs and player stats
 
-Three NBA feeds. Only the injury reports are scheduled, by `fetch-injuries-nba` ([the job](#the-fetch-injuries-job)); game logs and player stats are manual CLIs. The rest of scheduled NBA collection is prices ([fetch-oddsportal-job](fetch-oddsportal-job.md#leagues), [betfair-exchange](betfair-exchange.md)) ([project-overview](../foundations/project-overview.md)). The feature groups built on these tables are in [feature-groups](../modelling/feature-groups.md).
+ESPN supplies the [schedule and settlement](#nba-schedule-from-espn). Of the three context feeds below, only injury reports are scheduled, by `fetch-injuries-nba` ([the job](#the-fetch-injuries-job)); game logs and player stats are manual CLIs. Current scheduled collection is listed in the [deployment matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs). The feature groups built on these tables are in [feature-groups](../modelling/feature-groups.md).
 
 | | Injury reports | Game logs | Player stats |
 |---|---|---|---|
@@ -46,6 +53,19 @@ Three NBA feeds. Only the injury reports are scheduled, by `fetch-injuries-nba` 
 | Source | official NBA PDFs via `nbainjuries` | stats.nba.com LeagueGameFinder | `api.pbpstats.com/get-totals/nba` |
 | Writer / key | `odds_lambda.storage.injury_writer.InjuryWriter.upsert_injury_reports`, `uq_injury_report_time_team_player_date` (`report_time, team, player_name, game_date`) | `odds_lambda.storage.game_log_writer.GameLogWriter.upsert_game_logs`, `uq_game_log_game_team` (`nba_game_id, team_id`) | `odds_lambda.storage.pbpstats_writer.PbpStatsWriter.upsert_player_stats`, `uq_player_season_stats_player_season` (`player_id, season`) |
 | Collection | `fetch-injuries-nba` job; CLI `odds injuries fetch\|backfill\|status` | CLI `odds nba-stats fetch\|status` | CLI `odds pbpstats fetch\|backfill\|status` |
+
+## NBA schedule from ESPN
+
+NBA has no published schedule the other collectors can read, and no job created its events: Polymarket creates none, the Odds API `/events` lists only games it prices and live OddsPortal and Betfair create events only for listed games, so the NBA collectors would stay dormant ([dormancy](../scheduling/decision-engine.md#dormancy)) and a played game would have no event for the backfill. ESPN's public NBA scoreboard (`odds_lambda.espn_nba_schedule`, one request per US game day) lists every game with its kick-off, final score and an id:
+
+- `odds_lambda.jobs.fetch_espn_fixtures.main` runs it for `basketball_nba` as `fetch-espn-fixtures-nba` (daily cron, `fetch-espn-fixtures-nba` in `odds_core.config.AlertConfig.heartbeat_expectations`). `odds_lambda.espn_nba_schedule.sync_upcoming` covers the last `odds_lambda.espn_nba_schedule.SETTLE_DAYS` days and the next `odds_lambda.espn_nba_schedule.UPCOMING_DAYS`. The events it creates are NBA's published schedule: the stored-event lookup of the collectors sees them, so `odds_lambda.collection_calendar.published_schedule_kickoff` has no NBA table to read. The NBA injury-report job schedules from the same stored events ([NBA injuries](nba-injuries-and-stats.md#the-fetch-injuries-job)). A run fails, alerting, when any game failed after the others are stored, and warns when ESPN lists no game.
+- Each game goes through `odds_lambda.storage.event_resolver.resolve_event` as a game of source `espn` with ESPN's event id as its external id ([resolver](../storage/event-resolver.md)). A game another source already created is matched within ±2 h and gains the ESPN id; a rerun matches the event it made. ESPN ranks last in the NBA kick-off authority order (`odds_lambda.storage.event_kickoff.KICKOFF_AUTHORITY`), so it moves only an event that holds no OddsPortal or Odds API id, which lets an event only ESPN knows follow a reschedule.
+- A finished game (`STATUS_FINAL`) also sets its event FINAL with the score through `odds_lambda.storage.writers.OddsWriter.update_event_status`, which the backfill requires, and a `STATUS_POSTPONED` or `STATUS_CANCELED` game sets POSTPONED or CANCELLED. This is the only NBA settlement on a schedule, and `odds_lambda.health_monitor.UNSETTLED_SPORTS` includes NBA.
+- The scoreboard also lists games that are not events to create, and `odds_lambda.espn_nba_schedule.parse_scoreboard` skips them: preseason games, games whose start ESPN marks invalid, and any game with a side outside the 30 teams (`odds_lambda.polymarket_matching.canonical_nba_team`), which covers NBA Cup "TBD @ TBD" placeholders and All-Star teams. A placeholder would take the real game's ESPN id and keep its event.
+- Team names go through `odds_core.team.normalize_team_name`, so ESPN's `LA Clippers` becomes `Los Angeles Clippers`.
+- `odds events sync-nba-games` (`odds_cli.commands.events.sync_nba_games`, which calls `odds_lambda.espn_nba_schedule.sync_schedule`) covers an arbitrary range for the backfill: `--since` (required) and `--until` (default today). Without `--apply` each game is rolled back, and a transaction holds one game.
+
+For Polymarket history, sync the season so far before `odds polymarket backfill-odds --sport basketball_nba` ([backfill](polymarket-odds-snapshots.md#backfill)).
 
 ## Injury reports
 
@@ -57,7 +77,7 @@ League-wide injury report snapshots parsed from the official PDFs by `nbainjurie
 
 ## The fetch-injuries job
 
-`odds_lambda.jobs.fetch_injuries.main` runs as `fetch-injuries-nba` (per sport, NBA only through its `odds_lambda.scheduling.jobs._JOB_SPORTS` entry, in the default `bootstrap_jobs`). It self-schedules from the stored NBA events, which `fetch-espn-fixtures-nba` creates ([NBA schedule](polymarket-odds-snapshots.md#nba-schedule-from-espn)), through `odds_lambda.collection_calendar.decide_collection_run` with `stored_only` ([dormancy](../scheduling/decision-engine.md#dormancy)).
+`odds_lambda.jobs.fetch_injuries.main` runs as `fetch-injuries-nba` (per sport, NBA only through its `odds_lambda.scheduling.jobs._JOB_SPORTS` entry, in the default `bootstrap_jobs`). It self-schedules from the stored NBA events, which `fetch-espn-fixtures-nba` creates ([NBA schedule](#nba-schedule-from-espn)), through `odds_lambda.collection_calendar.decide_collection_run` with `stored_only` ([dormancy](../scheduling/decision-engine.md#dormancy)).
 
 - **Schedule.** `odds_lambda.jobs.fetch_injuries.CADENCE` is 6 h at every tier, so with the NBA overnight window (07:00 to 15:00 UTC) the first cadence run of a game day is when the window ends, 15:00 UTC, and one runs about every 6 h after. `odds_lambda.jobs.fetch_injuries.LEADS` adds a run 2 h and one 30 min before each kickoff ([lead runs](../scheduling/decision-engine.md#lead-runs)); games with the same tip-off share them, so a game day costs about 10 to 15 runs. The 2 h run catches the report once most starters' status is filed, and the 30 min run the last slot published before tip-off. A run books its next one before it fetches.
 - **Fetch.** `odds_lambda.injury_fetcher.fetch_latest_injury_report` takes the newest quarter-hour slot at or before the run and steps back up to `odds_lambda.jobs.fetch_injuries.MAX_SLOTS_BACK` slots (6 h) when a slot is not published (a slot appears a few minutes after its time, and the NBA has stopped publishing for hours, on 2026-10-30 from 06:15 to 15:45 ET) and over a slot whose PDF fails to parse, as one still uploading does. `nbainjuries` reports a network error or a 403 as "not published". `odds_lambda.injury_fetcher.fetch_latest_injury_report_isolated` runs it in a child process (`python -m odds_lambda.injury_fetcher`), because JPype cannot restart a JVM and one started from an executor thread kept the interpreter from exiting in testing; the child is killed on a timeout (`odds_lambda.injury_fetcher.SUBPROCESS_TIMEOUT_SECONDS`) or a cancelled run, and its logs reach the scheduler's, far inside `odds_lambda.scheduling.runner.JOB_TIMEOUT`.
