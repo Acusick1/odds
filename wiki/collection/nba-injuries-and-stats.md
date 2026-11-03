@@ -56,7 +56,7 @@ ESPN supplies the [schedule and settlement](#nba-schedule-from-espn). Of the thr
 
 ## NBA schedule from ESPN
 
-NBA has no published schedule the other collectors can read, and no job created its events: Polymarket creates none, the Odds API `/events` lists only games it prices and live OddsPortal and Betfair create events only for listed games, so the NBA collectors would stay dormant ([dormancy](../scheduling/decision-engine.md#dormancy)) and a played game would have no event for the backfill. ESPN's public NBA scoreboard (`odds_lambda.espn_nba_schedule`, one request per US game day) lists every game with its kick-off, final score and an id:
+ESPN supplies NBA fixtures independently of priced listings: Polymarket creates no events, the Odds API `/events` lists only games it prices, and live OddsPortal and Betfair create events only for listed games. Stored fixtures wake the NBA collectors from [dormancy](../scheduling/decision-engine.md#dormancy) and give played games an event for backfill. ESPN's public NBA scoreboard (`odds_lambda.espn_nba_schedule`, one request per US game day) lists every game with its kick-off, final score and an id:
 
 - `odds_lambda.jobs.fetch_espn_fixtures.main` runs it for `basketball_nba` as `fetch-espn-fixtures-nba` (daily cron, `fetch-espn-fixtures-nba` in `odds_core.config.AlertConfig.heartbeat_expectations`). `odds_lambda.espn_nba_schedule.sync_upcoming` covers the last `odds_lambda.espn_nba_schedule.SETTLE_DAYS` days and the next `odds_lambda.espn_nba_schedule.UPCOMING_DAYS`. The events it creates are NBA's published schedule: the stored-event lookup of the collectors sees them, so `odds_lambda.collection_calendar.published_schedule_kickoff` has no NBA table to read. The NBA injury-report job schedules from the same stored events ([NBA injuries](nba-injuries-and-stats.md#the-fetch-injuries-job)). A run fails, alerting, when any game failed after the others are stored, and warns when ESPN lists no game.
 - Each game goes through `odds_lambda.storage.event_resolver.resolve_event` as a game of source `espn` with ESPN's event id as its external id ([resolver](../storage/event-resolver.md)). A game another source already created is matched within ±2 h and gains the ESPN id; a rerun matches the event it made. ESPN ranks last in the NBA kick-off authority order (`odds_lambda.storage.event_kickoff.KICKOFF_AUTHORITY`), so it moves only an event that holds no OddsPortal or Odds API id, which lets an event only ESPN knows follow a reschedule.
@@ -65,7 +65,7 @@ NBA has no published schedule the other collectors can read, and no job created 
 - Team names go through `odds_core.team.normalize_team_name`, so ESPN's `LA Clippers` becomes `Los Angeles Clippers`.
 - `odds events sync-nba-games` (`odds_cli.commands.events.sync_nba_games`, which calls `odds_lambda.espn_nba_schedule.sync_schedule`) covers an arbitrary range for the backfill: `--since` (required) and `--until` (default today). Without `--apply` each game is rolled back, and a transaction holds one game.
 
-For Polymarket history, sync the season so far before `odds polymarket backfill-odds --sport basketball_nba` ([backfill](polymarket-odds-snapshots.md#backfill)).
+For Polymarket history, sync the season so far before `odds polymarket backfill-odds --sport basketball_nba` ([backfill](polymarket-odds-snapshots.md#backfill-command)).
 
 ## Injury reports
 

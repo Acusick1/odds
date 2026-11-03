@@ -22,11 +22,11 @@ The wiki is the documentation ([SCHEMA](../SCHEMA.md)); [README.md](../../README
 | Topic | Authoritative source |
 |---|---|
 | Settings and defaults | `odds_core.config`; [Configuration](configuration.md#sections) owns the field map and template rules. |
-| CLI flags and defaults | Each command's `--help`; [CLI reference](odds-cli.md#shared-flags). |
+| CLI flags and defaults | Each command's `--help`; [CLI reference](odds-cli.md#shared-conventions). |
 | Jobs and deployment | [Deployment matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs) owns the source map and operational status. |
 | Alerting and reporting | [Alerts](../operations/alerts.md#delivery) and [reporting surfaces](../operations/reporting-surfaces.md#reporting-surfaces) cite their implementations. |
 | MCP toolset | Registered tool signatures and return shapes; [server catalogue](../agent/mcp-server.md#tool-catalogue-16). |
-| Agent behaviour | Prompt files in `packages/odds-mcp/agents/`; [betting agent](../agent/betting-agent.md#the-prompts-are-authoritative). |
+| Agent behaviour | Prompt files in `packages/odds-mcp/agents/`; [betting agent](../agent/betting-agent.md#prompts). |
 | Schema and storage | Model files, mainly `odds_core.models`; [storage table map](../storage/index.md#table-map). |
 | Training data, target and feature config | `odds_analytics.training.config.FeatureConfig` and `odds_analytics.feature_groups.prepare_training_data`; [feature pipeline](../modelling/feature-pipeline.md#feature-pipeline). Evidence lives in `experiments/results/` ([evaluation index](../evaluation/index.md#backtests-and-model-research)). |
 | Agent data sources | [Agent data sources](../agent/agent-data-sources.md#agent-data-sources-and-rejected-sources). |
