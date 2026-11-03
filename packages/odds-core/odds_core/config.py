@@ -8,6 +8,7 @@ from pathlib import Path
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from odds_core.job_specs import default_bootstrap_jobs, default_heartbeat_expectations
 from odds_core.sports import SportKey
 
 
@@ -158,7 +159,7 @@ class SchedulerConfig(BaseSettings):
 
     backend: str = Field(
         default="local",
-        description="Scheduler backend: 'aws', 'railway', or 'local'",
+        description="Scheduler backend: 'aws' or 'local'",
     )
     dry_run: bool = Field(
         default=False,
@@ -169,23 +170,7 @@ class SchedulerConfig(BaseSettings):
         description="How many days ahead to check for games when scheduling",
     )
     bootstrap_jobs: list[str] = Field(
-        default=[
-            # "agent-run",
-            "fetch-odds",
-            "fetch-scores",
-            "update-status",
-            "check-health",
-            "fetch-oddsportal",
-            "fetch-oddsportal-results",
-            "fetch-mlb-results",
-            "fetch-espn-fixtures",
-            "fetch-betfair-exchange",
-            "fetch-polymarket-odds",
-            "fetch-mlb-probables",
-            "fetch-injuries",
-            "run-candidates",
-            "backup-database",
-        ],
+        default_factory=default_bootstrap_jobs,
         description="Jobs to bootstrap when starting the local scheduler",
     )
 
@@ -269,40 +254,9 @@ class AlertConfig(BaseSettings):
     )
 
     # Job heartbeat monitoring: max hours between completions before alerting.
-    # Keys are compound job names matching EventBridge rules (e.g. "fetch-oddsportal-epl").
+    # Keys are persisted heartbeat identifiers, including the legacy bare names.
     heartbeat_expectations: dict[str, float] = Field(
-        default={
-            # Overnight windows (EPL 22-06 UTC, MLB 05-14 UTC, NBA 07-15 UTC) pause these jobs, so the
-            # allowed gap is the window plus the polling interval.
-            # The longest gaps between runs: the 48 h opening tier for fetch-odds-epl, the 24 h
-            # early, opening and no-game interval for fetch-odds-nba plus the 00:00-10:00 UTC
-            # quiet window that can push a run to 10:00 (gaps up to about 33 h), and the 12 h idle
-            # interval for fetch-scores, each plus slack. Only fetch-odds-nba pauses overnight.
-            "fetch-odds-epl": 49,
-            "fetch-odds-nba": 35,
-            "fetch-scores-epl": 13,
-            "fetch-oddsportal-epl": 11,
-            "fetch-oddsportal-results-epl": 26,
-            "fetch-oddsportal-mlb": 12,
-            "fetch-oddsportal-nba": 11,
-            "fetch-mlb-results": 26,
-            "fetch-mlb-probables": 30,
-            # Daily 06:00 UTC cron, plus slack.
-            "fetch-espn-fixtures": 26,
-            "fetch-espn-fixtures-nba": 26,
-            "fetch-betfair-exchange-epl": 10,
-            "fetch-betfair-exchange-mlb": 11,
-            "fetch-betfair-exchange-nba": 11,
-            "fetch-polymarket-odds-epl": 11,
-            "fetch-polymarket-odds-nba": 11,
-            # Lead runs restart the 6 h cadence, so the last run of a night can be as late as
-            # 01:00 UTC or later and the next is 15:00 UTC after the overnight window: up to
-            # 14 h, plus 1 h slack.
-            "fetch-injuries-nba": 15,
-            "check-health": 2,
-            # Daily cron, plus slack.
-            "backup-database": 26,
-        },
+        default_factory=default_heartbeat_expectations,
         description="Max hours between job completions before alerting (job_name -> hours)",
     )
 

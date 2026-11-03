@@ -1145,6 +1145,7 @@ def _schedule_stubs(
     )
     monkeypatch.setattr(module, decider, AsyncMock(return_value=decision))
     monkeypatch.setattr(scheduling_helpers, "self_schedule", AsyncMock())
+    monkeypatch.setattr("odds_lambda.scheduling.collection.self_schedule", AsyncMock())
     if hasattr(module, "self_schedule"):
         monkeypatch.setattr(module, "self_schedule", AsyncMock())
 

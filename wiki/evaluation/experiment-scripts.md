@@ -26,7 +26,7 @@ status: stable
 
 ## Results directories
 
-A results directory holds CSV tables, a `summary.json` and, for the retail-EV evaluation, a manifest ([retail-EV evaluation](retail-ev-evaluation.md#outputs)). The experiment page that reports a run links its directory. `experiments/results/` holds only some runs' outputs, so a missing results directory does not mean the run did not happen.
+A results directory holds CSV tables and a `summary.json`. The historical [price-only evaluation runs](exp-epl-retail-ev-price-only.md#rescored-by-the-evaluation-command) also retain manifests. The experiment page that reports a run links its directory. `experiments/results/` holds only some runs' outputs, so a missing results directory does not mean the run did not happen.
 
 ## Verification artifacts
 

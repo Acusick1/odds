@@ -729,7 +729,7 @@ class TestMain:
                 raised.append(f"{name}: {e}")
                 raise
 
-        monkeypatch.setattr(fetch_polymarket_odds, "job_alert_context", spy)
+        monkeypatch.setattr("odds_lambda.scheduling.collection.job_alert_context", spy)
         monkeypatch.setattr(
             fetch_polymarket_odds,
             "decide_collection_run",
@@ -739,7 +739,8 @@ class TestMain:
                 )
             ),
         )
-        monkeypatch.setattr(fetch_polymarket_odds, "self_schedule", AsyncMock())
+        book = AsyncMock()
+        monkeypatch.setattr("odds_lambda.scheduling.collection.self_schedule", book)
         monkeypatch.setattr(
             fetch_polymarket_odds, "async_session_maker", SessionMaker(pglite_async_session)
         )
@@ -757,7 +758,9 @@ class TestMain:
 
         assert len(alerts) == 1
         assert alerts[0].startswith("fetch-polymarket-odds-epl:")
-        assert fetch_polymarket_odds.self_schedule.await_count == 2
+        from odds_lambda.scheduling import collection
+
+        assert collection.self_schedule.await_count == 2
         log = (await pglite_async_session.execute(select(FetchLog))).scalar_one()
         assert log.success is False
         assert "gamma down" in (log.error_message or "")

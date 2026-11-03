@@ -732,6 +732,9 @@ class TestFindRetailEdges:
         # First-wins per (book, outcome, line), as latest_book_prices resolves them.
         book_prices = {(o.bookmaker, o.outcome_name, o.line): o for o in reversed(odds)}
 
+        window = MagicMock()
+        window.latest.return_value = book_prices
+        window.sharp.return_value = reader.sharp_result
         with (
             patch("odds_mcp.server.async_session_maker") as mock_session_maker,
             patch("odds_mcp.server.OddsReader", return_value=reader),
@@ -739,11 +742,7 @@ class TestFindRetailEdges:
                 "odds_mcp.server.latest_priced_snapshot",
                 AsyncMock(return_value=self._make_snapshot()),
             ),
-            patch("odds_mcp.server.latest_book_prices", AsyncMock(return_value=book_prices)),
-            patch(
-                "odds_mcp.server.resolve_sharp_prices",
-                AsyncMock(return_value=reader.sharp_result),
-            ),
+            patch("odds_mcp.server.load_market_window", AsyncMock(return_value=window)),
         ):
             mock_session_maker.return_value.__aenter__ = AsyncMock()
             mock_session_maker.return_value.__aexit__ = AsyncMock()

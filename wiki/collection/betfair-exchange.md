@@ -3,6 +3,7 @@ type: reference
 title: Betfair Exchange client and job
 description: "The Betfair client, cert loading and adapter, the fetch-betfair-exchange job's cadence and where it runs, and what price is actually stored as betfair_exchange."
 sources:
+  - odds_core.job_specs.JOB_SPECS
   - odds_lambda.betfair.client.BetfairExchangeClient
   - odds_lambda.betfair.adapter.betfair_book_to_bookmaker_entry
   - odds_lambda.betfair.adapter.totals_runner
@@ -15,7 +16,7 @@ sources:
   - odds_lambda.betfair.kickoff.MAX_BETFAIR_START_LEAD
   - odds_lambda.betfair.kickoff.next_close_target
   - odds_lambda.jobs.fetch_betfair_exchange.CLOSE_LEAD
-  - odds_lambda.scheduling.jobs._JOB_SPORTS
+  - odds_core.job_specs.JOB_SPECS
   - odds_core.config.BetfairConfig
   - deployment/aws/terraform/lambda.tf
   - deployment/aws/terraform/eventbridge.tf
@@ -42,10 +43,12 @@ Package `packages/odds-lambda/odds_lambda/betfair/`, driven by the fetch-betfair
 
 ### Where it runs
 
-- Production (local scheduler): in the default `bootstrap_jobs`, self-scheduling for every sport in `odds_lambda.betfair.constants.SPORT_CONFIG` (its `odds_lambda.scheduling.jobs._JOB_SPORTS` allowlist is derived from that map, as the `fetch-polymarket-odds` allowlist is from the keys of `odds_lambda.polymarket_sports.POLYMARKET_SPORTS`; other allowlists, such as EPL-only `fetch-oddsportal-results`, NBA-only `fetch-injuries` and `fetch-odds` (EPL and NBA), are written out). A scheduler restart keeps the pending run; with none, bootstrap runs the job once to start the chain ([bootstrap](../scheduling/local-scheduler.md#bootstrap-jobs-and-cron-table)).
+- Production (local scheduler): in the default `bootstrap_jobs`, self-scheduling for every sport in `odds_lambda.betfair.constants.SPORT_CONFIG` (its `odds_core.job_specs.JOB_SPECS` allowlist is derived from that map, as the `fetch-polymarket-odds` allowlist is from the keys of `odds_lambda.polymarket_sports.POLYMARKET_SPORTS`; other allowlists, such as EPL-only `fetch-oddsportal-results`, NBA-only `fetch-injuries` and `fetch-odds` (EPL and NBA), are written out). A scheduler restart keeps the pending run; with none, bootstrap runs the job once to start the chain ([bootstrap](../scheduling/local-scheduler.md#bootstrap-jobs-and-cron-table)).
 - AWS (dormant): per-sport rule on the AWS Lambda function (`deployment/aws/terraform/eventbridge.tf`), created only when Terraform `betfair_enabled` is true (default false); Betfair credentials and SSM cert parameter names are set in `deployment/aws/terraform/lambda.tf` ([aws-infrastructure](../operations/aws-infrastructure.md)). The dev deploy invokes `fetch-betfair-exchange-epl` as a smoke test ([ci-cd-workflows](../operations/ci-cd-workflows.md)).
 
 ### Flow
+
+Scheduling follows the [shared collector lifecycle](../scheduling/self-scheduling.md#pattern). Betfair resolves certificates after the active decision, outside the alert context, and postbooks after a successful heartbeat.
 
 1. Resolve the target sport: `ctx.sport` is required (`odds_lambda.scheduling.jobs.require_sport`), and a sport outside `odds_lambda.betfair.constants.SPORT_CONFIG` logs `betfair_unknown_sport` and returns.
 2. Pre-schedule with `odds_lambda.collection_calendar.decide_collection_run` and `odds_lambda.jobs.fetch_betfair_exchange.CADENCE`: 15 min under 3 h, 30 min at 3-12 h, 2 h beyond, 1 h database fallback. With no fixture within 28 days the run is dormant: a 6 h check-in, its heartbeat, no login, the same decision for every collector ([dormancy](../scheduling/decision-engine.md#dormancy)). Its lead `odds_lambda.jobs.fetch_betfair_exchange.CLOSE_LEAD` (5 min) moves the next run to 5 min before a kickoff whenever the cadence would step past that time, or to straight away when a run that started before that time finished after it and the kickoff is still ahead (the job passes its start time as `run_started`), so every kickoff gets a snapshot at the last [ADR-0012](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md) decision time, inside the live close window. The job passes `odds_lambda.betfair.kickoff.next_betfair_kickoff` as its kickoff lookup, so the cadence and the close run also count the Betfair start in the `market_start_time` of an event's latest stored `betfair` match odds snapshot (`odds_core.models.OddsSnapshot`, found by its integer `event_id`; other markets' starts are not read) while it is still ahead and earlier than `commence_time` (`odds_lambda.betfair.kickoff.next_close_target`). Betfair can turn a market in play at its own start, an hour before first pitch for the 2026-10-24 World Series game (inferred from the job's logs), so a close run lands before the market goes in play; once that start passes, the event's `commence_time` is the target again and keeps its own close run. A Betfair start more than `odds_lambda.betfair.kickoff.MAX_BETFAIR_START_LEAD` (3 h) before `commence_time` is ignored as a mismatched listing, a later one never delays a run, and a missing one counts as none. Only the snapshots of events starting within 3 h of the next one are read. The run before an earlier Betfair start is still more than `odds_core.close.LIVE_CLOSE_WINDOW` before `commence_time` when the gap exceeds 30 min, so it is not the [close](../modelling/clv-target-functions.md#retail-ev-rows) (`odds_core.close.is_live_close`). The sport's overnight window applies to the cadence, not to the close run ([lead runs](../scheduling/decision-engine.md#lead-runs)).

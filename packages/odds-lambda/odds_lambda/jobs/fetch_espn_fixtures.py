@@ -14,7 +14,7 @@ Flow:
    events are scheduled. Rows fetched before a failure are upserted first.
 
 Scheduler cadence is a fixed daily cron (06:00 UTC, pre-matchday) in
-``_JOB_CRON_MAP`` — the ESPN endpoint is free and unauthenticated so no
+``JobSpec.cron`` — the ESPN endpoint is free and unauthenticated so no
 proximity-based gating is needed.
 """
 
@@ -28,6 +28,7 @@ from odds_core.alerts import send_job_warning
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_core.epl_data_models import EspnFixtureRecord
+from odds_core.job_specs import heartbeat_name
 from odds_core.models import Event, EventStatus
 
 from odds_lambda.collection_calendar import EmptyCollectionError, event_calendar
@@ -80,7 +81,7 @@ async def main(ctx: JobContext) -> None:
         sport=SPORT_KEY,
     )
 
-    async with job_alert_context("fetch-espn-fixtures"):
+    async with job_alert_context(heartbeat_name("fetch-espn-fixtures", sport)):
         past_count, upcoming_count, total = await _fetch_and_upsert(season)
         logger.info(
             "fetch_espn_fixtures_completed",

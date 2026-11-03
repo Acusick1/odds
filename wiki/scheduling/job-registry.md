@@ -1,17 +1,12 @@
 ---
 type: reference
 title: Job registry
-description: Which jobs exist in the registry, the bootstrap and smoke maps, which jobs are per sport and how compound names are built, and what JobContext carries.
+description: Which jobs exist in the registry, bootstrap and smoke policies, which jobs are per sport and how compound names are built, and what JobContext carries.
 sources:
-  - odds_lambda.scheduling.jobs._JOB_MODULE_MAP
-  - odds_lambda.scheduling.jobs._JOB_BOOTSTRAP_MAP
-  - odds_lambda.scheduling.jobs._PER_SPORT_JOBS
-  - odds_lambda.scheduling.jobs._JOB_CRON_MAP
-  - odds_lambda.scheduling.jobs._JOB_SPORTS
+  - odds_core.job_specs
+  - odds_core.job_specs.JOB_SPECS
   - odds_lambda.scheduling.jobs.get_job_sports
   - odds_lambda.scheduling.jobs.resolve_target_sports
-  - odds_lambda.scheduling.jobs._SMOKE_UNSAFE_JOBS
-  - odds_lambda.scheduling.jobs._PAID_API_JOBS
   - odds_lambda.scheduling.jobs._SPORT_SUFFIX_MAP
   - odds_lambda.scheduling.jobs.JobContext
   - odds_lambda.scheduling.jobs.get_job_function
@@ -24,22 +19,24 @@ status: stable
 
 # Job registry
 
-`odds_lambda.scheduling.jobs` is the source of truth for which jobs exist and, in `odds_lambda.scheduling.jobs._JOB_SPORTS`, which sports each per-sport job takes (`fetch-espn-fixtures`: EPL and NBA; `fetch-injuries`: NBA). It is a different thing from the `odds_lambda/jobs/` package that holds the job modules, so imports of "jobs" are ambiguous. Where each registered job runs is on [Where each job runs](job-deployment-matrix.md#where-each-job-runs).
+`odds_core.job_specs.JOB_SPECS` contains immutable `odds_core.job_specs.JobSpec` records. Each record owns the entry point, sport routing, bootstrap default and override, smoke side effects, forward cadence, static cron and heartbeat identifiers. Core stores module names without importing runtime code; `odds_lambda.scheduling.jobs` resolves names and imports entry points lazily. [Where each job runs](job-deployment-matrix.md#where-each-job-runs) covers deployment.
 
 ## Registry
 
-- `_JOB_MODULE_MAP`: job name to `(module path, "main")` for 15 jobs: `fetch-odds`, `fetch-scores`, `update-status`, `check-health`, `fetch-oddsportal`, `fetch-oddsportal-results`, `fetch-mlb-results`, `agent-run`, `fetch-espn-fixtures`, `fetch-betfair-exchange`, `fetch-polymarket-odds`, `fetch-mlb-probables`, `fetch-injuries`, `run-candidates`, `backup-database`.
-- `odds_lambda.scheduling.jobs.get_job_function` imports the module on first use and caches it.
-- `_JOB_BOOTSTRAP_MAP`: jobs whose local bootstrap uses a different function; only `agent-run` (`odds_lambda.jobs.agent_run.schedule_next`). `odds_lambda.scheduling.jobs.get_bootstrap_function` wraps it to the `(JobContext)` signature. As a result `odds scheduler start` never launches the agent run itself; it only books its next wake-up.
-- `_SMOKE_UNSAFE_JOBS` (`agent-run`), `_CANDIDATE_JOBS` (`run-candidates`) and `_PAID_API_JOBS` (`fetch-odds`, `fetch-scores`) drive [`odds scheduler smoke`](local-scheduler.md#cli); smoke skips them unless `--include-agent`, `--include-candidates` and `--include-paid-api` respectively.
-- `_JOB_CRON_MAP` maps each local cron job (`fetch-espn-fixtures`, `fetch-mlb-probables` and `backup-database`) to its cron expression; a self-scheduling job has no entry ([cron table](local-scheduler.md#bootstrap-jobs-and-cron-table)). At import the registry asserts every `_JOB_CRON_MAP` key is a registered job.
-- `_JOB_SPORTS` (`fetch-odds` allows EPL and NBA, `fetch-scores` EPL) maps a per-sport job, cron or self-scheduling, to the sports it may run for; `odds_lambda.scheduling.jobs.get_job_sports` returns `None` for a job with no entry, and `odds_lambda.scheduling.jobs.resolve_target_sports` then falls back to every configured sport; otherwise it keeps the configured sports that are in the allowlist. At import the registry asserts every `_JOB_SPORTS` key is in `_PER_SPORT_JOBS`.
+- `module` and `function` identify the normal entry point. `odds_lambda.scheduling.jobs.get_job_function` imports it on first use and caches the function.
+- `bootstrap_function` optionally names a different function in the same module. `odds_lambda.scheduling.jobs.get_bootstrap_function` adapts it to `odds_lambda.scheduling.jobs.JobContext`; `agent-run` books its next wake-up through `odds_lambda.jobs.agent_run.schedule_next`.
+- `bootstrap` controls membership in `odds_core.job_specs.default_bootstrap_jobs`. `odds_core.config.SchedulerConfig.bootstrap_jobs` remains the operator override, including an explicitly empty list.
+- `agent_trades`, `candidate_trades` and `paid_api` drive the separate smoke opt-ins `--include-agent`, `--include-candidates` and `--include-paid-api` ([CLI](local-scheduler.md#cli)).
+- `cron` gives the fixed local schedule. A self-scheduling job leaves it unset; bootstrap otherwise replaces its pending run with that cron.
+- `per_sport` controls compound naming. `sports` optionally restricts configured sports through an explicit tuple or a lazy `odds_core.job_specs.SportMap` reference to the adapter's authoritative map; `odds_lambda.scheduling.jobs.resolve_target_sports` intersects the allowlist with the operator's configured sports. An unrestricted job runs for every configured sport.
+- `cadence` holds the default forward polling intervals; `sport_cadences` supplies sport overrides. `odds_core.job_specs.job_cadence` selects them without runtime imports. Runtime `odds_lambda.scheduling.decision.CadenceConfig` adds tier lookup to the core value record.
+- `heartbeats` carries exact persisted identifiers, allowed hours and sports. `odds_core.job_specs.default_heartbeat_expectations` supplies defaults to `odds_core.config.AlertConfig.heartbeat_expectations`; that setting remains an independent operator override.
 
 ## Compound job names
 
-`_PER_SPORT_JOBS` lists the jobs that take a sport: `fetch-odds`, `fetch-scores`, `fetch-oddsportal`, `fetch-oddsportal-results`, `agent-run`, `fetch-espn-fixtures`, `fetch-betfair-exchange`, `fetch-polymarket-odds`, `fetch-mlb-probables`, `fetch-injuries`, `run-candidates`. `update-status`, `check-health`, `fetch-mlb-results` and `backup-database` are global.
+`odds_lambda.scheduling.jobs._SPORT_SUFFIX_MAP` maps sport keys to `epl`, `mlb` and `nba`. `odds_lambda.scheduling.jobs.make_compound_job_name("fetch-odds", "soccer_epl")` returns `fetch-odds-epl`, the EventBridge rule suffix and APScheduler schedule id; `odds_lambda.scheduling.jobs.resolve_job_name` reverses it. An unknown sport suffix keeps the bare name; a per-sport job given no sport raises `ValueError`.
 
-`_SPORT_SUFFIX_MAP` knows `epl` (`soccer_epl`), `mlb` (`baseball_mlb`) and `nba` (`basketball_nba`). `odds_lambda.scheduling.jobs.make_compound_job_name("fetch-odds", "soccer_epl")` returns `fetch-odds-epl`, which is the EventBridge rule suffix and the APScheduler schedule id; `odds_lambda.scheduling.jobs.resolve_job_name` reverses it. A sport with no suffix yields the bare job name, but a per-sport job given no sport raises `ValueError`, because the bare name matches no schedule. The compound name must equal the rule name, or a reschedule goes nowhere ([Add a scheduler job](howto-add-scheduler-job.md)). Adding a sport touches several tables, listed in [Adding a sport](../collection/howto-add-sport.md).
+Heartbeat identifiers are separate from schedule ids. `odds_core.job_specs.heartbeat_name` preserves the bare `fetch-mlb-probables` and EPL `fetch-espn-fixtures` identifiers; their schedules remain `fetch-mlb-probables-mlb` and `fetch-espn-fixtures-epl`. NBA ESPN uses `fetch-espn-fixtures-nba` for both.
 
 ## JobContext
 

@@ -7,10 +7,8 @@ from dataclasses import dataclass, fields
 from importlib import import_module
 
 import structlog
+from odds_core.job_specs import JOB_SPECS, SportMap
 from odds_core.sports import SportKey
-
-from odds_lambda.betfair.constants import SPORT_CONFIG as BETFAIR_SPORT_CONFIG
-from odds_lambda.polymarket_sports import POLYMARKET_SPORTS
 
 logger = structlog.get_logger()
 
@@ -44,35 +42,6 @@ class JobContext:
         return cls(**known)  # type: ignore[arg-type]
 
 
-# Maps job name to (module_path, function_name).
-# Modules are imported lazily when the job is first requested.
-_JOB_MODULE_MAP: dict[str, tuple[str, str]] = {
-    "fetch-odds": ("odds_lambda.jobs.fetch_odds", "main"),
-    "fetch-scores": ("odds_lambda.jobs.fetch_scores", "main"),
-    "update-status": ("odds_lambda.jobs.update_status", "main"),
-    "check-health": ("odds_lambda.jobs.check_health", "main"),
-    "fetch-oddsportal": ("odds_lambda.jobs.fetch_oddsportal", "main"),
-    "fetch-oddsportal-results": ("odds_lambda.jobs.fetch_oddsportal_results", "main"),
-    "fetch-mlb-results": ("odds_lambda.jobs.fetch_mlb_results", "main"),
-    "agent-run": ("odds_lambda.jobs.agent_run", "main"),
-    "fetch-espn-fixtures": ("odds_lambda.jobs.fetch_espn_fixtures", "main"),
-    "fetch-betfair-exchange": ("odds_lambda.jobs.fetch_betfair_exchange", "main"),
-    "fetch-polymarket-odds": ("odds_lambda.jobs.fetch_polymarket_odds", "main"),
-    "fetch-mlb-probables": ("odds_lambda.jobs.fetch_mlb_probables", "main"),
-    "fetch-injuries": ("odds_lambda.jobs.fetch_injuries", "main"),
-    "run-candidates": ("odds_lambda.jobs.run_candidates", "main"),
-    "backup-database": ("odds_lambda.jobs.backup_database", "main"),
-}
-
-# Bootstrap entry-point overrides: jobs listed here use a different function
-# for bootstrap (scheduler start) than for normal execution. The function
-# receives a single ``sport: str`` argument for per-sport jobs, or no args
-# for global jobs.  Jobs not listed here use their regular ``main(JobContext)``
-# for bootstrap.
-_JOB_BOOTSTRAP_MAP: dict[str, tuple[str, str]] = {
-    "agent-run": ("odds_lambda.jobs.agent_run", "schedule_next"),
-}
-
 # Maps sport suffix to sport_key for per-sport job routing.
 # e.g. "fetch-odds-epl" resolves to ("fetch-odds", "soccer_epl")
 _SPORT_SUFFIX_MAP: dict[str, SportKey] = {
@@ -81,88 +50,18 @@ _SPORT_SUFFIX_MAP: dict[str, SportKey] = {
     "nba": "basketball_nba",
 }
 
-# Jobs that must never run during a deploy smoke check, even when listed in
-# ``bootstrap_jobs``. ``agent-run`` places paper bets, so executing it as part of
-# a pre-restart validation would pollute the live portfolio. The smoke command
-# skips it by default and only runs it under an explicit opt-in.
-_SMOKE_UNSAFE_JOBS: frozenset[str] = frozenset({"agent-run"})
-
-# ``run-candidates`` also places paper bets, so smoke skips it too, under its own opt-in.
-_CANDIDATE_JOBS: frozenset[str] = frozenset({"run-candidates"})
-
-# Jobs whose runs spend Odds API quota units. The smoke command skips these by
-# default because every deploy would otherwise burn units off-schedule.
-_PAID_API_JOBS: frozenset[str] = frozenset({"fetch-odds", "fetch-scores"})
-
-# Jobs that accept a sport parameter. When invoked with a sport suffix
-# (e.g. "fetch-odds-epl"), the sport_key is extracted and passed as a kwarg.
-_PER_SPORT_JOBS: frozenset[str] = frozenset(
-    {
-        "fetch-odds",
-        "fetch-scores",
-        "fetch-oddsportal",
-        "fetch-oddsportal-results",
-        "agent-run",
-        "fetch-espn-fixtures",
-        "fetch-betfair-exchange",
-        "fetch-polymarket-odds",
-        "fetch-mlb-probables",
-        "fetch-injuries",
-        "run-candidates",
-    }
-)
-
-# Jobs with fixed cron schedules in the local scheduler. Keys are base job
-# names (no sport suffix); the scheduler CLI expands per-sport jobs into one
-# schedule per target sport, each with its own compound job name. A job that
-# self-schedules must not be listed: bootstrap re-applies every cron, which
-# would replace the job's pending run under the shared schedule id.
-_JOB_CRON_MAP: dict[str, str] = {
-    "fetch-espn-fixtures": "0 6 * * *",
-    # MLB probable pitchers — once daily at 06:00 UTC. The only writer of
-    # ``mlb_probable_pitchers``: the MCP ``get_probable_pitchers`` tool reads
-    # live without persisting and falls back to this snapshot.
-    "fetch-mlb-probables": "0 6 * * *",
-    "backup-database": "0 5 * * *",
-}
-
-# Sport allowlists for per-sport jobs, cron or event-driven. A job absent
-# here runs for every sport in ``data_collection.sports``. Use an allowlist
-# for jobs whose ``main()`` raises on unsupported sports (a fire on one would
-# raise inside ``job_alert_context`` and spam critical Discord alerts) or
-# that should not spend resources on every configured sport.
-_JOB_SPORTS: dict[str, tuple[SportKey, ...]] = {
-    "fetch-espn-fixtures": ("soccer_epl", "basketball_nba"),
-    # Allowlist derived from the BFE adapter's supported-sports map so adding
-    # a new sport requires only a SPORT_CONFIG entry.
-    "fetch-betfair-exchange": tuple(BETFAIR_SPORT_CONFIG),
-    "fetch-polymarket-odds": tuple(POLYMARKET_SPORTS),
-    "fetch-mlb-probables": ("baseball_mlb",),
-    "fetch-injuries": ("basketball_nba",),
-    # MLB is settled from the MLB Stats API by fetch-mlb-results.
-    "fetch-oddsportal-results": ("soccer_epl",),
-    # EPL and NBA each spend their own Odds API key; NBA results come from ESPN, not fetch-scores.
-    "fetch-odds": ("soccer_epl", "basketball_nba"),
-    "fetch-scores": ("soccer_epl",),
-}
-
 
 def get_job_cron(job_name: str) -> str | None:
-    """Return the cron expression for a job, or None if it is event-driven."""
-    return _JOB_CRON_MAP.get(job_name)
+    spec = JOB_SPECS.get(job_name)
+    return spec.cron if spec else None
 
 
 def get_job_sports(job_name: str) -> tuple[SportKey, ...] | None:
-    """Return the sport allowlist for a job, or ``None`` for all configured sports."""
-    return _JOB_SPORTS.get(job_name)
-
-
-assert set(_JOB_CRON_MAP) <= set(_JOB_MODULE_MAP), (
-    f"Unknown jobs in _JOB_CRON_MAP: {set(_JOB_CRON_MAP) - set(_JOB_MODULE_MAP)}"
-)
-assert set(_JOB_SPORTS) <= _PER_SPORT_JOBS, (
-    f"Non-per-sport jobs in _JOB_SPORTS: {set(_JOB_SPORTS) - _PER_SPORT_JOBS}"
-)
+    spec = JOB_SPECS.get(job_name)
+    sports = spec.sports if spec else None
+    if isinstance(sports, SportMap):
+        return tuple(getattr(import_module(sports.module), sports.attribute))
+    return sports
 
 
 # Cache of already-imported job functions.
@@ -193,7 +92,7 @@ def make_compound_job_name(base_job_name: str, sport: str | None) -> str:
         ValueError: If a per-sport job is given no sport, since the bare name
             matches no schedule and would start an unmanaged chain.
     """
-    if base_job_name in _PER_SPORT_JOBS:
+    if is_per_sport_job(base_job_name):
         if not sport:
             raise ValueError(f"Job '{base_job_name}' requires a sport")
         suffix = sport_key_to_suffix(sport)
@@ -219,14 +118,14 @@ def resolve_job_name(compound_name: str) -> tuple[str, SportKey | None]:
         (base_job_name, sport_key or None)
     """
     # Try direct match first (global jobs and bare per-sport jobs)
-    if compound_name in _JOB_MODULE_MAP:
+    if compound_name in JOB_SPECS:
         return compound_name, None
 
     # Try stripping sport suffix: "fetch-odds-epl" -> ("fetch-odds", "epl")
     for suffix, sport_key in _SPORT_SUFFIX_MAP.items():
         if compound_name.endswith(f"-{suffix}"):
             base_name = compound_name[: -(len(suffix) + 1)]
-            if base_name in _JOB_MODULE_MAP and base_name in _PER_SPORT_JOBS:
+            if base_name in JOB_SPECS and is_per_sport_job(base_name):
                 return base_name, sport_key
 
     return compound_name, None
@@ -249,11 +148,12 @@ def get_job_function(job_name: str) -> Callable[[JobContext], Awaitable[None]]:
     if job_name in _loaded_jobs:
         return _loaded_jobs[job_name]
 
-    if job_name not in _JOB_MODULE_MAP:
-        available = ", ".join(sorted(_JOB_MODULE_MAP))
+    if job_name not in JOB_SPECS:
+        available = ", ".join(sorted(JOB_SPECS))
         raise KeyError(f"Unknown job '{job_name}'. Available jobs: {available}")
 
-    module_path, func_name = _JOB_MODULE_MAP[job_name]
+    spec = JOB_SPECS[job_name]
+    module_path, func_name = spec.module, spec.function
     module = import_module(module_path)
     fn = getattr(module, func_name)
     _loaded_jobs[job_name] = fn
@@ -262,7 +162,8 @@ def get_job_function(job_name: str) -> Callable[[JobContext], Awaitable[None]]:
 
 def is_per_sport_job(job_name: str) -> bool:
     """Check whether a job accepts a sport parameter."""
-    return job_name in _PER_SPORT_JOBS
+    spec = JOB_SPECS.get(job_name)
+    return spec.per_sport if spec else False
 
 
 def spends_api_quota(job_name: str) -> bool:
@@ -271,7 +172,8 @@ def spends_api_quota(job_name: str) -> bool:
     Accepts a compound (sport-suffixed) or base job name.
     """
     base_name, _ = resolve_job_name(job_name)
-    return base_name in _PAID_API_JOBS
+    spec = JOB_SPECS.get(base_name)
+    return spec.paid_api if spec else False
 
 
 def places_candidate_trades(job_name: str) -> bool:
@@ -280,7 +182,8 @@ def places_candidate_trades(job_name: str) -> bool:
     Accepts a compound (sport-suffixed) or base job name.
     """
     base_name, _ = resolve_job_name(job_name)
-    return base_name in _CANDIDATE_JOBS
+    spec = JOB_SPECS.get(base_name)
+    return spec.candidate_trades if spec else False
 
 
 def is_smoke_unsafe(job_name: str) -> bool:
@@ -289,13 +192,14 @@ def is_smoke_unsafe(job_name: str) -> bool:
     Accepts a compound (sport-suffixed) or base job name.
     """
     base_name, _ = resolve_job_name(job_name)
-    return base_name in _SMOKE_UNSAFE_JOBS
+    spec = JOB_SPECS.get(base_name)
+    return spec.agent_trades if spec else False
 
 
 def resolve_target_sports(job_name: str, configured_sports: Sequence[SportKey]) -> list[SportKey]:
     """Sports a per-sport job actually schedules for, honoring any allowlist.
 
-    A job may restrict itself to a subset of sports via ``_JOB_SPORTS``;
+    A job may restrict itself to a subset of sports via its ``JobSpec``;
     unrestricted jobs run for every configured sport.
     """
     allowed = get_job_sports(job_name)
@@ -331,14 +235,15 @@ def get_bootstrap_function(job_name: str) -> Callable[[JobContext], Awaitable[No
     Raises:
         KeyError: If job name not found in registry
     """
-    if job_name in _JOB_BOOTSTRAP_MAP:
-        module_path, func_name = _JOB_BOOTSTRAP_MAP[job_name]
+    spec = JOB_SPECS.get(job_name)
+    if spec is not None and spec.bootstrap_function is not None:
+        module_path, func_name = spec.module, spec.bootstrap_function
         module = import_module(module_path)
         raw_fn = getattr(module, func_name)
 
         # Wrap custom bootstrap functions to accept JobContext uniformly.
         # Per-sport custom bootstraps expect (sport: str); global ones expect ().
-        if job_name in _PER_SPORT_JOBS:
+        if is_per_sport_job(job_name):
 
             async def _per_sport_wrapper(ctx: JobContext) -> None:
                 await raw_fn(require_sport(ctx, job_name))
@@ -356,4 +261,4 @@ def get_bootstrap_function(job_name: str) -> Callable[[JobContext], Awaitable[No
 
 def list_available_jobs() -> list[str]:
     """List all registered job names."""
-    return sorted(_JOB_MODULE_MAP)
+    return sorted(JOB_SPECS)

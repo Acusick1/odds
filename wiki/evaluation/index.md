@@ -15,7 +15,6 @@ Backtests replay a strategy over stored events. The experiment pages record what
 - [Experiment scripts and artifacts](experiment-scripts.md) — Layout of experiments/, config and script conventions, the verification artifact files, and the inventory of scripts.
 - [Parity check](candidate-parity.md) — What odds candidates parity replays, how it rebuilds each decision from its recorded input snapshots, how it reports data differences from the current database, and its exit code.
 - [Replay backtest](candidate-backtest.md) — What odds candidates backtest replays, the decision state and timing it uses, how a model rule is tuned and refitted during the replay, the comparison candidate, how bets are scored, the coverage it reports and its JSON output.
-- [Retail-EV evaluation](retail-ev-evaluation.md) — The one-look evaluation of a frozen retail-EV model on a window of events, with its spec, the window-end guard, the refit blocks, the keep-bar statistics and verdict, the coverage report, the descriptive slices and the output files.
 - [The run-candidates job](run-candidates-job.md) — How the scheduled run-candidates job takes each active mechanical candidate's decisions at their decision times, what it records, when it records a decision as missed, and how it books its next run.
 
 ### Explanation
@@ -28,6 +27,5 @@ Backtests replay a strategy over stored events. The experiment pages record what
 ### How-to guides
 
 - [Run and record a modelling experiment](howto-run-experiment.md) — Run an experiment script, check its verification artifacts, and record the result in the wiki.
-- [Run the retail-EV evaluation](howto-run-retail-ev-evaluation.md) — Write the evaluation spec, run odds evaluate retail-ev once from a clean tree on a local copy of the data, and read the verdict, manifest and coverage.
 - [Take an idea to a verdict](howto-take-an-idea-to-a-verdict.md) — The steps from a candidate idea issue through a development backtest, registration, the forward test and its checkpoints and the parity check, to promoting or killing the candidate.
 <!-- pages:end -->

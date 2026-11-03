@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from odds_core.models import Event, EventStatus
@@ -56,7 +57,10 @@ class TestDecideForward:
     """Proximity gate + tier classification keyed off the next game."""
 
     @pytest.mark.asyncio
-    async def test_no_game_gates_off(self) -> None:
+    async def test_no_game_gates_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "odds_lambda.scheduling.decision.get_next_kickoff", AsyncMock(return_value=None)
+        )
         decision = await decide_forward("soccer_epl", CADENCE, now=NOW, next_kickoff=None)
         assert decision.should_execute is False
         assert decision.tier is None

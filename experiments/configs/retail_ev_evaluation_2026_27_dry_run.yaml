@@ -1,4 +1,4 @@
-# Dry run of experiments/configs/retail_ev_evaluation_2026_27.yaml on development data:
+# ADR-0016 evaluation dry-run configuration on development data:
 # the same spec with the window moved to February to July 2026, the live-collected events
 # of March to May 2026. No event after 2026-07-31 is read; this is not a keep-bar result.
 training_start: 2024-08-01T00:00:00Z

@@ -4,7 +4,6 @@ title: About the system and its pivots
 description: What the system is, which sports are live, the goal in outline, what runs where in outline, the three pivots and the NBA-era defaults they left.
 sources:
   - odds_core.sports.SportKey
-  - odds_core.config.SchedulerConfig.bootstrap_jobs
   - odds_core.config.PolymarketConfig
   - odds_cli.commands.backfill
   - odds_analytics.backfill_executor.BackfillExecutor
@@ -20,7 +19,7 @@ Design principles `(inferred)`: robust collection and storage before analysis; a
 
 ## Sports
 
-EPL and MLB price collection is active. NBA OddsPortal and Betfair collection is configured and starts once the ESPN NBA schedule supplies fixtures (#725); the Odds API collects EPL (key 0) and NBA (key 1) ([keys](../collection/odds-api-client.md#retry-and-keys)). The agents run by hand on the production host, not autonomously, and are paused. NBA injury, game-log and player-stat code exists but runs only by manual command. `odds_core.sports.SportKey` allows all three. EPL odds are stored under market key `1x2` and MLB under `h2h`; see [Sport, market and bookmaker keys](../collection/sport-and-market-keys.md).
+`odds_core.sports.SportKey` allows EPL, MLB and NBA. The [deployment matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs) is authoritative for current collection and agent operation. NBA injury reports are scheduled; game logs and player stats use manual commands ([NBA collection](../collection/nba-injuries-and-stats.md#injury-reports)). Sport and market keys are listed in [Sport, market and bookmaker keys](../collection/sport-and-market-keys.md#market-key-dialects).
 
 ## Goal
 
@@ -28,9 +27,7 @@ Profit. Any approach can be a candidate (mechanical rules, models, agents), run 
 
 ## What runs where
 
-One host, the production host, runs every scheduled job under its local scheduler and holds the production database ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)). The default job set is `odds_core.config.SchedulerConfig.bootstrap_jobs`, with `agent-run` commented out; it includes the EPL Polymarket price job, the results jobs (OddsPortal for EPL, the MLB Stats API for MLB), the NBA injury-report job, the `run-candidates` job that places mechanical candidates' paper trades, and the nightly [database backup](database-backup-job.md). The `odds-scheduler` Lambda and its Terraform remain but are dormant (a disabled `odds-scheduler-scraper` function may still exist in the account, with no Terraform), and the Neon database they wrote to is a frozen archive. The repo does not record the deployed AWS state; the only check is `odds scheduler list-jobs --backend aws`.
-
-Per-job table: [Where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs); local backend: [Local scheduler](../scheduling/local-scheduler.md).
+The production host runs the local scheduler and production database ([ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)). The [deployment matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs) owns the operational job list and [dormant AWS rules](../scheduling/job-deployment-matrix.md#dormant-aws-rules); the [local scheduler](../scheduling/local-scheduler.md#scheduling-primitives) describes execution.
 
 ## The three pivots
 
@@ -46,7 +43,6 @@ Each fails quietly on EPL and MLB data: the symptom is an empty result (no event
 
 - `backfill scores` hardcodes `sport_key="basketball_nba"` (`odds_cli.commands.backfill`) and spends no Odds API units. `odds_analytics.backfill_executor.BackfillExecutor` takes its sport from the acquisition manifest and stores every game a call returns on the event the game resolves to through the [event resolver](../storage/event-resolver.md), reporting a game the resolver drops ([Odds API historical backfill](../collection/odds-api-backfill.md)).
 - `odds polymarket discover` lists NBA events (`odds_cli.commands.polymarket.discover`); EPL and NBA match prices (fetched from Polymarket's public Gamma and CLOB APIs with `odds_lambda.polymarket_fetcher.PolymarketClient`) are stored as `polymarket` snapshots ([Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md)).
-- Alert intervals and per-job heartbeat hours are `odds_core.config.AlertConfig` fields that have no template variable ([Alerts](../operations/alerts.md#alert-history)).
 
 ## Related
 

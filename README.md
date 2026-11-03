@@ -7,8 +7,7 @@ Shared infrastructure (odds collection, storage, paper trading, scheduling, aler
 reused across sports; each sport adds its own data sources, feature extractors, agent
 prompts, and MCP tools.
 
-**Active sports:** EPL football and MLB baseball (agents in interactive evaluation).
-NBA infrastructure exists but is deprioritized.
+Current collection and agent status: [deployment matrix](wiki/scheduling/job-deployment-matrix.md#where-each-job-runs).
 
 The pipeline collects bookmaker odds (The Odds API), UK retail odds (OddsPortal,
 football-data.co.uk) and Betfair Exchange prices, stores hybrid raw + normalized data, and

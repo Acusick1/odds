@@ -19,12 +19,14 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NamedTuple
 
 import structlog
 from odds_core.config import get_settings
+from odds_core.job_specs import job_cadence
 from odds_core.sports import SportKey
 
 from odds_lambda.scheduling.decision import (
@@ -38,14 +40,7 @@ from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, requ
 logger = structlog.get_logger()
 
 # Wake cadence (hours) keyed by canonical FetchTier proximity bands.
-CADENCE = CadenceConfig(
-    closing=1.0,  # < 3h to KO — lineups dropping, final decisions
-    pregame=4.0,  # 3-12h
-    sharp=4.0,  # 12-24h — active research
-    early=12.0,  # 24-72h — research window opening
-    opening=24.0,  # 72h+ — far out
-    no_game=12.0,  # no fixtures within lookahead — off-season check-in
-)
+CADENCE = CadenceConfig(**asdict(job_cadence("agent-run")))
 
 # Agent subprocess limits
 AGENT_TIMEOUT_SECONDS = 15 * 60  # 15 minutes

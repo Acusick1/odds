@@ -13,14 +13,14 @@ when OP moved exchanges into a separate (encrypted) AJAX endpoint.
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
-from odds_core.alerts import job_alert_context
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
+from odds_core.job_specs import job_cadence
 from odds_core.models import FetchLog
 from odds_core.sports import SportKey
 from odds_core.vocabulary import Source, TimeBasis
@@ -52,13 +52,13 @@ from odds_lambda.live_events import (
     count_dropped,
 )
 from odds_lambda.mlb_game_resolver import GameRow
+from odds_lambda.scheduling.collection import CollectionResult, run_collection
 from odds_lambda.scheduling.decision import (
     OVERNIGHT_WINDOWS,
     CadenceConfig,
     Lead,
     ScheduleDecision,
 )
-from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload
 
@@ -67,15 +67,7 @@ logger = structlog.get_logger()
 # Proximity-based polling cadence (hours): cheap delayed API — poll more
 # aggressively than browser-driven fetch-oddsportal. 12h+ to kickoff all poll
 # at 2h, matching the previous "far" band.
-CADENCE = CadenceConfig(
-    closing=0.25,
-    pregame=0.5,
-    sharp=2.0,
-    early=2.0,
-    opening=2.0,
-    no_game=6.0,
-    db_fallback=1.0,
-)
+CADENCE = CadenceConfig(**asdict(job_cadence("fetch-betfair-exchange")))
 # A run this long before every kickoff: the latest decision time and inside the
 # live close window of ADR-0012. Kickoffs come from ``next_betfair_kickoff``, so
 # the run also lands before an earlier Betfair start.
@@ -354,8 +346,8 @@ async def main(ctx: JobContext) -> None:
     overnight = OVERNIGHT_WINDOWS.get(sport)
     started = datetime.now(UTC)
 
-    async def _reschedule(label: str) -> ScheduleDecision:
-        decision = await decide_collection_run(
+    async def decide() -> ScheduleDecision:
+        return await decide_collection_run(
             [sport],
             CADENCE,
             overnight=overnight,
@@ -363,35 +355,19 @@ async def main(ctx: JobContext) -> None:
             leads=[CLOSE_LEAD],
             run_started=started,
         )
-        assert decision.next_execution is not None  # noqa: S101
-        try:
-            await self_schedule(
-                job_name=compound_job_name,
-                next_time=decision.next_execution,
-                dry_run=settings.scheduler.dry_run,
-                sport=sport,
-                reason=f"{label}: {decision.reason}",
-            )
-        except Exception as e:
-            logger.error("betfair_schedule_failed", error=str(e), exc_info=True)
-            if label == "pre-schedule":
-                raise
-        return decision
 
-    # Pre-schedule before doing the work, so a crash mid-fetch doesn't break
-    # the chain.
-    decision = await _reschedule("pre-schedule")
+    snapshot_time: datetime | None = None
+    cert_file: str | None = None
+    cert_key: str | None = None
 
-    if not decision.should_execute:
-        async with job_alert_context(compound_job_name):
-            logger.info("betfair_job_dormant", sport=sport, reason=decision.reason)
-        return
+    def prepare() -> None:
+        nonlocal snapshot_time, cert_file, cert_key
+        snapshot_time = datetime.now(UTC)
+        assert bf.username and bf.password and bf.app_key
+        cert_file, cert_key = resolve_cert_paths(bf)
 
-    snapshot_time = datetime.now(UTC)
-    # BetfairConfig validator guarantees these are non-None when enabled=True.
-    assert bf.username and bf.password and bf.app_key
-    cert_file, cert_key = resolve_cert_paths(bf)
-    async with job_alert_context(compound_job_name):
+    async def collect() -> CollectionResult:
+        assert snapshot_time is not None
         client = BetfairExchangeClient(
             username=bf.username,
             password=bf.password,
@@ -433,5 +409,14 @@ async def main(ctx: JobContext) -> None:
             now=snapshot_time,
         )
 
-    # Reschedule based on (possibly updated) next kickoff after fetch.
-    await _reschedule("post-fetch")
+        return CollectionResult()
+
+    await run_collection(
+        job_name=compound_job_name,
+        sport=sport,
+        dry_run=settings.scheduler.dry_run,
+        decide=decide,
+        collect=collect,
+        post_label="post-fetch",
+        prepare=prepare,
+    )

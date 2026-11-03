@@ -3,18 +3,12 @@ type: reference
 title: Polymarket match prices as odds snapshots
 description: The Polymarket client and settings, how Polymarket's match markets (EPL three-way, NBA two-way) become polymarket odds snapshots, the history grid and its drop rules, attaching matches to events, the backfill command and the fetch-polymarket-odds job.
 sources:
+  - odds_core.job_specs.JOB_SPECS
   - odds_lambda.polymarket_sports.POLYMARKET_SPORTS
   - odds_lambda.polymarket_sports.PolymarketSportConfig
   - odds_lambda.polymarket_sports.epl_team_name
   - odds_lambda.polymarket_sports.nba_team_name
   - odds_lambda.polymarket_matching.NBA_ABBREV_MAP
-  - odds_lambda.espn_nba_schedule
-  - odds_lambda.espn_nba_schedule.sync_schedule
-  - odds_lambda.espn_nba_schedule.sync_upcoming
-  - odds_lambda.espn_nba_schedule.SETTLE_DAYS
-  - odds_lambda.espn_nba_schedule.UPCOMING_DAYS
-  - odds_lambda.jobs.fetch_espn_fixtures.main
-  - odds_cli.commands.events.sync_nba_games
   - odds_lambda.polymarket_odds
   - odds_lambda.polymarket_odds.TIER_STEPS
   - odds_lambda.polymarket_odds.MAX_HORIZON
@@ -118,22 +112,15 @@ Polymarket creates no events. `odds_lambda.storage.event_resolver.attach_event` 
 
 ## NBA schedule from ESPN
 
-NBA has no published schedule the other collectors can read, and no job created its events: Polymarket creates none, the Odds API `/events` lists only games it prices and live OddsPortal and Betfair create events only for listed games, so the NBA collectors would stay dormant ([dormancy](../scheduling/decision-engine.md#dormancy)) and a played game would have no event for the backfill. ESPN's public NBA scoreboard (`odds_lambda.espn_nba_schedule`, one request per US game day) lists every game with its kick-off, final score and an id:
-
-- `odds_lambda.jobs.fetch_espn_fixtures.main` runs it for `basketball_nba` as `fetch-espn-fixtures-nba` (daily cron, `fetch-espn-fixtures-nba` in `odds_core.config.AlertConfig.heartbeat_expectations`). `odds_lambda.espn_nba_schedule.sync_upcoming` covers the last `odds_lambda.espn_nba_schedule.SETTLE_DAYS` days and the next `odds_lambda.espn_nba_schedule.UPCOMING_DAYS`. The events it creates are NBA's published schedule: the stored-event lookup of the collectors sees them, so `odds_lambda.collection_calendar.published_schedule_kickoff` has no NBA table to read. The NBA injury-report job schedules from the same stored events ([NBA injuries](nba-injuries-and-stats.md#the-fetch-injuries-job)). A run fails, alerting, when any game failed after the others are stored, and warns when ESPN lists no game.
-- Each game goes through `odds_lambda.storage.event_resolver.resolve_event` as a game of source `espn` with ESPN's event id as its external id ([resolver](../storage/event-resolver.md)). A game another source already created is matched within ±2 h and gains the ESPN id; a rerun matches the event it made. ESPN ranks last in the NBA kick-off authority order (`odds_lambda.storage.event_kickoff.KICKOFF_AUTHORITY`), so it moves only an event that holds no OddsPortal or Odds API id, which lets an event only ESPN knows follow a reschedule.
-- A finished game (`STATUS_FINAL`) also sets its event FINAL with the score through `odds_lambda.storage.writers.OddsWriter.update_event_status`, which the backfill requires, and a `STATUS_POSTPONED` or `STATUS_CANCELED` game sets POSTPONED or CANCELLED. This is the only NBA settlement on a schedule, and `odds_lambda.health_monitor.UNSETTLED_SPORTS` includes NBA.
-- The scoreboard also lists games that are not events to create, and `odds_lambda.espn_nba_schedule.parse_scoreboard` skips them: preseason games, games whose start ESPN marks invalid, and any game with a side outside the 30 teams (`odds_lambda.polymarket_matching.canonical_nba_team`), which covers NBA Cup "TBD @ TBD" placeholders and All-Star teams. A placeholder would take the real game's ESPN id and keep its event.
-- Team names go through `odds_core.team.normalize_team_name`, so ESPN's `LA Clippers` becomes `Los Angeles Clippers`.
-- `odds events sync-nba-games` (`odds_cli.commands.events.sync_nba_games`, which calls `odds_lambda.espn_nba_schedule.sync_schedule`) covers an arbitrary range for the backfill: `--since` (required) and `--until` (default today). Without `--apply` each game is rolled back, and a transaction holds one game.
-
-Run the command for the season so far before `odds polymarket backfill-odds --sport basketball_nba`.
+NBA events must exist before Polymarket can attach prices. The [NBA schedule and settlement reference](nba-injuries-and-stats.md#nba-schedule-from-espn) covers the ESPN job and historical schedule sync.
 
 ## The fetch-polymarket-odds job
 
+Scheduling follows the [shared collector lifecycle](../scheduling/self-scheduling.md#pattern). Polymarket postbooks inside the alert context, before its heartbeat or a deferred ingestion failure; a failure while logging or warning still propagates immediately.
+
 `odds_lambda.jobs.fetch_polymarket_odds.main` stores the current midpoint of every open match within `odds_lambda.polymarket_odds.MAX_HORIZON` that attaches to an event. It is per sport (`fetch-polymarket-odds-epl`; `ctx.sport` is required and must be in the allowlist), allowlisted to every sport in `odds_lambda.polymarket_sports.POLYMARKET_SPORTS`, one of the default bootstrap jobs ([ADR-0013](../../docs/adr/0013-collect-polymarket-epl-as-sharp-reference.md)); it self-schedules, and a scheduler restart keeps its pending run ([where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs)). It does nothing when `odds_core.config.PolymarketConfig.enabled` is false.
 
-1. Pre-schedule with `odds_lambda.collection_calendar.decide_collection_run` (`stored_only`, timed from the events' `commence_time`) and `odds_lambda.jobs.fetch_polymarket_odds.CADENCE`, derived from `odds_lambda.polymarket_odds.TIER_STEPS`: 5 min closing, 15 min pregame and sharp, 30 min early, 1 h opening ([decision engine](../scheduling/decision-engine.md#cadence)). With no stored SCHEDULED event within 28 days the run is dormant: a 6 h check-in and its heartbeat, no Gamma call ([dormancy](../scheduling/decision-engine.md#dormancy)). The sport's overnight window applies, and the job passes no [leads](../scheduling/decision-engine.md#lead-runs).
+1. Pre-schedule with `odds_lambda.collection_calendar.decide_collection_run` (`stored_only`, timed from the events' `commence_time`) and `odds_lambda.jobs.fetch_polymarket_odds.CADENCE`, selected from `odds_core.job_specs.JOB_SPECS` and matching the historical grid in `odds_lambda.polymarket_odds.TIER_STEPS`: 5 min closing, 15 min pregame and sharp, 30 min early, 1 h opening ([decision engine](../scheduling/decision-engine.md#cadence)). With no stored SCHEDULED event within 28 days the run is dormant: a 6 h check-in and its heartbeat, no Gamma call ([dormancy](../scheduling/decision-engine.md#dormancy)). The sport's overnight window applies, and the job passes no [leads](../scheduling/decision-engine.md#lead-runs).
 2. Inside `odds_core.alerts.job_alert_context`, `odds_lambda.jobs.fetch_polymarket_odds.ingest_sport` lists the open events ending within `odds_lambda.polymarket_odds.MAX_HORIZON`, keeps matches that have not started, attaches them to events ([attaching](#attaching-to-events)), and stores a snapshot through `odds_lambda.storage.writers.OddsWriter.store_envelope` under the event's integer id with source `polymarket`, the sport's market key and time basis `observed`. Its price rows are `mid` (the midpoint), `back` (the ask) and `lay` (the bid) per outcome, all as decimal odds 1/p, and the run's envelopes are archived as one payload ([writing price rows](../storage/price-tables.md#writing-price-rows)). Each snapshot is written in its own savepoint, so a failing match is recorded in the run's errors and the others stand. A snapshot already stored for that time is skipped, and when nothing was inserted the run's payload is discarded; `snapshots_stored` counts inserts.
 3. The price is the midpoint of Gamma's `bestBid` and `bestAsk` (a match with any midpoint outside (0, 1) has no prices), the same quantity as the history series (observed: `/midpoint` equals the last history point). A match is skipped and counted when its event has started (`snapshot_time >= commence_time`), when a bid or ask is missing, when any outcome's spread exceeds `odds_lambda.polymarket_odds.MAX_QUOTE_SPREAD` (0.03, an empty book), or when the prices are off the sum tolerance.
 4. Each sport's run writes an `odds_core.models.FetchLog` row (`success` is whether a snapshot was stored; no quota), ([fetch logs](odds-ingestion-service.md#fetch-logs)).

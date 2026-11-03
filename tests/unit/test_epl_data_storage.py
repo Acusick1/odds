@@ -14,9 +14,7 @@ from odds_core.epl_data_models import (
 )
 from odds_lambda.storage.espn_fixture_reader import EspnFixtureReader
 from odds_lambda.storage.espn_fixture_writer import EspnFixtureWriter
-from odds_lambda.storage.espn_lineup_reader import EspnLineupReader
 from odds_lambda.storage.espn_lineup_writer import EspnLineupWriter
-from odds_lambda.storage.fpl_availability_reader import FplAvailabilityReader
 from odds_lambda.storage.fpl_availability_writer import FplAvailabilityWriter
 from sqlalchemy import select
 
@@ -198,58 +196,6 @@ class TestEspnLineupWriter:
         assert len(list(result.scalars().all())) == 1
 
 
-class TestEspnLineupReader:
-    @pytest.mark.asyncio
-    async def test_get_all_lineups(self, pglite_async_session):
-        writer = EspnLineupWriter(pglite_async_session)
-        await writer.upsert_lineups(
-            [
-                _lineup_record(starter=True),
-                _lineup_record(player_id="67890", player_name="Sub Player", starter=False),
-            ]
-        )
-        await pglite_async_session.commit()
-
-        reader = EspnLineupReader(pglite_async_session)
-        lineups = await reader.get_all_lineups()
-        assert len(lineups) == 2
-
-    @pytest.mark.asyncio
-    async def test_get_starters(self, pglite_async_session):
-        writer = EspnLineupWriter(pglite_async_session)
-        await writer.upsert_lineups(
-            [
-                _lineup_record(starter=True),
-                _lineup_record(player_id="67890", player_name="Sub Player", starter=False),
-            ]
-        )
-        await pglite_async_session.commit()
-
-        reader = EspnLineupReader(pglite_async_session)
-        starters = await reader.get_starters()
-        assert len(starters) == 1
-        assert starters[0].player_name == "Bukayo Saka"
-
-    @pytest.mark.asyncio
-    async def test_get_lineups_by_season(self, pglite_async_session):
-        writer = EspnLineupWriter(pglite_async_session)
-        await writer.upsert_lineups(
-            [
-                _lineup_record(season="2024-25"),
-                _lineup_record(
-                    date=datetime(2024, 1, 15, 15, 0, tzinfo=UTC),
-                    player_id="99999",
-                    season="2023-24",
-                ),
-            ]
-        )
-        await pglite_async_session.commit()
-
-        reader = EspnLineupReader(pglite_async_session)
-        lineups = await reader.get_lineups_by_season("2024-25")
-        assert len(lineups) == 1
-
-
 class TestFplAvailabilityWriter:
     @pytest.mark.asyncio
     async def test_upsert_creates_records(self, pglite_async_session):
@@ -293,60 +239,6 @@ class TestFplAvailabilityWriter:
         rows = list(result.scalars().all())
         assert len(rows) == 1
         assert rows[0].chance_of_playing == 75.0
-
-
-class TestFplAvailabilityReader:
-    @pytest.mark.asyncio
-    async def test_get_all_availability(self, pglite_async_session):
-        writer = FplAvailabilityWriter(pglite_async_session)
-        await writer.upsert_availability(
-            [
-                _fpl_record(),
-                _fpl_record(player_code=205651, player_name="G.Jesus"),
-            ]
-        )
-        await pglite_async_session.commit()
-
-        reader = FplAvailabilityReader(pglite_async_session)
-        records = await reader.get_all_availability()
-        assert len(records) == 2
-
-    @pytest.mark.asyncio
-    async def test_get_availability_by_season(self, pglite_async_session):
-        writer = FplAvailabilityWriter(pglite_async_session)
-        await writer.upsert_availability(
-            [
-                _fpl_record(season="2024-25"),
-                _fpl_record(
-                    season="2023-24",
-                    snapshot_time=datetime(2024, 1, 14, 18, 0, tzinfo=UTC),
-                ),
-            ]
-        )
-        await pglite_async_session.commit()
-
-        reader = FplAvailabilityReader(pglite_async_session)
-        records = await reader.get_availability_by_season("2024-25")
-        assert len(records) == 1
-
-    @pytest.mark.asyncio
-    async def test_get_availability_for_gameweek(self, pglite_async_session):
-        writer = FplAvailabilityWriter(pglite_async_session)
-        await writer.upsert_availability(
-            [
-                _fpl_record(gameweek=21),
-                _fpl_record(
-                    gameweek=22,
-                    snapshot_time=datetime(2025, 1, 21, 18, 0, tzinfo=UTC),
-                ),
-            ]
-        )
-        await pglite_async_session.commit()
-
-        reader = FplAvailabilityReader(pglite_async_session)
-        records = await reader.get_availability_for_gameweek("2024-25", 21)
-        assert len(records) == 1
-        assert records[0].gameweek == 21
 
 
 class TestLoadFixturesDf:

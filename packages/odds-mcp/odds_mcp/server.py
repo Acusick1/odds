@@ -41,6 +41,7 @@ from odds_mcp.prices import (
     book_quotes,
     latest_book_prices,
     latest_priced_snapshot,
+    load_market_window,
     resolve_sharp_prices,
     selection_sharp_reading,
 )
@@ -965,20 +966,15 @@ async def find_retail_edges(
                 "message": "No odds snapshots available for this event",
             }
 
-        # Sharp prices: lookback across recent snapshots.
-        sharp_result = await resolve_sharp_prices(
+        window = await load_market_window(
             session,
             event,
             Market(market),
-            sharp_bms,
-            sharp_lookback_hours,
             latest_snapshot.snapshot_time,
+            max(sharp_lookback_hours, lookback_hours),
         )
-
-        # Retail prices: per-bookmaker latest within the lookback window.
-        book_prices = await latest_book_prices(
-            session, event, Market(market), latest_snapshot.snapshot_time, lookback_hours
-        )
+        sharp_result = window.sharp(sharp_bms, sharp_lookback_hours)
+        book_prices = window.latest(lookback_hours)
 
         event_dict = _event_to_dict(event)
 

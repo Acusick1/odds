@@ -65,7 +65,7 @@ class SchedulerBackend(ABC):
     """
     Abstract interface for scheduling backends.
 
-    All scheduler implementations (AWS EventBridge, Railway cron, local APScheduler)
+    All scheduler implementations (AWS EventBridge, local APScheduler)
     must implement this interface to provide a consistent API for job scheduling.
 
     Features:

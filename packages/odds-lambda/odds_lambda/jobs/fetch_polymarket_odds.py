@@ -8,14 +8,15 @@ with the cadence that mirrors the backfill grid spacing.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
-from odds_core.alerts import job_alert_context, send_job_warning
+from odds_core.alerts import send_job_warning
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
+from odds_core.job_specs import job_cadence
 from odds_core.models import Event, EventStatus, FetchLog
 from odds_core.sports import SportKey
 from odds_core.vocabulary import Market, Source, TimeBasis
@@ -23,12 +24,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.collection_calendar import CollectionSource, decide_collection_run
-from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.polymarket_fetcher import PolymarketClient
 from odds_lambda.polymarket_odds import (
     MAX_HORIZON,
     MAX_QUOTE_SPREAD,
-    TIER_STEPS,
     PolymarketMatch,
     build_envelope,
     listed_game,
@@ -36,12 +35,12 @@ from odds_lambda.polymarket_odds import (
     sum_is_valid,
 )
 from odds_lambda.polymarket_sports import POLYMARKET_SPORTS
+from odds_lambda.scheduling.collection import CollectionResult, PostbookTiming, run_collection
 from odds_lambda.scheduling.decision import (
     OVERNIGHT_WINDOWS,
     CadenceConfig,
     ScheduleDecision,
 )
-from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
 from odds_lambda.storage.event_resolver import attach_events
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, discard_payload, store_payload
@@ -49,23 +48,10 @@ from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
 
-_NO_GAME_HOURS = 6.0
 LISTING_CHECK_HORIZON = timedelta(days=5)
 
 
-def _hours(tier: FetchTier) -> float:
-    return TIER_STEPS[tier].total_seconds() / 3600
-
-
-CADENCE = CadenceConfig(
-    closing=_hours(FetchTier.CLOSING),
-    pregame=_hours(FetchTier.PREGAME),
-    sharp=_hours(FetchTier.SHARP),
-    early=_hours(FetchTier.EARLY),
-    opening=_hours(FetchTier.OPENING),
-    no_game=_NO_GAME_HOURS,
-    db_fallback=1.0,
-)
+CADENCE = CadenceConfig(**asdict(job_cadence("fetch-polymarket-odds")))
 
 SOURCE = CollectionSource(
     key="polymarket",
@@ -249,36 +235,13 @@ async def main(ctx: JobContext) -> None:
     compound_job_name = make_compound_job_name("fetch-polymarket-odds", sport)
     overnight = OVERNIGHT_WINDOWS.get(sport)
 
-    async def _reschedule(label: str) -> ScheduleDecision:
-        decision = await decide_collection_run(
-            [sport], CADENCE, overnight=overnight, stored_only=True
-        )
-        assert decision.next_execution is not None  # noqa: S101
-        try:
-            await self_schedule(
-                job_name=compound_job_name,
-                next_time=decision.next_execution,
-                dry_run=settings.scheduler.dry_run,
-                sport=sport,
-                reason=f"{label}: {decision.reason}",
-            )
-        except Exception as e:
-            logger.error("polymarket_odds_schedule_failed", error=str(e), exc_info=True)
-            if label == "pre-schedule":
-                raise
-        return decision
+    async def decide() -> ScheduleDecision:
+        return await decide_collection_run([sport], CADENCE, overnight=overnight, stored_only=True)
 
-    decision = await _reschedule("pre-schedule")
-
-    if not decision.should_execute:
-        async with job_alert_context(compound_job_name):
-            logger.info("polymarket_odds_dormant", sport=sport, reason=decision.reason)
-        return
-
-    snapshot_time = datetime.now(UTC)
-    stats: IngestionStats | None = None
-    failure: str | None = None
-    async with job_alert_context(compound_job_name):
+    async def collect() -> CollectionResult:
+        snapshot_time = datetime.now(UTC)
+        stats: IngestionStats | None = None
+        failure: str | None = None
         try:
             stats = await ingest_sport(sport, snapshot_time)
         except Exception as e:
@@ -298,7 +261,16 @@ async def main(ctx: JobContext) -> None:
                 f"{compound_job_name} stored 0 snapshots from {stats.matches_seen} match(es).",
             )
 
-        await _reschedule("post-fetch")
-
         if failure is not None:
-            raise RuntimeError(f"{compound_job_name} failed: {failure}")
+            return CollectionResult(failure=RuntimeError(f"{compound_job_name} failed: {failure}"))
+        return CollectionResult()
+
+    await run_collection(
+        job_name=compound_job_name,
+        sport=sport,
+        dry_run=settings.scheduler.dry_run,
+        decide=decide,
+        collect=collect,
+        post_label="post-fetch",
+        postbook_timing=PostbookTiming.BEFORE_HEARTBEAT,
+    )

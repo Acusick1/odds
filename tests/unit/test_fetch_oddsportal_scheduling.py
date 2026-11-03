@@ -90,48 +90,10 @@ class TestProximityScheduling:
         yield
 
     @pytest.mark.asyncio
-    async def test_preschedule_before_scrape(self) -> None:
-        """Pre-schedule must fire before ingest_league."""
-        call_order: list[str] = []
-
-        async def fake_ingest(spec):
-            call_order.append("ingest")
-            from odds_lambda.jobs.fetch_oddsportal import IngestionStats
-
-            return IngestionStats(league="test", matches_scraped=5, snapshots_stored=3)
-
-        async def fake_schedule(**kwargs):
-            call_order.append("schedule")
-
-        mock_backend = AsyncMock()
-        mock_backend.get_backend_name = Mock(return_value="test")
-        mock_backend.schedule_next_execution = AsyncMock(side_effect=fake_schedule)
-
-        with (
-            patch("odds_lambda.jobs.fetch_oddsportal.ingest_league", side_effect=fake_ingest),
-            patch(
-                "odds_lambda.scheduling.helpers.get_scheduler_backend",
-                return_value=mock_backend,
-            ),
-            patch("odds_core.config.get_settings") as mock_settings,
-            patch("odds_core.alerts.job_alert_context", side_effect=self._noop_alert_context),
-            patch(
-                "odds_lambda.collection_calendar.next_fixture_kickoff",
-                new_callable=AsyncMock,
-                return_value=datetime.now(UTC) + timedelta(hours=20),
-            ),
-        ):
-            mock_settings.return_value.scheduler.dry_run = False
-            await main(JobContext(sport="soccer_epl"))
-
-        assert call_order[0] == "schedule", (
-            "schedule_next_execution must be called before ingest_league"
-        )
-        assert "ingest" in call_order
-
-    @pytest.mark.asyncio
-    async def test_success_reschedules_with_updated_interval(self) -> None:
-        """On success, a second schedule call fires with re-queried interval."""
+    @pytest.mark.parametrize(("matches_scraped", "expected_bookings"), [(5, 2), (0, 1)])
+    async def test_scrape_count_controls_postbooking(
+        self, matches_scraped: int, expected_bookings: int
+    ) -> None:
         mock_backend = AsyncMock()
         mock_backend.get_backend_name = Mock(return_value="test")
 
@@ -144,7 +106,14 @@ class TestProximityScheduling:
                 return_value=mock_backend,
             ),
             patch("odds_core.config.get_settings") as mock_settings,
-            patch("odds_core.alerts.job_alert_context", side_effect=self._noop_alert_context),
+            patch(
+                "odds_lambda.jobs.fetch_oddsportal.require_rows_for_fixtures",
+                new_callable=AsyncMock,
+            ) as validate_rows,
+            patch(
+                "odds_lambda.scheduling.collection.job_alert_context",
+                side_effect=self._noop_alert_context,
+            ),
             patch(
                 "odds_lambda.collection_calendar.next_fixture_kickoff",
                 new_callable=AsyncMock,
@@ -155,85 +124,20 @@ class TestProximityScheduling:
 
             mock_settings.return_value.scheduler.dry_run = False
             mock_ingest.return_value = IngestionStats(
-                league="test", matches_scraped=5, snapshots_stored=3
+                league="test",
+                matches_scraped=matches_scraped,
+                snapshots_stored=3 if matches_scraped else 0,
             )
 
             await main(JobContext(sport="soccer_epl"))
 
-        # Pre-schedule + success reschedule
-        assert mock_backend.schedule_next_execution.call_count == 2
+        validate_rows.assert_awaited_once()
+        assert mock_backend.schedule_next_execution.call_count == expected_bookings
         # No retry_count in any payload
         for call in mock_backend.schedule_next_execution.call_args_list:
             payload = call.kwargs.get("payload")
             if payload:
                 assert "retry_count" not in payload
-
-    @pytest.mark.asyncio
-    async def test_failure_keeps_prescheduled(self) -> None:
-        """On failure, no second schedule call — the pre-scheduled one stands."""
-        mock_backend = AsyncMock()
-        mock_backend.get_backend_name = Mock(return_value="test")
-
-        with (
-            patch(
-                "odds_lambda.jobs.fetch_oddsportal.ingest_league", new_callable=AsyncMock
-            ) as mock_ingest,
-            patch(
-                "odds_lambda.scheduling.helpers.get_scheduler_backend",
-                return_value=mock_backend,
-            ),
-            patch("odds_core.config.get_settings") as mock_settings,
-            patch("odds_core.alerts.job_alert_context", side_effect=self._noop_alert_context),
-            patch(
-                "odds_lambda.jobs.fetch_oddsportal.require_rows_for_fixtures",
-                new_callable=AsyncMock,
-            ),
-            patch(
-                "odds_lambda.collection_calendar.next_fixture_kickoff",
-                new_callable=AsyncMock,
-                return_value=datetime.now(UTC) + timedelta(hours=20),
-            ),
-        ):
-            from odds_lambda.jobs.fetch_oddsportal import IngestionStats
-
-            mock_settings.return_value.scheduler.dry_run = False
-            mock_ingest.return_value = IngestionStats(league="test", matches_scraped=0)
-
-            await main(JobContext(sport="soccer_epl"))
-
-        # Only the pre-schedule fires
-        assert mock_backend.schedule_next_execution.call_count == 1
-
-    @pytest.mark.asyncio
-    async def test_chain_survives_ingest_exception(self) -> None:
-        """If ingest_league raises, the pre-schedule is already set."""
-        mock_backend = AsyncMock()
-        mock_backend.get_backend_name = Mock(return_value="test")
-
-        with (
-            patch(
-                "odds_lambda.jobs.fetch_oddsportal.ingest_league",
-                new_callable=AsyncMock,
-                side_effect=Exception("simulated timeout"),
-            ),
-            patch(
-                "odds_lambda.scheduling.helpers.get_scheduler_backend",
-                return_value=mock_backend,
-            ),
-            patch("odds_core.config.get_settings") as mock_settings,
-            patch("odds_core.alerts.job_alert_context", side_effect=self._noop_alert_context),
-            patch(
-                "odds_lambda.collection_calendar.next_fixture_kickoff",
-                new_callable=AsyncMock,
-                return_value=datetime.now(UTC) + timedelta(hours=20),
-            ),
-        ):
-            mock_settings.return_value.scheduler.dry_run = False
-            with pytest.raises(RuntimeError, match="simulated timeout"):
-                await main(JobContext(sport="soccer_epl"))
-
-        # Only the pre-schedule fires
-        assert mock_backend.schedule_next_execution.call_count == 1
 
     @pytest.mark.asyncio
     async def test_db_failure_falls_back_to_1h(self) -> None:
@@ -250,7 +154,10 @@ class TestProximityScheduling:
                 return_value=mock_backend,
             ),
             patch("odds_core.config.get_settings") as mock_settings,
-            patch("odds_core.alerts.job_alert_context", side_effect=self._noop_alert_context),
+            patch(
+                "odds_lambda.scheduling.collection.job_alert_context",
+                side_effect=self._noop_alert_context,
+            ),
             patch(
                 "odds_lambda.collection_calendar.next_fixture_kickoff",
                 new_callable=AsyncMock,
@@ -294,7 +201,10 @@ class TestProximityScheduling:
                 return_value=mock_backend,
             ),
             patch("odds_core.config.get_settings") as mock_settings,
-            patch("odds_core.alerts.job_alert_context", side_effect=self._noop_alert_context),
+            patch(
+                "odds_lambda.scheduling.collection.job_alert_context",
+                side_effect=self._noop_alert_context,
+            ),
             patch(
                 "odds_lambda.collection_calendar.next_fixture_kickoff",
                 new_callable=AsyncMock,
@@ -338,7 +248,10 @@ class TestProximityScheduling:
                 return_value=mock_backend,
             ),
             patch("odds_core.config.get_settings") as mock_settings,
-            patch("odds_core.alerts.job_alert_context", side_effect=self._noop_alert_context),
+            patch(
+                "odds_lambda.scheduling.collection.job_alert_context",
+                side_effect=self._noop_alert_context,
+            ),
             patch(
                 "odds_lambda.collection_calendar.next_fixture_kickoff",
                 new_callable=AsyncMock,
@@ -389,7 +302,7 @@ class TestDormancy:
                 return_value=mock_backend,
             ),
             patch("odds_core.config.get_settings") as mock_settings,
-            patch("odds_core.alerts.job_alert_context", side_effect=alert_context),
+            patch("odds_lambda.scheduling.collection.job_alert_context", side_effect=alert_context),
             patch(
                 "odds_lambda.collection_calendar.next_fixture_kickoff",
                 new_callable=AsyncMock,
@@ -485,7 +398,10 @@ class TestDroppedGamesAlert:
                 return_value=mock_backend,
             ),
             patch("odds_core.config.get_settings") as mock_settings,
-            patch("odds_core.alerts.job_alert_context", side_effect=recording_alert_context),
+            patch(
+                "odds_lambda.scheduling.collection.job_alert_context",
+                side_effect=recording_alert_context,
+            ),
             patch(
                 "odds_lambda.collection_calendar.next_fixture_kickoff",
                 new_callable=AsyncMock,

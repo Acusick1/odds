@@ -92,7 +92,7 @@ def start_local(
     Start local scheduler for testing (APScheduler backend).
 
     Simulates AWS Lambda + EventBridge behavior locally using APScheduler.
-    Fixed-schedule jobs listed in ``_JOB_CRON_MAP`` have their cron re-applied
+    Fixed-schedule jobs listed in ``JobSpec.cron`` have their cron re-applied
     at bootstrap; self-scheduling jobs keep a pending run, or run their
     bootstrap function when they have none.
 
@@ -244,12 +244,11 @@ def run_once(
     """
     Execute a single job once and exit.
 
-    Works with any backend (local, aws, railway).
+    Works with either the local or AWS backend.
     Useful for:
     - Manual job execution
     - Testing individual jobs
     - CI/CD pipelines
-    - Railway cron invocation
 
     Usage:
         odds scheduler run-once fetch-odds-epl
@@ -533,11 +532,6 @@ def info():
         console.print("  • Dynamic one-time schedules")
         console.print("  • Deploy with: [cyan]terraform apply[/cyan]")
 
-    elif app_settings.scheduler.backend == "railway":
-        console.print("  • Uses Railway cron (static schedules)")
-        console.print("  • Configure in railway.json")
-        console.print("  • Jobs use smart gating logic")
-
     if app_settings.scheduler.dry_run:
         console.print("\n[bold yellow]⚠ DRY-RUN MODE ENABLED[/bold yellow]")
         console.print("  Scheduling operations will be logged but not executed")
@@ -549,7 +543,7 @@ def list_jobs(
         None,
         "--backend",
         help=(
-            "Override the configured scheduler backend ('aws', 'local', 'railway'). "
+            "Override the configured scheduler backend ('aws', 'local'). "
             "Use '--backend aws' to query the live deployed EventBridge schedule "
             "without editing .env (requires AWS_REGION, AWS_LAMBDA_ARN, AWS_RULE_PREFIX "
             "and AWS credentials)."
@@ -565,7 +559,6 @@ def list_jobs(
     - Status
     - Schedule (raw EventBridge expression, AWS backend only)
 
-    Note: Not supported on Railway backend (static cron schedules).
     """
     app_settings = get_settings()
     effective_backend = backend or app_settings.scheduler.backend

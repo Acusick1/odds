@@ -13,6 +13,8 @@ sources:
   - odds_mcp.prices.is_book_price
   - odds_mcp.prices.SharpLines
   - odds_mcp.prices.book_quotes
+  - odds_mcp.prices.MarketWindow
+  - odds_mcp.prices.load_market_window
   - odds_mcp.prices.latest_priced_snapshot
   - odds_mcp.prices.latest_book_prices
   - odds_mcp.prices.resolve_sharp_prices
@@ -58,8 +60,8 @@ Inputs: `event_id`, `market` (`h2h`, `1x2`, `totals`, `spreads`), `sharp_bookmak
 Computation:
 
 1. Anchor on the event's latest snapshot of `market` holding a book price; both windows end at that snapshot's time.
-2. Sharp prices: `odds_mcp.prices.resolve_sharp_prices`, newest first, per `(outcome, line)`, taking the first sharp book in priority order that has a price.
-3. Retail prices: `odds_mcp.prices.latest_book_prices`, the newest price per `(book, outcome, point)`. Any book outside the sharp list is retail.
+2. Load the wider of the sharp and retail windows once through `odds_mcp.prices.load_market_window`. Quotes are sorted by snapshot time descending, then snapshot id ascending, preserving price-row order within a snapshot. The loader bounds snapshot time at the anchor and optionally bounds storage time with `known_at` for historical reads.
+3. `odds_mcp.prices.MarketWindow` projects sharp and retail prices without further reads or sorting, each with its own inclusive cutoff. Sharp prices resolve per `(outcome, line)`, using bookmaker priority within the newest eligible snapshot. Retail prices resolve per `(book, outcome, point)`. The single-purpose `odds_mcp.prices.resolve_sharp_prices` and `odds_mcp.prices.latest_book_prices` callers use the same loader and projections.
 4. Per `(outcome, point)` bucket: `divergence = retail_implied_prob - sharp_implied_prob` per book, with implied probabilities taken as `1 / price_decimal`; `median_divergence` and `dispersion_stddev` (population standard deviation, needs 2+ books); `z_score = (divergence - median) / stddev`, set only when the bucket has 3+ books and a nonzero stddev; `best_retail` (lowest implied probability) and `worst_retail`.
 5. `market_hold` per book, only for `h2h` and `1x2`, from `odds_analytics.utils.per_book_market_holds` over decimal prices, which drops books missing any required outcome.
 

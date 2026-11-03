@@ -70,4 +70,3 @@ Missing:
 - [Take an idea to a verdict](../evaluation/howto-take-an-idea-to-a-verdict.md)
 - [About the system and its pivots](project-overview.md)
 - [Paper trading](../agent/paper-trading.md)
-- [Retail-EV evaluation](../evaluation/retail-ev-evaluation.md)

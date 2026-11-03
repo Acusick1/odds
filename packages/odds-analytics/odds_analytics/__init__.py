@@ -8,8 +8,6 @@ install with ``pip install odds-analytics[training]`` for full functionality.
 Modules that require training extras raise ImportError at import time if missing.
 """
 
-from odds_analytics.utils import calculate_ev
-
 
 def __getattr__(name: str) -> object:
     """Lazy-load modules that require optional training dependencies."""
@@ -43,8 +41,6 @@ __all__ = [
     "XGBoostLineMovementStrategy",
     # Backfill
     "BackfillExecutor",
-    # Utils
-    "calculate_ev",
     # Training Configuration
     "MLTrainingConfig",
     "TrainingConfig",

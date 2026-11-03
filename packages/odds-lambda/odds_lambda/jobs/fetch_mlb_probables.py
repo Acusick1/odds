@@ -22,6 +22,7 @@ from datetime import UTC, date, datetime, timedelta
 import structlog
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
+from odds_core.job_specs import heartbeat_name
 
 from odds_lambda.collection_calendar import EmptyCollectionError, event_calendar
 from odds_lambda.mlb_stats_fetcher import MlbStatsFetcher, dates_for_window
@@ -63,7 +64,7 @@ async def main(ctx: JobContext) -> None:
         date_count=len(target_dates),
     )
 
-    async with job_alert_context("fetch-mlb-probables"):
+    async with job_alert_context(heartbeat_name("fetch-mlb-probables", sport)):
         record_count = await _fetch_and_store(now, target_dates)
         logger.info(
             "fetch_mlb_probables_completed",

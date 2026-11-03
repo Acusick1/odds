@@ -39,7 +39,7 @@ async def bootstrap_job(
 ) -> BootstrapResult:
     """Install the schedule for a job, per sport when ``sport`` is set, on scheduler start.
 
-    A cron job has its cron re-applied, so an edit to ``_JOB_CRON_MAP`` takes
+    A cron job has its cron re-applied, so an edit to ``JobSpec.cron`` takes
     effect. A self-scheduling job keeps a pending one-off run, which it
     computed itself, re-booked at the same time so it runs through the current
     runner. Without one, any other stored schedule (such as a cron left from

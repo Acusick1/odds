@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import pytest
 from odds_core.match_brief_models import BriefDecision, MatchBrief
-from odds_core.models import Event, EventStatus
+from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.vocabulary import Market
 from odds_mcp.prices import (
     SharpLines,
@@ -19,7 +19,7 @@ from odds_mcp.prices import (
     resolve_sharp_prices,
 )
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from tests.test_helpers import (
     make_epl_event,
@@ -1631,6 +1631,82 @@ class TestBookPricePredicate:
         assert anchor.snapshot_time == event.commence_time - timedelta(hours=2)
         assert later not in {q.snapshot_time for q in found}
         assert anchor.id in {q.snapshot_id for q in found}
+
+
+class TestMarketWindow:
+    @pytest.mark.asyncio
+    async def test_historical_window_respects_storage_and_snapshot_bounds(
+        self,
+        pglite_async_session: AsyncSession,
+        sharp_lookback_event: tuple[Event, OddsSnapshot, OddsSnapshot],
+    ) -> None:
+        from odds_mcp.prices import load_market_window
+
+        event, older, newer = sharp_lookback_event
+        older.created_at = older.snapshot_time
+        newer.created_at = newer.snapshot_time + timedelta(hours=1)
+        await pglite_async_session.commit()
+        window = await load_market_window(
+            pglite_async_session,
+            event,
+            Market.ONE_X_TWO,
+            newer.snapshot_time,
+            2,
+            known_at=newer.snapshot_time,
+        )
+        assert {price.snapshot_id for price in window.latest(2).values()} == {older.id}
+        assert window.latest(0.5) == {}
+        before_newer = await load_market_window(
+            pglite_async_session,
+            event,
+            Market.ONE_X_TWO,
+            newer.snapshot_time - timedelta(microseconds=1),
+            2,
+        )
+        assert {price.snapshot_id for price in before_newer.latest(2).values()} == {older.id}
+
+    @pytest.mark.asyncio
+    async def test_retail_screen_reads_prices_once_for_different_windows(
+        self,
+        pglite_async_engine: AsyncEngine,
+        sharp_lookback_event: tuple[Event, OddsSnapshot, OddsSnapshot],
+        patch_session_maker: async_sessionmaker[AsyncSession],
+    ) -> None:
+        from odds_mcp.server import find_retail_edges
+        from sqlalchemy import event as sqlalchemy_event
+
+        event, _older, _newer = sharp_lookback_event
+        price_reads: list[str] = []
+
+        def record_price_read(
+            connection: object,
+            cursor: object,
+            statement: str,
+            parameters: object,
+            context: object,
+            executemany: bool,
+        ) -> None:
+            if "JOIN prices" in statement and statement.lstrip().startswith("SELECT"):
+                price_reads.append(statement)
+
+        engine = pglite_async_engine.sync_engine
+        sqlalchemy_event.listen(engine, "before_cursor_execute", record_price_read)
+        try:
+            result = await find_retail_edges(
+                event_id=event.id,
+                market="1x2",
+                lookback_hours=0.5,
+                sharp_lookback_hours=2,
+            )
+        finally:
+            sqlalchemy_event.remove(engine, "before_cursor_execute", record_price_read)
+        assert len(price_reads) == 1
+        assert {row["outcome"] for row in result["per_outcome"]} == {"Brighton", "Draw", "Wolves"}
+        assert all(row["n_books"] == 1 for row in result["per_outcome"])
+        assert all(
+            row["sharp_snapshot_time"] == _older.snapshot_time.isoformat()
+            for row in result["per_outcome"]
+        )
 
 
 class TestPaperBetSharpReading:
