@@ -133,9 +133,12 @@ async def book_quotes(
     *,
     since: datetime | None = None,
     until: datetime | None = None,
+    known_at: datetime | None = None,
 ) -> list[Quote]:
     """The book prices of ``market`` in snapshot time order: back prices, and Polymarket's mid."""
-    found = await quotes(session, [event_id], market, sides=BOOK_SIDES, since=since, until=until)
+    found = await quotes(
+        session, [event_id], market, sides=BOOK_SIDES, since=since, until=until, known_at=known_at
+    )
     return [q for q in found if is_book_price(q.source, q.side)]
 
 
@@ -157,18 +160,8 @@ async def latest_book_prices(
     first and the first price of a key wins, so a snapshot holding only some books (a Betfair
     snapshot beside an older retail one) does not hide the others.
     """
-    window = await book_quotes(
-        session,
-        event.id,
-        market,
-        since=anchor_time - timedelta(hours=lookback_hours),
-        until=anchor_time,
-    )
-    prices: dict[BookKey, BookPrice] = {}
-    for quote in newest_first(window):
-        price = BookPrice.from_quote(event, quote, anchor_time)
-        prices.setdefault((price.bookmaker, price.outcome_name, price.line), price)
-    return prices
+    window = await load_market_window(session, event, market, anchor_time, lookback_hours)
+    return window.latest(lookback_hours)
 
 
 async def resolve_sharp_prices(
@@ -184,44 +177,83 @@ async def resolve_sharp_prices(
     Snapshots are walked newest first; an outcome at a line takes the first sharp book, in the
     priority order of ``sharp_bookmakers``, that prices it in the snapshot, and is not revisited.
     """
-    window = await book_quotes(
+    window = await load_market_window(session, event, market, anchor_time, lookback_hours)
+    return window.sharp(sharp_bookmakers, lookback_hours)
+
+
+@dataclass(frozen=True)
+class MarketWindow:
+    event: Event
+    anchor_time: datetime
+    quotes: tuple[Quote, ...]
+
+    def _within(self, lookback_hours: float) -> tuple[Quote, ...]:
+        cutoff = self.anchor_time - timedelta(hours=lookback_hours)
+        return tuple(q for q in self.quotes if cutoff <= q.snapshot_time <= self.anchor_time)
+
+    def latest(self, lookback_hours: float) -> dict[BookKey, BookPrice]:
+        window = self._within(lookback_hours)
+        prices: dict[BookKey, BookPrice] = {}
+        for quote in window:
+            price = BookPrice.from_quote(self.event, quote, self.anchor_time)
+            prices.setdefault((price.bookmaker, price.outcome_name, price.line), price)
+        return prices
+
+    def sharp(self, sharp_bookmakers: Sequence[str], lookback_hours: float) -> SharpLines:
+        window = self._within(lookback_hours)
+        by_snapshot: dict[int, list[Quote]] = {}
+        for quote in window:
+            by_snapshot.setdefault(quote.snapshot_id, []).append(quote)
+
+        result = SharpLines()
+        seen: set[SharpKey] = set()
+        for snapshot_quotes in by_snapshot.values():
+            keyed = [((outcome_label(self.event, q.outcome), q.line), q) for q in snapshot_quotes]
+            seen.update(key for key, _ in keyed)
+            for key in {key for key, _ in keyed}:
+                if key in result.prices:
+                    continue
+                for bookmaker in sharp_bookmakers:
+                    match = next(
+                        (q for k, q in keyed if k == key and q.bookmaker == bookmaker),
+                        None,
+                    )
+                    if match is None:
+                        continue
+                    result.prices[key] = {
+                        "bookmaker": bookmaker,
+                        "price": decimal_to_american(match.price),
+                        "price_decimal": match.price,
+                        "implied_prob": round(decimal_to_implied_probability(match.price), 6),
+                    }
+                    result.meta[key] = SharpPriceMeta(
+                        snapshot_id=match.snapshot_id,
+                        snapshot_time=match.snapshot_time,
+                        age_seconds=round(
+                            (self.anchor_time - match.snapshot_time).total_seconds(), 1
+                        ),
+                    )
+                    break
+            if seen <= result.prices.keys():
+                break
+        return result
+
+
+async def load_market_window(
+    session: AsyncSession,
+    event: Event,
+    market: Market,
+    anchor_time: datetime,
+    lookback_hours: float,
+    *,
+    known_at: datetime | None = None,
+) -> MarketWindow:
+    found = await book_quotes(
         session,
         event.id,
         market,
         since=anchor_time - timedelta(hours=lookback_hours),
         until=anchor_time,
+        known_at=known_at,
     )
-    by_snapshot: dict[int, list[Quote]] = {}
-    for quote in newest_first(window):
-        by_snapshot.setdefault(quote.snapshot_id, []).append(quote)
-
-    result = SharpLines()
-    seen: set[SharpKey] = set()
-    for snapshot_quotes in by_snapshot.values():
-        keyed = [((outcome_label(event, q.outcome), q.line), q) for q in snapshot_quotes]
-        seen.update(key for key, _ in keyed)
-        for key in {key for key, _ in keyed}:
-            if key in result.prices:
-                continue
-            for bookmaker in sharp_bookmakers:
-                match = next(
-                    (q for k, q in keyed if k == key and q.bookmaker == bookmaker),
-                    None,
-                )
-                if match is None:
-                    continue
-                result.prices[key] = {
-                    "bookmaker": bookmaker,
-                    "price": decimal_to_american(match.price),
-                    "price_decimal": match.price,
-                    "implied_prob": round(decimal_to_implied_probability(match.price), 6),
-                }
-                result.meta[key] = SharpPriceMeta(
-                    snapshot_id=match.snapshot_id,
-                    snapshot_time=match.snapshot_time,
-                    age_seconds=round((anchor_time - match.snapshot_time).total_seconds(), 1),
-                )
-                break
-        if seen <= result.prices.keys():
-            break
-    return result
+    return MarketWindow(event, anchor_time, tuple(newest_first(found)))
