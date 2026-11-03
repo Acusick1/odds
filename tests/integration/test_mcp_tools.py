@@ -1697,4 +1697,7 @@ class TestMarketWindow:
         assert len(price_reads) == 1
         assert {row["outcome"] for row in result["per_outcome"]} == {"Brighton", "Draw", "Wolves"}
         assert all(row["n_books"] == 1 for row in result["per_outcome"])
-        assert all(row["sharp_snapshot_time"] == _older.snapshot_time.isoformat() for row in result["per_outcome"])
+        assert all(
+            row["sharp_snapshot_time"] == _older.snapshot_time.isoformat()
+            for row in result["per_outcome"]
+        )
