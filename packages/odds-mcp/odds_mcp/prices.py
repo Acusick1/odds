@@ -7,10 +7,17 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
+from odds_core.market_prices import TWO_WAY_MARKET, market_outcomes
 from odds_core.match_brief_models import SharpPriceMap, SharpPriceMeta
 from odds_core.models import Event, OddsSnapshot, Price
-from odds_core.odds_math import decimal_to_american, decimal_to_implied_probability
+from odds_core.odds_math import (
+    decimal_to_american,
+    decimal_to_implied_probability,
+    devig_probabilities,
+)
+from odds_core.paper_trade_models import SharpReading
 from odds_core.quotes import Quote, quotes
+from odds_core.utils import is_three_way_sport
 from odds_core.vocabulary import Market, PriceOutcome, Side, Source
 from sqlalchemy import and_, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -257,3 +264,45 @@ async def load_market_window(
         known_at=known_at,
     )
     return MarketWindow(event, anchor_time, tuple(newest_first(found)))
+
+
+async def selection_sharp_reading(
+    session: AsyncSession,
+    event: Event,
+    market: str,
+    selection: str,
+    line: float | None,
+    sharp_bookmakers: Sequence[str],
+    lookback_hours: float,
+    anchor_time: datetime,
+) -> SharpReading | None:
+    """The devigged sharp probability of ``selection`` on ``line``, from ``resolve_sharp_prices``.
+
+    The selection's sharp price is devigged against the sharp prices of the market's other
+    outcomes on the same line, each as ``resolve_sharp_prices`` picked it, so they may come from
+    different books. None when the market or selection is not one a trade takes, or any outcome
+    has no sharp price in the window.
+    """
+    try:
+        outcome = PriceOutcome(selection)
+        outcomes = market_outcomes(market)
+    except ValueError:
+        return None
+    if market == TWO_WAY_MARKET and is_three_way_sport(event.sport_key):
+        outcomes = (PriceOutcome.HOME, PriceOutcome.DRAW, PriceOutcome.AWAY)
+    if outcome not in outcomes:
+        return None
+    sharp = await resolve_sharp_prices(
+        session, event, Market(market), sharp_bookmakers, lookback_hours, anchor_time
+    )
+    keys = [(outcome_label(event, o), line) for o in outcomes]
+    if not all(key in sharp.prices for key in keys):
+        return None
+    implied = [decimal_to_implied_probability(sharp.prices[key]["price_decimal"]) for key in keys]  # type: ignore[arg-type]
+    fair = dict(zip(outcomes, devig_probabilities(*implied), strict=True))
+    selected = (outcome_label(event, outcome), line)
+    return SharpReading(
+        bookmaker=str(sharp.prices[selected]["bookmaker"]),
+        snapshot_time=sharp.meta[selected].snapshot_time,
+        probability=fair[outcome],
+    )

@@ -15,8 +15,12 @@ from odds_core.market_prices import (
     market_outcomes,
 )
 from odds_core.models import Event, EventStatus
-from odds_core.odds_math import calculate_profit_from_decimal, selection_won
-from odds_core.paper_trade_models import PaperTrade, TradeResult
+from odds_core.odds_math import (
+    calculate_profit_from_decimal,
+    decimal_to_implied_probability,
+    selection_won,
+)
+from odds_core.paper_trade_models import PaperTrade, SharpReading, TradeResult
 from odds_core.utils import is_three_way_sport
 from odds_core.vocabulary import Market
 from sqlalchemy import func, select
@@ -86,11 +90,13 @@ async def place_trade(
     candidate_name: str | None = None,
     candidate_version: int | None = None,
     decision_id: int | None = None,
+    sharp: SharpReading | None = None,
 ) -> PaperTrade:
     """Place a new paper trade. Validates stake against bankroll and the candidate.
 
     ``bankroll=None`` places a flat-stake candidate trade, which records no bankroll. ``line``
-    is the selection's line, a half line in a market with lines and None otherwise.
+    is the selection's line, a half line in a market with lines and None otherwise. ``sharp``
+    is the sharp market's reading of the selection at placement, if one was taken and found.
     """
     if price_decimal <= 1.0:
         raise ValueError(f"Decimal price must exceed 1.0, got {price_decimal}")
@@ -150,6 +156,11 @@ async def place_trade(
         decision_id=decision_id,
         git_sha=current_git_sha(),
     )
+    if sharp is not None:
+        trade.sharp_probability = sharp.probability
+        trade.sharp_bookmaker = sharp.bookmaker
+        trade.sharp_snapshot_time = sharp.snapshot_time
+        trade.sharp_spread = decimal_to_implied_probability(price_decimal) - sharp.probability
     session.add(trade)
     await session.flush()
     return trade

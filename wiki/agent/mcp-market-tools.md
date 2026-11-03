@@ -26,7 +26,7 @@ status: stable
 
 # MCP odds and retail-edge tools
 
-Four read-only market-data tools (none reads paper trades), part of the [odds-mcp server](mcp-server.md). Event ids are integers; an unknown one returns `{"error": "Event '<id>' not found"}`. The first three read stored data; `odds_mcp.server.find_retail_edges` is the [betting agent](betting-agent.md)'s flagship screener, about 290 lines.
+Four read-only market-data tools (none reads paper trades), part of the [odds-mcp server](mcp-server.md). Event ids are integers; an unknown one returns `{"error": "Event '<id>' not found"}`. The first three read stored data; `odds_mcp.server.find_retail_edges` is the [betting agent](betting-agent.md)'s flagship screener, about 290 lines, and its sharp lookup also backs the sharp reading of `odds_mcp.server.paper_bet`.
 
 The tools read prices from the `prices` table through `odds_core.quotes.quotes` ([reading quotes](../storage/price-tables.md#reading-quotes)), in `odds_mcp.prices`, and treat the event id as opaque: every source's snapshots hang on the one event of a match ([event resolver](../storage/event-resolver.md)). A book's price is its `back` price, except Polymarket's, which is its `mid` (`odds_mcp.prices.BOOK_SIDES`, `odds_mcp.prices.book_quotes`); lay and traded prices are not surfaced. Outcomes are shown as the event's home and away team names, `Draw`, `Over` and `Under` (`odds_mcp.prices.outcome_label`), and `point` is the stored line. Bookmaker keys are the canonical keys the writers store ([bookmakers](../storage/price-tables.md#reading-an-envelope)), so the same book has one key across sources.
 
@@ -55,7 +55,7 @@ Every snapshot of `market` that holds a book price, in time order, each with its
 
 `odds_mcp.server.find_retail_edges` ranks retail books that price an outcome longer than the sharp reference ([sharp benchmark](../modelling/sharp-benchmark.md)). Books in `sharp_bookmakers` and in `odds_core.bookmakers.NON_BETTABLE_BOOKMAKERS` (Pinnacle and `polymarket`, which a UK bettor cannot use) are never retail rows. Exchanges are retail rows unless the sharp list names them.
 
-Inputs: `event_id`, `market` (`h2h`, `1x2`, `totals`, `spreads`), `sharp_bookmakers` (list, JSON-array string or comma string; default `["pinnacle", "betfair_exchange"]`), `sharp_lookback_hours=2.0`, `lookback_hours=2.0` (retail).
+Inputs: `event_id`, `market` (`h2h`, `1x2`, `totals`, `spreads`), `sharp_bookmakers` (list, JSON-array string or comma string; default `odds_core.bookmakers.SHARP_BOOKMAKERS`, `pinnacle` then `betfair_exchange`), `sharp_lookback_hours=2.0`, `lookback_hours=2.0` (retail).
 
 Computation:
 
@@ -69,7 +69,7 @@ Output: `event`, `snapshot_time` (newest contributing retail snapshot), `sharp_b
 
 Divergence is vig-inclusive on both sides (each side is `1 / price_decimal`), with no devigging ([devigging](../foundations/devigging.md)). A retail book with a larger margin looks worse on every outcome; use `market_hold` to separate margin from divergence. The same holds for the `sharp_prob` and `retail_sharp_diff` model features, and the three code copies of the sharp-price logic differ ([code copies](../modelling/sharp-benchmark.md#code-copies)).
 
-Sharp prices are keyed by `(outcome, line)` as retail rows are bucketed by `(outcome, point)`, so on `totals` and `spreads` each retail row is compared with the sharp price at its own line, and a line with no sharp price has a null divergence. `odds_mcp.server.save_match_brief` stamps one sharp price per outcome, from the outcome's lowest line (`odds_mcp.prices.SharpLines.by_outcome`).
+Sharp prices are keyed by `(outcome, line)` as retail rows are bucketed by `(outcome, point)`, so on `totals` and `spreads` each retail row is compared with the sharp price at its own line, and a line with no sharp price has a null divergence. `odds_mcp.server.save_match_brief` stamps one sharp price per outcome, from the outcome's lowest line (`odds_mcp.prices.SharpLines.by_outcome`), and `odds_mcp.server.paper_bet` records the devigged sharp price of the selection on its line ([sharp fields](paper-trading.md#sharp-fields)).
 
 Under the default hybrid sharp list, outcomes resolve independently, so one outcome's sharp price can be Pinnacle and another's Betfair; read `sharp_snapshot_time` and `sharp_age_seconds` per row.
 
