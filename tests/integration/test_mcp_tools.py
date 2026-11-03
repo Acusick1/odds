@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 from odds_core.match_brief_models import BriefDecision, MatchBrief
-from odds_core.models import Event, EventStatus
+from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.vocabulary import Market
 from odds_mcp.prices import (
     SharpLines,
@@ -18,7 +18,7 @@ from odds_mcp.prices import (
     resolve_sharp_prices,
 )
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from tests.test_helpers import (
     make_epl_event,
@@ -1635,7 +1635,9 @@ class TestBookPricePredicate:
 class TestMarketWindow:
     @pytest.mark.asyncio
     async def test_historical_window_respects_storage_and_snapshot_bounds(
-        self, pglite_async_session, sharp_lookback_event
+        self,
+        pglite_async_session: AsyncSession,
+        sharp_lookback_event: tuple[Event, OddsSnapshot, OddsSnapshot],
     ) -> None:
         from odds_mcp.prices import load_market_window
 
@@ -1664,7 +1666,10 @@ class TestMarketWindow:
 
     @pytest.mark.asyncio
     async def test_retail_screen_reads_prices_once_for_different_windows(
-        self, pglite_async_engine, sharp_lookback_event, patch_session_maker
+        self,
+        pglite_async_engine: AsyncEngine,
+        sharp_lookback_event: tuple[Event, OddsSnapshot, OddsSnapshot],
+        patch_session_maker: async_sessionmaker[AsyncSession],
     ) -> None:
         from odds_mcp.server import find_retail_edges
         from sqlalchemy import event as sqlalchemy_event
