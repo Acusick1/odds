@@ -23,12 +23,13 @@ decision time, so the decision reads a snapshot taken just before it.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 
 import structlog
 from odds_core.candidates import candidates_dir, load_candidates
 from odds_core.database import async_session_maker
+from odds_core.job_specs import job_cadence
 from odds_core.vocabulary import Market, Source, TimeBasis
 
 from odds_lambda.candidate_rules import decision_leads
@@ -48,13 +49,13 @@ from odds_lambda.live_events import (
 from odds_lambda.mlb_game_resolver import GameRow
 from odds_lambda.oddsportal_adapter import MatchOdds, convert_market
 from odds_lambda.oddsportal_client import FEED_MARKETS, OddsPortalClient, OddsPortalError
+from odds_lambda.scheduling.collection import CollectionResult, run_collection
 from odds_lambda.scheduling.decision import (
     OVERNIGHT_WINDOWS,
     CadenceConfig,
     Lead,
     ScheduleDecision,
 )
-from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload
 
@@ -62,15 +63,7 @@ logger = structlog.get_logger()
 
 # Proximity-based polling cadence (hours): feed scrape — moderate cadence.
 # 12h+ to kickoff all poll at 2h, matching the previous "far" band.
-CADENCE = CadenceConfig(
-    closing=0.5,
-    pregame=1.0,
-    sharp=2.0,
-    early=2.0,
-    opening=2.0,
-    no_game=6.0,
-    db_fallback=1.0,
-)
+CADENCE = CadenceConfig(**asdict(job_cadence("fetch-oddsportal")))
 
 # An EPL or MLB scrape takes about a minute (two minutes at most, October 2026), so a run
 # this long before a decision time has stored its snapshots by then. An NBA scrape with its
@@ -334,7 +327,6 @@ async def main(ctx: JobContext) -> None:
     interval, pre-schedule before scraping. After successful scrape,
     re-query (new events may have appeared) and reschedule.
     """
-    from odds_core.alerts import job_alert_context
     from odds_core.config import get_settings
 
     settings = get_settings()
@@ -351,35 +343,12 @@ async def main(ctx: JobContext) -> None:
     leads = candidate_scrape_leads(spec.sport_key)
     started = datetime.now(UTC)
 
-    async def _reschedule(label: str) -> ScheduleDecision:
-        decision = await decide_collection_run(
+    async def decide() -> ScheduleDecision:
+        return await decide_collection_run(
             sport_keys, CADENCE, overnight=overnight, leads=leads, run_started=started
         )
-        assert decision.next_execution is not None  # noqa: S101
-        try:
-            await self_schedule(
-                job_name=compound_job_name,
-                next_time=decision.next_execution,
-                dry_run=settings.scheduler.dry_run,
-                sport=sport,
-                reason=f"{label}: {decision.reason}",
-            )
-        except Exception as e:
-            logger.error("fetch_oddsportal_scheduling_failed", error=str(e), exc_info=True)
-            if label == "pre-schedule":
-                raise
-        return decision
 
-    # Pre-schedule before scraping so the chain survives Lambda timeouts
-    # or a hung scrape.
-    decision = await _reschedule("pre-schedule")
-
-    if not decision.should_execute:
-        async with job_alert_context(compound_job_name):
-            logger.info("fetch_oddsportal_dormant", sport=sport, reason=decision.reason)
-        return
-
-    async with job_alert_context(compound_job_name):
+    async def collect() -> CollectionResult:
         logger.info(
             "fetch_oddsportal_started",
             sport=sport,
@@ -423,7 +392,13 @@ async def main(ctx: JobContext) -> None:
                 errors_by_sport={spec.sport_key: stats.errors},
             )
 
-    # On success, re-query next kickoff (scrape may have created new events)
-    # and reschedule at the updated interval.
-    if total_scraped > 0:
-        await _reschedule("post-scrape")
+        return CollectionResult(postbook=total_scraped > 0)
+
+    await run_collection(
+        job_name=compound_job_name,
+        sport=sport,
+        dry_run=settings.scheduler.dry_run,
+        decide=decide,
+        collect=collect,
+        post_label="post-scrape",
+    )

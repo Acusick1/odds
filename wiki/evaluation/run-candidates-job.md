@@ -9,7 +9,7 @@ mentions:
   - odds_lambda.paper_trading.place_trade
   - odds_lambda.paper_trading.settle_trades
   - odds_core.alerts.job_alert_context
-  - odds_lambda.scheduling.jobs._CANDIDATE_JOBS
+  - odds_core.job_specs.JOB_SPECS
   - odds_lambda.candidate_rules.rules.run_rule
   - odds_lambda.candidate_rules.market_state.MarketState.input_snapshot_ids
   - odds_lambda.candidate_rules.market_state.MarketState.has_input
@@ -19,7 +19,7 @@ status: stable
 
 # The run-candidates job
 
-`odds_lambda.jobs.run_candidates.main` places the paper trades of every active [mechanical candidate](candidate-registry.md) of one sport. It runs per sport as `run-candidates-epl` and `run-candidates-mlb`, self-schedules ([self-scheduling](../scheduling/self-scheduling.md)) and is bootstrapped by default ([where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs)). Smoke checks skip it, because it places bets, unless `--include-candidates` (`odds_lambda.scheduling.jobs._CANDIDATE_JOBS`).
+`odds_lambda.jobs.run_candidates.main` places the paper trades of every active [mechanical candidate](candidate-registry.md) of one sport. It runs per sport as `run-candidates-epl` and `run-candidates-mlb`, self-schedules ([self-scheduling](../scheduling/self-scheduling.md)) and is bootstrapped by default ([where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs)). Smoke checks skip it, because it places bets, unless `--include-candidates` (`odds_core.job_specs.JOB_SPECS`).
 
 ## One run
 

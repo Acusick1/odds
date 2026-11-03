@@ -8,13 +8,14 @@ This job:
 4. Self-schedules next execution based on game proximity
 """
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from functools import partial
 
 import structlog
 from odds_core.alerts import job_alert_context, send_outage_warning
 from odds_core.config import Settings, get_settings
+from odds_core.job_specs import job_cadence
 from odds_core.vocabulary import Market, Source
 
 from odds_lambda.collection_calendar import CollectionSource, require_rows_for_fixtures
@@ -41,14 +42,7 @@ logger = structlog.get_logger()
 # Proximity-based polling cadence (hours). Each /odds call costs 3 units against
 # the 500/month free tier, so the closing tier polls every 2 h and the pregame
 # tier every 3 h; the Betfair and OddsPortal jobs carry the close.
-CADENCE = CadenceConfig(
-    closing=2.0,
-    pregame=3.0,
-    sharp=12.0,
-    early=24.0,
-    opening=48.0,
-    no_game=24.0,
-)
+CADENCE = CadenceConfig(**asdict(job_cadence("fetch-odds")))
 
 SOURCE = CollectionSource(
     key="odds_api",
@@ -66,14 +60,7 @@ SOURCE = CollectionSource(
 # of the 12 h interval after the previous night's last lead run, held to NBA_QUIET_HOURS' end.
 # Replayed over stored NBA events that is 100-117 calls (300-351 units) in 30 days, and the
 # share of games last priced over 3 h before tip-off falls from 36-45% to 14-21%.
-NBA_CADENCE = CadenceConfig(
-    closing=12.0,
-    pregame=12.0,
-    sharp=12.0,
-    early=24.0,
-    opening=24.0,
-    no_game=24.0,
-)
+NBA_CADENCE = CadenceConfig(**asdict(job_cadence("fetch-odds", "basketball_nba")))
 NBA_LEADS = (
     Lead(before=timedelta(hours=3), until=timedelta(hours=2)),
     Lead(before=timedelta(hours=1), until=timedelta(minutes=20)),

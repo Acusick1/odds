@@ -41,11 +41,8 @@ def alert_context(heartbeats: list[str]) -> Callable[[str], AbstractAsyncContext
 
 @pytest.fixture
 def booked() -> Iterator[SimpleNamespace]:
-    with (
-        patch.object(fetch_betfair_exchange, "self_schedule", new_callable=AsyncMock) as betfair,
-        patch.object(fetch_polymarket_odds, "self_schedule", new_callable=AsyncMock) as polymarket,
-    ):
-        yield SimpleNamespace(betfair=betfair, polymarket=polymarket)
+    with patch("odds_lambda.scheduling.collection.self_schedule", new_callable=AsyncMock) as book:
+        yield SimpleNamespace(betfair=book, polymarket=book)
 
 
 class TestBetfairDormancy:
@@ -58,7 +55,7 @@ class TestBetfairDormancy:
     ) -> None:
         with (
             patch.object(fetch_betfair_exchange, "get_settings", return_value=_settings()),
-            patch.object(fetch_betfair_exchange, "job_alert_context", alert_context),
+            patch("odds_lambda.scheduling.collection.job_alert_context", alert_context),
             patch.object(fetch_betfair_exchange, "BetfairExchangeClient") as client,
             patch(
                 "odds_lambda.collection_calendar.next_fixture_kickoff",
@@ -92,7 +89,7 @@ class TestBetfairDormancy:
         settings = _settings()
         with (
             patch.object(fetch_betfair_exchange, "get_settings", return_value=settings),
-            patch.object(fetch_betfair_exchange, "job_alert_context", alert_context),
+            patch("odds_lambda.scheduling.collection.job_alert_context", alert_context),
             patch.object(fetch_betfair_exchange, "resolve_cert_paths", return_value=(None, None)),
             patch.object(fetch_betfair_exchange, "BetfairExchangeClient") as client,
             patch.object(
@@ -131,7 +128,7 @@ class TestPolymarketDormancy:
     ) -> None:
         with (
             patch.object(fetch_polymarket_odds, "get_settings", return_value=_settings()),
-            patch.object(fetch_polymarket_odds, "job_alert_context", alert_context),
+            patch("odds_lambda.scheduling.collection.job_alert_context", alert_context),
             patch.object(fetch_polymarket_odds, "ingest_sport", new_callable=AsyncMock) as ingest,
             patch(
                 "odds_lambda.scheduling.decision.get_next_kickoff",
@@ -154,7 +151,7 @@ class TestPolymarketDormancy:
     ) -> None:
         with (
             patch.object(fetch_polymarket_odds, "get_settings", return_value=_settings()),
-            patch.object(fetch_polymarket_odds, "job_alert_context", alert_context),
+            patch("odds_lambda.scheduling.collection.job_alert_context", alert_context),
             patch.object(
                 fetch_polymarket_odds,
                 "ingest_sport",

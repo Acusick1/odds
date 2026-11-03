@@ -11,12 +11,14 @@ the stored events within ``DORMANCY_HORIZON_DAYS`` the run only books its next c
 from __future__ import annotations
 
 import asyncio
+from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 
 import structlog
 from odds_core.alerts import job_alert_context, send_job_warning
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
+from odds_core.job_specs import job_cadence
 
 from odds_lambda.collection_calendar import decide_collection_run, event_calendar
 from odds_lambda.injury_fetcher import fetch_latest_injury_report_isolated
@@ -31,15 +33,7 @@ SPORT_KEY = "basketball_nba"
 
 # One interval at every tier: the cadence run is the morning-ET anchor (the overnight window
 # resumes at 15:00 UTC, 11:00 ET) and a catch-up; the lead runs do the pre-tip work.
-CADENCE = CadenceConfig(
-    closing=6.0,
-    pregame=6.0,
-    sharp=6.0,
-    early=6.0,
-    opening=6.0,
-    no_game=6.0,
-    db_fallback=1.0,
-)
+CADENCE = CadenceConfig(**asdict(job_cadence("fetch-injuries")))
 
 # About two hours out the starters' status is mostly filed, and half an hour out is the last
 # report slot before tip-off that is already published. A run that falls behind the earlier

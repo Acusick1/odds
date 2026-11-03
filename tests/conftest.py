@@ -1,13 +1,18 @@
 """Pytest configuration and fixtures."""
 
+import asyncio
 import json
 import os
+import subprocess
 from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pytest
+from py_pglite.config import PGliteConfig
+from py_pglite.manager import PGliteManager
+from py_pglite.sqlalchemy.manager_async import SQLAlchemyAsyncPGliteManager
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 
@@ -17,6 +22,55 @@ os.environ.setdefault("ODDS_API_KEY", "test_api_key")
 os.environ["DISCORD_WEBHOOK_URL"] = ""
 os.environ["DEAD_MANS_SWITCH_URL"] = ""
 os.environ["ALERT_ENABLED"] = "false"
+
+
+@pytest.fixture(scope="session")
+def start_pglite_manager() -> Callable[[PGliteManager], None]:
+    from unittest.mock import patch
+
+    original_generate = PGliteManager._generate_tcp_js_content
+    original_popen = subprocess.Popen
+
+    def generate_ready_server(
+        manager: PGliteManager, extension_imports: str, extension_config: str
+    ) -> str:
+        # The socket handler must not lock PGlite before database initialization finishes.
+        return original_generate(manager, extension_imports, extension_config).replace(
+            "const server =", "await db.waitReady; const server ="
+        )
+
+    def start_node(args: list[str], **kwargs: Any) -> subprocess.Popen[Any]:
+        # Eager WASM optimization exceeds this test host's memory budget.
+        command = (
+            [args[0], "--liftoff-only", "--wasm-lazy-compilation", *args[1:]]
+            if args[0] == "node"
+            else args
+        )
+        return original_popen(command, **kwargs)
+
+    def start(manager: PGliteManager) -> None:
+        with (
+            patch.object(PGliteManager, "_generate_tcp_js_content", generate_ready_server),
+            patch("py_pglite.manager.subprocess.Popen", side_effect=start_node),
+        ):
+            manager.start()
+
+    return start
+
+
+@pytest.fixture(scope="session")
+async def pglite_async_sqlalchemy_manager(
+    pglite_config: PGliteConfig,
+    start_pglite_manager: Callable[[PGliteManager], None],
+) -> AsyncGenerator[SQLAlchemyAsyncPGliteManager, None]:
+    manager = SQLAlchemyAsyncPGliteManager(pglite_config)
+    try:
+        start_pglite_manager(manager)
+        if not await asyncio.wait_for(manager.wait_for_ready(), timeout=30):
+            raise RuntimeError("PGlite database did not become ready")
+        yield manager
+    finally:
+        await manager.stop()
 
 
 @pytest.fixture(scope="session")
@@ -55,7 +109,9 @@ def sample_scores_data() -> list[dict[str, Any]]:
 
 # Override pglite_async_engine to create SQLModel tables
 @pytest.fixture(scope="session")
-async def pglite_async_engine(pglite_async_sqlalchemy_manager) -> AsyncEngine:
+async def pglite_async_engine(
+    pglite_async_sqlalchemy_manager: SQLAlchemyAsyncPGliteManager,
+) -> AsyncEngine:
     """Override py-pglite engine to create SQLModel tables."""
     from sqlmodel import SQLModel
 

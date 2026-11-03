@@ -49,7 +49,7 @@ A Saturday 3pm kickoff:
 | Sat 14:00-15:00 | Final adjustments, late money | Bets placed, if any |
 | Sat evening | Matches complete | Settle bets, report P&L |
 
-The table is `(inferred)` from the wake-up cadence in `odds_lambda.jobs.agent_run.CADENCE` (see [Cadence](../scheduling/decision-engine.md#cadence)) and the prompt's KO-60 lineup note (`packages/odds-mcp/agents/epl/base.md`); it is not a schedule in code. The cadence is what puts a wake-up inside the lineup window. Lineups come from web search because every structured lineup API was rejected ([ADR-0006](../../docs/adr/0006-lineups-from-web-research.md), [rejected sources](agent-data-sources.md#rejected-sources)). The timeline is an EPL example. MLB has its own overnight suppression window and sport file, and no MLB timeline is recorded ([overnight windows](../scheduling/decision-engine.md#overnight-windows)).
+The table is `(inferred)` from the wake-up cadence of the agent's `odds_core.job_specs.JobSpec` in `odds_core.job_specs.JOB_SPECS`, exposed as `odds_lambda.jobs.agent_run.CADENCE` (see [Cadence](../scheduling/decision-engine.md#cadence)) and the prompt's KO-60 lineup note (`packages/odds-mcp/agents/epl/base.md`); it is not a schedule in code. The cadence is what puts a wake-up inside the lineup window. Lineups come from web search because every structured lineup API was rejected ([ADR-0006](../../docs/adr/0006-lineups-from-web-research.md), [rejected sources](agent-data-sources.md#rejected-sources)). The timeline is an EPL example. MLB has its own overnight suppression window and sport file, and no MLB timeline is recorded ([overnight windows](../scheduling/decision-engine.md#overnight-windows)).
 
 ## Design principles
 

@@ -28,7 +28,7 @@ def get_scheduler_backend(
     Create scheduler backend based on configuration.
 
     Args:
-        backend_type: Backend type ('aws', 'railway', 'local').
+        backend_type: Backend type ('aws', 'local').
                      If None, reads from settings.scheduler.backend
         dry_run: Enable dry-run mode (log operations without executing)
         retry_config: Custom retry configuration (uses defaults if None)
@@ -42,7 +42,6 @@ def get_scheduler_backend(
 
     Supported backends:
     - 'aws': AWS Lambda + EventBridge (production)
-    - 'railway': Railway cron (alternative production)
     - 'local': APScheduler (local testing)
 
     Examples:
@@ -80,14 +79,6 @@ def get_scheduler_backend(
             rule_prefix=kwargs.get("rule_prefix") or settings.aws.rule_prefix,
         )
 
-    elif backend == "railway":
-        from odds_lambda.scheduling.backends.railway import RailwayBackend
-
-        return RailwayBackend(
-            dry_run=dry_run,
-            retry_config=retry_config,
-        )
-
     elif backend == "local":
         from odds_lambda.scheduling.backends.local import LocalSchedulerBackend
 
@@ -97,9 +88,7 @@ def get_scheduler_backend(
         )
 
     else:
-        raise ConfigurationError(
-            f"Unknown scheduler backend: {backend}. Supported: 'aws', 'railway', 'local'"
-        )
+        raise ConfigurationError(f"Unknown scheduler backend: {backend}. Supported: 'aws', 'local'")
 
 
 __all__ = [

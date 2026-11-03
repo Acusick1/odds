@@ -4,8 +4,7 @@ title: Where each job runs
 description: The production host and its job set, the per-job sport and schedule table, the dormant AWS rules, heartbeat writers, and how to check deployed AWS state.
 sources:
   - odds_core.config.SchedulerConfig.bootstrap_jobs
-  - odds_lambda.scheduling.jobs._JOB_CRON_MAP
-  - odds_lambda.scheduling.jobs._JOB_SPORTS
+  - odds_core.job_specs.JOB_SPECS
   - odds_lambda.scheduling.jobs.resolve_target_sports
   - deployment/aws/terraform/eventbridge.tf
   - deployment/aws/terraform/variables.tf
@@ -21,11 +20,11 @@ Every scheduled job runs on one host: the production host, under the [local sche
 
 ## Where each job runs
 
-Three lists in code decide what the production scheduler runs:
+Job records and operator overrides decide what the production scheduler runs:
 
-- `odds_core.config.SchedulerConfig.bootstrap_jobs` names the jobs `odds scheduler start` bootstraps. `agent-run` is commented out there, so it runs only when added to `SCHEDULER_BOOTSTRAP_JOBS`.
-- `odds_lambda.scheduling.jobs._JOB_CRON_MAP` gives the jobs installed as a fixed cron: `fetch-espn-fixtures`, `fetch-mlb-probables` and `backup-database`. Every other bootstrapped job self-schedules ([Self-scheduling](self-scheduling.md)); a restart keeps its pending run, and only a job without one runs its bootstrap function ([bootstrap](local-scheduler.md#bootstrap-jobs-and-cron-table)).
-- `odds_lambda.scheduling.jobs._JOB_SPORTS` limits a per-sport job, cron or self-scheduling, to the configured sports in its allowlist. A per-sport job absent from it runs for every sport in `data_collection.sports` (`odds_lambda.scheduling.jobs.resolve_target_sports`).
+- `odds_core.config.SchedulerConfig.bootstrap_jobs` names the jobs `odds scheduler start` bootstraps. `agent-run` has `bootstrap=False` in `odds_core.job_specs.JOB_SPECS`, so it runs only when added to `SCHEDULER_BOOTSTRAP_JOBS`.
+- `odds_core.job_specs.JOB_SPECS` gives the jobs installed as a fixed cron: `fetch-espn-fixtures`, `fetch-mlb-probables` and `backup-database`. Every other bootstrapped job self-schedules ([Self-scheduling](self-scheduling.md)); a restart keeps its pending run, and only a job without one runs its bootstrap function ([bootstrap](local-scheduler.md#bootstrap-jobs-and-cron-table)).
+- `odds_core.job_specs.JOB_SPECS` limits a per-sport job, cron or self-scheduling, to the configured sports in its allowlist. A per-sport job with no sport allowlist runs for every sport in `data_collection.sports` (`odds_lambda.scheduling.jobs.resolve_target_sports`).
 
 | Job | Bootstrapped by default | Sports | Schedule |
 |---|---|---|---|

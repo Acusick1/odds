@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import structlog
+from odds_core.job_specs import job_cadence
 from odds_core.odds_math import PRICE_DECIMAL_KEY
 from odds_core.vocabulary import Source
 
@@ -31,12 +32,13 @@ DRAW_SLUG_SUFFIX = "draw"
 _MAX_HORIZON_HOURS = 168.0
 MAX_HORIZON = timedelta(hours=_MAX_HORIZON_HOURS)
 # Grid spacing per fetch tier, shared by the backfill and the live job cadence.
+_CADENCE = job_cadence("fetch-polymarket-odds")
 TIER_STEPS: dict[FetchTier, timedelta] = {
-    FetchTier.CLOSING: timedelta(minutes=5),
-    FetchTier.PREGAME: timedelta(minutes=15),
-    FetchTier.SHARP: timedelta(minutes=15),
-    FetchTier.EARLY: timedelta(minutes=30),
-    FetchTier.OPENING: timedelta(hours=1),
+    FetchTier.CLOSING: timedelta(hours=_CADENCE.closing),
+    FetchTier.PREGAME: timedelta(hours=_CADENCE.pregame),
+    FetchTier.SHARP: timedelta(hours=_CADENCE.sharp),
+    FetchTier.EARLY: timedelta(hours=_CADENCE.early),
+    FetchTier.OPENING: timedelta(hours=_CADENCE.opening),
 }
 # The three Yes prices sum to 1 within 0.03 from three days out; wider gaps are placeholder quotes.
 SUM_TOLERANCE = 0.03

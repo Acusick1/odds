@@ -6,7 +6,7 @@ sources:
   - odds_core.config.DataCollectionConfig
   - odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP
   - scripts/ingest_football_data_uk.py
-  - odds_lambda.jobs.fetch_polymarket_odds
+  - odds_lambda.jobs.fetch_polymarket_odds.SOURCE
 status: stable
 ---
 

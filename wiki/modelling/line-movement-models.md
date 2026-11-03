@@ -10,7 +10,7 @@ status: stable
 
 # Line-movement model (XGBoost)
 
-`odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy` wraps an XGBoost regressor of the closing line move. It is the trainer behind `odds train` ([training pipeline](training-pipeline.md)) and the model of the [retail-EV evaluation](../evaluation/retail-ev-evaluation.md); it places no bets. Config `strategy_type` accepts only `xgboost_line_movement`.
+`odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy` wraps an XGBoost regressor of the closing line move. It is the trainer behind `odds train` ([training pipeline](training-pipeline.md)) and the model behind [candidate replay](../evaluation/candidate-backtest.md#model-rules); it places no bets. Config `strategy_type` accepts only `xgboost_line_movement`.
 
 ## Behaviour
 

@@ -31,6 +31,7 @@ from typing import Protocol
 
 import structlog
 from odds_core.database import async_session_maker
+from odds_core.job_specs import Cadence
 from odds_core.models import EventStatus
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -109,7 +110,7 @@ class ScheduleDecision:
 
 
 @dataclass(slots=True, frozen=True)
-class CadenceConfig:
+class CadenceConfig(Cadence):
     """Per-job polling cadence (hours) keyed by canonical ``FetchTier``.
 
     Tier boundaries are always the canonical :class:`FetchTier` boundaries so
@@ -124,14 +125,6 @@ class CadenceConfig:
     itself fails (DB unreachable), so scheduling never blocks on DB
     availability.
     """
-
-    closing: float
-    pregame: float
-    sharp: float
-    early: float
-    opening: float
-    no_game: float
-    db_fallback: float = 1.0
 
     def interval_for(self, tier: FetchTier) -> float:
         """Return the polling interval (hours) for a tier.

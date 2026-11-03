@@ -4,7 +4,6 @@ title: About the system and its pivots
 description: What the system is, which sports are live, the goal in outline, what runs where in outline, the three pivots and the NBA-era defaults they left.
 sources:
   - odds_core.sports.SportKey
-  - odds_core.config.SchedulerConfig.bootstrap_jobs
   - odds_core.config.PolymarketConfig
   - odds_cli.commands.backfill
   - odds_analytics.backfill_executor.BackfillExecutor
@@ -44,7 +43,6 @@ Each fails quietly on EPL and MLB data: the symptom is an empty result (no event
 
 - `backfill scores` hardcodes `sport_key="basketball_nba"` (`odds_cli.commands.backfill`) and spends no Odds API units. `odds_analytics.backfill_executor.BackfillExecutor` takes its sport from the acquisition manifest and stores every game a call returns on the event the game resolves to through the [event resolver](../storage/event-resolver.md), reporting a game the resolver drops ([Odds API historical backfill](../collection/odds-api-backfill.md)).
 - `odds polymarket discover` lists NBA events (`odds_cli.commands.polymarket.discover`); EPL and NBA match prices (fetched from Polymarket's public Gamma and CLOB APIs with `odds_lambda.polymarket_fetcher.PolymarketClient`) are stored as `polymarket` snapshots ([Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md)).
-- Alert intervals and per-job heartbeat hours are `odds_core.config.AlertConfig` fields that have no template variable ([Alerts](../operations/alerts.md#alert-history)).
 
 ## Related
 

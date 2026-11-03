@@ -4,11 +4,8 @@ from importlib import import_module
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from odds_core.job_specs import JOB_SPECS
 from odds_lambda.scheduling.jobs import (
-    _JOB_CRON_MAP,
-    _JOB_MODULE_MAP,
-    _JOB_SPORTS,
-    _PER_SPORT_JOBS,
     JobContext,
     expected_compound_job_names,
     get_bootstrap_function,
@@ -114,7 +111,9 @@ class TestMakeCompoundJobName:
     def test_with_sport_mlb(self) -> None:
         assert make_compound_job_name("fetch-oddsportal", "baseball_mlb") == "fetch-oddsportal-mlb"
 
-    @pytest.mark.parametrize("job", sorted(_PER_SPORT_JOBS))
+    @pytest.mark.parametrize(
+        "job", sorted(name for name, spec in JOB_SPECS.items() if spec.per_sport)
+    )
     def test_per_sport_job_without_sport_raises(self, job: str) -> None:
         with pytest.raises(ValueError, match="requires a sport"):
             make_compound_job_name(job, None)
@@ -206,7 +205,7 @@ class TestGetBootstrapFunction:
 
 
 class TestJobCronRegistry:
-    """Tests for cron schedule + sport-allowlist lookups on ``_JOB_CRON_MAP``."""
+    """Tests for cron schedule + sport-allowlist lookups on ``JobSpec.cron``."""
 
     def test_get_job_cron_returns_none_for_event_driven_job(self) -> None:
         assert get_job_cron("fetch-odds") is None
@@ -240,15 +239,6 @@ class TestJobCronRegistry:
 
     def test_get_job_sports_returns_none_for_unknown_job(self) -> None:
         assert get_job_sports("totally-made-up") is None
-
-    def test_sport_allowlists_only_cover_per_sport_jobs(self) -> None:
-        assert set(_JOB_SPORTS) <= _PER_SPORT_JOBS
-
-    def test_every_cron_job_is_in_module_map(self) -> None:
-        """Cron jobs must be registered as importable — the import-time
-        assertion in ``jobs.py`` guards this, but the test pins the contract.
-        """
-        assert set(_JOB_CRON_MAP) <= set(_JOB_MODULE_MAP)
 
 
 class TestResolveTargetSports:
@@ -338,8 +328,64 @@ class TestRequireSport:
             require_sport(JobContext(), "fetch-odds")
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("job", sorted(_PER_SPORT_JOBS))
+    @pytest.mark.parametrize(
+        "job", sorted(name for name, spec in JOB_SPECS.items() if spec.per_sport)
+    )
     async def test_every_per_sport_job_rejects_missing_sport(self, job: str) -> None:
-        module_path, func_name = _JOB_MODULE_MAP[job]
+        spec = JOB_SPECS[job]
+        module_path, func_name = spec.module, spec.function
         with pytest.raises(ValueError, match="requires a sport"):
             await getattr(import_module(module_path), func_name)(JobContext())
+
+
+class TestJobSpecConsumers:
+    def test_settings_defaults_are_generated_and_independently_overridable(self) -> None:
+        from odds_core.config import AlertConfig, SchedulerConfig
+        from odds_core.job_specs import default_bootstrap_jobs, default_heartbeat_expectations
+
+        assert SchedulerConfig(_env_file=None).bootstrap_jobs == default_bootstrap_jobs()
+        assert (
+            AlertConfig(_env_file=None).heartbeat_expectations == default_heartbeat_expectations()
+        )
+        assert SchedulerConfig(bootstrap_jobs=["check-health"]).bootstrap_jobs == ["check-health"]
+        assert AlertConfig(heartbeat_expectations={"custom": 3}).heartbeat_expectations == {
+            "custom": 3
+        }
+
+    def test_legacy_heartbeat_names_differ_from_persisted_schedule_ids(self) -> None:
+        from odds_core.job_specs import heartbeat_name
+
+        assert heartbeat_name("fetch-mlb-probables", "baseball_mlb") == "fetch-mlb-probables"
+        assert (
+            make_compound_job_name("fetch-mlb-probables", "baseball_mlb")
+            == "fetch-mlb-probables-mlb"
+        )
+        assert heartbeat_name("fetch-espn-fixtures", "soccer_epl") == "fetch-espn-fixtures"
+        assert (
+            make_compound_job_name("fetch-espn-fixtures", "soccer_epl") == "fetch-espn-fixtures-epl"
+        )
+        assert heartbeat_name("fetch-espn-fixtures", "basketball_nba") == "fetch-espn-fixtures-nba"
+
+    def test_adapters_support_exactly_the_registered_sports(self) -> None:
+        from odds_lambda.betfair.constants import SPORT_CONFIG
+        from odds_lambda.polymarket_sports import POLYMARKET_SPORTS
+
+        assert set(get_job_sports("fetch-betfair-exchange")) == set(SPORT_CONFIG)
+        assert set(get_job_sports("fetch-polymarket-odds")) == set(POLYMARKET_SPORTS)
+
+    def test_heartbeat_definitions_are_unique(self) -> None:
+        names = [beat.name for spec in JOB_SPECS.values() for beat in spec.heartbeats]
+        assert len(names) == len(set(names))
+
+    def test_job_loading_stays_lazy_and_cached(self) -> None:
+        from odds_lambda.scheduling.jobs import _loaded_jobs, get_job_function
+
+        _loaded_jobs.pop("check-health", None)
+        try:
+            with patch("odds_lambda.scheduling.jobs.import_module") as load:
+                main = load.return_value.main
+                assert get_job_function("check-health") is main
+                assert get_job_function("check-health") is main
+                load.assert_called_once_with(JOB_SPECS["check-health"].module)
+        finally:
+            _loaded_jobs.pop("check-health", None)

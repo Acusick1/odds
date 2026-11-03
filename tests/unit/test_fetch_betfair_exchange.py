@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from odds_lambda.betfair.client import BetfairBook
@@ -81,3 +83,45 @@ class TestShouldSkipBook:
         assert not _should_skip_book(
             _book(runners_count=2), SPORT_CONFIG["baseball_mlb"].match_odds
         )
+
+
+class TestBetfairPreparation:
+    @pytest.mark.asyncio
+    async def test_cert_failure_follows_prebooking_and_prevents_collection(self) -> None:
+        from odds_lambda.jobs.fetch_betfair_exchange import main
+        from odds_lambda.scheduling.decision import ScheduleDecision
+        from odds_lambda.scheduling.jobs import JobContext
+
+        settings = SimpleNamespace(
+            betfair=SimpleNamespace(enabled=True, username="test", password="test", app_key="test"),
+            scheduler=SimpleNamespace(dry_run=True),
+        )
+        decision = ScheduleDecision(
+            should_execute=True,
+            reason="scheduled fixture",
+            next_execution=datetime.now(UTC) + timedelta(hours=1),
+            tier=FetchTier.CLOSING,
+        )
+        with (
+            patch("odds_lambda.jobs.fetch_betfair_exchange.get_settings", return_value=settings),
+            patch(
+                "odds_lambda.jobs.fetch_betfair_exchange.decide_collection_run",
+                AsyncMock(return_value=decision),
+            ),
+            patch(
+                "odds_lambda.scheduling.collection.self_schedule", new_callable=AsyncMock
+            ) as book,
+            patch(
+                "odds_lambda.scheduling.collection.job_alert_context", new_callable=Mock
+            ) as alerts,
+            patch(
+                "odds_lambda.jobs.fetch_betfair_exchange.resolve_cert_paths",
+                side_effect=ValueError("certificate unavailable"),
+            ),
+            patch("odds_lambda.jobs.fetch_betfair_exchange.BetfairExchangeClient") as client,
+        ):
+            with pytest.raises(ValueError, match="certificate unavailable"):
+                await main(JobContext(sport="soccer_epl"))
+        book.assert_awaited_once()
+        alerts.assert_not_called()
+        client.assert_not_called()

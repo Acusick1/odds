@@ -8,7 +8,7 @@ sources:
   - odds_core.config.APIConfig.key_for
   - odds_core.config.AlertConfig.quota_warning_threshold
   - odds_core.config.AlertConfig.quota_critical_threshold
-  - odds_lambda.scheduling.jobs._JOB_SPORTS
+  - odds_core.job_specs.JOB_SPECS
   - odds_lambda.ingestion.OddsIngestionService.ingest_sport
   - odds_lambda.jobs.fetch_odds.main
   - odds_lambda.jobs.fetch_odds.CADENCE
@@ -16,7 +16,6 @@ sources:
   - odds_lambda.jobs.fetch_odds.NBA_LEADS
   - odds_lambda.storage.readers.OddsReader.get_latest_quota_by_key
   - odds_lambda.storage.readers.QUOTA_MAX_AGE
-  - odds_lambda.scheduling.jobs._PAID_API_JOBS
   - odds_lambda.health_monitor.HealthMonitor.check_api_quota
   - odds_lambda.storage.readers.OddsReader.get_fetch_logs
   - odds_lambda.storage.readers.OddsReader.get_database_stats
@@ -44,7 +43,7 @@ Quota is a per-key monthly balance that only [the client](odds-api-client.md#cos
 
 ## Scheduled spend
 
-Each `fetch-odds` call names at most 10 bookmakers for its sport (`odds_core.config.DataCollectionConfig.bookmakers`), which the Odds API bills as one region, so a call costs one unit per configured market ([sport-and-market-keys](sport-and-market-keys.md#odds-api-scope)). The scheduled jobs that spend units are `fetch-odds` and `fetch-scores`, both run on the production host; `fetch-odds` is limited to EPL and NBA and `fetch-scores` to EPL by their `odds_lambda.scheduling.jobs._JOB_SPORTS` allowlists, while Polymarket, Betfair, the ESPN NBA sync and the NBA injury-report job spend none (MLB results come from the free MLB Stats API) ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). `odds scheduler smoke`, which [deploy.sh](../scheduling/howto-run-scheduler-service.md#redeploy) runs, skips both (`odds_lambda.scheduling.jobs._PAID_API_JOBS`) unless passed `--include-paid-api`, so a deploy spends no units ([local-scheduler](../scheduling/local-scheduler.md#cli)).
+Each `fetch-odds` call names at most 10 bookmakers for its sport (`odds_core.config.DataCollectionConfig.bookmakers`), which the Odds API bills as one region, so a call costs one unit per configured market ([sport-and-market-keys](sport-and-market-keys.md#odds-api-scope)). The scheduled jobs that spend units are `fetch-odds` and `fetch-scores`, both run on the production host; `fetch-odds` is limited to EPL and NBA and `fetch-scores` to EPL by their `odds_core.job_specs.JOB_SPECS` allowlists, while Polymarket, Betfair, the ESPN NBA sync and the NBA injury-report job spend none (MLB results come from the free MLB Stats API) ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). `odds scheduler smoke`, which [deploy.sh](../scheduling/howto-run-scheduler-service.md#redeploy) runs, skips both (`odds_core.job_specs.JOB_SPECS`) unless passed `--include-paid-api`, so a deploy spends no units ([local-scheduler](../scheduling/local-scheduler.md#cli)).
 
 The vendor bills `/odds` at markets x regions, and every group of 10 bookmakers counts as one region ([usage quota costs](https://the-odds-api.com/liveapi/guides/v4/#usage-quota-costs)), so a `fetch-odds` call is 3 units and its cadence sets the monthly spend ([cadence](../scheduling/decision-engine.md#cadence)). The closing tier polls every 2 h and the pregame tier every 3 h (`odds_lambda.jobs.fetch_odds.CADENCE`) to fit the 500-unit key, which resets on the 1st of the month ([vendor FAQ](https://the-odds-api.com/frequently-asked-questions/)); Betfair and OddsPortal cover the close. Simulating the cadence over a month of 4 weekend rounds (Friday night to Monday night) with 1 or 3 midweek rounds, against the previous 0.5 h closing and 3 h pregame cadence:
 

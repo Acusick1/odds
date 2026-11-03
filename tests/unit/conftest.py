@@ -20,6 +20,7 @@ from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from odds_lambda.oddsportal_client import _key
 from py_pglite.config import PGliteConfig
+from py_pglite.manager import PGliteManager
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
@@ -168,37 +169,14 @@ async def converted_input(legacy_connection: AsyncConnection) -> AsyncConnection
 
 
 @pytest.fixture(scope="session")
-async def legacy_engine(legacy_pglite_config: PGliteConfig) -> AsyncIterator[AsyncEngine]:
-    from py_pglite.manager import PGliteManager
+async def legacy_engine(
+    legacy_pglite_config: PGliteConfig, start_pglite_manager: Callable[[PGliteManager], None]
+) -> AsyncIterator[AsyncEngine]:
     from sqlalchemy.ext.asyncio import create_async_engine
     from sqlalchemy.pool import StaticPool
 
-    # The socket handler must not lock PGlite before database initialization finishes.
-    class ReadyPGliteManager(PGliteManager):
-        def _generate_tcp_js_content(self, extension_imports: str, extension_config: str) -> str:
-            return (
-                super()
-                ._generate_tcp_js_content(extension_imports, extension_config)
-                .replace("const server =", "await db.waitReady; const server =")
-            )
-
-    manager = ReadyPGliteManager(legacy_pglite_config)
-    import subprocess
-    from unittest.mock import patch
-
-    popen = subprocess.Popen
-
-    # Eager WASM optimization exceeds this test host's memory budget.
-    def start_node(args: list[str], **kwargs: Any) -> subprocess.Popen[str]:
-        command = (
-            [args[0], "--liftoff-only", "--wasm-lazy-compilation", *args[1:]]
-            if args[0] == "node"
-            else args
-        )
-        return popen(command, **kwargs)
-
-    with patch("py_pglite.manager.subprocess.Popen", side_effect=start_node):
-        manager.start()
+    manager = PGliteManager(legacy_pglite_config)
+    start_pglite_manager(manager)
     engine = create_async_engine(
         legacy_pglite_config.get_asyncpg_uri().replace("postgresql://", "postgresql+asyncpg://"),
         poolclass=StaticPool,

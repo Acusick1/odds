@@ -11,8 +11,7 @@ sources:
   - odds_lambda.jobs.agent_run.main
   - odds_lambda.jobs.agent_run._check_agent_requested_wakeup
   - odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS
-  - odds_lambda.scheduling.jobs._SMOKE_UNSAFE_JOBS
-  - odds_lambda.scheduling.jobs._JOB_BOOTSTRAP_MAP
+  - odds_core.job_specs.JOB_SPECS
   - odds_core.agent_wakeup_models.AgentWakeup
   - odds_core.match_brief_models.MatchBrief
   - odds_cli.commands.agent.run
@@ -37,11 +36,11 @@ The runtime of the [betting agent](betting-agent.md) lives in `odds_lambda.jobs.
 - runs under `AGENT_DATABASE_URL` when set, otherwise inherits the parent DSN with a logged warning (`odds_lambda.jobs.agent_run._build_agent_subprocess_env`), see [database role](#database-role);
 - writes a JSONL trace per run ([run traces](agent-run-traces.md)).
 
-Two entry paths: the scheduled `agent-run` job, and `odds agent run --sport S` for one wake-up with no scheduling side effects. `agent-run` is in `_SMOKE_UNSAFE_JOBS` because it places paper bets (as does [`run-candidates`](../evaluation/run-candidates-job.md), which has its own `--include-candidates`), so `odds scheduler smoke` skips it unless `--include-agent` ([local scheduler](../scheduling/local-scheduler.md#cli)).
+Two entry paths: the scheduled `agent-run` job, and `odds agent run --sport S` for one wake-up with no scheduling side effects. `agent-run` has `agent_trades=True` in `odds_core.job_specs.JOB_SPECS` because it places paper bets (as does [`run-candidates`](../evaluation/run-candidates-job.md), which has its own `--include-candidates`), so `odds scheduler smoke` skips it unless `--include-agent` ([local scheduler](../scheduling/local-scheduler.md#cli)).
 
 ## The agent-run job
 
-The job is opt-in and local-only: no EventBridge rule exists for it, and the default `SCHEDULER_BOOTSTRAP_JOBS` has `agent-run` commented out, so the loop starts only when you add it ([where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs), [configuration](../foundations/configuration.md)). Its bootstrap function in `_JOB_BOOTSTRAP_MAP` is `odds_lambda.jobs.agent_run.schedule_next`, not `odds_lambda.jobs.agent_run.main`, so `odds scheduler start` never launches the agent itself, and it calls even that only when no wake-up is pending ([bootstrap](../scheduling/local-scheduler.md#bootstrap-jobs-and-cron-table)).
+The job is opt-in and local-only: no EventBridge rule exists for it, and the default `SCHEDULER_BOOTSTRAP_JOBS` excludes `agent-run` through its record's `bootstrap=False`, so the loop starts only when you add it ([where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs), [configuration](../foundations/configuration.md)). Its bootstrap function in `odds_core.job_specs.JOB_SPECS` is `odds_lambda.jobs.agent_run.schedule_next`, not `odds_lambda.jobs.agent_run.main`, so `odds scheduler start` never launches the agent itself, and it calls even that only when no wake-up is pending ([bootstrap](../scheduling/local-scheduler.md#bootstrap-jobs-and-cron-table)).
 
 ### Flow
 

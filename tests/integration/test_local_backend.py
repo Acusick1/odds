@@ -400,7 +400,7 @@ class TestLocalSchedulerBackend:
         """Re-applying schedule_cron with a new expression swaps the trigger.
 
         Regression guard for the bootstrap short-circuit bug: editing
-        ``_JOB_CRON_MAP`` must propagate to the stored schedule on the
+        ``JobSpec.cron`` must propagate to the stored schedule on the
         next ``odds scheduler start``.
         """
         from apscheduler.triggers.cron import CronTrigger

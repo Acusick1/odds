@@ -29,6 +29,8 @@ The cadence of a data job follows how close the next kickoff is, which only the 
 
 ## Pattern
 
+The odds collectors share `odds_lambda.scheduling.collection.run_collection`: it decides and prebooks before preparation or collection, writes a heartbeat without collection when dormant, and applies the source's `odds_lambda.scheduling.collection.PostbookTiming` policy. Its callback returns `odds_lambda.scheduling.collection.CollectionResult`, carrying whether to postbook and any failure that must be raised after that booking. Source callbacks retain their calendar lookup, error handling and row checks. Prebooking failure prevents collection; postbooking failure is logged and leaves the prebooked run in place. Cancellation propagates.
+
 1. Decide: `odds_lambda.scheduling.decision.decide_forward_resilient` or `odds_lambda.scheduling.decision.decide_backward_resilient`. The collectors that create their own events decide through `odds_lambda.collection_calendar.decide_collection_run` (one definition of dormancy; `fetch-betfair-exchange` also passes its own kickoff lookup, [lead runs](decision-engine.md#lead-runs)) and, with no fixture within the dormancy horizon only book a check-in and write their heartbeat ([dormancy](decision-engine.md#dormancy)). A job that must run a set time before each kickoff passes those times as leads, with its own start time ([lead runs](decision-engine.md#lead-runs)).
 2. Pre-schedule the next run before any work, so a crash or Lambda timeout leaves the chain intact.
 3. If the gate says skip, return.

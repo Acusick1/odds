@@ -1,14 +1,13 @@
 ---
 type: reference
 title: Scheduler backends
-description: The SchedulerBackend interface and selection, the AWS EventBridge backend and its env contract, the Railway shim, health checks, and the Lambda handler EventBridge invokes.
+description: The SchedulerBackend interface and selection, the AWS EventBridge backend and its env contract, health checks, and the Lambda handler EventBridge invokes.
 sources:
   - odds_lambda.scheduling.backends.base.SchedulerBackend
   - odds_lambda.scheduling.backends.base.RetryConfig
   - odds_lambda.scheduling.backends.get_scheduler_backend
   - odds_lambda.scheduling.backends.aws.AWSEventBridgeBackend
   - odds_lambda.scheduling.backends.aws.AWS_SCHEDULE_FORMAT
-  - odds_lambda.scheduling.backends.railway.RailwayBackend
   - odds_lambda.scheduling.exceptions.BackendUnavailableError
   - odds_lambda.scheduling.exceptions.ConfigurationError
   - odds_lambda.scheduling.exceptions.SchedulingFailedError
@@ -29,7 +28,7 @@ status: stable
 
 # Scheduler backends
 
-`packages/odds-lambda/odds_lambda/scheduling/backends/` holds one ABC and three implementations (AWS EventBridge, local APScheduler, a Railway shim). Jobs never import a concrete backend; they call `odds_lambda.scheduling.backends.get_scheduler_backend`, usually through [self-scheduling](self-scheduling.md). The Lambda handler is the entry point EventBridge invokes. Production runs on the local backend; the AWS backend's rules are disabled and its Lambdas dormant ([Where each job runs](job-deployment-matrix.md#dormant-aws-rules), [ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)).
+`packages/odds-lambda/odds_lambda/scheduling/backends/` holds one ABC and two implementations (AWS EventBridge, local APScheduler). Jobs never import a concrete backend; they call `odds_lambda.scheduling.backends.get_scheduler_backend`, usually through [self-scheduling](self-scheduling.md). The Lambda handler is the entry point EventBridge invokes. Production runs on the local backend; the AWS backend's rules are disabled and its Lambdas dormant ([Where each job runs](job-deployment-matrix.md#dormant-aws-rules), [ADR-0008](../../docs/adr/0008-mini-pc-is-production.md)).
 
 ## The ABC
 
@@ -39,7 +38,7 @@ status: stable
 - `odds_lambda.scheduling.backends.base.SchedulerBackend.cancel_scheduled_execution`, `odds_lambda.scheduling.backends.base.SchedulerBackend.get_scheduled_jobs`, `odds_lambda.scheduling.backends.base.SchedulerBackend.get_job_status`.
 - `odds_lambda.scheduling.backends.base.SchedulerBackend.health_check() -> BackendHealth`, `odds_lambda.scheduling.backends.base.SchedulerBackend.validate_configuration() -> ValidationResult`, `odds_lambda.scheduling.backends.base.SchedulerBackend.get_backend_name()`.
 
-The constructor takes a dry-run flag and a `odds_lambda.scheduling.backends.base.RetryConfig`. In dry-run mode the AWS and local implementations log and return, and their listings return `[]`; `odds_lambda.scheduling.backends.railway.RailwayBackend.get_scheduled_jobs` raises regardless. `odds_lambda.scheduling.backends.get_scheduler_backend` defaults the dry-run flag to false, so a listing built without it (as `odds scheduler list-jobs` does) is never emptied by dry-run. Return types are frozen dataclasses (`odds_lambda.scheduling.backends.base.ScheduledJob`, `odds_lambda.scheduling.backends.base.BackendHealth`, `odds_lambda.scheduling.backends.base.ValidationResult`).
+The constructor takes a dry-run flag and a `odds_lambda.scheduling.backends.base.RetryConfig`. In dry-run mode the AWS and local implementations log and return, and their listings return `[]`. `odds_lambda.scheduling.backends.get_scheduler_backend` defaults the dry-run flag to false, so a listing built without it (as `odds scheduler list-jobs` does) is never emptied by dry-run. Return types are frozen dataclasses (`odds_lambda.scheduling.backends.base.ScheduledJob`, `odds_lambda.scheduling.backends.base.BackendHealth`, `odds_lambda.scheduling.backends.base.ValidationResult`).
 
 `odds_lambda.scheduling.backends.base.RetryConfig` is consumed only by the AWS backend, and only `max_attempts`, `initial_delay_seconds` and `max_delay_seconds`; `exponential_base` and `jitter` are read by nothing (#473). Each `odds_lambda.scheduling.helpers.self_schedule` call builds a fresh backend (and boto3 clients on AWS); there is no shared instance.
 
@@ -48,10 +47,6 @@ The constructor takes a dry-run flag and a `odds_lambda.scheduling.backends.base
 ## Health checks
 
 `odds_lambda.scheduling.health_check` provides `odds_lambda.scheduling.health_check.HealthCheckBuilder` (`odds_lambda.scheduling.health_check.HealthCheckBuilder.pass_check`, `odds_lambda.scheduling.health_check.HealthCheckBuilder.fail_check`, `odds_lambda.scheduling.health_check.HealthCheckBuilder.check_condition`, `odds_lambda.scheduling.health_check.HealthCheckBuilder.build`) and `odds_lambda.scheduling.health_check.ValidationBuilder`. A backend is healthy when no check failed. `odds scheduler health` and `odds scheduler test-backend` use the configured backend only; they do not accept `--backend`.
-
-## Railway shim
-
-`odds_lambda.scheduling.backends.railway.RailwayBackend` is not a deployment target. `odds_lambda.scheduling.backends.railway.RailwayBackend.schedule_next_execution` and `odds_lambda.scheduling.backends.railway.RailwayBackend.cancel_scheduled_execution` only log. `odds_lambda.scheduling.backends.railway.RailwayBackend.get_scheduled_jobs` and `odds_lambda.scheduling.backends.railway.RailwayBackend.get_job_status` raise `odds_lambda.scheduling.exceptions.BackendUnavailableError`, which `odds scheduler list-jobs` catches and prints as "not supported". Jobs still run their own gate logic under it, but cannot move their own cadence. Its `odds_lambda.scheduling.backends.railway.RailwayBackend.health_check` fails the "Running in Railway environment" check unless `RAILWAY_ENVIRONMENT` is set, so it reports unhealthy anywhere else.
 
 ## AWS EventBridge backend
 
@@ -89,7 +84,7 @@ EventBridge delivers the target `Input` written by the AWS backend or by Terrafo
 `job` may be a compound name (`fetch-odds-epl`). The handler:
 
 1. Raises `ValueError` if `job` is missing.
-2. Calls `odds_lambda.scheduling.jobs.resolve_job_name` to split it into base job and suffix-derived sport. An explicit `sport` in the payload wins over the suffix.
+2. Calls `odds_lambda.scheduling.jobs.resolve_job_name` to split it into base job and suffix-derived sport, consulting each `odds_core.job_specs.JobSpec` in `odds_core.job_specs.JOB_SPECS` for per-sport routing. An explicit `sport` in the payload wins over the suffix.
 3. Binds `job`, `request_id` and `sport` into structlog context so CloudWatch can filter on them (`configure_logging(..., json_output=True)` runs at import).
 4. Builds `odds_lambda.scheduling.jobs.JobContext.from_payload` from every payload key except `job`, then runs `get_job_function(base)(ctx)` under `asyncio.run`.
 5. Returns `{"statusCode": 200, "body": ...}`, or 500 with `error` and `error_type` on any exception.
