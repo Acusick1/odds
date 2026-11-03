@@ -36,7 +36,9 @@ class TradeResult(str, Enum):
 
 @dataclass(frozen=True)
 class SharpReading:
-    """The sharp market's devigged probability of a selection, from one book's snapshot."""
+    """The sharp market's devigged probability of a selection, with the book and snapshot time of
+    the selection's own sharp price; the other outcomes it is devigged against may come from
+    another book or snapshot."""
 
     bookmaker: str
     snapshot_time: datetime

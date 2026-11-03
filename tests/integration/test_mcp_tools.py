@@ -5,6 +5,7 @@ async_session_maker patched to use the PGlite test database.
 """
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -18,7 +19,7 @@ from odds_mcp.prices import (
     resolve_sharp_prices,
 )
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from tests.test_helpers import (
     make_epl_event,
@@ -1636,7 +1637,7 @@ class TestPaperBetSharpReading:
     """paper_bet records the sharp market's devigged reading of the selection at placement."""
 
     @staticmethod
-    async def _event_with_books(session, bookmakers: list[dict]) -> Event:
+    async def _event_with_books(session: AsyncSession, bookmakers: list[dict[str, Any]]) -> Event:
         event = make_epl_event(70, commence_time=datetime.now(UTC) + timedelta(days=1))
         session.add(event)
         if bookmakers:
@@ -1650,7 +1651,7 @@ class TestPaperBetSharpReading:
         return event
 
     @staticmethod
-    async def _bet(event: Event) -> dict:
+    async def _bet(event: Event) -> dict[str, Any]:
         from odds_mcp.server import paper_bet
 
         result = await paper_bet(
@@ -1669,7 +1670,9 @@ class TestPaperBetSharpReading:
         return (1 / prices[0]) / sum(1 / p for p in prices)
 
     @pytest.mark.asyncio
-    async def test_first_priority_book(self, pglite_async_session, patch_session_maker):
+    async def test_first_priority_book(
+        self, pglite_async_session: AsyncSession, patch_session_maker: async_sessionmaker
+    ) -> None:
         pinnacle = (2.0, 3.6, 4.0)
         event = await self._event_with_books(
             pglite_async_session,
@@ -1688,7 +1691,9 @@ class TestPaperBetSharpReading:
         assert trade["sharp_snapshot_time"] is not None
 
     @pytest.mark.asyncio
-    async def test_fallback_book_only(self, pglite_async_session, patch_session_maker):
+    async def test_fallback_book_only(
+        self, pglite_async_session: AsyncSession, patch_session_maker: async_sessionmaker
+    ) -> None:
         betfair = (2.2, 3.5, 3.9)
         event = await self._event_with_books(
             pglite_async_session,
@@ -1704,7 +1709,9 @@ class TestPaperBetSharpReading:
         assert trade["sharp_probability"] == pytest.approx(self._fair_home(betfair))
 
     @pytest.mark.asyncio
-    async def test_no_sharp_book(self, pglite_async_session, patch_session_maker):
+    async def test_no_sharp_book(
+        self, pglite_async_session: AsyncSession, patch_session_maker: async_sessionmaker
+    ) -> None:
         event = await self._event_with_books(
             pglite_async_session, [three_way_bookmaker("bet365", (2.1, 3.4, 3.6))]
         )
@@ -1717,7 +1724,9 @@ class TestPaperBetSharpReading:
         assert trade["sharp_spread"] is None
 
     @pytest.mark.asyncio
-    async def test_market_missing_an_outcome(self, pglite_async_session, patch_session_maker):
+    async def test_market_missing_an_outcome(
+        self, pglite_async_session: AsyncSession, patch_session_maker: async_sessionmaker
+    ) -> None:
         pinnacle = three_way_bookmaker("pinnacle", (2.0, 3.6, 4.0))
         pinnacle["markets"][0]["outcomes"].pop()  # no away price, so nothing to devig against
         event = await self._event_with_books(pglite_async_session, [pinnacle])
