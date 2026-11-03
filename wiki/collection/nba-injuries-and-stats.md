@@ -1,7 +1,7 @@
 ---
 type: reference
 title: NBA schedule, injury reports, game logs and player stats
-description: "The NBA injury-report job and the manual feeds (stats.nba.com game logs, PBPStats player stats): sources, CLIs, writers and event matching."
+description: "The ESPN NBA schedule and settlement, the injury-report job and the manual feeds (stats.nba.com game logs, PBPStats player stats): sources, CLIs, writers and event matching."
 sources:
   - odds_lambda.espn_nba_schedule
   - odds_lambda.espn_nba_schedule.sync_schedule

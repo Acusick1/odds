@@ -1694,6 +1694,7 @@ class TestMarketWindow:
             )
         finally:
             sqlalchemy_event.remove(engine, "before_cursor_execute", record_price_read)
-        assert result["retail_edges"]
         assert len(price_reads) == 1
-        assert {row["book"] for row in result["retail_edges"]} == {"bet365"}
+        assert {row["outcome"] for row in result["per_outcome"]} == {"Brighton", "Draw", "Wolves"}
+        assert all(row["n_books"] == 1 for row in result["per_outcome"])
+        assert all(row["sharp_snapshot_time"] == _older.snapshot_time.isoformat() for row in result["per_outcome"])
