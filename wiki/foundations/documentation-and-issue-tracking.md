@@ -10,8 +10,6 @@ sources:
   - docs/agents/issue-tracker.md#conventions
   - docs/agents/issue-tracker.md#pull-requests-as-a-triage-surface
   - docs/agents/triage-labels.md
-  - deployment/aws/terraform/eventbridge.tf
-  - odds_lambda.scheduling.jobs._JOB_CRON_MAP
 status: stable
 ---
 
@@ -23,16 +21,16 @@ The wiki is the documentation ([SCHEMA](../SCHEMA.md)); [README.md](../../README
 
 | Topic | Authoritative source |
 |---|---|
-| Settings, defaults, per-job heartbeat hours (fetch-odds, fetch-scores and each sport's collectors included), stale-data multipliers, the Betfair-close lookback, the key index each sport spends, the backup retention and the default job list | `odds_core.config` ([Configuration](configuration.md#sections)); `.env.example` is a template, never a source of defaults: list settings stay commented out there, and a setting removed from `odds_core.config` is removed from the template in the same change |
-| CLI flags and defaults | each command's `--help` ([The odds CLI](odds-cli.md)) |
-| Job and schedule matrix | `odds_core.config.SchedulerConfig.bootstrap_jobs`, `odds_lambda.scheduling.jobs._JOB_CRON_MAP` (the fixed crons) and `odds_lambda.scheduling.jobs._JOB_SPORTS` for what runs in production (the collectors, Polymarket for each sport it lists, ESPN for EPL and NBA and the NBA injury reports, the results jobs, the candidate runner and the nightly database backup), and `odds_lambda.scheduling.bootstrap.bootstrap_job` for what each scheduler start does to a stored schedule (and `odds_lambda.scheduling.runner.run_chain_job` for the timeout, chain re-booking and recovery alerts every local run gets); `deployment/aws/terraform/eventbridge.tf` for the dormant AWS scheduler rules ([Where each job runs](../scheduling/job-deployment-matrix.md)); deployed AWS state only via `odds scheduler list-jobs --backend aws` |
-| Alerting and reporting | `odds_core.alerts` and its `odds_core.alerts.send_job_failure` (once per outage; `odds_core.alerts.send_outage_warning` for warnings, `odds_core.alerts.send_scheduling_failure` for a job that cannot book its next run; the health monitor reminds every `stale_reminder_minutes`; all share `odds_core.alerts.send_recorded_alert`, described in [Alerts](../operations/alerts.md#alert-history)), gated by `odds_core.config.Settings.alerts_deliverable` and `SCHEDULER_DRY_RUN` ([Alerts](../operations/alerts.md#delivery), [Reporting surfaces](../operations/reporting-surfaces.md)); `odds_core.alerts.ping_dead_mans_switch`, the external dead-man's switch ping, ignores `ALERT_ENABLED` and is gated only by its URL and `SCHEDULER_DRY_RUN` ([Dead-man's switch](../operations/health-monitor.md#dead-mans-switch)) |
-| MCP toolset | each `@mcp.tool()` function registered on `odds_mcp.server.mcp`, with its signature, docstring and return shape (the source for a tool's arguments and results) ([odds-mcp server](../agent/mcp-server.md)) |
-| Agent behaviour | the prompt files in `packages/odds-mcp/agents/` ([The betting agent](../agent/betting-agent.md)) |
-| Schema and storage | the model files, mainly `odds_core.models` (events with their integer key, external ids, and status moves, snapshots (with closed-set source, market, time basis and market status), their prices and archived payloads, and the fetch (with each Odds API key's remaining and used quota), data-quality and alert logs; [Storage](../storage/index.md), [snapshots table](../storage/odds-tables.md)) |
-| Training data, target and feature config | `odds_analytics.training.config.FeatureConfig` (whose `feature_groups` names, per target, and `target_type` are validated, with the fields a `retail_ev` target does not read, and `retail_ev_arm`, which only a `retail_ev` target may set away from `direct`) and `odds_analytics.feature_groups.prepare_training_data` (which builds the training arrays `X`, `y` and `event_ids` from the groups, over each decision snapshot's price rows and its own source's close, sampling only of the sources whose close has a sharp book); evidence in `experiments/results/` ([experiment pages](../evaluation/index.md)) |
-| Agent data sources | [Agent data sources](../agent/agent-data-sources.md) |
-| Issue and triage workflow | `docs/agents/` (below) |
+| Settings and defaults | `odds_core.config`; [Configuration](configuration.md#sections) owns the field map and template rules. |
+| CLI flags and defaults | Each command's `--help`; [CLI reference](odds-cli.md#shared-flags). |
+| Jobs and deployment | [Deployment matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs) owns the source map and operational status. |
+| Alerting and reporting | [Alerts](../operations/alerts.md#delivery) and [reporting surfaces](../operations/reporting-surfaces.md#reporting-surfaces) cite their implementations. |
+| MCP toolset | Registered tool signatures and return shapes; [server catalogue](../agent/mcp-server.md#tool-catalogue-16). |
+| Agent behaviour | Prompt files in `packages/odds-mcp/agents/`; [betting agent](../agent/betting-agent.md#the-prompts-are-authoritative). |
+| Schema and storage | Model files, mainly `odds_core.models`; [storage table map](../storage/index.md#table-map). |
+| Training data, target and feature config | `odds_analytics.training.config.FeatureConfig` and `odds_analytics.feature_groups.prepare_training_data`; [feature pipeline](../modelling/feature-pipeline.md#feature-pipeline). Evidence lives in `experiments/results/` ([evaluation index](../evaluation/index.md#backtests-and-model-research)). |
+| Agent data sources | [Agent data sources](../agent/agent-data-sources.md#agent-data-sources-and-rejected-sources). |
+| Issue and triage workflow | `docs/agents/` ([issue tracker](#issue-tracker)). |
 
 ## How the docs stay current
 
