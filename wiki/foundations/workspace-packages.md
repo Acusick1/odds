@@ -131,7 +131,7 @@ Importing `odds_core.alerts` builds `odds_core.config.get_settings()` ([Read at 
 ### Names that mislead
 
 - `odds_analytics.quality_metrics` never touches `odds_core.models.DataQualityLog`; it counts game and odds coverage, with snapshots counted as distinct snapshot times and per-book coverage read from price rows. Data-quality rows are a separate system ([Odds validation](../storage/odds-validator.md), [Coverage checks](../storage/coverage-checks.md)).
-- `odds_analytics.utils.per_book_market_holds` is the hold maths the MCP screener calls, over decimal prices ([retail edges](../agent/mcp-market-tools.md#retail-edges)); it is the only reason `odds-mcp` imports analytics ([odds-mcp server](../agent/mcp-server.md)).
+- `odds_analytics.utils.per_book_market_holds` is the hold maths the MCP screener calls, over decimal prices ([retail edges](../agent/mcp-market-tools.md#retail-edges)); MCP also imports `odds_analytics.candidate_report` for candidate summaries and `odds_analytics.standings_features` for EPL table ranking ([odds-mcp server](../agent/mcp-server.md)).
 
 ## Dependency exceptions
 
