@@ -35,6 +35,8 @@ DEFAULT_MODULE_DIRS = (
 DEFAULT_MCP_DIR = "packages/odds-mcp/odds_mcp"
 DEFAULT_PACKAGES_DIR = "packages"
 DEFAULT_SYMBOL_ROOT = DEFAULT_PACKAGES_DIR
+# Not installed, but importable as `scripts.<module>`: a namespace package at the repo root.
+SCRIPTS_PACKAGE = "scripts"
 ALLOWED_WORDS = frozenset({"main", "master"})
 # Common English words and config keys: a bare mention is prose unless it names a function or class.
 GENERIC_VARIABLE_NAMES = frozenset(
@@ -630,7 +632,11 @@ class Resolved(NamedTuple):
 
 @dataclass
 class Packages:
-    """Installed Python packages, loaded statically with griffe (nothing is imported)."""
+    """Installed Python packages and the `scripts` namespace, loaded statically with griffe.
+
+    Nothing is imported. Scripts resolve like package modules, but are left out of the
+    bare-name symbol index: their names (`main`, `parse_args`) repeat across files.
+    """
 
     root: Path
     search_roots: tuple[Path, ...]
@@ -651,6 +657,14 @@ class Packages:
             for init in sorted(search_root.glob("*/__init__.py")):
                 if not SKIP_DIRS & set(init.parts):
                     packages.names.setdefault(init.parent.name, search_root)
+        scripts = root / SCRIPTS_PACKAGE
+        if (
+            scripts.is_dir()
+            and not (scripts / "__init__.py").exists()
+            and next(scripts.rglob("*.py"), None) is not None
+        ):
+            packages.names.setdefault(SCRIPTS_PACKAGE, root)
+            packages.search_roots = (*search, root)
         return packages
 
     def module_name(self, rel: str) -> str | None:
@@ -723,7 +737,8 @@ class Packages:
         if self._index is None:
             index = SymbolIndex()
             for name in self.names:
-                self._index_module(index, self._modules()[name])
+                if name != SCRIPTS_PACKAGE:
+                    self._index_module(index, self._modules()[name])
             self._index = index
         return self._index
 

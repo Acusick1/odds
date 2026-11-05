@@ -11,8 +11,9 @@ sources:
   - odds_core.epl_data_models.EspnFixture
   - odds_core.job_specs.JOB_SPECS
   - odds_mcp.tools.epl._is_final
-  - scripts/ingest_espn_lineups.py
-  - scripts/ingest_fbref_player_stats.py
+  - scripts.ingest_espn_lineups.write_db
+  - scripts.ingest_espn_lineups.SEASONS
+  - scripts.ingest_fbref_player_stats.write_csv
   - deployment/aws/terraform/eventbridge.tf
 mentions:
   - odds_core.alerts.job_alert_context
@@ -25,10 +26,10 @@ Supplementary EPL data that feeds the retail-EV schedule features ([EPL context 
 
 | Source | Table (model) | Written by | Read by |
 |---|---|---|---|
-| ESPN fixtures | `espn_fixtures` (`odds_core.epl_data_models.EspnFixture`) | the `fetch-espn-fixtures` job; `scripts/ingest_espn_fixtures.py` | `odds_lambda.storage.espn_fixture_reader.EspnFixtureReader`, `odds_analytics.feature_groups.load_fixtures_df` (all fixtures, or those up to an optional date) |
-| ESPN lineups | `espn_lineups` (`odds_core.epl_data_models.EspnLineup`) | `scripts/ingest_espn_lineups.py` (manual) | no reader is exposed |
-| FPL availability | `fpl_availability` (`odds_core.epl_data_models.FplAvailability`) | `scripts/ingest_fpl_availability.py` (manual) | no reader is exposed |
-| FBref player stats | none | `scripts/ingest_fbref_player_stats.py` (CSV only) | n/a |
+| ESPN fixtures | `espn_fixtures` (`odds_core.epl_data_models.EspnFixture`) | the `fetch-espn-fixtures` job; `scripts.ingest_espn_fixtures.write_db` | `odds_lambda.storage.espn_fixture_reader.EspnFixtureReader`, `odds_analytics.feature_groups.load_fixtures_df` (all fixtures, or those up to an optional date) |
+| ESPN lineups | `espn_lineups` (`odds_core.epl_data_models.EspnLineup`) | `scripts.ingest_espn_lineups.write_db` (manual) | no reader is exposed |
+| FPL availability | `fpl_availability` (`odds_core.epl_data_models.FplAvailability`) | `scripts.ingest_fpl_availability.write_db` (manual) | no reader is exposed |
+| FBref player stats | none | `scripts.ingest_fbref_player_stats.write_csv` (CSV only) | n/a |
 
 ## ESPN fixtures
 
@@ -43,7 +44,7 @@ Supplementary EPL data that feeds the retail-EV schedule features ([EPL context 
 
 ## Lineups, FPL, FBref
 
-All three are manual scripts writing CSVs under `data/`, with `--skip-db` on the lineup and FPL scripts to skip the upsert. Lineup coverage is 2020-21 onward, FPL 2021-22 onward (`scripts/ingest_espn_lineups.py`, `scripts/ingest_fpl_availability.py`). FBref pages must be saved by hand from a browser (Cloudflare) and parsed; there is no model or table.
+All three are manual scripts writing CSVs under `data/`, with `--skip-db` on the lineup and FPL scripts to skip the upsert. Lineup coverage is 2020-21 onward, FPL 2021-22 onward (`scripts.ingest_espn_lineups.SEASONS`, `scripts.ingest_fpl_availability.SEASONS`). FBref pages must be saved by hand from a browser (Cloudflare) and parsed; there is no model or table.
 
 No feature code reads `espn_lineups` or FPL availability.
 
