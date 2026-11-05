@@ -308,6 +308,23 @@ class TestAPIConfigKeys:
         assert api.key_for("baseball_mlb") == "b"
         assert api.key_for("basketball_nba") == "a"
 
+    def test_acquisition_key_is_the_one_at_its_index_whatever_the_sport(self):
+        api = APIConfig(keys="a,b,c", acquisition_key_index=2, _env_file=None)
+
+        assert api.acquisition_key() == "c"
+        assert api.key_for("basketball_nba") == "b"
+
+    def test_acquisition_key_defaults_to_the_first_key(self):
+        api = APIConfig(keys="a,b", _env_file=None)
+
+        assert api.acquisition_key() == "a"
+
+    def test_an_acquisition_index_beyond_the_configured_keys_raises(self):
+        api = APIConfig(key="only", acquisition_key_index=1, _env_file=None)
+
+        with pytest.raises(ValueError, match="backfill spends Odds API key index 1"):
+            api.acquisition_key()
+
 
 class TestEnvExampleTemplate:
     """`.env.example` copied to `.env` loads, with its commented settings enabled or not."""

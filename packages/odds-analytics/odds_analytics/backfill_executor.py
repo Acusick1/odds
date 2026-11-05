@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 import structlog
+from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_core.models import FetchLog, OddsSnapshot
 from odds_core.time import utc_isoformat
@@ -72,8 +73,9 @@ class BackfillExecutor:
     ):
         """
         Args:
-            manifest: Fixes the sport (whose key pays), markets, and bookmakers or regions
-            client: API client (one is created and closed with the executor if not given)
+            manifest: Fixes the sport, markets, and bookmakers or regions
+            client: API client (one spending ``APIConfig.acquisition_key`` is created and closed
+                with the executor if not given)
             session_factory: Creates database sessions (defaults to ``async_session_maker``)
             skip_existing: Skip a call when every fixture it serves already has the snapshot it
                 would return
@@ -90,7 +92,7 @@ class BackfillExecutor:
 
     async def __aenter__(self) -> "BackfillExecutor":
         if self._owns_client:
-            self._client = TheOddsAPIClient()
+            self._client = TheOddsAPIClient(api_key=get_settings().api.acquisition_key())
             await self._client.__aenter__()
         return self
 

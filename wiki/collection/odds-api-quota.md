@@ -26,7 +26,7 @@ status: stable
 
 # Odds API quota accounting
 
-Quota is a per-key monthly balance that only [the client](odds-api-client.md#cost-per-call) spends. Each sport spends one key, EPL key 0 and NBA key 1 ([keys](odds-api-client.md#retry-and-keys)), so a key's balance is the balance of the sport that spends it, and every view below is per key (two sports given the same index would share one reading). A fetch-odds run (one sport per run) that stores no snapshot while an EPL fixture is within 48 hours, or an NBA game within 14 hours, fails and alerts regardless of quota ([fetch-odds-job](fetch-odds-job.md#flow)). Three places read or act on it, and each reads it differently.
+Quota is a per-key monthly balance that only [the client](odds-api-client.md#cost-per-call) spends. Each sport spends one key, EPL key 0 and NBA key 1, except that a backfill spends the acquisition key whatever its sport ([keys](odds-api-client.md#retry-and-keys)), so a key's balance is the balance of the sport that spends it, and every view below is per key (two sports given the same index would share one reading). A fetch-odds run (one sport per run) that stores no snapshot while an EPL fixture is within 48 hours, or an NBA game within 14 hours, fails and alerts regardless of quota ([fetch-odds-job](fetch-odds-job.md#flow)). Three places read or act on it, and each reads it differently.
 
 ## Where quota is recorded, alerted and checked
 
@@ -65,7 +65,7 @@ Replaying the schedule over the stored NBA events (30-day windows starting 2025-
 ## Where the views disagree
 
 - **Failed calls.** A failed `/odds` call writes no `fetch_logs` row, so it leaves no quota trace (#472; [fetch logs](odds-ingestion-service.md#fetch-logs)).
-- **Historical calls.** The manifest planner derives a call's cost from the manifest's markets and bookmakers, and the executor records the key's remaining quota (`x-requests-remaining`) in `fetch_logs` after each call, failed calls included, so a backfill's spend shows in `odds status quota`; each call's own cost (`x-requests-last`) is only in the structured log and the run's summed units ([odds-api-backfill](odds-api-backfill.md#executing-calls)).
+- **Historical calls.** The manifest planner derives a call's cost from the manifest's markets and bookmakers, and the executor, spending the acquisition key, records that key's remaining quota (`x-requests-remaining`) in `fetch_logs` after each call, failed calls included, so a backfill's spend shows in `odds status quota`; each call's own cost (`x-requests-last`) is only in the structured log and the run's summed units ([odds-api-backfill](odds-api-backfill.md#executing-calls)).
 - **Scores.** `fetch-scores` spends more than the minimum per call because the client always sends `daysFrom` ([results-jobs](results-jobs.md)).
 
 ## Related

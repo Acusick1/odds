@@ -6,12 +6,14 @@ from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from odds_analytics import backfill_executor
 from odds_analytics.backfill_executor import BackfillExecutor, CallProgress
 from odds_analytics.backfill_plan import Call, Fixture, Manifest, Target
 from odds_core.api_models import HistoricalOddsResponse, parse_api_event
+from odds_core.config import APIConfig, Settings
 from odds_core.models import OddsSnapshot
 from odds_core.vocabulary import Market, Source, TimeBasis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -329,3 +331,62 @@ class TestBackfillExecutor:
         assert [(log.success, log.api_quota_remaining) for log in writer.fetch_logs] == [
             (False, 900)
         ]
+
+
+class _KeyRecordingSession:
+    def __init__(self) -> None:
+        self.api_keys: list[str] = []
+
+    def get(self, url: str, params: dict[str, Any], timeout: Any) -> _KeyRecordingResponse:
+        self.api_keys.append(params["apiKey"])
+        return _KeyRecordingResponse()
+
+    async def close(self) -> None:
+        return None
+
+
+class _KeyRecordingResponse:
+    status = 200
+    headers = {"x-requests-remaining": "900", "x-requests-used": "100", "x-requests-last": "20"}
+
+    def raise_for_status(self) -> None:
+        return None
+
+    async def json(self) -> dict[str, Any]:
+        return {"timestamp": "2026-04-18T09:55:00Z", "data": []}
+
+    async def __aenter__(self) -> _KeyRecordingResponse:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+class TestAcquisitionKey:
+    @pytest.mark.parametrize(
+        "sport", ["soccer_epl", "basketball_nba", "baseball_mlb", "soccer_spain_la_liga"]
+    )
+    async def test_every_manifest_spends_the_acquisition_key(
+        self, test_session, writer, sport: str
+    ) -> None:
+        settings = Settings(
+            api=APIConfig(keys="live,nba-live,purchased", acquisition_key_index=2, _env_file=None),
+            database={"url": "postgresql+asyncpg://localhost/test"},
+        )
+        recorder = _KeyRecordingSession()
+
+        with (
+            patch.object(backfill_executor, "get_settings", return_value=settings),
+            patch("odds_lambda.data_fetcher.get_settings", return_value=settings),
+        ):
+            async with BackfillExecutor(
+                manifest().model_copy(update={"sport": sport}),
+                session_factory=Factory(test_session),
+                skip_existing=False,
+                rate_limit_seconds=0,
+            ) as ex:
+                ex._client.session = recorder  # type: ignore[union-attr]
+                await ex.execute([call(T0, 1)])
+
+        assert recorder.api_keys == ["purchased"]

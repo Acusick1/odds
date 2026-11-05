@@ -27,6 +27,10 @@ class APIConfig(BaseSettings):
         default={"basketball_nba": 1},
         description="Index into the keys of the key each sport spends; absent sports use index 0",
     )
+    acquisition_key_index: int = Field(
+        default=0,
+        description="Index into the keys of the key every backfill manifest spends, whatever its sport",
+    )
     base_url: str = Field(
         default="https://api.the-odds-api.com/v4", description="Base URL for The Odds API"
     )
@@ -44,13 +48,19 @@ class APIConfig(BaseSettings):
 
     def key_for(self, sport: str | None) -> str:
         """The key ``sport`` spends."""
+        return self._key_at(self.key_index_for(sport), f"{sport} spends")
+
+    def acquisition_key(self) -> str:
+        """The key every backfill manifest spends."""
+        return self._key_at(self.acquisition_key_index, "backfill spends")
+
+    def _key_at(self, index: int, spender: str) -> str:
         keys = self.key_list
         if not keys:
             raise ValueError("No Odds API key configured: set ODDS_API_KEYS or ODDS_API_KEY")
-        index = self.key_index_for(sport)
         if index >= len(keys):
             raise ValueError(
-                f"{sport} spends Odds API key index {index} but {len(keys)} key(s) are "
+                f"{spender} Odds API key index {index} but {len(keys)} key(s) are "
                 "configured: set ODDS_API_KEYS to one key per index"
             )
         return keys[index]

@@ -13,6 +13,8 @@ sources:
   - .github/workflows/deploy-dev.yml
   - .github/workflows/deploy-prod.yml
   - .github/workflows/live-api.yml
+mentions:
+  - odds_core.config.APIConfig
 status: stable
 ---
 

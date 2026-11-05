@@ -31,7 +31,7 @@ status: stable
 |---|---|
 | `odds fetch` | [Odds API ingestion service](../collection/odds-ingestion-service.md), [Results and status jobs](../collection/results-jobs.md) |
 | `scrape` | [OddsPortal scraper](../collection/oddsportal-scraper.md) |
-| `odds_cli.commands.discover`, `odds_cli.commands.backfill` | [Odds API historical backfill](../collection/odds-api-backfill.md); `discover games` and `backfill execute` store events and snapshots through the [event resolver](../storage/event-resolver.md); `discover games` commits every 100 games and prints dropped counts, `backfill plan` costs an acquisition manifest without an API call (with `--cost`, beside the key's balance or a note that it is unknown), and `backfill execute` runs its calls |
+| `odds_cli.commands.discover`, `odds_cli.commands.backfill` | [Odds API historical backfill](../collection/odds-api-backfill.md); `discover games` and `backfill execute` store events and snapshots through the [event resolver](../storage/event-resolver.md); `discover games` commits every 100 games and prints dropped counts, `backfill plan` costs an acquisition manifest without an API call (with `--cost`, beside the acquisition key's balance or a note that it is unknown), and `backfill execute` runs its calls |
 | `odds train` | [Training pipeline](../modelling/training-pipeline.md) (`tune` stores a new timestamped study in a local SQLite file unless `--in-memory`; both subcommands pass the split's sample weights and kick-off times on, [sample weights](../modelling/training-pipeline.md#sample-weights)), [Hyperparameter tuner](../modelling/hyperparameter-tuner.md) |
 | `odds status` | [odds status](../operations/health-monitor.md#odds-status), [Odds API quota](../collection/odds-api-quota.md) |
 | `validate`, `quality` | [Coverage and completeness checks](../storage/coverage-checks.md) (`quality coverage` lists each book by its canonical key, from price rows) |
@@ -51,7 +51,7 @@ status: stable
 |---|---|
 | `odds_cli.commands.fetch` (`current`, `scores`; `scores` runs the fetch-scores job's `odds_lambda.jobs.fetch_scores.update_scores`, which finds each event by its Odds API id and logs `score_event_not_found` for an unknown one) | required, since each sport spends its own Odds API key; `results` defaults to `soccer_epl`, settles `baseball_mlb` from the MLB Stats API and prints the settled, cancelled, postponed, moved and unresolved counts ([results jobs](../collection/results-jobs.md#fetch-oddsportal-results)) |
 | `odds_cli.commands.discover` (`odds_cli.commands.discover.games` spends units, `odds_cli.commands.discover.upcoming` is free) | required |
-| `odds_cli.commands.backfill.execute_backfill` | the manifest's sport, whose key it spends; `odds_cli.commands.backfill.plan_backfill` takes it too |
+| `odds_cli.commands.backfill.execute_backfill` | the manifest's sport, and the acquisition key it spends whatever the sport; `odds_cli.commands.backfill.plan_backfill` takes it too |
 | `odds_cli.commands.quality` | required |
 | `odds_cli.commands.validate` (`daily`, `tier-coverage`) | required; one of `odds_core.sports.SUPPORTED_SPORTS`, whose league timezone sets the day ([coverage checks](../storage/coverage-checks.md#tiercoveragevalidator)) |
 | `odds_cli.commands.polymarket.discover` | `basketball_nba` |
