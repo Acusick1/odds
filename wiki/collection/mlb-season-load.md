@@ -21,7 +21,7 @@ The live jobs create an MLB event only for a game a source prices, so seasons pl
 
 `odds_lambda.mlb_season_load.fetch_season` reads calendar year `season` (1 January to 31 December) with `odds_lambda.mlb_stats_fetcher.MlbStatsFetcher.fetch_results`, in 30-day calls, and `odds_lambda.mlb_season_load.final_games` keeps each Final game once:
 
-- **Game types.** Only the types in `odds_lambda.mlb_season_load.LOADED_GAME_TYPES` load: the regular season and the four postseason rounds. Spring training, exhibitions and the All-Star Game are left out.
+- **Game types.** Only the types in `odds_lambda.collection_calendar.MLB_PRICED_GAME_TYPES` load: the regular season and the four postseason rounds. Spring training, exhibitions and the All-Star Game are left out.
 - **Final only.** A game loads when a slot of it that is not a resumed continuation is Final with both scores (`odds_lambda.mlb_game_resolver.final_scores`). A cancelled game, or one never played, has none.
 - **Postponed games** are listed under each date they were scheduled for, sharing one `gamePk`; the event is placed at the slot played (`odds_lambda.mlb_game_resolver.played_slots`).
 - **Resumed games.** A suspended game is placed at the slot it began in, and its score is that slot's; the continuation slot (`resumedFrom`) only repeats it.

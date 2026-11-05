@@ -20,6 +20,7 @@ from odds_core.models import EventStatus
 from odds_core.team import normalize_team_name
 from odds_core.vocabulary import Source
 
+from odds_lambda.collection_calendar import MLB_PRICED_GAME_TYPES
 from odds_lambda.mlb_game_resolver import (
     MLB_SPORT_KEY,
     ResolutionRule,
@@ -34,9 +35,6 @@ from odds_lambda.storage.writers import OddsWriter
 logger = structlog.get_logger()
 
 SPORT_TITLE = "MLB"
-# The regular season and the four postseason rounds (wild card, division series, LCS, World
-# Series); spring training, exhibitions and the All-Star Game are left out.
-LOADED_GAME_TYPES: frozenset[str] = frozenset({"R", "F", "D", "L", "W"})
 
 
 @dataclass(frozen=True)
@@ -86,7 +84,7 @@ def final_games(schedule: Sequence[MlbGameResult]) -> list[FinalGame]:
     began in (``played_slots``); its score is the Final slot's (``final_scores``). The
     ``sibling_starts`` of a doubleheader game are the other games of the pair that MLB date.
     """
-    loaded = [slot for slot in schedule if slot.game_type in LOADED_GAME_TYPES]
+    loaded = [slot for slot in schedule if slot.game_type in MLB_PRICED_GAME_TYPES]
     played = played_slots(loaded)
     listing = {slot.game_pk: slot for slot in loaded if not slot.resumed}
     placed: list[tuple[date, FinalGame]] = []
