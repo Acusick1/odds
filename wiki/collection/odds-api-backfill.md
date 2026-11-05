@@ -26,6 +26,8 @@ A manifest in `backfills/` fixes what a historical purchase requests, validated 
 - **Snapshot grid:** steps by date, each a snapshot interval from its start until the next step's start (10 minutes from 2020-06-06, 5 from 2022-09-01).
 - **Probe:** the snapshot times to request before the full run and what each must return: fixtures at least `min_fixture_lead_hours` ahead, the `required_bookmakers` on each market, and an `x-requests-last` of `units_per_call`. Validation rejects a lead shorter than the earliest band's farthest lead plus its max age, a units figure that differs from the manifest's, and required books or markets the manifest does not request. The probe also checks that the snapshot interval matches the grid.
 
+The EPL manifest's bands are a 10-minute max age to KO−2h, 1 hour to KO−1d and 6 hours to KO−7d. Every envelope over 100K units bills as one month of the 5M plan, so the bands serve every lead a candidate might read rather than saving units ([#740](https://github.com/Acusick1/odds/issues/740)).
+
 Granularity and billing are the Odds API's documented values until the probe confirms them ([odds-api-client](odds-api-client.md#cost-per-call)).
 
 ## Planning calls
