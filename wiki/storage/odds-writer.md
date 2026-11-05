@@ -33,7 +33,7 @@ It returns an `odds_lambda.storage.writers.StoredEnvelope`: the stored snapshot 
 
 ## Event handling
 
-`odds_lambda.storage.writers.OddsWriter.update_event_status` is on [Events table](events.md#writing-events); it raises `ValueError` for FINAL without both scores and for a move the stored status does not allow ([Event status lifecycle](../collection/event-status-lifecycle.md#allowed-moves)). The writer creates no events: the live OddsPortal and Betfair jobs and the Odds API writers find or create them through `odds_lambda.live_events.LiveEventFinder` and the [event resolver](event-resolver.md) ([live MLB events](event-matching.md#live-mlb-events), [Odds API events](event-matching.md#odds-api-events)).
+`odds_lambda.storage.writers.OddsWriter.update_event_status` is on [Events table](events.md#writing-events); it raises `ValueError` for FINAL without both scores and for a move the stored status does not allow ([Event status lifecycle](../collection/event-status-lifecycle.md#allowed-moves)). The writer creates no events: the live OddsPortal and Betfair jobs and the Odds API writers find or create them through `odds_lambda.live_events.LiveEventFinder` and the [event resolver](event-resolver.md) (an Odds API game listed under way only finds one) ([live MLB events](event-matching.md#live-mlb-events), [Odds API events](event-matching.md#odds-api-events)).
 
 ## Log helpers
 

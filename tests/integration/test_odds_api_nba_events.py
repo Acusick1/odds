@@ -58,7 +58,9 @@ class TestOddsApiNbaEvents:
         listed = [_api_event("api-1", home, away, TIP_OFF + timedelta(minutes=5))]
 
         finder = await odds_api_finder(NBA, listed)
-        result = await resolve_odds_api_events(pglite_async_session, finder, listed)
+        result = await resolve_odds_api_events(
+            pglite_async_session, finder, listed, observed_at=datetime.now(UTC)
+        )
 
         assert (result.created, result.matched, result.errors) == (0, 1, [])
         events = (await pglite_async_session.execute(select(func.count(Event.id)))).scalar_one()
@@ -77,6 +79,8 @@ class TestOddsApiNbaEvents:
         ]
 
         finder = await odds_api_finder(NBA, listed)
-        result = await resolve_odds_api_events(pglite_async_session, finder, listed)
+        result = await resolve_odds_api_events(
+            pglite_async_session, finder, listed, observed_at=datetime.now(UTC)
+        )
 
         assert (result.created, result.matched) == (2, 0)

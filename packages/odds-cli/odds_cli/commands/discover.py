@@ -186,7 +186,10 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str):
                     batch = unique_events[i : i + batch_size]
 
                     try:
-                        resolved = await resolve_odds_api_events(session, finder, batch)
+                        # Every listing kept starts after its own snapshot, so after start_date.
+                        resolved = await resolve_odds_api_events(
+                            session, finder, batch, observed_at=start_date
+                        )
                         await session.commit()
                     except Exception as e:
                         await session.rollback()

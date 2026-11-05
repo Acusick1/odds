@@ -56,7 +56,9 @@ class EventSyncService:
         events = list({event.odds_api_id: event for event in response.events}.values())
         finder = await odds_api_finder(sport_key, events)
         async with self._session_factory() as session:
-            resolved = await resolve_odds_api_events(session, finder, events)
+            resolved = await resolve_odds_api_events(
+                session, finder, events, observed_at=response.timestamp
+            )
             await session.commit()
 
         logger.info(

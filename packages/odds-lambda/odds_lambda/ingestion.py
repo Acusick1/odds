@@ -148,7 +148,9 @@ class OddsIngestionService:
             try:
                 async with self._session_factory() as session:
                     writer = OddsWriter(session)
-                    found = await resolve_odds_api_event(finder, session, event)
+                    found = await resolve_odds_api_event(
+                        finder, session, event, observed_at=response.timestamp
+                    )
                     if isinstance(found, DroppedGame):
                         dropped_games.append(found)
                         continue

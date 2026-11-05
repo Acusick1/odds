@@ -10,7 +10,7 @@ from odds_lambda.odds_api_events import OddsApiResolutions
 from typer.testing import CliRunner
 
 
-async def _resolved(session, finder, events):
+async def _resolved(session, finder, events, *, observed_at):
     return OddsApiResolutions(created=len(events))
 
 
@@ -360,7 +360,9 @@ class TestDiscoverCommand:
         )
         resolved: list[ApiEvent] = []
 
-        async def _record(session, finder, events: list[ApiEvent]) -> OddsApiResolutions:
+        async def _record(
+            session, finder, events: list[ApiEvent], *, observed_at: datetime
+        ) -> OddsApiResolutions:
             resolved.extend(events)
             return OddsApiResolutions(created=len(events))
 

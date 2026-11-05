@@ -24,7 +24,7 @@ status: stable
 
 Three scripts under `scripts/` load OddsPortal scrapes and football-data.co.uk (FDUK) CSVs for EPL as `odds_core.models.Event` rows, each with `odds_core.models.OddsSnapshot` rows ([columns and constraints](../storage/odds-tables.md#odds_snapshots)) with `odds_core.models.Price` rows and a payload holding the envelopes they were built from. This is the history that models train and are evaluated on ([data-sources](data-sources.md)). None is scheduled. The steps to run them are in [howto-load-historical-epl-odds](howto-load-historical-epl-odds.md).
 
-Each ingester finds the event of a game with `odds_lambda.storage.event_resolver.resolve_event` and stores each snapshot with `odds_lambda.storage.shaped_snapshots.store_shaped_snapshot` ([Writing price rows](../storage/price-tables.md#writing-price-rows)). Prices are read from the `prices` table ([Reading quotes](../storage/price-tables.md#reading-quotes)).
+Each ingester finds the event of a game with `odds_lambda.storage.event_resolver.resolve_event`, which creates one however long ago the game was played since a historical listing sets no `earliest_created_start`, and stores each snapshot with `odds_lambda.storage.shaped_snapshots.store_shaped_snapshot` ([Writing price rows](../storage/price-tables.md#writing-price-rows)). Prices are read from the `prices` table ([Reading quotes](../storage/price-tables.md#reading-quotes)).
 
 ## Inputs
 
