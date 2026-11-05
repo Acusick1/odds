@@ -39,6 +39,7 @@ Costs a historical purchase before it is bought, buys it, and fills scores. Exec
 
    - A call that fails stops the run. Rerun the same command: calls whose fixtures already have their snapshot are skipped, unless you pass `--no-skip-existing`.
    - Each call logs its real cost and the key's remaining and used quota; `odds status quota` shows the balance afterwards.
+   - The summary's dropped games are distinct games the calls listed but no stored event took ([historical listings](../storage/event-matching.md#historical-odds-api-listings)); an `id_refused` drop names a second event holding the game's Odds API id.
 
 ## Fill scores
 

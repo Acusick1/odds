@@ -87,6 +87,16 @@ class ResolvedEvent:
     resolution: Resolution
 
 
+@dataclass(frozen=True)
+class RefusedId:
+    """A listed game whose event was found but refused the source's id, as ``check`` decided."""
+
+    event: Event
+    source: Source
+    external_id: str
+    check: ExternalIdCheck
+
+
 class AmbiguousHistoricalMatch(ValueError):
     """A historical row has several same-fixture events within ±24 h and none within ±2 h, so
     it could be any of them or a game of its own."""
@@ -161,16 +171,27 @@ async def resolve_event(session: AsyncSession, game: ListedGame) -> ResolvedEven
     return resolved
 
 
-async def attach_event(
+async def attach_event(session: AsyncSession, game: ListedGame) -> ResolvedEvent | None:
+    """The existing event of ``game``, recording the source's id on it; ``None`` when none
+    matches or the id is refused (``attach_listing``), and no event is created.
+
+    Raises:
+        LockOrderError: as ``resolve_event``.
+    """
+    attached = await attach_listing(session, game)
+    return attached if isinstance(attached, ResolvedEvent) else None
+
+
+async def attach_listing(
     session: AsyncSession, game: ListedGame, *, by_listed_start: bool = False
-) -> ResolvedEvent | None:
+) -> ResolvedEvent | RefusedId | None:
     """The existing event of ``game``, recording the source's id on it; ``None`` when none
     matches, and no event is created. The lock and lookup are ``resolve_event``'s; the listed
     start is not offered to ``move_kickoff``, for a source that is not a schedule authority.
     With ``by_listed_start`` the lookup skips the source's id and only matches the teams within
     the game's ``match_window`` of the listed start (not for an MLB game, found by ``gamePk``).
 
-    Also ``None`` when the event already holds another id from the source (or another event
+    ``RefusedId`` when the event already holds another id from the source (or another event
     holds this one): the id is refused, so the game is not the event's to write prices for. The
     refusal is logged once per refused id and event. Flushes; the caller commits.
 
@@ -193,7 +214,8 @@ async def attach_event(
     if game.external_id is not None and not await _record_external_id(
         session, resolved.event, game.source, game.external_id, log_repeats=False
     ):
-        return None
+        check = await check_external_id(session, resolved.event, game.source, game.external_id)
+        return RefusedId(resolved.event, game.source, game.external_id, check)
     return resolved
 
 

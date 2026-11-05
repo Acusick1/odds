@@ -7,15 +7,17 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from odds_analytics import backfill_executor
 from odds_analytics.backfill_executor import BackfillExecutor, BackfillResult
 from odds_analytics.backfill_plan import Call, Fixture, Manifest, Target
-from odds_core.models import Event, EventExternalId, EventStatus, OddsSnapshot
+from odds_core.models import DataQualityLog, Event, EventExternalId, EventStatus, OddsSnapshot
 from odds_core.sports import SportKey
 from odds_core.vocabulary import Source
 from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.live_events import DroppedGame, LiveEventFinder, SkipReason
 from odds_lambda.mlb_game_resolver import GameRow, ResolutionRule, ResolvedGame
 from odds_lambda.storage.event_resolver import (
+    REFUSED_ID_ISSUE,
     ListedGame,
     MatchWindow,
     ResolvedEvent,
@@ -191,6 +193,18 @@ async def run_call(
 ) -> BackfillResult:
     """One planned call at ``at`` whose response lists ``listings``, through the real client and
     executor."""
+    return await run_calls(session, sport, [at], listings, serves)
+
+
+async def run_calls(
+    session: AsyncSession,
+    sport: SportKey,
+    times: list[datetime],
+    listings: list[dict[str, Any]],
+    serves: tuple[Event, ...] = (),
+) -> BackfillResult:
+    """One run of planned calls at ``times``, each answered with the response for the first."""
+    at = times[0]
     snapshot_time = at - timedelta(minutes=5)
     http = RecordedHttpSession(
         {"timestamp": snapshot_time.isoformat().replace("+00:00", "Z"), "data": listings},
@@ -200,14 +214,17 @@ async def run_call(
     client.session = http  # type: ignore[assignment]
     m = manifest(sport)
     band = m.coverage[0]
-    call = Call(
-        at,
-        tuple(
-            Target(Fixture(event.id, event.commence_time), band, at, at)
-            for event in serves
-            if event.id is not None
-        ),
-    )
+    calls = [
+        Call(
+            t,
+            tuple(
+                Target(Fixture(event.id, event.commence_time), band, t, t)
+                for event in serves
+                if event.id is not None
+            ),
+        )
+        for t in times
+    ]
     async with BackfillExecutor(
         m,
         client=client,
@@ -215,7 +232,7 @@ async def run_call(
         skip_existing=False,
         rate_limit_seconds=0,
     ) as executor:
-        return await executor.execute([call])
+        return await executor.execute(calls)
 
 
 async def events_of(session: AsyncSession, sport: str) -> list[Event]:
@@ -259,7 +276,7 @@ class TestHistoricalFixtureAttach:
         assert await odds_api_ids(session, loaded) == ["api-1"]
         assert await snapshot_times(session, loaded) == {at - timedelta(minutes=5)}
         assert (loaded.status, loaded.commence_time) == (EventStatus.FINAL, league.kickoff)
-        assert (result.fixtures_stored, result.dropped_games) == (1, [])
+        assert (result.fixtures_stored, result.dropped_games) == (1, {})
 
     async def test_listing_off_the_kickoff_by_up_to_two_hours_attaches(
         self, pglite_async_session: AsyncSession
@@ -332,6 +349,79 @@ class TestHistoricalFixtureAttach:
         assert (loaded.status, loaded.commence_time) == (EventStatus.FINAL, fixture.kickoff)
         for result in (first, rerun):
             assert [d.reason for d in result.dropped_games] == [SkipReason.NO_EVENT]
+
+    async def test_an_id_another_event_holds_is_reported_as_refused(
+        self, pglite_async_session: AsyncSession
+    ) -> None:
+        session = pglite_async_session
+        fixture = VALENCIA_REAL
+        duplicate = await resolve_event(
+            session,
+            ListedGame(
+                source=Source.ODDS_API,
+                sport_key=fixture.sport,
+                sport_title=fixture.sport_title,
+                home_team=fixture.api_home,
+                away_team=fixture.api_away,
+                commence_time=VALENCIA_REAL_ORIGINAL,
+                external_id="vr",
+            ),
+        )
+        loaded = await load_fduk_fixture(session, fixture)
+        at = fixture.kickoff - timedelta(hours=1)
+
+        result = await run_call(
+            session, fixture.sport, at, [listing("vr", fixture, fixture.kickoff, at)], (loaded,)
+        )
+
+        [dropped] = result.dropped_games
+        assert dropped.reason is SkipReason.ID_REFUSED
+        assert dropped.detail == (
+            f"odds_api id vr is held by event {duplicate.event.id}, "
+            f"not the matched event {loaded.id}"
+        )
+        assert await odds_api_ids(session, loaded) == []
+        assert await snapshot_times(session, loaded) == set()
+        assert await snapshot_times(session, duplicate.event) == set()
+        refusals = await session.execute(
+            select(DataQualityLog.event_id).where(DataQualityLog.issue_type == REFUSED_ID_ISSUE)
+        )
+        assert refusals.scalars().all() == [loaded.id]
+
+    async def test_a_game_dropped_by_several_calls_is_reported_once(
+        self, pglite_async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        session = pglite_async_session
+        fixture = LEAGUE_FIXTURES[0]
+        await load_fduk_fixture(session, fixture)
+        playoff = LeagueFixture(
+            fixture.sport,
+            fixture.sport_title,
+            "Sunderland",
+            "Coventry",
+            "Sunderland",
+            "Coventry City",
+            datetime(2025, 5, 13, 19, 0, tzinfo=UTC),
+        )
+        start = playoff.kickoff - timedelta(hours=3)
+        times = [start + timedelta(minutes=10 * i) for i in range(3)]
+        alerted: list[list[DroppedGame]] = []
+
+        async def alert(job_name: str, dropped: list[DroppedGame]) -> bool:
+            alerted.append(list(dropped))
+            return True
+
+        monkeypatch.setattr(backfill_executor, "alert_dropped_games", alert)
+
+        result = await run_calls(
+            session, fixture.sport, times, [listing("api-9", playoff, playoff.kickoff, start)]
+        )
+
+        assert result.calls_made == 3
+        assert [(d.game.home_team, d.reason, n) for d, n in result.dropped_games.items()] == [
+            ("Sunderland", SkipReason.NO_EVENT, 3)
+        ]
+        assert [len(games) for games in alerted] == [1]
 
     async def test_relisting_a_fixture_keeps_one_event_and_one_id(
         self, pglite_async_session: AsyncSession

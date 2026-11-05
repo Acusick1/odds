@@ -34,10 +34,12 @@ from odds_lambda.mlb_game_resolver import (
 from odds_lambda.mlb_stats_fetcher import MlbStatsFetcher
 from odds_lambda.storage.event_merge import find_match_id
 from odds_lambda.storage.event_resolver import (
+    IdDecision,
     ListedGame,
+    RefusedId,
     Resolution,
     ResolvedEvent,
-    attach_event,
+    attach_listing,
     event_lock_key,
     resolve_event,
     resolve_unscheduled_mlb_event,
@@ -63,6 +65,7 @@ class SkipReason(StrEnum):
     UNRESOLVED = "unresolved"
     SCHEDULE_UNAVAILABLE = "schedule_unavailable"
     NO_EVENT = "no_event"
+    ID_REFUSED = "id_refused"
 
 
 @dataclass(frozen=True)
@@ -202,8 +205,9 @@ class LiveEventFinder:
         self, session: AsyncSession, game: GameRow, source: Source, external_id: str | None
     ) -> ResolvedEvent | DroppedGame:
         """The stored event of a historical listing, recording ``source``'s id for it, or the game
-        dropped (``SkipReason.NO_EVENT`` when no event is the listed game). Never creates an
-        event and moves no kick-off.
+        dropped: ``SkipReason.NO_EVENT`` when no event is the listed game, ``SkipReason.ID_REFUSED``
+        when its event refused the id (another event holds it). Never creates an event and moves
+        no kick-off.
 
         An MLB game is its ``gamePk``'s event. Any other game is the event of its teams within
         ±2 h of the listed start, never found by the source's id, so a game listed at a kick-off
@@ -213,11 +217,13 @@ class LiveEventFinder:
         mlb_game = await self._mlb_game(session, game, source, external_id)
         if isinstance(mlb_game, (ResolvedEvent, DroppedGame)):
             return mlb_game
-        found = await attach_event(
+        found = await attach_listing(
             session,
             self._listed(game, source, external_id, mlb_game),
             by_listed_start=mlb_game is None,
         )
+        if isinstance(found, RefusedId):
+            return DroppedGame(game, SkipReason.ID_REFUSED, describe_refusal(found))
         return found or DroppedGame(game, SkipReason.NO_EVENT)
 
     async def _mlb_game(
@@ -306,6 +312,16 @@ class LiveEventFinder:
                     "listing_ingestion_failed", source=shape.source.value, error=msg, exc_info=True
                 )
         return writes
+
+
+def describe_refusal(refused: RefusedId) -> str:
+    source = refused.source.value
+    if refused.check.decision is IdDecision.HELD_ELSEWHERE:
+        return (
+            f"{source} id {refused.external_id} is held by event {refused.check.other}, "
+            f"not the matched event {refused.event.id}"
+        )
+    return f"event {refused.event.id} holds {source} id {refused.check.other}"
 
 
 async def alert_dropped_games(job_name: str, dropped: Sequence[DroppedGame]) -> bool:
