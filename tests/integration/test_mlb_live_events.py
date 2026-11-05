@@ -686,8 +686,8 @@ class TestDroppedGamesAlert:
         assert await alert_dropped_games("fetch-betfair-exchange-mlb", dropped)
 
         alert_type, severity, message = sent.await_args.args
-        assert (alert_type, severity) == ("mlb_games_dropped:fetch-betfair-exchange-mlb", "warning")
-        assert "2 listed MLB games" in message
+        assert (alert_type, severity) == ("games_dropped:fetch-betfair-exchange-mlb", "warning")
+        assert "2 listed games" in message
         assert (
             f"St. Louis Cardinals @ Chicago Cubs game 2 {AFTERNOON:%Y-%m-%d %H:%M}Z "
             "(unresolved: game_number_not_found)" in message

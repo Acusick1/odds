@@ -161,10 +161,14 @@ async def resolve_event(session: AsyncSession, game: ListedGame) -> ResolvedEven
     return resolved
 
 
-async def attach_event(session: AsyncSession, game: ListedGame) -> ResolvedEvent | None:
+async def attach_event(
+    session: AsyncSession, game: ListedGame, *, by_listed_start: bool = False
+) -> ResolvedEvent | None:
     """The existing event of ``game``, recording the source's id on it; ``None`` when none
     matches, and no event is created. The lock and lookup are ``resolve_event``'s; the listed
     start is not offered to ``move_kickoff``, for a source that is not a schedule authority.
+    With ``by_listed_start`` the lookup skips the source's id and only matches the teams within
+    the game's ``match_window`` of the listed start (not for an MLB game, found by ``gamePk``).
 
     Also ``None`` when the event already holds another id from the source (or another event
     holds this one): the id is refused, so the game is not the event's to write prices for. The
@@ -172,10 +176,18 @@ async def attach_event(session: AsyncSession, game: ListedGame) -> ResolvedEvent
 
     Raises:
         LockOrderError: as ``resolve_event``.
+        ValueError: ``by_listed_start`` for an MLB game.
     """
-    resolved = await _lock_and_find(
-        session, game, normalize_team_name(game.home_team), normalize_team_name(game.away_team)
-    )
+    home_team = normalize_team_name(game.home_team)
+    away_team = normalize_team_name(game.away_team)
+    if by_listed_start:
+        if game.mlb_game is not None:
+            raise ValueError("an MLB game is found by its gamePk, not by its listed start")
+        await _lock(session, _lock_key(game))
+        matched = await _match(session, game, home_team, away_team)
+        resolved = ResolvedEvent(matched, Resolution.MATCHED) if matched is not None else None
+    else:
+        resolved = await _lock_and_find(session, game, home_team, away_team)
     if resolved is None:
         return None
     if game.external_id is not None and not await _record_external_id(

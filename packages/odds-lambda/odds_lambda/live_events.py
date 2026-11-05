@@ -37,6 +37,7 @@ from odds_lambda.storage.event_resolver import (
     ListedGame,
     Resolution,
     ResolvedEvent,
+    attach_event,
     event_lock_key,
     resolve_event,
     resolve_unscheduled_mlb_event,
@@ -61,6 +62,7 @@ def lock_order(sport_key: str, game: GameRow) -> int:
 class SkipReason(StrEnum):
     UNRESOLVED = "unresolved"
     SCHEDULE_UNAVAILABLE = "schedule_unavailable"
+    NO_EVENT = "no_event"
 
 
 @dataclass(frozen=True)
@@ -182,36 +184,83 @@ class LiveEventFinder:
                 ``LIVE_EVENT_STALE_THRESHOLD`` before ``now``.
         """
         now = now or datetime.now(UTC)
-        mlb_game: ResolvedGame | None = None
-        if self.sport_key == MLB_SPORT_KEY:
-            if self.resolutions is None:
-                found = await resolve_unscheduled_mlb_event(
-                    session,
-                    source,
-                    game.home_team,
-                    game.away_team,
-                    game.start,
-                    game.game_number,
-                    external_id,
-                )
-                return found or DroppedGame(game, SkipReason.SCHEDULE_UNAVAILABLE)
-            resolution = self.resolutions[game]
-            if isinstance(resolution, UnresolvedGame):
-                return DroppedGame(game, SkipReason.UNRESOLVED, resolution.reason)
-            mlb_game = resolution
+        mlb_game = await self._mlb_game(session, game, source, external_id)
+        if isinstance(mlb_game, (ResolvedEvent, DroppedGame)):
+            return mlb_game
         return await resolve_event(
             session,
-            ListedGame(
-                source=source,
-                sport_key=self.sport_key,
-                sport_title=self.sport_title,
-                home_team=game.home_team,
-                away_team=game.away_team,
-                commence_time=game.start,
-                external_id=external_id,
-                mlb_game=mlb_game,
+            self._listed(
+                game,
+                source,
+                external_id,
+                mlb_game,
                 earliest_created_start=None if create_stale else now - LIVE_EVENT_STALE_THRESHOLD,
             ),
+        )
+
+    async def attach_historical(
+        self, session: AsyncSession, game: GameRow, source: Source, external_id: str | None
+    ) -> ResolvedEvent | DroppedGame:
+        """The stored event of a historical listing, recording ``source``'s id for it, or the game
+        dropped (``SkipReason.NO_EVENT`` when no event is the listed game). Never creates an
+        event and moves no kick-off.
+
+        An MLB game is its ``gamePk``'s event. Any other game is the event of its teams within
+        ±2 h of the listed start, never found by the source's id, so a game listed at a kick-off
+        its event no longer has (before a postponement) attaches to nothing, whatever the order
+        of the calls that listed it. Flushes; the caller commits.
+        """
+        mlb_game = await self._mlb_game(session, game, source, external_id)
+        if isinstance(mlb_game, (ResolvedEvent, DroppedGame)):
+            return mlb_game
+        found = await attach_event(
+            session,
+            self._listed(game, source, external_id, mlb_game),
+            by_listed_start=mlb_game is None,
+        )
+        return found or DroppedGame(game, SkipReason.NO_EVENT)
+
+    async def _mlb_game(
+        self, session: AsyncSession, game: GameRow, source: Source, external_id: str | None
+    ) -> ResolvedGame | ResolvedEvent | DroppedGame | None:
+        """An MLB game's ``gamePk`` resolution; the attached event or dropped game when the MLB
+        schedule was unavailable or lacks the game; ``None`` for another sport."""
+        if self.sport_key != MLB_SPORT_KEY:
+            return None
+        if self.resolutions is None:
+            found = await resolve_unscheduled_mlb_event(
+                session,
+                source,
+                game.home_team,
+                game.away_team,
+                game.start,
+                game.game_number,
+                external_id,
+            )
+            return found or DroppedGame(game, SkipReason.SCHEDULE_UNAVAILABLE)
+        resolution = self.resolutions[game]
+        if isinstance(resolution, UnresolvedGame):
+            return DroppedGame(game, SkipReason.UNRESOLVED, resolution.reason)
+        return resolution
+
+    def _listed(
+        self,
+        game: GameRow,
+        source: Source,
+        external_id: str | None,
+        mlb_game: ResolvedGame | None,
+        earliest_created_start: datetime | None = None,
+    ) -> ListedGame:
+        return ListedGame(
+            source=source,
+            sport_key=self.sport_key,
+            sport_title=self.sport_title,
+            home_team=game.home_team,
+            away_team=game.away_team,
+            commence_time=game.start,
+            external_id=external_id,
+            mlb_game=mlb_game,
+            earliest_created_start=earliest_created_start,
         )
 
     async def store_listings(
@@ -270,9 +319,9 @@ async def alert_dropped_games(job_name: str, dropped: Sequence[DroppedGame]) -> 
         else ""
     )
     return await send_recorded_alert(
-        f"mlb_games_dropped:{job_name}",
+        f"games_dropped:{job_name}",
         "warning",
-        f"⚠️ {job_name} stored no odds for {len(dropped)} listed MLB games: {shown}{more}",
+        f"⚠️ {job_name} stored no odds for {len(dropped)} listed games: {shown}{more}",
         every=timedelta(minutes=get_settings().alerts.stale_reminder_minutes),
         context={"job_name": job_name, "games": [d.describe() for d in dropped]},
     )

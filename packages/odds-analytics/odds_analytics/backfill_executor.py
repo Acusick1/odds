@@ -18,7 +18,11 @@ from odds_core.utils import is_three_way_sport
 from odds_core.vocabulary import Market, Source, TimeBasis
 from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.live_events import DroppedGame, alert_dropped_games, lock_order
-from odds_lambda.odds_api_events import game_row, odds_api_finder, resolve_odds_api_event
+from odds_lambda.odds_api_events import (
+    attach_historical_odds_api_event,
+    game_row,
+    odds_api_finder,
+)
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload
 from odds_lambda.storage.writers import OddsWriter
 from sqlalchemy import select
@@ -179,7 +183,7 @@ class BackfillExecutor:
                 key=lambda pair: lock_order(manifest.sport, game_row(pair[0])),
             )
             for event, raw in fixtures:
-                found = await resolve_odds_api_event(finder, session, event)
+                found = await attach_historical_odds_api_event(finder, session, event)
                 if isinstance(found, DroppedGame):
                     result.dropped_games.append(found)
                     continue

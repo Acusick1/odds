@@ -542,6 +542,46 @@ class TestAttachEvent:
         assert attached.event.id == 1
 
 
+class TestAttachByListedStart:
+    @pytest.mark.asyncio
+    async def test_a_recorded_id_does_not_attach_across_a_moved_kickoff(
+        self, pglite_async_session, stored_epl_event
+    ) -> None:
+        await attach_event(pglite_async_session, epl_listing(Source.ODDS_API, "api-1"))
+
+        moved = epl_listing(Source.ODDS_API, "api-1", TWIN_KICKOFF - timedelta(days=30))
+        attached = await attach_event(pglite_async_session, moved, by_listed_start=True)
+
+        assert attached is None
+        count = await pglite_async_session.execute(select(func.count()).select_from(Event))
+        assert count.scalar_one() == 1
+
+    @pytest.mark.asyncio
+    async def test_attaches_within_two_hours_and_records_the_source_id(
+        self, pglite_async_session, stored_epl_event
+    ) -> None:
+        listing = epl_listing(Source.ODDS_API, "api-1", TWIN_KICKOFF + timedelta(hours=2))
+
+        attached = await attach_event(pglite_async_session, listing, by_listed_start=True)
+
+        assert attached is not None
+        assert (attached.event.id, attached.resolution) == (
+            stored_epl_event.id,
+            Resolution.MATCHED,
+        )
+        assert await external_ids(pglite_async_session, stored_epl_event) == {
+            Source.ODDS_API: "api-1"
+        }
+        assert stored_epl_event.commence_time == TWIN_KICKOFF
+
+    @pytest.mark.asyncio
+    async def test_an_mlb_game_is_refused(self, pglite_async_session) -> None:
+        with pytest.raises(ValueError, match="gamePk"):
+            await attach_event(
+                pglite_async_session, mlb_listing(1, GAME_1_START), by_listed_start=True
+            )
+
+
 class TestAttachEvents:
     @pytest.mark.asyncio
     async def test_a_mixed_batch_attaches_in_key_order_and_answers_in_input_order(
