@@ -3,7 +3,9 @@
 import asyncio
 import json
 import os
+import socket
 import subprocess
+import time
 from collections.abc import AsyncGenerator, Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -35,8 +37,30 @@ def start_pglite_manager() -> Callable[[PGliteManager], None]:
         manager: PGliteManager, extension_imports: str, extension_config: str
     ) -> str:
         # The socket handler must not lock PGlite before database initialization finishes.
-        return original_generate(manager, extension_imports, extension_config).replace(
-            "const server =", "await db.waitReady; const server ="
+        return (
+            original_generate(manager, extension_imports, extension_config)
+            .replace("const server =", "await db.waitReady; const server =")
+            .replace(
+                "await server.start();",
+                """
+                server.addEventListener('error', event => {
+                    const err = event.detail;
+                    fs.writeFileSync('startup-status.tmp', err.code || String(err));
+                    fs.renameSync('startup-status.tmp', 'startup-status');
+                });
+                await server.start();
+                fs.writeFileSync('startup-status.tmp', 'ready');
+                fs.renameSync('startup-status.tmp', 'startup-status');
+                """,
+            )
+            .replace(
+                "console.error('Failed to start PGlite server:', err);",
+                """
+                fs.writeFileSync('startup-status.tmp', err.code || String(err));
+                fs.renameSync('startup-status.tmp', 'startup-status');
+                console.error('Failed to start PGlite server:', err);
+                """,
+            )
         )
 
     def start_node(args: list[str], **kwargs: Any) -> subprocess.Popen[Any]:
@@ -49,11 +73,51 @@ def start_pglite_manager() -> Callable[[PGliteManager], None]:
         return original_popen(command, **kwargs)
 
     def start(manager: PGliteManager) -> None:
-        with (
-            patch.object(PGliteManager, "_generate_tcp_js_content", generate_ready_server),
-            patch("py_pglite.manager.subprocess.Popen", side_effect=start_node),
-        ):
-            manager.start()
+        # The upstream emergency fallback kills unrelated PGlite processes.
+        manager._kill_all_pglite_processes = lambda: None
+        for attempt in range(5):
+            with socket.socket() as listener:
+                listener.bind((manager.config.tcp_host, 0))
+                manager.config.tcp_port = listener.getsockname()[1]
+            try:
+                with (
+                    patch.object(PGliteManager, "_generate_tcp_js_content", generate_ready_server),
+                    patch("py_pglite.manager.subprocess.Popen", side_effect=start_node),
+                ):
+                    manager.start()
+                assert manager.work_dir is not None and manager.process is not None
+                status_file = manager.work_dir / "startup-status"
+                deadline = time.monotonic() + manager.config.timeout
+                while (
+                    not status_file.exists()
+                    and manager.process.poll() is None
+                    and time.monotonic() < deadline
+                ):
+                    time.sleep(0.05)
+                status = (
+                    status_file.read_text()
+                    if status_file.exists()
+                    else "startup failed or timed out"
+                )
+                if status == "ready" and manager.process.poll() is None:
+                    return
+                raise RuntimeError(status)
+            except RuntimeError as exc:
+                status_file = manager.work_dir / "startup-status" if manager.work_dir else None
+                status = (
+                    status_file.read_text() if status_file and status_file.exists() else str(exc)
+                )
+                if manager.process is not None:
+                    if manager.process.poll() is None:
+                        manager.process.kill()
+                    output, _ = manager.process.communicate()
+                    if "EADDRINUSE" in (output or ""):
+                        status = "EADDRINUSE"
+                    elif output:
+                        status = f"{status}: {output}"
+                    manager.process = None
+                if status != "EADDRINUSE" or attempt == 4:
+                    raise RuntimeError(f"PGlite startup failed: {status}") from exc
 
     return start
 
@@ -74,18 +138,15 @@ async def pglite_async_sqlalchemy_manager(
 
 
 @pytest.fixture(scope="session")
-def pglite_config():
+def pglite_config() -> PGliteConfig:
     """
     Override pglite config to force TCP mode.
 
     This prevents intermittent Unix socket connection errors by ensuring
     all tests use TCP connections on a dedicated port.
     """
-    from py_pglite.config import PGliteConfig
-
     return PGliteConfig(
         use_tcp=True,
-        tcp_port=5434,
         cleanup_on_exit=True,
         timeout=30,
     )

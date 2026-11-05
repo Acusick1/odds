@@ -7,7 +7,6 @@ import base64
 import gzip
 import json
 import os
-import socket
 from collections.abc import AsyncIterator, Callable
 from contextlib import suppress
 from datetime import datetime
@@ -153,10 +152,7 @@ async def legacy_connection(legacy_engine: AsyncEngine) -> AsyncIterator[AsyncCo
 
 @pytest.fixture(scope="session")
 def legacy_pglite_config() -> PGliteConfig:
-    with socket.socket() as listener:
-        listener.bind(("127.0.0.1", 0))
-        port: int = listener.getsockname()[1]
-    return PGliteConfig(use_tcp=True, tcp_port=port, cleanup_on_exit=True, timeout=30)
+    return PGliteConfig(use_tcp=True, cleanup_on_exit=True, timeout=30)
 
 
 @pytest_asyncio.fixture(loop_scope="session")

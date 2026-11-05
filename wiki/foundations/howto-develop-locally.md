@@ -53,7 +53,7 @@ A bare `uv run pytest` from the repo root runs the offline suite, which is what 
 - `uv run pytest -m live_api -v` calls third-party HTTP APIs.
 - `uv run pytest tests/migration -v` connects to whatever `DATABASE_URL` points at and includes write tests, so run it only against the local database ([Create and apply a database migration](howto-database-migration.md)); otherwise leave it to the deploy workflows.
 
-What the suites run against, the shared fixtures in `tests/conftest.py` (among them the `pglite_async_session` database session, which hands each test empty tables, the Gamma event builders and a recorded MLB Stats API schedule), the markers and the layout are in [Test suite](test-suite.md). A webhook or dead-man's switch URL exported in your shell or `.env` is safe: tests never post to or ping it.
+What the suites run against, the shared fixtures in `tests/conftest.py` (among them the `pglite_async_session` database session, which hands each test empty tables on an automatically allocated TCP port, the Gamma event builders and a recorded MLB Stats API schedule), the markers and the layout are in [Test suite](test-suite.md). A webhook or dead-man's switch URL exported in your shell or `.env` is safe: tests never post to or ping it.
 
 ## Related
 
