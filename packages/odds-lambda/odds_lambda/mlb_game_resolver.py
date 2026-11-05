@@ -43,6 +43,8 @@ class ResolutionRule(StrEnum):
     START_ORDER = "start_order"
     SIBLING_STARTED = "sibling_started"
     START_TIME = "start_time"
+    # The game is the schedule's own listing, not a source's row matched to it.
+    SCHEDULE = "schedule"
 
 
 class UnresolvedReason(StrEnum):
