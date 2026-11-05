@@ -1,22 +1,26 @@
 #!/usr/bin/env python3
-"""Ingest football-data.co.uk EPL CSVs into the database.
+"""Ingest football-data.co.uk league CSVs into the database.
 
-Downloads CSVs from football-data.co.uk and stores each match's opening and closing
-prices as ``football_data_uk`` snapshots with their price rows, through the same
-envelope writer as ingest_oddsportal.py.
+Downloads a league's season CSVs (main layout, ``mmz4281/<season>/<code>.csv``) from
+football-data.co.uk and stores each match's opening and closing prices as
+``football_data_uk`` snapshots with their price rows, through the same envelope writer
+as ingest_oddsportal.py.
 
 Usage:
-    # Download and ingest all seasons (dry-run first)
-    uv run python scripts/ingest_football_data_uk.py --all --dry-run
+    # EPL from 2015-2016 to the current season (dry-run first)
+    uv run python scripts/ingest_football_data_uk.py \
+        --league E0 --sport-key soccer_epl --sport-title EPL --since 2015-2016 --dry-run
 
-    # Ingest specific seasons
-    uv run python scripts/ingest_football_data_uk.py --seasons 2024-2025
+    # Specific seasons of another league
+    uv run python scripts/ingest_football_data_uk.py \
+        --league SP1 --sport-key soccer_spain_la_liga --sport-title "La Liga" \
+        --seasons 2024-2025 2025-2026
 
     # Ingest from already-downloaded CSVs
-    uv run python scripts/ingest_football_data_uk.py --all --no-download
+    uv run python scripts/ingest_football_data_uk.py <league options> --seasons 2024-2025 --no-download
 
     # Download only (no database writes)
-    uv run python scripts/ingest_football_data_uk.py --all --download-only
+    uv run python scripts/ingest_football_data_uk.py <league options> --seasons 2024-2025 --download-only
 """
 
 from __future__ import annotations
@@ -27,6 +31,7 @@ import csv
 import io
 import logging
 import math
+import re
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
@@ -66,26 +71,10 @@ log = logging.getLogger("ingest_football_data_uk")
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "football_data_uk"
 BASE_URL = "https://www.football-data.co.uk/mmz4281"
 SOURCE_TAG = "football_data_uk"
-SPORT_KEY = "soccer_epl"
-SPORT_TITLE = "EPL"
 MARKET_KEY = "1x2"
 KICKOFF_MISMATCH_TOLERANCE = timedelta(minutes=15)
-
-# Season label → URL path segment
-SEASONS: dict[str, str] = {
-    "2015-2016": "1516",
-    "2016-2017": "1617",
-    "2017-2018": "1718",
-    "2018-2019": "1819",
-    "2019-2020": "1920",
-    "2020-2021": "2021",
-    "2021-2022": "2122",
-    "2022-2023": "2223",
-    "2023-2024": "2324",
-    "2024-2025": "2425",
-    "2025-2026": "2526",
-    "2026-2027": "2627",
-}
+SEASON_LABEL = re.compile(r"(\d{4})-(\d{4})")
+SEASON_START_MONTH = 7
 
 # Bookmaker column prefixes → pipeline bookmaker key.
 # Each entry maps (home_col, draw_col, away_col) derived from prefix + H/D/A.
@@ -129,6 +118,16 @@ DEFAULT_KICKOFF = time(15, 0)
 
 
 @dataclass(frozen=True)
+class FdukLeague:
+    """A football-data.co.uk league and the sport its events are stored under."""
+
+    code: str
+    sport_key: str
+    sport_title: str
+    timezone: ZoneInfo = UK_TZ
+
+
+@dataclass(frozen=True)
 class CollectionSlot:
     """A weekly deadline by which FDUK has collected its opening odds (UK local time)."""
 
@@ -162,22 +161,35 @@ def normalize_team(name: str) -> str:
     return _normalize_team_central(name)
 
 
-def _season_url(season: str) -> str:
+def season_code(season: str) -> str:
+    """The URL path segment of a season label: ``2024-2025`` is ``2425``."""
+    match = SEASON_LABEL.fullmatch(season)
+    if match is None or int(match[2]) != int(match[1]) + 1:
+        raise ValueError(f"Season must look like 2024-2025, got {season!r}")
+    return f"{match[1][2:]}{match[2][2:]}"
+
+
+def seasons_since(first: str, today: date) -> list[str]:
+    """Season labels from ``first`` through the season under way on ``today``."""
+    season_code(first)
+    current = today.year if today.month >= SEASON_START_MONTH else today.year - 1
+    return [f"{year}-{year + 1}" for year in range(int(first[:4]), current + 1)]
+
+
+def _season_url(league: FdukLeague, season: str) -> str:
     """Build CSV download URL for a season."""
-    code = SEASONS[season]
-    return f"{BASE_URL}/{code}/E0.csv"
+    return f"{BASE_URL}/{season_code(season)}/{league.code}.csv"
 
 
-def _csv_path(season: str) -> Path:
+def _csv_path(league: FdukLeague, season: str) -> Path:
     """Local CSV storage path for a season."""
-    code = SEASONS[season]
-    return DATA_DIR / f"E0_{code}.csv"
+    return DATA_DIR / f"{league.code}_{season_code(season)}.csv"
 
 
-def download_csv(season: str) -> Path:
+def download_csv(league: FdukLeague, season: str) -> Path:
     """Download a season CSV from football-data.co.uk."""
-    url = _season_url(season)
-    path = _csv_path(season)
+    url = _season_url(league, season)
+    path = _csv_path(league, season)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     with urlopen(url, timeout=30) as resp:  # noqa: S310
@@ -198,8 +210,8 @@ def read_csv(path: Path) -> list[dict[str, str]]:
     return [row for row in reader if row.get("HomeTeam")]
 
 
-def parse_kickoff(row: dict[str, str]) -> Kickoff:
-    """Parse the match date and UK-local kick-off time into a UTC instant.
+def parse_kickoff(row: dict[str, str], tz: ZoneInfo) -> Kickoff:
+    """Parse the match date and ``tz``-local kick-off time into a UTC instant.
 
     Date format is DD/MM/YYYY or DD/MM/YY. Seasons before 2019-20 have no Time
     column; those kick-offs are assumed to be 15:00 and flagged.
@@ -208,7 +220,7 @@ def parse_kickoff(row: dict[str, str]) -> Kickoff:
     time_str = (row.get("Time") or "").strip()
     fmt = "%d/%m/%Y" if len(date_str.split("/")[-1]) == 4 else "%d/%m/%y"
     kickoff = time_str or DEFAULT_KICKOFF.strftime("%H:%M")
-    local = datetime.strptime(f"{date_str} {kickoff}", f"{fmt} %H:%M").replace(tzinfo=UK_TZ)
+    local = datetime.strptime(f"{date_str} {kickoff}", f"{fmt} %H:%M").replace(tzinfo=tz)
     return Kickoff(commence_time=local.astimezone(UTC), time_assumed=not time_str)
 
 
@@ -369,18 +381,19 @@ def _build_envelope(
 
 
 async def ingest_season(
+    league: FdukLeague,
     season: str,
     *,
     dry_run: bool = False,
     no_download: bool = False,
 ) -> FdukStats:
-    """Ingest one season of football-data.co.uk data."""
+    """Ingest one season of a league's football-data.co.uk data."""
     stats = FdukStats()
 
-    path = _csv_path(season)
+    path = _csv_path(league, season)
     if not no_download:
         try:
-            path = download_csv(season)
+            path = download_csv(league, season)
         except OSError as e:
             log.error(f"  {season}: download failed — {e}")
             stats.errors.append(f"{season}: download failed — {e}")
@@ -404,7 +417,7 @@ async def ingest_season(
 
     async with async_session_maker() as session:
         for row in rows:
-            await ingest_row(session, row, stats)
+            await ingest_row(session, league, row, stats)
             # One commit per match releases the fixture lock the resolver took.
             await session.commit()
 
@@ -413,13 +426,14 @@ async def ingest_season(
 
 async def ingest_row(
     session: AsyncSession,
+    league: FdukLeague,
     row: dict[str, str],
     stats: FdukStats,
 ) -> None:
     """Ingest one CSV row in a savepoint so a failure leaves the event's rows untouched."""
     try:
         async with session.begin_nested():
-            await _ingest_one_match(session, row, stats)
+            await _ingest_one_match(session, league, row, stats)
     except AmbiguousHistoricalMatch as e:
         stats.games_skipped += 1
         log.warning(f"  Skipped: {e}")
@@ -448,6 +462,7 @@ def _report_dry_run(season: str, rows: list[dict[str, str]]) -> None:
 
 async def _ingest_one_match(
     session: AsyncSession,
+    league: FdukLeague,
     row: dict[str, str],
     stats: FdukStats,
 ) -> None:
@@ -460,14 +475,14 @@ async def _ingest_one_match(
 
     home_team = normalize_team(home_raw)
     away_team = normalize_team(away_raw)
-    kickoff = parse_kickoff(row)
+    kickoff = parse_kickoff(row, league.timezone)
 
     resolved = await resolve_event(
         session,
         ListedGame(
             source=Source.FOOTBALL_DATA_UK,
-            sport_key=SPORT_KEY,
-            sport_title=SPORT_TITLE,
+            sport_key=league.sport_key,
+            sport_title=league.sport_title,
             home_team=home_team,
             away_team=away_team,
             commence_time=kickoff.commence_time,
@@ -643,18 +658,31 @@ async def _referenced_by_decisions(session: AsyncSession, snapshot_ids: list[int
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Ingest football-data.co.uk EPL data into the database"
+        description="Ingest a football-data.co.uk league into the database"
     )
     parser.add_argument(
+        "--league", required=True, help="football-data.co.uk league code (e.g. E0, SP1)"
+    )
+    parser.add_argument(
+        "--sport-key", required=True, help="Sport key of the events (e.g. soccer_epl)"
+    )
+    parser.add_argument(
+        "--sport-title", required=True, help="Sport title of created events (e.g. EPL)"
+    )
+    parser.add_argument(
+        "--timezone",
+        default=UK_TZ.key,
+        help=f"Timezone of the CSV's Date and Time columns (default {UK_TZ.key})",
+    )
+    season_group = parser.add_mutually_exclusive_group(required=True)
+    season_group.add_argument(
         "--seasons",
         nargs="+",
-        default=None,
         help="Seasons to ingest (e.g. 2024-2025)",
     )
-    parser.add_argument(
-        "--all",
-        action="store_true",
-        help="Ingest all available seasons (2015-2027)",
+    season_group.add_argument(
+        "--since",
+        help="Ingest every season from this one (e.g. 2015-2016) through the current one",
     )
     parser.add_argument(
         "--dry-run",
@@ -673,18 +701,20 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if args.all:
-        seasons = list(SEASONS.keys())
-    elif args.seasons:
-        for s in args.seasons:
-            if s not in SEASONS:
-                parser.error(f"Unknown season: {s}. Available: {list(SEASONS.keys())}")
-        seasons = args.seasons
-    else:
-        parser.error("Specify --seasons or --all")
+    league = FdukLeague(args.league, args.sport_key, args.sport_title, ZoneInfo(args.timezone))
+    try:
+        if args.since:
+            seasons = seasons_since(args.since, datetime.now(UTC).date())
+        else:
+            seasons = args.seasons
+            for season in seasons:
+                season_code(season)
+    except ValueError as e:
+        parser.error(str(e))
 
     asyncio.run(
         _run(
+            league,
             seasons,
             dry_run=args.dry_run,
             no_download=args.no_download,
@@ -694,6 +724,7 @@ def main() -> None:
 
 
 async def _run(
+    league: FdukLeague,
     seasons: list[str],
     *,
     dry_run: bool,
@@ -707,7 +738,7 @@ async def _run(
 
         if download_only:
             try:
-                download_csv(season)
+                download_csv(league, season)
                 totals.seasons_downloaded += 1
             except OSError as e:
                 log.error(f"  {season}: download failed — {e}")
@@ -715,6 +746,7 @@ async def _run(
             continue
 
         stats = await ingest_season(
+            league,
             season,
             dry_run=dry_run,
             no_download=no_download,

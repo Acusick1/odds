@@ -24,9 +24,9 @@ How to run the tests is in [Set up and run locally](howto-develop-locally.md#run
 
 ```
 tests/unit/         ~110 flat files across all five packages; `conftest.py` holds the OddsPortal feed fixtures
-tests/integration/  shared fixtures in conftest.py (e.g. an event with child rows (a snapshot with price rows, a paper trade and a match brief), an EPL event with a Betfair `1x2` snapshot without prices, `mixed_source_event` (an EPL event kicking off 2026-04-18 with an Odds API snapshot 3 h out and a later Polymarket one carrying mid, ask and bid price rows), and `job_session`, the test session handed to the OddsPortal and Betfair jobs as their session factory)
+tests/integration/  shared fixtures in conftest.py (e.g. an event with child rows (a snapshot with price rows, a paper trade and a match brief), an EPL event with a Betfair `1x2` snapshot without prices, `mixed_source_event` (an EPL event kicking off 2026-04-18 with an Odds API snapshot 3 h out and a later Polymarket one carrying mid, ask and bid price rows), `job_session`, the test session handed to the OddsPortal and Betfair jobs as their session factory, and `fduk_epl` and `fduk_session`, the EPL league and the test session handed to the FDUK loader, reading CSVs from `tests/fixtures/football_data_uk/`)
 tests/migration/    schema and CLI checks against a real database
-tests/fixtures/     sample Odds API JSON
+tests/fixtures/     sample Odds API JSON; trimmed FDUK CSVs (EPL and La Liga) and the EPL golden load they must reproduce
 ```
 
 ## Configuration
