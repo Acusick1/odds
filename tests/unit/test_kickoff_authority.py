@@ -5,7 +5,11 @@ from __future__ import annotations
 import pytest
 from odds_core.sports import SportKey
 from odds_core.vocabulary import Source
-from odds_lambda.storage.event_kickoff import KICKOFF_AUTHORITY, PLAYED_START_SOURCES
+from odds_lambda.storage.event_kickoff import (
+    IN_PLAY_START_SOURCES,
+    KICKOFF_AUTHORITY,
+    PLAYED_START_SOURCES,
+)
 
 
 class TestKickoffAuthorityOrder:
@@ -47,3 +51,8 @@ class TestKickoffAuthorityOrder:
 class TestPlayedStartSources:
     def test_the_mlb_stats_api_and_football_data_uk_date_games_by_when_played(self) -> None:
         assert PLAYED_START_SOURCES == {Source.MLB_STATS_API, Source.FOOTBALL_DATA_UK}
+
+
+class TestInPlayStartSources:
+    def test_the_odds_api_lists_a_game_under_way_at_its_actual_start(self) -> None:
+        assert IN_PLAY_START_SOURCES == {Source.ODDS_API}

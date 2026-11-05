@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import pytest
 from odds_cli.main import app
+from odds_core.api_models import ApiEvent
 from odds_lambda.odds_api_events import OddsApiResolutions
 from typer.testing import CliRunner
 
@@ -335,3 +336,94 @@ class TestDiscoverCommand:
 
                 # Should still process valid events
                 assert "Events parsed: 1" in result.stdout
+
+    def test_a_game_listed_under_way_keeps_its_pre_game_start(
+        self, runner, mock_api_client_factory, mock_db_session
+    ):
+        def listing(commence_time: str) -> dict:
+            return {
+                "data": [
+                    {
+                        "id": "knicks-at-celtics",
+                        "sport_key": "basketball_nba",
+                        "sport_title": "NBA",
+                        "commence_time": commence_time,
+                        "home_team": "Boston Celtics",
+                        "away_team": "New York Knicks",
+                    }
+                ],
+                "quota_remaining": 19990,
+            }
+
+        mock_client = mock_api_client_factory(
+            side_effect=[listing("2024-10-22T23:30:00Z"), listing("2024-10-22T23:35:56Z")]
+        )
+        resolved: list[ApiEvent] = []
+
+        async def _record(session, finder, events: list[ApiEvent]) -> OddsApiResolutions:
+            resolved.extend(events)
+            return OddsApiResolutions(created=len(events))
+
+        with (
+            patch("odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client),
+            patch("odds_cli.commands.discover.async_session_maker", return_value=mock_db_session),
+            patch("odds_cli.commands.discover.resolve_odds_api_events", side_effect=_record),
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "discover",
+                    "games",
+                    "--sport",
+                    "basketball_nba",
+                    "--start",
+                    "2024-10-22",
+                    "--end",
+                    "2024-10-23",
+                ],
+            )
+
+        assert result.exit_code == 0
+        assert [e.commence_time for e in resolved] == [datetime(2024, 10, 22, 23, 30, tzinfo=UTC)]
+
+    def test_a_game_only_listed_under_way_is_not_stored(
+        self, runner, mock_api_client_factory, mock_db_session
+    ):
+        response = {
+            "data": [
+                {
+                    "id": "knicks-at-celtics",
+                    "sport_key": "basketball_nba",
+                    "sport_title": "NBA",
+                    "commence_time": "2024-10-22T23:35:56Z",
+                    "home_team": "Boston Celtics",
+                    "away_team": "New York Knicks",
+                }
+            ],
+            "quota_remaining": 19990,
+        }
+        mock_client = mock_api_client_factory(response)
+
+        with (
+            patch("odds_cli.commands.discover.TheOddsAPIClient", return_value=mock_client),
+            patch("odds_cli.commands.discover.async_session_maker", return_value=mock_db_session),
+            patch(
+                "odds_cli.commands.discover.resolve_odds_api_events", side_effect=_resolved
+            ) as resolve,
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "discover",
+                    "games",
+                    "--sport",
+                    "basketball_nba",
+                    "--start",
+                    "2024-10-23",
+                    "--end",
+                    "2024-10-23",
+                ],
+            )
+
+        assert result.exit_code == 0
+        resolve.assert_not_called()

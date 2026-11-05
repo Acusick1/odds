@@ -96,6 +96,38 @@ class TestMoveKickoff:
         )
 
 
+class TestOddsApiInPlayStart:
+    @pytest.mark.asyncio
+    async def test_a_start_already_past_is_refused_before_the_stored_kickoff(
+        self, pglite_async_session, stored_epl_event
+    ) -> None:
+        tip_off = TWIN_KICKOFF - timedelta(minutes=4, seconds=4)
+
+        assert not await move_kickoff(
+            pglite_async_session,
+            stored_epl_event,
+            Source.ODDS_API,
+            tip_off,
+            now=TWIN_KICKOFF - timedelta(minutes=2),
+        )
+        assert stored_epl_event.commence_time == TWIN_KICKOFF
+
+    @pytest.mark.asyncio
+    async def test_oddsportal_still_moves_to_a_start_just_past(
+        self, pglite_async_session, stored_epl_event
+    ) -> None:
+        scheduled = TWIN_KICKOFF - timedelta(minutes=10)
+
+        assert await move_kickoff(
+            pglite_async_session,
+            stored_epl_event,
+            Source.ODDSPORTAL,
+            scheduled,
+            now=TWIN_KICKOFF - timedelta(minutes=2),
+        )
+        assert stored_epl_event.commence_time == scheduled
+
+
 class TestMoveKickoffAfterTheStoredKickoff:
     @pytest.mark.asyncio
     async def test_an_in_play_start_is_refused(
