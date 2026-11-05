@@ -13,6 +13,8 @@ sources:
   - migrations/versions/9c822a7a3faf_expand_odds_data_model.py
   - odds_core.quotes
   - odds_lambda.oddsportal_adapter.convert_market
+mentions:
+  - odds_analytics.backfill_executor.BackfillExecutor
 status: stable
 ---
 

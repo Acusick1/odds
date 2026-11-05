@@ -37,7 +37,7 @@ def manifest_data(**overrides: Any) -> dict[str, Any]:
     data: dict[str, Any] = {
         "sport": "soccer_epl",
         "seasons": {"2022-23": {"start": "2022-07-01T00:00:00Z", "end": "2023-07-01T00:00:00Z"}},
-        "markets": [{"key": "h2h"}, {"key": "totals", "line": 2.5}],
+        "markets": ["h2h", "totals"],
         "bookmakers": [f"book{i}" for i in range(10)],
         "coverage": [
             band(1, 60, 10),
@@ -190,8 +190,9 @@ class TestManifest:
     @pytest.mark.parametrize(
         ("overrides", "message"),
         [
-            ({"markets": [{"key": "h2h"}, {"key": "h2h"}]}, "requested once"),
-            ({"markets": [{"key": "1x2"}]}, "markets"),
+            ({"markets": ["h2h", "h2h"]}, "requested once"),
+            ({"markets": ["1x2"]}, "markets"),
+            ({"markets": ["h2h", {"key": "totals", "line": 2.5}]}, "markets"),
             ({"regions": ["mars"], "bookmakers": []}, "regions"),
             (
                 {
@@ -223,14 +224,14 @@ class TestManifest:
             (None, {"units_per_call": 10}, "units per call"),
             (None, {"required_bookmakers": {"h2h": ["pinnacle"]}}, "unrequested books"),
             (
-                [{"key": "h2h"}],
+                ["h2h"],
                 {"required_bookmakers": {"totals": ["book0"]}, "units_per_call": 10},
                 "unrequested market",
             ),
         ],
     )
     def test_the_probe_matches_the_request(
-        self, markets: list[dict[str, str]] | None, probe: dict[str, Any], message: str
+        self, markets: list[str] | None, probe: dict[str, Any], message: str
     ) -> None:
         data = manifest_data(**({"markets": markets} if markets else {}))
         data["probe"] = data["probe"] | probe

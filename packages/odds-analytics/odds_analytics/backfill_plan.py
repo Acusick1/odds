@@ -55,11 +55,6 @@ class Season(_Frozen):
         return self
 
 
-class MarketRequest(_Frozen):
-    key: ApiMarket
-    line: float | None = None
-
-
 class Band(_Frozen):
     """Decisions ``min_lead_minutes`` to ``max_lead_minutes`` before kick-off, inclusive, each
     with an input at most ``max_input_age_minutes`` old."""
@@ -109,7 +104,7 @@ class Probe(_Frozen):
 class Manifest(_Frozen):
     sport: SportKey
     seasons: dict[str, Season] = Field(min_length=1)
-    markets: tuple[MarketRequest, ...] = Field(min_length=1)
+    markets: tuple[ApiMarket, ...] = Field(min_length=1)
     bookmakers: tuple[str, ...] = ()
     regions: tuple[Region, ...] = ()
     coverage: tuple[Band, ...] = Field(min_length=1)
@@ -124,9 +119,8 @@ class Manifest(_Frozen):
 
     @model_validator(mode="after")
     def _distinct_markets(self) -> Manifest:
-        keys = [market.key for market in self.markets]
-        if len(set(keys)) != len(keys):
-            raise ValueError(f"each market is requested once, got {keys}")
+        if len(set(self.markets)) != len(self.markets):
+            raise ValueError(f"each market is requested once, got {list(self.markets)}")
         return self
 
     @model_validator(mode="after")
@@ -151,9 +145,8 @@ class Manifest(_Frozen):
                 f"the probe expects {self.probe.units_per_call} units per call, "
                 f"the manifest requests {self.units_per_call}"
             )
-        requested = {market.key for market in self.markets}
         for market, books in self.probe.required_bookmakers.items():
-            if market not in requested:
+            if market not in self.markets:
                 raise ValueError(f"the probe requires books on unrequested market {market}")
             if self.bookmakers and not set(books) <= set(self.bookmakers):
                 raise ValueError(f"the probe requires unrequested books on {market}")

@@ -153,7 +153,7 @@ class BackfillExecutor:
         response = await client.get_historical_odds(
             sport=manifest.sport,
             date=utc_isoformat(call.time),
-            markets=[str(market.key) for market in manifest.markets],
+            markets=[str(market) for market in manifest.markets],
             regions=list(manifest.regions) or None,
             bookmakers=list(manifest.bookmakers) or None,
         )
@@ -249,8 +249,8 @@ class BackfillExecutor:
         # Soccer's three-way h2h is stored as 1x2 (odds_core.utils.relabel_three_way_markets).
         markets = {
             Market.ONE_X_TWO
-            if market.key == Market.H2H and is_three_way_sport(self.manifest.sport)
-            else Market(market.key)
+            if market == Market.H2H and is_three_way_sport(self.manifest.sport)
+            else Market(market)
             for market in self.manifest.markets
         }
         step = self.manifest.grid_step_at(call.time)

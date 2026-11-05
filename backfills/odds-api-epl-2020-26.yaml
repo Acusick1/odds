@@ -9,10 +9,7 @@ seasons:
   2023-24: {start: 2023-07-01T00:00:00Z, end: 2024-07-01T00:00:00Z}
   2024-25: {start: 2024-07-01T00:00:00Z, end: 2025-07-01T00:00:00Z}
   2025-26: {start: 2025-07-01T00:00:00Z, end: 2026-07-01T00:00:00Z}
-markets:
-  - key: h2h
-  - key: totals
-    line: 2.5
+markets: [h2h, totals]
 bookmakers:
   - pinnacle
   - betfair_ex_uk

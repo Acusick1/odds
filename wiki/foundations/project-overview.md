@@ -6,8 +6,9 @@ sources:
   - odds_core.sports.SportKey
   - odds_core.config.PolymarketConfig
   - odds_cli.commands.backfill
-  - odds_analytics.backfill_executor.BackfillExecutor
   - odds_lambda.polymarket_fetcher.PolymarketClient
+mentions:
+  - odds_analytics.backfill_executor.BackfillExecutor
 status: stable
 ---
 

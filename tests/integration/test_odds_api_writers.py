@@ -642,7 +642,7 @@ def _manifest() -> Manifest:
             "seasons": {
                 "2025-26": {"start": "2025-07-01T00:00:00Z", "end": "2026-07-01T00:00:00Z"}
             },
-            "markets": [{"key": "h2h"}, {"key": "totals", "line": 2.5}],
+            "markets": ["h2h", "totals"],
             "regions": ["uk"],
             "coverage": [
                 {"min_lead_minutes": 1, "max_lead_minutes": 120, "max_input_age_minutes": 10}
