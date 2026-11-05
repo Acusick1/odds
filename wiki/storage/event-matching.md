@@ -92,7 +92,7 @@ Event sync (`odds_lambda.event_sync.EventSyncService.sync_sport`), `odds discove
 The backfill prices only the FINAL fixtures its manifest was costed against, so it attaches each listed game through `odds_lambda.odds_api_events.attach_historical_odds_api_event` (`odds_lambda.live_events.LiveEventFinder.attach_historical`) and never creates an event or moves a kick-off:
 
 - **Football and NBA.** The game attaches to the stored event of its teams within ±2 h of the kick-off the listing gives (`odds_lambda.storage.event_resolver.attach_event` with `by_listed_start`), and never by its Odds API id. The listing's id is then recorded on that event (a reissued id replaces the old one).
-- **MLB.** The game attaches to the event holding its `gamePk`, else to a match within ±2 h holding none ([live MLB events](#live-mlb-events)).
+- **MLB.** The game attaches to the event holding its `gamePk`, else to the event holding its Odds API id or a match within ±2 h, either holding no `gamePk` ([live MLB events](#live-mlb-events)); no `gamePk` is recorded.
 - **No stored event.** The game is dropped with reason `no_event` (`odds_lambda.live_events.SkipReason`) and reported with the run's other drops; nothing of it is written. A game outside the loaded fixtures (a Championship play-off, which football-data.co.uk does not list) is dropped this way.
 - **A postponed match.** The fixture football-data.co.uk loaded sits at the kick-off it was played. A listing from before the postponement gives the original kick-off, so it is dropped; a listing after the new date is set attaches. Because the Odds API id is not a lookup key, a rerun of an earlier call drops the same listing again, whatever the fixture holds by then.
 
