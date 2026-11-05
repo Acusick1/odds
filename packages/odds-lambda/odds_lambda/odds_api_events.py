@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.live_events import DroppedGame, LiveEventFinder, SkipReason, lock_order
-from odds_lambda.mlb_game_resolver import GameRow
+from odds_lambda.mlb_game_resolver import MLB_SPORT_KEY, GameRow
 from odds_lambda.storage.event_resolver import (
     Resolution,
     ResolvedEvent,
@@ -43,7 +43,9 @@ async def resolve_odds_api_event(
     """The listed game's event, or the game dropped. A game the API lists at or after its start,
     as of ``observed_at``, is listed at its actual start rather than its schedule, so it matches
     an event but creates none. Without ``observed_at`` (the historical backfill) a game with no
-    event creates one however late."""
+    event creates one however late, and so does an MLB game, whose event takes the MLB schedule's
+    start."""
+    under_way_creates = observed_at is None or finder.sport_key == MLB_SPORT_KEY
     try:
         return await finder.resolve(
             session,
@@ -51,7 +53,7 @@ async def resolve_odds_api_event(
             Source.ODDS_API,
             event.odds_api_id,
             now=observed_at,
-            stale_after=None if observed_at is None else timedelta(0),
+            stale_after=None if under_way_creates else timedelta(0),
         )
     except StaleListing:
         return DroppedGame(game_row(event), SkipReason.UNDER_WAY)
