@@ -19,7 +19,7 @@ sources:
   - odds_lambda.storage.event_resolver.resolve_unscheduled_mlb_event
   - odds_lambda.live_events.LiveEventFinder.store_listings
 mentions:
-  - odds_analytics.backfill_executor.BackfillExecutor
+  - odds_analytics.backfill_executor.BackfillExecutor.execute
   - odds_lambda.mlb_stats_fetcher.MlbStatsFetcher.fetch_results
   - odds_lambda.mlb_stats_fetcher.MlbGameResult
 status: stable
@@ -81,7 +81,7 @@ When a run drops any game, the job sends `mlb_games_dropped:<job>` with the coun
 
 ## Odds API events
 
-Event sync (`odds_lambda.event_sync.EventSyncService.sync_sport`), `odds discover games`, ingestion (`odds_lambda.ingestion.OddsIngestionService.ingest_sport`) and the historical backfill (`odds_analytics.backfill_executor.BackfillExecutor`) resolve each game the Odds API lists in a response through `odds_lambda.live_events.LiveEventFinder.resolve` with `odds_lambda.odds_api_events.resolve_odds_api_event`. The listing's id is recorded as the game's `odds_api` external id; a created event receives a database-assigned integer id ([schema](events.md#external-ids)). Lookup and creation follow the [resolver steps](event-resolver.md#steps). `odds_lambda.odds_api_events.odds_api_finder` makes the finder once per response (the backfill: once per call), so an MLB response reads the MLB schedule once and finds each game by `gamePk` exactly as the live jobs do ([live MLB events](#live-mlb-events)); a game that schedule lacks is dropped, logged as `odds_api_game_dropped` and counted by neither the inserted nor the updated count. Ingestion and the backfill report drops through `odds_lambda.live_events.alert_dropped_games`; a drop is not a failure.
+Event sync (`odds_lambda.event_sync.EventSyncService.sync_sport`), `odds discover games`, ingestion (`odds_lambda.ingestion.OddsIngestionService.ingest_sport`) and the historical backfill (`odds_analytics.backfill_executor.BackfillExecutor.execute`) resolve each game the Odds API lists in a response through `odds_lambda.live_events.LiveEventFinder.resolve` with `odds_lambda.odds_api_events.resolve_odds_api_event`. The listing's id is recorded as the game's `odds_api` external id; a created event receives a database-assigned integer id ([schema](events.md#external-ids)). Lookup and creation follow the [resolver steps](event-resolver.md#steps). `odds_lambda.odds_api_events.odds_api_finder` makes the finder once per response (the backfill: once per call), so an MLB response reads the MLB schedule once and finds each game by `gamePk` exactly as the live jobs do ([live MLB events](#live-mlb-events)); a game that schedule lacks is dropped, logged as `odds_api_game_dropped` and counted by neither the inserted nor the updated count. Ingestion and the backfill report drops through `odds_lambda.live_events.alert_dropped_games`; a drop is not a failure.
 
 - **Found by id.** The event holding the API's id as an external id, else a team-and-start match (`odds_lambda.storage.event_resolver.resolve_event`, step 3). Its sport, teams, status and scores are left as stored, a kick-off the API moves is offered to `odds_lambda.storage.event_kickoff.move_kickoff`, which decides whether the API may move it, and an id the API reissues replaces the recorded one ([Event resolver](event-resolver.md#refused-ids)).
 - **Created in play.** The API lists games already under way, so a game with no event creates one however long ago it started (`create_stale`); the live OddsPortal and Betfair jobs refuse such a game (`odds_lambda.live_events.LIVE_EVENT_STALE_THRESHOLD`).

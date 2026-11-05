@@ -119,7 +119,9 @@ def _cost_table(
         )
         table.add_row(label, *cells([a - b for a, b in zip(full, counts(rest), strict=True)]))
     key = get_settings().api.acquisition_key_index
-    if balance is None:
+    if key is None:
+        table.caption = "No acquisition key set (ODDS_API_ACQUISITION_KEY_INDEX): balance unknown"
+    elif balance is None:
         table.caption = f"Key {key} balance unknown: no recent fetch recorded a quota"
     else:
         table.caption = (
@@ -147,7 +149,7 @@ def execute_backfill(
     """
     Make the Odds API historical calls an acquisition manifest plans and store what they return.
 
-    Spends paid quota on the acquisition key (ODDS_API_ACQUISITION_KEY_INDEX). Use --dry-run first to count the calls.
+    Spends paid quota on the acquisition key (ODDS_API_ACQUISITION_KEY_INDEX, required). Use --dry-run first to count the calls.
 
     Example:
         odds backfill execute --manifest backfills/odds-api-epl-2020-26.yaml --season 2024-25 --dry-run
@@ -160,6 +162,12 @@ def execute_backfill(
 async def _execute_backfill_async(
     manifest: Manifest, seasons: dict[str, Season], dry_run: bool, skip_existing: bool
 ) -> None:
+    if not dry_run:
+        try:
+            get_settings().api.acquisition_key()
+        except ValueError as e:
+            console.print(f"[red]{e}[/red]")
+            raise typer.Exit(1) from e
     fixtures, balance = await _load_season_fixtures(manifest, seasons)
     calls = [
         call for season_fixtures in fixtures.values() for call in plan(manifest, season_fixtures)

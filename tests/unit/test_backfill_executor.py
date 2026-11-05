@@ -211,7 +211,7 @@ class TestBackfillExecutor:
         }
         assert [
             (f.sport_key, f.api_quota_remaining, f.api_quota_used) for f in writer.fetch_logs
-        ] == [("soccer_epl", 900, 4000)]
+        ] == [("soccer_epl", None, None)]
         assert (result.fixtures_stored, result.snapshots_stored) == (2, 4)
         assert progress == [CallProgress(T0, "fetched", 2, 20, 900)]
 
@@ -305,7 +305,7 @@ class TestBackfillExecutor:
         assert [p.status for p in progress] == ["fetched", "failed"]
         assert progress[-1].message == "quota exhausted"
 
-    async def test_a_failed_request_records_the_last_quota(self, test_session, writer) -> None:
+    async def test_a_failed_request_is_logged_without_a_quota(self, test_session, writer) -> None:
         client = FakeClient(RuntimeError("429 Too Many Requests"))
 
         async with executor(client, test_session, skip_existing=False) as ex:
@@ -315,10 +315,12 @@ class TestBackfillExecutor:
         assert len(client.requests) == 1
         assert [
             (log.success, log.api_quota_remaining, log.api_quota_used) for log in writer.fetch_logs
-        ] == [(False, 950, 4050)]
+        ] == [(False, None, None)]
         assert "429" in writer.fetch_logs[0].error_message
 
-    async def test_a_failed_store_records_the_quota_and_stops(self, test_session, writer) -> None:
+    async def test_a_failed_store_is_logged_without_a_quota_and_stops(
+        self, test_session, writer
+    ) -> None:
         writer.fail_store = True
         client = FakeClient(response("e1", quota=900), response("e1"))
         client.quota_remaining = 900
@@ -329,7 +331,7 @@ class TestBackfillExecutor:
 
         assert len(client.requests) == 1
         assert [(log.success, log.api_quota_remaining) for log in writer.fetch_logs] == [
-            (False, 900)
+            (False, None)
         ]
 
 
@@ -390,3 +392,28 @@ class TestAcquisitionKey:
                 await ex.execute([call(T0, 1)])
 
         assert recorder.api_keys == ["purchased"]
+
+    async def test_an_unset_acquisition_key_stops_a_real_run(self, test_session, writer) -> None:
+        settings = Settings(
+            api=APIConfig(keys="a,b", _env_file=None),
+            database={"url": "postgresql+asyncpg://localhost/test"},
+        )
+
+        with patch.object(backfill_executor, "get_settings", return_value=settings):
+            with pytest.raises(ValueError, match="ODDS_API_ACQUISITION_KEY_INDEX"):
+                async with BackfillExecutor(manifest(), session_factory=Factory(test_session)):
+                    pass
+
+    async def test_a_dry_run_needs_no_acquisition_key(self, test_session, writer) -> None:
+        settings = Settings(
+            api=APIConfig(keys="a,b", _env_file=None),
+            database={"url": "postgresql+asyncpg://localhost/test"},
+        )
+
+        with patch.object(backfill_executor, "get_settings", return_value=settings):
+            async with BackfillExecutor(
+                manifest(), session_factory=Factory(test_session), dry_run=True
+            ) as ex:
+                result = await ex.execute([call(T0, 1)])
+
+        assert result.would_fetch == 1

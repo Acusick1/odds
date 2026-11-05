@@ -314,10 +314,11 @@ class TestAPIConfigKeys:
         assert api.acquisition_key() == "c"
         assert api.key_for("basketball_nba") == "b"
 
-    def test_acquisition_key_defaults_to_the_first_key(self):
+    def test_an_unset_acquisition_key_index_raises_rather_than_using_key_zero(self):
         api = APIConfig(keys="a,b", _env_file=None)
 
-        assert api.acquisition_key() == "a"
+        with pytest.raises(ValueError, match="ODDS_API_ACQUISITION_KEY_INDEX"):
+            api.acquisition_key()
 
     def test_an_acquisition_index_beyond_the_configured_keys_raises(self):
         api = APIConfig(key="only", acquisition_key_index=1, _env_file=None)
