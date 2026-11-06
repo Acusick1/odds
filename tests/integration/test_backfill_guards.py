@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 from odds_analytics.backfill_checks import ResponseCheck
-from odds_analytics.backfill_executor import BackfillStopped
+from odds_analytics.backfill_executor import BackfillExecutor, BackfillStopped
 from odds_core.models import FetchLog, OddsSnapshot
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -128,11 +128,12 @@ class TestRunGuards:
             replay.record(at, [g.listing(at) for g in games], snapshot=at)
             calls.append(replay.call(manifest, at, games[0].event))
 
-        try:
+        if made == len(calls):
             await replay.run(manifest, calls, skip_existing=False, max_units=cap)
-        except BackfillStopped as stop:
-            assert f"--max-units {cap}" in str(stop)
-            assert stop.result.units_used == 20 * made
+        else:
+            with pytest.raises(BackfillStopped, match=f"--max-units {cap}") as stop:
+                await replay.run(manifest, calls, skip_existing=False, max_units=cap)
+            assert stop.value.result.units_used == 20 * made
         assert len(replay.requests) == made
 
     async def test_consecutive_empty_calls_stop_the_run(
@@ -334,3 +335,9 @@ class TestProbe:
 
         assert len(replay.requests) == 1
         assert await count(session, FetchLog) == 2
+
+
+class TestGuardSettings:
+    def test_a_streak_limit_below_one_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="max_consecutive_gaps must be at least 1"):
+            BackfillExecutor(load_manifest(MLB), max_consecutive_gaps=0)

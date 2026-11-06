@@ -51,7 +51,7 @@ status: stable
 |---|---|
 | `odds_cli.commands.fetch` (`current`, `scores`; `scores` runs the fetch-scores job's `odds_lambda.jobs.fetch_scores.update_scores`, which finds each event by its Odds API id and logs `score_event_not_found` for an unknown one) | required, since each sport spends its own Odds API key; `results` defaults to `soccer_epl`, settles `baseball_mlb` from the MLB Stats API and prints the settled, cancelled, postponed, moved and unresolved counts ([results jobs](../collection/results-jobs.md#fetch-oddsportal-results)) |
 | `odds_cli.commands.discover` (`odds_cli.commands.discover.games` spends units, `odds_cli.commands.discover.upcoming` is free) | required |
-| `odds_cli.commands.backfill.execute_backfill` | the manifest's sport, and the acquisition key it spends whatever the sport (a real run needs `ODDS_API_ACQUISITION_KEY_INDEX`); `odds_cli.commands.backfill.plan_backfill` and `odds_cli.commands.backfill.probe_backfill` take it too |
+| `odds_cli.commands.backfill.execute_backfill` | the manifest's sport, and the acquisition key it spends whatever the sport (a real run needs `ODDS_API_ACQUISITION_KEY_INDEX`); `odds_cli.commands.backfill.plan_backfill` and `odds_cli.commands.backfill.probe_backfill` take it too; `backfill execute` and `backfill probe` exit non-zero when a guard stops the run or a probe check fails |
 | `odds_cli.commands.quality` | required |
 | `odds_cli.commands.validate` (`daily`, `tier-coverage`) | required; one of `odds_core.sports.SUPPORTED_SPORTS`, whose league timezone sets the day ([coverage checks](../storage/coverage-checks.md#tiercoveragevalidator)) |
 | `odds_cli.commands.polymarket.discover` | `basketball_nba` |

@@ -100,6 +100,8 @@ class BackfillExecutor:
             max_consecutive_gaps: Stop after this many consecutive fetched calls that return no
                 events or lack a required bookmaker on a market
         """
+        if max_consecutive_gaps < 1:
+            raise ValueError(f"max_consecutive_gaps must be at least 1, got {max_consecutive_gaps}")
         self.manifest = manifest
         self._client = client
         self._owns_client = client is None
@@ -143,14 +145,16 @@ class BackfillExecutor:
             for call in calls:
                 try:
                     progress, check = await self._run_call(call, result)
-                    report(progress)
-                    if check is not None:
-                        sparse_streak = sparse_streak + 1 if check.sparse_reason else 0
-                        self._guard(check, sparse_streak, result)
+                except BackfillStopped:
+                    raise
                 except Exception as e:
                     logger.error("backfill_call_failed", call_time=utc_isoformat(call.time))
                     report(CallProgress(call.time, "failed", message=str(e)))
                     raise
+                report(progress)
+                if check is not None:
+                    sparse_streak = sparse_streak + 1 if check.sparse_reason else 0
+                    self._guard(check, sparse_streak, result)
                 if progress.status == "fetched":
                     await asyncio.sleep(self.rate_limit_seconds)
         finally:

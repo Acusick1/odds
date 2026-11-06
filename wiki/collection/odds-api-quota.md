@@ -65,7 +65,7 @@ Replaying the schedule over the stored NBA events (30-day windows starting 2025-
 ## Where the views disagree
 
 - **Failed calls.** A failed `/odds` call writes no `fetch_logs` row, so it leaves no quota trace (#472; [fetch logs](odds-ingestion-service.md#fetch-logs)).
-- **Historical calls.** The manifest planner derives a call's cost from the manifest's markets and bookmakers, and the executor, spending the acquisition key, records no quota in `fetch_logs` (see the opening paragraph), so a backfill's spend does not show in `odds status quota`; the run prints the key's last remaining quota, `--max-units` stops it before a call that would bill past a cap, and each call's own cost (`x-requests-last`) is only in the structured log and the run's summed units (`odds_analytics.backfill_executor.BackfillExecutor.execute`) ([odds-api-backfill](odds-api-backfill.md#executing-calls)).
+- **Historical calls.** The manifest planner derives a call's cost from the manifest's markets and bookmakers, and the executor, spending the acquisition key, records no quota in `fetch_logs` (see the opening paragraph), so a backfill's spend does not show in `odds status quota`; the run prints the key's last remaining quota, `--max-units` stops it before a call that would bill past a cap (the run's summary shows the units billed so far), and each call's own cost (`x-requests-last`) is only in the structured log and the run's summed units (`odds_analytics.backfill_executor.BackfillExecutor.execute`) ([odds-api-backfill](odds-api-backfill.md#executing-calls)).
 - **Scores.** `fetch-scores` spends more than the minimum per call because the client always sends `daysFrom` ([results-jobs](results-jobs.md)).
 
 ## Related

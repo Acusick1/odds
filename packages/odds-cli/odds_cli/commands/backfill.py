@@ -157,6 +157,7 @@ def execute_backfill(
     max_consecutive_gaps: int = typer.Option(
         10,
         "--max-consecutive-gaps",
+        min=1,
         help="Stop after this many consecutive calls with no events or a required book missing",
     ),
 ):
@@ -313,7 +314,11 @@ def probe_backfill(
     if not typer.confirm("Proceed with probe?"):
         console.print("[red]Aborted[/red]")
         raise typer.Exit(0)
-    checks = asyncio.run(_probe_backfill_async(manifest))
+    try:
+        checks = asyncio.run(_probe_backfill_async(manifest))
+    except Exception as e:
+        console.print(f"[red]Probe stopped: {type(e).__name__}: {e}[/red]")
+        raise typer.Exit(1) from e
     console.print(_probe_table(manifest, checks))
     if not all(check.ok for check in checks):
         raise typer.Exit(1)
