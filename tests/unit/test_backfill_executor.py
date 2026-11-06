@@ -353,7 +353,7 @@ class _KeyRecordingSession:
 
 class _KeyRecordingResponse:
     status = 200
-    headers = {"x-requests-remaining": "900", "x-requests-used": "100", "x-requests-last": "20"}
+    headers = {"x-requests-remaining": "900", "x-requests-used": "100", "x-requests-last": "0"}
 
     def raise_for_status(self) -> None:
         return None

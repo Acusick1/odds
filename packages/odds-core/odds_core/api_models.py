@@ -61,7 +61,9 @@ class HistoricalOddsResponse:
     """Response from get_historical_odds() API call.
 
     ``snapshot_time`` is the provider's own time for the snapshot, the latest at or before the
-    requested date; ``units_used`` is the call's cost from ``x-requests-last``.
+    requested date; ``units_used`` is the call's cost from ``x-requests-last``. The neighbouring
+    snapshots' times are the API's ``previous_timestamp`` and ``next_timestamp``, None when it
+    gives none.
     """
 
     events: list[ApiEvent]
@@ -71,6 +73,8 @@ class HistoricalOddsResponse:
     quota_used: int | None
     snapshot_time: datetime
     units_used: int | None = None
+    previous_snapshot_time: datetime | None = None
+    next_snapshot_time: datetime | None = None
 
 
 def parse_scores_from_api_dict(score_data: dict) -> tuple[int | None, int | None]:

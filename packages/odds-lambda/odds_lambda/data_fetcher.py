@@ -49,6 +49,10 @@ def _header_int(headers: Mapping[str, str], name: str) -> int | None:
     return int(float(headers[name])) if name in headers else None
 
 
+def _optional_datetime(value: str | None) -> datetime | None:
+    return parse_api_datetime(value) if value else None
+
+
 class TheOddsAPIClient:
     """Client for interacting with The Odds API."""
 
@@ -375,6 +379,8 @@ class TheOddsAPIClient:
             quota_used=self._quota_used,
             snapshot_time=snapshot_time,
             units_used=self._units_used,
+            previous_snapshot_time=_optional_datetime(data.get("previous_timestamp")),
+            next_snapshot_time=_optional_datetime(data.get("next_timestamp")),
         )
 
     async def get_historical_events(

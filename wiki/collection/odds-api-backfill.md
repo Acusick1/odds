@@ -6,6 +6,7 @@ sources:
   - odds_cli.commands.discover
   - odds_cli.commands.backfill
   - odds_analytics.backfill_plan
+  - odds_analytics.backfill_checks
   - backfills/odds-api-epl-2020-26.yaml
   - backfills/odds-api-la-liga-2024-26.yaml
   - backfills/odds-api-serie-a-2024-26.yaml
@@ -16,6 +17,8 @@ sources:
   - backfills/odds-api-mlb-2024-26.yaml
   - odds_analytics.backfill_executor.BackfillExecutor
   - odds_analytics.backfill_executor.BackfillExecutor.execute
+  - odds_analytics.backfill_executor.BackfillExecutor.probe
+  - odds_analytics.backfill_executor.BackfillStopped
   - odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_odds
 status: stable
 ---
@@ -41,11 +44,11 @@ Each manifest holds:
 - **Content:** the sport, the seasons as disjoint `[start, end)` kick-off ranges, the markets in the Odds API's keys (`h2h` and `totals`), each once and with no line, since a call stores every line the books return, and either named bookmakers or regions, not both.
 - **Coverage bands:** each band (`odds_analytics.backfill_plan.Band`) is a range of leads before kick-off in whole minutes, from `min_lead_minutes` to `max_lead_minutes` inclusive, with a max input age. It promises that a decision at any whole minute in the range finds a snapshot at most the max age old, so a candidate deciding at any of those leads with at least that max input age has inputs, since it reads the latest snapshot in `[t - max age, t]` at decision time `t`, both ends inclusive (`odds_lambda.candidate_rules.market_state.load_market_state`). Bands do not overlap.
 - **Snapshot grid:** steps by date, each a snapshot interval from its start until the next step's start (the EPL manifest: 10 minutes from 2020-06-06, 5 from 2022-09-01; the 2024-26 manifests: 5 from 2022-09-01).
-- **Probe:** the snapshot times to request before the full run and what each must return: fixtures at least `min_fixture_lead_hours` ahead, the `required_bookmakers` on each market, and an `x-requests-last` of `units_per_call`. Validation rejects a lead shorter than the earliest band's farthest lead plus its max age, a units figure that differs from the manifest's, required books or markets the manifest does not request, and a snapshot outside every season or off the grid. The probe also checks that the snapshot interval matches the grid.
+- **Probe:** the snapshot times to request before the full run and what each must return: fixtures at least `min_fixture_lead_hours` ahead, the `required_bookmakers` on each market, and an `x-requests-last` of `units_per_call`. Validation rejects a lead shorter than the earliest band's farthest lead plus its max age, a units figure that differs from the manifest's, required books or markets the manifest does not request, and a snapshot outside every season or off the grid. `odds backfill probe` makes these calls and checks each response against the manifest ([probe](#probing-a-manifest)).
 
 Every manifest's bands are a 10-minute max age to KO−2h, 1 hour to KO−1d and 6 hours to KO−7d ([#740](https://github.com/Acusick1/odds/issues/740)).
 
-Granularity and billing are the Odds API's documented values until the probe confirms them ([odds-api-client](odds-api-client.md#cost-per-call)).
+Granularity and billing are the Odds API's documented values until a probe confirms them ([odds-api-client](odds-api-client.md#cost-per-call)).
 
 ## Planning calls
 
@@ -59,9 +62,23 @@ A call costs `odds_analytics.backfill_plan.Manifest.units_per_call`: 10 units pe
 
 - `odds discover games --start D --end D` calls `odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_events` per day (the snapshot at or before 00:00Z) and resolves each listed game to its event and creates a SCHEDULED one only when none matches (`odds_cli.commands.discover`; [Odds API events](../storage/event-matching.md#odds-api-events)). A game listed with a start at or before the requested time is already under way, and the API lists it at its actual start, so it is skipped and counted as "listed under way"; a game listed on several days keeps its latest pre-game listing. An evening game before 00:00Z is therefore stored from the previous day's snapshot, and only when that day is in the window. The default window is yesterday to today. Events already in the database, stored by any source, keep their id, status, scores, teams, MLB `gamePk` and acknowledgements, and their kick-off once it has passed, since the [kick-off authority](../storage/kickoff-authority.md) refuses a start at or before now after the stored kick-off ([events](../storage/events.md#writing-events)). It prints the events inserted, updated and dropped, and commits every 100 games.
 - `odds backfill plan --manifest M [--season S ...] [--cost]` plans the manifest's calls for each season (`odds_cli.commands.backfill.plan_backfill`) and makes no API call. It prints each call's time and the number of fixture bands it serves. With `--cost` it prints a table of calls and units per season: one row for all bands, then a row per band with the calls that band adds to all the others, so band rows do not sum to the total.
-- `odds backfill execute --manifest M [--season S ...] [--dry-run] [--no-skip-existing]` plans each selected season and runs the calls with `odds_analytics.backfill_executor.BackfillExecutor` (`odds_cli.commands.backfill.execute_backfill`), which stores prices only on events already in the database. It prints the call count, the units that many calls cost (`odds_analytics.backfill_plan.Manifest.units_per_call` each) and the acquisition key's balance (or that it is unknown), asks for confirmation unless `--dry-run`, exits with an error before the prompt when the acquisition key is not set (a dry run needs no key), shows a progress bar and ends with a summary table. See [the executor](#executing-calls).
+- `odds backfill probe --manifest M [--dry-run]` requests the manifest's probe snapshots through the acquisition key and judges each response ([probing](#probing-a-manifest)) (`odds_cli.commands.backfill.probe_backfill`). It prints the calls and units, asks for confirmation unless `--dry-run`, exits with an error before the prompt when the acquisition key is not set, and prints a table of checks per snapshot. A dry run lists each call it would make with its units, needs no key and reads no database. It exits non-zero if any check fails, or on a call that errors, printing the error without the table.
+- `odds backfill execute --manifest M [--season S ...] [--dry-run] [--no-skip-existing] [--max-units N] [--max-consecutive-gaps N]` plans each selected season and runs the calls with `odds_analytics.backfill_executor.BackfillExecutor` (`odds_cli.commands.backfill.execute_backfill`), which stores prices only on events already in the database. It prints the call count, the units that many calls cost (`odds_analytics.backfill_plan.Manifest.units_per_call` each) and the acquisition key's balance (or that it is unknown), asks for confirmation unless `--dry-run`, exits with an error before the prompt when the acquisition key is not set (a dry run needs no key), shows a progress bar and ends with a summary table. A run stopped by a guard prints the reason and the summary so far and exits non-zero. See [the executor](#executing-calls).
 - `odds backfill scores --start D --end D [--dry-run]` fills missing scores from `nba_team_game_logs`, and sets FINAL ([event-status-lifecycle](event-status-lifecycle.md)). Home/away comes from the matchup string (`vs.` home, `@` away). The game logs come from `odds nba-stats fetch` ([nba-injuries-and-stats](nba-injuries-and-stats.md)).
 - `odds backfill status` prints counts of events with snapshots and the earliest/latest snapshot time. It counts all `odds_snapshots`, not only backfilled ones.
+
+## Probing a manifest
+
+`odds_analytics.backfill_executor.BackfillExecutor.probe` requests only the manifest's `probe.snapshots`, one call each, and stores what each returns through the same path as a run. `odds_analytics.backfill_checks.check_response` judges each response (`odds_analytics.backfill_checks.ResponseCheck`):
+
+- **Lag.** The returned snapshot is the requested time to within 60 s (`odds_analytics.backfill_checks.TIMESTAMP_TOLERANCE`). The planner assumes a stored snapshot's time is the grid time it requested, which the coverage bands and the skip rule rely on, so a larger lag fails the probe, and the table prints the lag.
+- **Units.** The billed units (`x-requests-last`) equal `probe.units_per_call`; a response with no such header fails. A response with no events is billed nothing, which the API does not count against the quota ([Odds API](https://the-odds-api.com/liveapi/guides/v4/#usage-quota-costs)), so it may bill 0 or no header, or `units_per_call`.
+- **Grid.** The snapshot before the response's is one grid step earlier, the step in force at that earlier snapshot, and the one after is one step later, the step in force at the response's own, each to within 60 s since the provider's timestamps carry seconds of jitter. The API's `previous_timestamp` and `next_timestamp` give them, and a response without either fails. The table prints the gaps to the second.
+- **Lead.** The farthest listed fixture kicks off at least `probe.min_fixture_lead_hours` after the snapshot.
+- **Books.** Each `probe.required_bookmakers` book, canonicalised with `odds_core.bookmakers.ODDS_API_BOOKMAKER_KEY_MAP` as the response's keys are, appears on its market (soccer's `h2h` is `1x2` in the response), and the check counts the events carrying it; none fails. The probe judges every listed event.
+- **Horizon.** The table prints, per market and required book, the farthest lead (kick-off less snapshot time) of a listed event carrying it, and the probe fails when any is under 24 h, the horizon within which a run judges books (`odds_analytics.backfill_checks.BOOK_JUDGED_LEAD`, [below](#executing-calls)).
+
+A call that errors stops the probe, which logs the failed fetch as a run does.
 
 ## Executing calls
 
@@ -75,7 +92,13 @@ A call costs `odds_analytics.backfill_plan.Manifest.units_per_call`: 10 units pe
 - **Rerun.** A call's rows commit together, so a rerun after a failure stores the whole call, and with `skip_existing` off a rerun stores nothing new: a snapshot's key is its event, source, market and time, an identical one is skipped and a differing one is kept and logged as `snapshot_key_conflict` ([storing snapshots](../storage/price-tables.md#writing-price-rows)), never merged into the stored one.
 - **Pace.** The run sleeps 1 s after each paid call.
 
-Any exception from a call stops the run after it is reported, since every call is paid. The result counts calls made, skipped and would-be-made, the units used (the sum of the responses' `x-requests-last`), the fixtures and snapshots stored, the dropped games (each distinct game once, with the number of calls that listed it, so the summary table and the `games_dropped:odds-backfill` alert count games, not listings) and the last quota remaining (`odds_analytics.backfill_executor.BackfillResult`).
+Any exception from a call stops the run after it is reported, since every call is paid. Three guards also stop it, raising `odds_analytics.backfill_executor.BackfillStopped` with the reason and the result so far, from the same `odds_analytics.backfill_checks.ResponseCheck` the probe uses:
+
+- **Units.** A fetched call with events whose billed units differ from `units_per_call`, or are missing, or an empty one billed neither nothing nor `units_per_call`. The call's rows are stored first, since it is paid.
+- **Cap.** With `max_units` set (`--max-units`), the run stops before a call that would take the run's billed units past it. A dry run bills nothing, so it never reaches the cap.
+- **Sparse streak.** `max_consecutive_gaps` (`--max-consecutive-gaps`, default 10, at least 1) consecutive fetched calls are sparse, so one sparse snapshot does not stop a run. A call is sparse when it returns no events, when none of the fixtures it serves was stored (an unmatched or dropped listing, such as a broken matcher), or when a required book is missing from a market. The books are judged only on the stored fixtures the call serves that kick off within 24 h of the snapshot (`odds_analytics.backfill_checks.BOOK_JUDGED_LEAD`), since the exchange's totals and Pinnacle's MLB totals are not posted days ahead (inferred; the probe's horizon check tests it), which is all a call lists across a break (an All-Star or international break); a call serving no such fixture is not judged on books. A good call resets the streak and a skipped call leaves it unchanged.
+
+The result counts calls made, skipped and would-be-made, the units used (the sum of the responses' `x-requests-last`), the fixtures and snapshots stored, the dropped games (each distinct game once, with the number of calls that listed it, so the summary table and the `games_dropped:odds-backfill` alert count games, not listings) and the last quota remaining (`odds_analytics.backfill_executor.BackfillResult`).
 
 ## Limits
 
@@ -88,7 +111,7 @@ Any exception from a call stops the run after it is reported, since every call i
 
 ## Tests
 
-`tests/integration/test_backfill_replay.py` replays a constructed historical response for each manifest, in the API's documented shape, through the real client and executor on the test database: one test per football league, NBA and MLB, then the rerun cases and the MLB doubleheader and postponed game. `tests/integration/test_historical_fixture_attach.py` covers matching a listing to a stored fixture.
+`tests/integration/test_backfill_guards.py` replays recorded responses that pass and fail each probe check and each run guard, and `tests/unit/test_backfill_probe_cli.py` runs a dry-run probe offline. `tests/integration/test_backfill_replay.py` replays a constructed historical response for each manifest, in the API's documented shape, through the real client and executor on the test database: one test per football league, NBA and MLB, then the rerun cases and the MLB doubleheader and postponed game. `tests/integration/test_historical_fixture_attach.py` covers matching a listing to a stored fixture.
 
 ## Related
 

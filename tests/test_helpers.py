@@ -583,14 +583,22 @@ class ReplayHttpSession(RecordedHttpSession):
     """Serves the recorded response of each requested ``date``; a date with none is a call the
     test did not expect to spend."""
 
-    def __init__(self, responses: dict[str, dict[str, Any]], headers: dict[str, str]) -> None:
+    def __init__(
+        self,
+        responses: dict[str, dict[str, Any]],
+        headers: dict[str, str],
+        headers_by_date: dict[str, dict[str, str]] | None = None,
+    ) -> None:
         super().__init__({}, headers)
         self._responses = responses
+        self._base_headers = headers
+        self._headers_by_date = headers_by_date or {}
 
     def get(self, url: str, params: dict[str, Any], timeout: Any) -> ReplayHttpSession:
         if params["date"] not in self._responses:
             raise AssertionError(f"no recorded response for {params['date']}")
         self._payload = self._responses[params["date"]]
+        self._headers = self._base_headers | self._headers_by_date.get(params["date"], {})
         return super().get(url, params, timeout)  # type: ignore[return-value]
 
 
