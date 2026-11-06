@@ -715,6 +715,26 @@ class TestLoadScoredBets:
             assert event_close(kept, KICKOFF, "soccer_epl", "1x2") == expected
 
 
+# The first 100 bets reach the k=100 checkpoint at EV +0.5; the 20 after it pull the current
+# estimate down to +0.33, which the command never shows.
+COHORT = (
+    trades(100)
+    + trades(20, ev=-0.5, start=100)
+    + [trade(i, name="ghost", version=2) for i in range(3)]
+)
+
+
+EXPECTED_REPORT = """\
+┏━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━┳━━━━━━━━━┓
+┃ Candidate ┃ Version ┃ Status      ┃ Settled ┃ With close ┃ No close ┃ Pending ┃ Staked ┃   P&L ┃   ROI ┃ Checkpoint n ┃ Mean EV ┃           95% CI ┃              Promote CI ┃ k ┃ Verdict ┃
+┡━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━╇━━━━━━━━━┩
+│ cand      │       1 │ not current │     120 │        120 │        0 │       0 │ 120.00 │ +0.00 │ +0.0% │          100 │ +0.5000 │ [+0.500, +0.500] │ 99.00% [+0.500, +0.500] │ 1 │ promote │
+│ epl-agent │       3 │ promoted    │       0 │          0 │        0 │       0 │   0.00 │ +0.00 │ +0.0% │            - │       - │                - │                       - │ 1 │ not_yet │
+│ ghost     │       2 │ not current │       3 │          3 │        0 │       0 │   3.00 │ +0.00 │ +0.0% │            - │       - │                - │                       - │ 1 │ not_yet │
+└───────────┴─────────┴─────────────┴─────────┴────────────┴──────────┴─────────┴────────┴───────┴───────┴──────────────┴─────────┴──────────────────┴─────────────────────────┴───┴─────────┘
+"""
+
+
 class TestReportCommand:
     @pytest.fixture
     def registry(self, tmp_path, monkeypatch: pytest.MonkeyPatch):
@@ -724,17 +744,19 @@ class TestReportCommand:
         monkeypatch.setattr("odds_cli.commands.candidates.candidates_dir", lambda: tmp_path)
 
         async def fake_report(registry):
-            sequence = trades(100) + [trade(i, name="ghost", version=2) for i in range(3)]
-            return summarize_candidates(sequence, registry, NOW, n_boot=N_BOOT)
+            return summarize_candidates(COHORT, registry, NOW, n_boot=N_BOOT)
 
         monkeypatch.setattr("odds_cli.commands.candidates._report", fake_report)
         return tmp_path
 
-    def test_lists_registered_and_unregistered_candidates(self, registry) -> None:
+    def test_prints_the_verdict_checkpoint_not_the_current_estimate(self, registry) -> None:
+        summaries = summarize_candidates(COHORT, [], NOW, n_boot=N_BOOT)
+        cand = next(s for s in summaries if s.name == "cand")
+        assert cand.checkpoint is not None and cand.current is not None
+        assert cand.checkpoint.mean_ev == pytest.approx(0.5)
+        assert cand.current.mean_ev == pytest.approx(1 / 3)
+
         result = CliRunner(env={"COLUMNS": "250"}).invoke(app, ["candidates", "report"])
+
         assert result.exit_code == 0, result.stdout
-        assert "Promote CI" in result.stdout and " k " in result.stdout
-        assert "epl-agent" in result.stdout
-        assert "ghost" in result.stdout
-        assert "not current" in result.stdout
-        assert "not_yet" in result.stdout
+        assert result.stdout == EXPECTED_REPORT

@@ -161,7 +161,7 @@ class TestPortfolioPage:
 
         assert 'class="r num">' in body
 
-    def test_a_failing_report_renders_unavailable_not_a_failed_page(
+    def test_a_report_raising_a_dbapi_error_renders_unavailable_but_this_does_not_prove_a_timeout_cancels(
         self, client: TestClient, report: dict[str, object], registry: list
     ) -> None:
         report["error"] = DBAPIError("select", {}, TimeoutError("canceling statement"))

@@ -22,6 +22,7 @@ from odds_core.models import EventStatus
 from odds_core.paper_trade_models import PaperTrade, TradeResult
 from odds_web.app import create_app
 from odds_web.db import WebDatabase, restrict_transactions
+from odds_web.role_check import RoleCheckFailed, check_role
 from sqlalchemy import Connection, event, text
 from sqlalchemy.exc import DBAPIError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -73,6 +74,78 @@ def as_odds_web(engine: AsyncEngine) -> Iterator[None]:
         yield
     finally:
         event.remove(engine.sync_engine, "begin", set_role)
+
+
+@contextmanager
+def as_odds_web_login(engine: AsyncEngine) -> Iterator[None]:
+    """Like ``as_odds_web``, with the role-level ``default_transaction_read_only`` a login applies.
+
+    ``SET ROLE`` does not apply ``ALTER ROLE ... SET``, so the setting is read back from
+    ``pg_db_role_setting`` and applied to each transaction as the server does for a new session.
+    """
+
+    def set_role(connection: Connection) -> None:
+        defaults = connection.exec_driver_sql(
+            "SELECT s.setconfig FROM pg_db_role_setting s JOIN pg_roles r ON r.oid = s.setrole "
+            "WHERE r.rolname = 'odds_web'"
+        ).scalar()
+        connection.exec_driver_sql("SET LOCAL ROLE odds_web")
+        if defaults and "default_transaction_read_only=on" in defaults:
+            connection.exec_driver_sql("SET TRANSACTION READ ONLY")
+
+    event.listen(engine.sync_engine, "begin", set_role)
+    try:
+        yield
+    finally:
+        event.remove(engine.sync_engine, "begin", set_role)
+
+
+class TestRoleCheck:
+    async def test_passes_for_the_granted_role_that_a_login_makes_read_only(
+        self, session: AsyncSession
+    ) -> None:
+        engine = session.bind
+        assert isinstance(engine, AsyncEngine)
+        with as_odds_web_login(engine):
+            async with engine.connect() as conn:
+                report = await check_role(conn)
+
+        assert "INSERT rejected (SQLSTATE 25006)" in report
+
+    async def test_passes_when_only_the_privileges_reject_the_write(
+        self, session: AsyncSession
+    ) -> None:
+        engine = session.bind
+        assert isinstance(engine, AsyncEngine)
+        with as_odds_web(engine):
+            async with engine.connect() as conn:
+                report = await check_role(conn)
+
+        assert "INSERT rejected (SQLSTATE 42501)" in report
+
+    async def test_fails_when_the_role_can_write(self, session: AsyncSession) -> None:
+        engine = session.bind
+        assert isinstance(engine, AsyncEngine)
+        await session.execute(text("GRANT INSERT ON paper_trades TO odds_web"))
+        await session.commit()
+
+        with as_odds_web_login(engine):
+            async with engine.connect() as conn:
+                with pytest.raises(RoleCheckFailed, match="write privileges on: paper_trades"):
+                    await check_role(conn)
+
+    async def test_fails_when_the_role_cannot_read_what_the_ui_needs(
+        self, session: AsyncSession
+    ) -> None:
+        engine = session.bind
+        assert isinstance(engine, AsyncEngine)
+        await session.execute(text("REVOKE SELECT ON paper_trades FROM odds_web"))
+        await session.commit()
+
+        with as_odds_web_login(engine):
+            async with engine.connect() as conn:
+                with pytest.raises(RoleCheckFailed, match="cannot SELECT from paper_trades"):
+                    await check_role(conn)
 
 
 class TestGrants:

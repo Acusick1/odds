@@ -140,11 +140,12 @@ ask_secret() {
 }
 
 # write_env KEY VALUE upserts KEY='VALUE' into ENV_FILE (replaces any existing
-# line) and sets $KEY. Idempotent. Creates ENV_FILE at mode 0600; writes through
-# a symlink and keeps an existing file's mode.
+# line) and sets $KEY. Idempotent. Creates ENV_FILE at mode 0600, narrows an
+# existing one to 0600 before any secret is written, and writes through a symlink.
 write_env() {
   local key="$1" value="$2" tmp sq="'\\''"
   [[ -e "$ENV_FILE" ]] || (umask 077 && : > "$ENV_FILE")
+  chmod 600 "$ENV_FILE"
   tmp=$(mktemp)
   grep -vE "^${key}=" "$ENV_FILE" > "$tmp" || true
   printf "%s='%s'\n" "$key" "${value//\'/$sq}" >> "$tmp"
@@ -246,30 +247,7 @@ stage "Write WEB_DATABASE_URL into .env"
 say "The UI refuses to start without it and never falls back to DATABASE_URL."
 write_env WEB_DATABASE_URL "postgresql+asyncpg://odds_web:${ODDS_WEB_PASSWORD}@localhost:5433/odds"
 say "Checking the role reads and cannot write:"
-uv run python - <<'PY'
-import asyncio
-
-import asyncpg
-from odds_core.config import get_settings
-
-
-async def main() -> None:
-    url = get_settings().database.web_url
-    assert url, "WEB_DATABASE_URL not read from .env"
-    connection = await asyncpg.connect(url.replace("+asyncpg", ""))
-    print("  paper_trades rows readable:", await connection.fetchval("SELECT count(*) FROM paper_trades"))
-    try:
-        await connection.execute("INSERT INTO paper_trades (event_id) VALUES (1)")
-    except asyncpg.InsufficientPrivilegeError:
-        print("  INSERT rejected, as it should be")
-    else:
-        raise SystemExit("odds_web could INSERT: do not continue")
-    finally:
-        await connection.close()
-
-
-asyncio.run(main())
-PY
+uv run python -m odds_web.role_check
 
 stage "Install and enable odds-web.service"
 say "odds-web.service sets User=andrew and WorkingDirectory=$REPO_ROOT; edit the file first if this host differs."

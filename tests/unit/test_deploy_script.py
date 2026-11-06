@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import pty
 import shutil
 import stat
 import subprocess
@@ -85,7 +87,7 @@ def host(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def deploy(host: Path, **env: str) -> subprocess.CompletedProcess[str]:
+def deploy(host: Path, *, terminal: bool = False, **env: str) -> subprocess.CompletedProcess[str]:
     # The script resolves systemctl by PATH and requires the sudo rules to name that path.
     full_env = {
         "PATH": f"{host / 'bin'}:/usr/bin:/bin",
@@ -94,15 +96,31 @@ def deploy(host: Path, **env: str) -> subprocess.CompletedProcess[str]:
         "SUDO_RULES": RULES.replace(SYSTEMCTL, str(host / "bin" / "systemctl")),
         **env,
     }
-    return subprocess.run(
-        ["bash", str(host / "repo" / "deploy.sh")],
-        env=full_env,
-        stdin=subprocess.DEVNULL,
-        capture_output=True,
-        text=True,
-        timeout=60,
-        check=False,
-    )
+    command = ["bash", str(host / "repo" / "deploy.sh")]
+    if not terminal:
+        return subprocess.run(
+            command,
+            env=full_env,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    master, slave = pty.openpty()
+    try:
+        return subprocess.run(
+            command,
+            env=full_env,
+            stdin=slave,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    finally:
+        os.close(master)
+        os.close(slave)
 
 
 def calls(host: Path) -> list[str]:
@@ -140,6 +158,56 @@ class TestPreflight:
         assert "no NOPASSWD sudo rule for" in result.stderr and missing in result.stderr
         assert "nothing was changed" in result.stderr
         assert mutating(host) == ["sudo -n -l"]
+
+    @pytest.mark.parametrize("rule_suffix", ["-other", "-other, /usr/bin/true"])
+    def test_a_rule_for_a_similarly_named_service_does_not_satisfy_the_check(
+        self, host: Path, rule_suffix: str
+    ) -> None:
+        systemctl = str(host / "bin" / "systemctl")
+        rules = "\n".join(
+            [
+                f"    (root) NOPASSWD: {systemctl} {action} {service}"
+                for service in ("odds-scheduler",)
+                for action in ("restart", "stop")
+            ]
+            + [
+                f"    (root) NOPASSWD: {systemctl} restart odds-web{rule_suffix}",
+                f"    (root) NOPASSWD: {systemctl} stop odds-web{rule_suffix}",
+            ]
+        )
+
+        result = deploy(host, SUDO_RULES=rules)
+
+        assert result.returncode == 1
+        assert "no NOPASSWD sudo rule for" in result.stderr and "odds-web'" in result.stderr
+        assert mutating(host) == ["sudo -n -l"]
+
+    def test_comma_separated_rules_on_one_line_are_each_honoured(self, host: Path) -> None:
+        systemctl = str(host / "bin" / "systemctl")
+        commands = [
+            f"{systemctl} {action} {service}"
+            for service in ("odds-scheduler", "odds-web")
+            for action in ("restart", "stop")
+        ]
+
+        result = deploy(host, SUDO_RULES=f"    (root) NOPASSWD: {', '.join(commands)}")
+
+        assert result.returncode == 0, result.stderr
+
+    def test_with_a_terminal_the_sudo_rules_are_not_checked(self, host: Path) -> None:
+        result = deploy(host, terminal=True, SUDO_RULES="")
+
+        assert result.returncode == 0, result.stderr
+        assert "sudo -n -l" not in calls(host)
+
+    def test_with_a_terminal_a_missing_web_unit_still_exits_before_the_pull(
+        self, host: Path
+    ) -> None:
+        result = deploy(host, terminal=True, WEB_UNIT_MISSING="1")
+
+        assert result.returncode == 1
+        assert "odds-web.service is not installed" in result.stderr
+        assert mutating(host) == []
 
 
 class TestDeploy:
@@ -195,6 +263,29 @@ class TestDeploy:
         assert result.returncode == 1
         assert "FAILED with odds-web STOPPED" in result.stderr
         assert "odds-scheduler STOPPED" not in result.stderr
+
+    def test_a_web_only_failure_after_a_migration_leaves_the_scheduler_and_the_database_alone(
+        self, host: Path
+    ) -> None:
+        result = deploy(host, ALEMBIC_CURRENT="abc123", FAIL_RESTART="odds-web")
+
+        assert result.returncode == 1
+        assert "odds-scheduler is running on the new code and schema" in result.stderr
+        assert "journalctl -u odds-web" in result.stderr
+        assert "sudo " in result.stderr and "restart odds-web" in result.stderr
+        assert "alembic downgrade" not in result.stderr
+        assert "git checkout" not in result.stderr
+        assert (host / "state.odds-scheduler").read_text().strip() == "active"
+
+    def test_a_scheduler_failure_after_a_migration_still_prints_the_downgrade_recovery(
+        self, host: Path
+    ) -> None:
+        result = deploy(host, ALEMBIC_CURRENT="abc123", FAIL_RESTART="odds-scheduler")
+
+        assert result.returncode == 1
+        assert "FAILED with odds-scheduler odds-web STOPPED" in result.stderr
+        assert "alembic downgrade abc123" in result.stderr
+        assert "git checkout abc1234" in result.stderr
 
     def test_a_scheduler_restart_failure_never_restarts_the_web_service(self, host: Path) -> None:
         result = deploy(host, FAIL_RESTART="odds-scheduler")

@@ -70,7 +70,7 @@ Python 3.12+ (`pyproject.toml`), a uv workspace linted by one root ruff configur
 | NBA injury-report PDFs | `nbainjuries` (tabula over JPype) and `jdk4py`, which bundles the JRE it needs | `packages/odds-lambda/pyproject.toml` |
 | CLI | Typer, Rich | `packages/odds-cli/pyproject.toml` |
 | MCP server | FastMCP | `packages/odds-mcp/pyproject.toml` |
-| Web UI | FastAPI, Jinja2, uvicorn (declared by odds-cli, which serves it), htmx and Observable Plot as vendored files | `packages/odds-web/pyproject.toml`, `packages/odds-cli/pyproject.toml` |
+| Web UI | FastAPI, Jinja2, uvicorn (declared by odds-cli, which serves it), htmx as a vendored file | `packages/odds-web/pyproject.toml`, `packages/odds-cli/pyproject.toml` |
 | Modelling | XGBoost | `packages/odds-analytics/pyproject.toml` |
 | Tests | pytest, pytest-asyncio, pytest-env, py-pglite ([Test suite](test-suite.md)) | `pyproject.toml` |
 

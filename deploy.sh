@@ -51,10 +51,14 @@ fi
 # Without a terminal sudo cannot prompt, so require every NOPASSWD rule before
 # changing anything.
 if [[ ! -t 0 ]]; then
-    sudo_rules="$(sudo -n -l)"
+    # One allowed command per line, so a rule must equal the whole command: a rule for
+    # 'stop odds-web-other' does not allow 'stop odds-web'.
+    allowed_commands="$(sudo -n -l | grep 'NOPASSWD:' \
+        | tr ',' '\n' \
+        | sed -E 's/^[[:space:]]*(\([^)]*\)[[:space:]]*)?(NOPASSWD:[[:space:]]*)?//; s/[[:space:]]+$//')"
     for service in "$SERVICE" "$WEB_SERVICE"; do
         for action in restart stop; do
-            if ! grep -q "NOPASSWD:.*$SYSTEMCTL $action $service" <<<"$sudo_rules"; then
+            if ! grep -qxF "$SYSTEMCTL $action $service" <<<"$allowed_commands"; then
                 echo "deploy.sh: no NOPASSWD sudo rule for '$SYSTEMCTL $action $service' and no terminal to prompt; nothing was changed" >&2
                 exit 1
             fi
@@ -71,7 +75,16 @@ report_services_down() {
     local status=$? stopped=()
     (( scheduler_down == 1 )) && stopped+=("$SERVICE")
     (( web_down == 1 )) && stopped+=("$WEB_SERVICE")
-    if (( status != 0 && ${#stopped[@]} > 0 )); then
+    if (( status != 0 && scheduler_down == 0 && web_down == 1 )); then
+        # Only reachable after the scheduler restarted and was verified on the new code
+        # and schema: downgrading or checking out old code would break the running scheduler.
+        {
+            echo "deploy.sh: FAILED with $WEB_SERVICE STOPPED."
+            echo "$SERVICE is running on the new code and schema: leave it alone, do not downgrade the database or check out old code."
+            echo "Fix the web service: journalctl -u $WEB_SERVICE, then sudo $SYSTEMCTL restart $WEB_SERVICE"
+            echo "Or rerun ./deploy.sh."
+        } >&2
+    elif (( status != 0 && ${#stopped[@]} > 0 )); then
         {
             echo "deploy.sh: FAILED with ${stopped[*]} STOPPED."
             echo "To bring the OLD code back (do not just start the services: the checkout holds the new code):"

@@ -8,6 +8,7 @@ sources:
   - odds_web.db
   - odds_web.cache
   - odds_web.portfolio
+  - odds_web.role_check
   - odds_analytics.candidate_report.candidate_report
   - odds_core.config.DatabaseConfig
   - odds-web.service
@@ -55,7 +56,7 @@ The current estimate and the verdict's checkpoint are separate fields: the estim
 
 ## Static files
 
-`odds_web/static/vendor/htmx.min.js` is htmx 2.0.11 as published on npm. `odds_web/static/vendor/plot.min.js` is Observable Plot 0.6.19 with the d3 modules it uses, bundled by esbuild into one file that defines the global `Plot` (`esbuild entry.js --bundle --minify --format=iife`, where `entry.js` assigns `import * as Plot from "@observablehq/plot"` to `globalThis.Plot`). Both are committed, so the page loads nothing from a CDN and the repo has no Node build. The portfolio page does not load Plot.
+`odds_web/static/vendor/htmx.min.js` is htmx 2.0.11 as published on npm, byte for byte, under the Zero-Clause BSD licence (`0BSD`, which asks for no notice). It is committed, so the page loads nothing from a CDN and the repo has no Node build.
 
 ## Related
 
