@@ -12,6 +12,7 @@ from odds_lambda.espn_nba_schedule import EspnNbaGame, SyncReport, sync_games
 from sqlalchemy import select
 
 from tests.integration.test_polymarket_odds import SessionMaker
+from tests.test_helpers import make_nba_event
 
 TIPOFF = datetime(2026, 10, 22, 2, 30, tzinfo=UTC)
 
@@ -102,6 +103,25 @@ class TestSyncGames:
 
         event = (await pglite_async_session.execute(select(Event))).scalar_one()
         assert (event.commence_time, event.status) == (later, EventStatus.SCHEDULED)
+
+    async def test_an_upcoming_event_another_source_listed_late_moves_to_espns_start(
+        self, pglite_async_session: Any, patch_session: None
+    ) -> None:
+        tipoff = (datetime.now(UTC) + timedelta(days=2)).replace(minute=0, second=0, microsecond=0)
+        event = make_nba_event(
+            31,
+            commence_time=tipoff + timedelta(minutes=10),
+            home_team="Los Angeles Clippers",
+            away_team="Sacramento Kings",
+        )
+        pglite_async_session.add_all(
+            [event, EventExternalId(source=Source.ODDS_API, external_id="oa-1", event_id=31)]
+        )
+        await pglite_async_session.flush()
+
+        await sync_games([game(status=None, commence_time=tipoff)], SyncReport(), apply=True)
+
+        assert event.commence_time == tipoff
 
     async def test_dry_run_writes_nothing(
         self, pglite_async_session: Any, patch_session: None

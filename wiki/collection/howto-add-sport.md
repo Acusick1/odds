@@ -24,7 +24,7 @@ status: stable
 
 The Odds API bookmakers and markets are config (`bookmakers`, a per-sport map, and `markets` on `odds_core.config.DataCollectionConfig`) and need no other code; a sport with no `bookmakers` entry fails its Odds API fetch, and a sport that needs its own Odds API key adds its index to `odds_core.config.APIConfig.key_index_by_sport` ([keys](odds-api-client.md#retry-and-keys)). A new sport needs the steps below; skip a step only when the sport has no feed or job of that kind. A sport loaded only for the Odds API historical backfill needs steps 1 and 7 ([historical listings](../storage/event-matching.md#historical-odds-api-listings)).
 
-1. Add the sport to `odds_core.sports.SportKey`, its timezone to `odds_core.sports.LEAGUE_TIMEZONES` and its source order to `odds_lambda.storage.event_kickoff.KICKOFF_AUTHORITY`.
+1. Add the sport to `odds_core.sports.SportKey`, its timezone to `odds_core.sports.LEAGUE_TIMEZONES` and its kick-off sources, best first, to `odds_lambda.storage.event_kickoff.KICKOFF_AUTHORITY`.
    - It becomes the `sport` argument of jobs, MCP tools and CLI commands ([sport-and-market-keys](sport-and-market-keys.md#sport-keys)); the timezone sets its game day ([timezones](../foundations/timezones.md)) and the order which source may move its kick-offs ([kick-off authority](../storage/kickoff-authority.md#authority-order)).
 2. Add a suffix in `odds_lambda.scheduling.jobs._SPORT_SUFFIX_MAP`.
    - The suffix names EventBridge rules, heartbeat keys and the sport filter of `odds_mcp.server.get_scheduled_jobs`; without one, compound job names stay bare ([job-registry](../scheduling/job-registry.md#compound-job-names)).
