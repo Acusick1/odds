@@ -169,6 +169,15 @@ class Manifest(_Frozen):
             raise ValueError("snapshot grid steps must start in increasing order")
         return self
 
+    @model_validator(mode="after")
+    def _probe_snapshots_requestable(self) -> Manifest:
+        for snapshot in self.probe.snapshots:
+            if not any(s.start <= snapshot < s.end for s in self.seasons.values()):
+                raise ValueError(f"probe snapshot {snapshot.isoformat()} is outside every season")
+            if self.floor_to_grid(snapshot) != snapshot:
+                raise ValueError(f"probe snapshot {snapshot.isoformat()} is off the grid")
+        return self
+
     @classmethod
     def load(cls, path: Path) -> Manifest:
         return cls.model_validate(yaml.safe_load(path.read_text()))

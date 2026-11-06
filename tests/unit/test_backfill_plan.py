@@ -173,6 +173,18 @@ class TestManifest:
         assert plan(committed, [Fixture(1, datetime(2024, 10, 5, 14, 0, tzinfo=UTC))])
 
     @pytest.mark.parametrize(
+        "path", sorted((REPO / "backfills").glob("*.yaml")), ids=lambda p: p.stem
+    )
+    def test_every_committed_manifest_requests_the_same_prices(self, path: Path) -> None:
+        reference = Manifest.load(REPO / "backfills" / "odds-api-epl-2020-26.yaml")
+        committed = Manifest.load(path)
+
+        assert committed.bookmakers == reference.bookmakers
+        assert committed.markets == reference.markets
+        assert committed.coverage == reference.coverage
+        assert committed.units_per_call == 20
+
+    @pytest.mark.parametrize(
         ("books", "regions", "units"),
         [(10, (), 20), (11, (), 40), (0, ("uk",), 20), (0, ("uk", "eu"), 40)],
     )
@@ -228,6 +240,9 @@ class TestManifest:
                 {"required_bookmakers": {"totals": ["book0"]}, "units_per_call": 10},
                 "unrequested market",
             ),
+            (None, {"snapshots": ["2023-09-16T10:00:00Z"]}, "outside every season"),
+            (None, {"snapshots": ["2020-01-01T00:00:00Z"]}, "outside every season"),
+            (None, {"snapshots": ["2022-09-17T10:02:00Z"]}, "off the grid"),
         ],
     )
     def test_the_probe_matches_the_request(
