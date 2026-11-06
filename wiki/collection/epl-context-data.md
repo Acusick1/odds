@@ -44,7 +44,7 @@ Supplementary EPL data that feeds the retail-EV schedule features ([EPL context 
 
 ## Lineups, FPL, FBref
 
-All three are manual scripts writing CSVs under `data/`, with `--skip-db` on the lineup and FPL scripts to skip the upsert. Lineup coverage is 2020-21 onward, FPL 2021-22 onward (`scripts.ingest_espn_lineups.SEASONS`, `scripts.ingest_fpl_availability.SEASONS`). FBref pages must be saved by hand from a browser (Cloudflare) and parsed; there is no model or table.
+All three are manual scripts writing CSVs under `data/`, with `--skip-db` on the lineup and FPL scripts to skip the upsert (`scripts.ingest_espn_lineups.main`, `scripts.ingest_fpl_availability.main`). Lineup coverage is 2020-21 onward, FPL 2021-22 onward (`scripts.ingest_espn_lineups.SEASONS`, `scripts.ingest_fpl_availability.SEASONS`). FBref pages must be saved by hand from a browser (Cloudflare) and parsed; there is no model or table.
 
 No feature code reads `espn_lineups` or FPL availability.
 

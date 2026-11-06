@@ -1554,6 +1554,12 @@ class TestScriptCitations:
             )
         ]
 
+    def test_scripts_directories_named_bare_are_prose(self, scripted: Path) -> None:
+        put_a(scripted, "Lives in `scripts` and `scripts.ci`.")
+        linter = lint_repo(scripted)
+        assert linter.findings == []
+        assert not [c for c in linter.pages["a"].citations if c.path.startswith("scripts")]
+
     def test_script_cited_by_path_must_be_dotted(self, scripted: Path) -> None:
         put_a(scripted, f"`{TOOL}` and `./scripts/ci/check.py`")
         findings = run(scripted)

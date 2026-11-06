@@ -57,7 +57,7 @@ Every writer builds one envelope per event in the Odds API's per-event shape: `b
 | OddsPortal history (`odds_lambda.oddsportal_common.build_envelope`) | `source: "oddsportal"`; `_snapshot_time` (an ISO time with a UTC offset), which `scripts.ingest_oddsportal._ingest_one_game` removes and uses as the snapshot time (its basketball relink and load keep only the 30 NBA teams, `odds_lambda.polymarket_matching.canonical_nba_team`); a game with an ambiguous event match stores none |
 | Betfair (`odds_lambda.jobs.fetch_betfair_exchange.ingest_sport`) | `betfair_event_id`; per book, `betfair_meta` with the runners and market state (a book with no back prices stores no snapshot) |
 | Polymarket (`odds_lambda.polymarket_odds.build_envelope`) | `source: "polymarket"`; per book, `polymarket_meta` with the outcome probabilities (`yes_probabilities`) and, live, the bid and ask |
-| football-data.co.uk (`scripts.ingest_football_data_uk._build_envelope`) | `source: "football_data_uk"`, `timing` (`basis` and whether the kick-off time was assumed, a missing time being 15:00 UK local time), `match_stats`; a game with an ambiguous event match stores no envelope |
+| football-data.co.uk (`scripts.ingest_football_data_uk._build_envelope`) | `source: "football_data_uk"`, `timing` (`basis` and whether the kick-off time was assumed, a missing time being 15:00 UK local time, `scripts.ingest_football_data_uk.parse_kickoff`), `match_stats`; a game with an ambiguous event match stores no envelope |
 
 ## Rebuilt payloads
 

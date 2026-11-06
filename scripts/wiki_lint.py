@@ -733,6 +733,18 @@ class Packages:
             return Resolved(tuple(hops), Target(rel, None))
         return Resolved(tuple(hops), Target(rel, final.path[len(final.module.path) + 1 :]))
 
+    def is_directory(self, dotted: str) -> bool:
+        """Whether `dotted` names a namespace package: a directory, not a citable file."""
+        if dotted.split(".")[0] not in self.names:
+            return False
+        try:
+            module = self._modules()[dotted]
+        except KeyError:
+            return False
+        return isinstance(module, griffe.Module) and (
+            module.is_namespace_package or module.is_namespace_subpackage
+        )
+
     def symbol_index(self) -> SymbolIndex:
         if self._index is None:
             index = SymbolIndex()
@@ -1129,6 +1141,8 @@ class WikiLinter:
             text = text[2:]
         dotted = DOTTED_RE.match(text)
         if dotted and dotted.group(1).split(".")[0] in self.packages.names:
+            if self.packages.is_directory(dotted.group(1)):
+                return
             self._check_dotted(page, dotted.group(1), raw, lines)
             return
         symbol_syntax = PATH_SYMBOL_RE.match(text)
