@@ -525,7 +525,7 @@ class TestRerunSemantics:
             assert await odds_api_ids(session, game.event) == [game.api_id]
             assert len(await stored_rows(session, game.event)) > 0
 
-    async def test_a_call_is_skipped_only_when_every_fixture_it_serves_is_stored(
+    async def test_a_call_is_skipped_when_any_fixture_it_serves_is_stored(
         self,
         pglite_async_session: AsyncSession,
         replay: BackfillReplay,
@@ -536,20 +536,54 @@ class TestRerunSemantics:
         early, late = await load_nba(session, mlb_schedule)
         at = early.start - timedelta(hours=2)
         replay.record(at, [early.listing(at)], snapshot=at)
-        await replay.run(manifest, [replay.call(manifest, at, early.event)])
-        replay.record(at, [early.listing(at), late.listing(at)], snapshot=at)
+        call = replay.call(manifest, at, early.event, late.event)
 
-        rerun = await replay.run(manifest, [replay.call(manifest, at, early.event, late.event)])
+        first = await replay.run(manifest, [call])
+        rerun = await replay.run(manifest, [call])
 
-        assert (rerun.calls_made, rerun.calls_skipped) == (1, 0)
-        assert (rerun.fixtures_stored, rerun.snapshots_stored) == (2, 2)
+        assert (first.calls_made, first.fixtures_stored) == (1, 1)
+        assert (rerun.calls_made, rerun.calls_skipped) == (0, 1)
+        assert len(replay.requests) == 1
+        assert await stored_rows(session, late.event) == set()
+
+    async def test_a_resumed_run_skips_the_calls_it_stored_and_fetches_the_rest(
+        self,
+        pglite_async_session: AsyncSession,
+        replay: BackfillReplay,
+        mlb_schedule: type[FakeMlbStatsFetcher],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        session = pglite_async_session
+        manifest = load_manifest(NBA)
+        early, late = await load_nba(session, mlb_schedule)
+        times = [early.start - timedelta(hours=3) + timedelta(hours=i) for i in range(3)]
+        for at in times:
+            replay.record(at, [early.listing(at)], snapshot=at)
+        calls = [replay.call(manifest, at, early.event, late.event) for at in times]
+        store = OddsWriter.store_envelope
+        stored: list[int] = []
+
+        async def fail_on_second_call(self: OddsWriter, *args: Any, **kwargs: Any) -> Any:
+            if stored:
+                raise RuntimeError("store failed")
+            stored.append(1)
+            return await store(self, *args, **kwargs)
+
+        with monkeypatch.context() as patched:
+            patched.setattr(OddsWriter, "store_envelope", fail_on_second_call)
+            await replay.run(manifest, calls[:1])
+            with pytest.raises(RuntimeError, match="store failed"):
+                await replay.run(manifest, calls[1:2])
         assert len(replay.requests) == 2
-        assert len(await stored_rows(session, early.event)) == len(
-            await stored_rows(session, late.event)
-        )
-        assert await count(session, DataQualityLog) == 0
 
-    async def test_a_call_missing_a_served_market_is_fetched_again(
+        resumed = await replay.run(manifest, calls)
+
+        assert (resumed.calls_made, resumed.calls_skipped) == (2, 1)
+        assert len(replay.requests) == 4
+        assert {r[0] for r in await stored_rows(session, early.event)} == set(times)
+        assert await stored_rows(session, late.event) == set()
+
+    async def test_a_call_missing_a_served_market_is_not_fetched_again(
         self,
         pglite_async_session: AsyncSession,
         replay: BackfillReplay,
@@ -569,7 +603,7 @@ class TestRerunSemantics:
         rerun = await replay.run(manifest, [call])
 
         assert {r[1] for r in await stored_rows(session, game.event)} == {Market.H2H}
-        assert (rerun.calls_made, rerun.calls_skipped, rerun.snapshots_stored) == (1, 0, 0)
+        assert (rerun.calls_made, rerun.calls_skipped) == (0, 1)
 
     async def test_a_live_snapshot_in_the_window_does_not_skip_the_call(
         self,

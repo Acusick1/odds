@@ -239,21 +239,25 @@ class TestBackfillExecutor:
         assert (result.calls_made, result.calls_skipped) == (0, 1)
         assert client.requests == []
 
-    async def test_calls_when_one_fixture_lacks_the_snapshot(self, test_session, writer) -> None:
+    async def test_skips_a_call_when_any_served_fixture_has_the_snapshot(
+        self, test_session, writer
+    ) -> None:
         for event_id in (1, 2):
             await add_event(test_session, make_epl_event(event_id, KICKOFF))
         await seed_snapshot(test_session, 1, T0 - timedelta(minutes=5), Source.ODDS_API)
-        client = FakeClient(response("e1", "e2"))
+        client = FakeClient()
 
         async with executor(client, test_session) as ex:
             result = await ex.execute([call(T0, 1, 2)])
 
-        assert (result.calls_made, result.calls_skipped) == (1, 0)
+        assert (result.calls_made, result.calls_skipped) == (0, 1)
 
-    async def test_calls_when_a_requested_market_is_missing(self, test_session, writer) -> None:
+    async def test_calls_when_no_served_fixture_has_a_requested_market(
+        self, test_session, writer
+    ) -> None:
         await add_event(test_session, make_epl_event(1, KICKOFF))
         await seed_snapshot(
-            test_session, 1, T0 - timedelta(minutes=5), Source.ODDS_API, (Market.ONE_X_TWO,)
+            test_session, 1, T0 - timedelta(minutes=5), Source.ODDS_API, (Market.H2H,)
         )
         client = FakeClient(response("e1"))
 
