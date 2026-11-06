@@ -33,9 +33,11 @@ The scripts (the OddsPortal one also takes basketball, skipping games with an un
    - OddsPortal goes first because it creates the events that the FDUK ingest attaches to.
 3. Ingest football-data.co.uk.
    ```bash
-   uv run python scripts/ingest_football_data_uk.py --seasons 2023-2024 --dry-run
+   uv run python scripts/ingest_football_data_uk.py \
+     --league E0 --sport-key soccer_epl --sport-title EPL --seasons 2023-2024 --dry-run
    ```
-   - Use the same seasons as step 2, or `--all`. Check the dry-run counts, then run without `--dry-run`.
+   - `--league E0` is FDUK's EPL file; `--sport-key` and `--sport-title` are the sport the events are stored under.
+   - Use the same seasons as step 2, or `--since 2015-2016` for every season through the current one; a season not yet started, or an unknown `--timezone`, stops the run with a usage error. Check the dry-run counts, then run without `--dry-run`.
    - It downloads `E0.csv` per season and writes an opening and a closing snapshot per match, except that the opening snapshot is skipped when its documented deadline is at or after kick-off.
    - Matches that already have an event of the same sport within 24 hours get no new event and keep its kick-off; their snapshots are still written. A new event's kick-off is the CSV time read as UK local time and stored as UTC.
    - Prices are stored as the CSV decimal (`price_decimal`). Snapshots loaded before the decimal price migration keep the old American `price` until this script is re-run ([Price encodings](../foundations/odds-math.md#price-encodings)).
