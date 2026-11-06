@@ -8,7 +8,8 @@ sources:
   - odds_lambda.oddsportal_common.build_envelope
   - odds_lambda.oddsportal_adapter
   - odds_lambda.polymarket_odds.build_envelope
-  - scripts/ingest_football_data_uk.py
+  - scripts.ingest_football_data_uk._build_envelope
+  - scripts.ingest_oddsportal._ingest_one_game
   - migrations/versions/a6f3c1e9d2b4_shape_orphan_odds_rows.py
   - migrations/versions/c7d9e1f3a5b6_convert_legacy_snapshots.py
   - migrations/versions/b8e2d5f7a1c3_drop_old_odds_representations.py
@@ -53,10 +54,10 @@ Every writer builds one envelope per event in the Odds API's per-event shape: `b
 | Producer | Extra keys |
 |---|---|
 | OddsPortal live (`odds_lambda.oddsportal_adapter.convert_market`) | `source: "oddsportal_live"`, `oddsportal_event_id`; per book, `betfair_matched` on the Betfair Exchange entry (in a ladder market, on each line's market element instead, [ladder markets](../collection/oddsportal-scraper.md#ladder-markets)) |
-| OddsPortal history (`odds_lambda.oddsportal_common.build_envelope`) | `source: "oddsportal"`; `_snapshot_time` (an ISO time with a UTC offset), which `scripts/ingest_oddsportal.py` removes and uses as the snapshot time (its basketball relink and load keep only the 30 NBA teams, `odds_lambda.polymarket_matching.canonical_nba_team`); a game with an ambiguous event match stores none |
+| OddsPortal history (`odds_lambda.oddsportal_common.build_envelope`) | `source: "oddsportal"`; `_snapshot_time` (an ISO time with a UTC offset), which `scripts.ingest_oddsportal._ingest_one_game` removes and uses as the snapshot time (its basketball relink and load keep only the 30 NBA teams, `odds_lambda.polymarket_matching.canonical_nba_team`); a game with an ambiguous event match stores none |
 | Betfair (`odds_lambda.jobs.fetch_betfair_exchange.ingest_sport`) | `betfair_event_id`; per book, `betfair_meta` with the runners and market state (a book with no back prices stores no snapshot) |
 | Polymarket (`odds_lambda.polymarket_odds.build_envelope`) | `source: "polymarket"`; per book, `polymarket_meta` with the outcome probabilities (`yes_probabilities`) and, live, the bid and ask |
-| football-data.co.uk (`scripts/ingest_football_data_uk.py`) | `source: "football_data_uk"`, `timing` (`basis` and whether the kick-off time was assumed, a missing time being 15:00 UK local time), `match_stats`; a game with an ambiguous event match stores no envelope |
+| football-data.co.uk (`scripts.ingest_football_data_uk._build_envelope`) | `source: "football_data_uk"`, `timing` (`basis` and whether the kick-off time was assumed, a missing time being 15:00 UK local time, `scripts.ingest_football_data_uk.parse_kickoff`), `match_stats`; a game with an ambiguous event match stores no envelope |
 
 ## Rebuilt payloads
 

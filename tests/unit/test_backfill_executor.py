@@ -140,7 +140,7 @@ def writer(monkeypatch: pytest.MonkeyPatch) -> Iterator[type[FakeWriter]]:
 
     monkeypatch.setattr(backfill_executor, "OddsWriter", FakeWriter)
     monkeypatch.setattr(backfill_executor, "odds_api_finder", finder)
-    monkeypatch.setattr(backfill_executor, "resolve_odds_api_event", resolve)
+    monkeypatch.setattr(backfill_executor, "attach_historical_odds_api_event", resolve)
     monkeypatch.setattr(backfill_executor, "store_payload", payload)
     yield FakeWriter
 

@@ -9,7 +9,7 @@ sources:
   - deployment/aws/terraform/eventbridge.tf
   - .github/workflows/deploy-prod.yml
   - .github/workflows/deploy-dev.yml
-  - scripts/ci/test_lambda.py
+  - scripts.ci.test_lambda.main
   - scripts/verify-schedules.sh
 status: stable
 ---

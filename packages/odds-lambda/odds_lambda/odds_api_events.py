@@ -40,6 +40,14 @@ async def resolve_odds_api_event(
     )
 
 
+async def attach_historical_odds_api_event(
+    finder: LiveEventFinder, session: AsyncSession, event: ApiEvent
+) -> ResolvedEvent | DroppedGame:
+    return await finder.attach_historical(
+        session, game_row(event), Source.ODDS_API, event.odds_api_id
+    )
+
+
 @dataclass(frozen=True)
 class ResolutionError:
     odds_api_id: str

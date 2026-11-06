@@ -19,7 +19,11 @@ from odds_core.utils import is_three_way_sport
 from odds_core.vocabulary import Market, Source, TimeBasis
 from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.live_events import DroppedGame, alert_dropped_games, lock_order
-from odds_lambda.odds_api_events import game_row, odds_api_finder, resolve_odds_api_event
+from odds_lambda.odds_api_events import (
+    attach_historical_odds_api_event,
+    game_row,
+    odds_api_finder,
+)
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload
 from odds_lambda.storage.writers import OddsWriter
 from sqlalchemy import select
@@ -35,7 +39,8 @@ CallStatus = Literal["fetched", "skipped", "would_fetch", "failed"]
 @dataclass
 class BackfillResult:
     """What a run did: ``calls_made`` paid calls, ``calls_skipped`` calls whose fixtures were
-    already stored, ``would_fetch`` calls a dry run did not make."""
+    already stored, ``would_fetch`` calls a dry run did not make. ``dropped_games`` holds each
+    game the run dropped once, with the number of calls that listed it."""
 
     calls_made: int = 0
     calls_skipped: int = 0
@@ -44,7 +49,7 @@ class BackfillResult:
     snapshots_stored: int = 0
     fixtures_stored: int = 0
     quota_remaining: int | None = None
-    dropped_games: list[DroppedGame] = field(default_factory=list)
+    dropped_games: dict[DroppedGame, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -128,7 +133,7 @@ class BackfillExecutor:
                 if progress.status == "fetched":
                     await asyncio.sleep(self.rate_limit_seconds)
         finally:
-            await alert_dropped_games("odds-backfill", result.dropped_games)
+            await alert_dropped_games("odds-backfill", list(result.dropped_games))
         return result
 
     async def _run_call(self, call: Call, result: BackfillResult) -> CallProgress:
@@ -181,9 +186,9 @@ class BackfillExecutor:
                 key=lambda pair: lock_order(manifest.sport, game_row(pair[0])),
             )
             for event, raw in fixtures:
-                found = await resolve_odds_api_event(finder, session, event)
+                found = await attach_historical_odds_api_event(finder, session, event)
                 if isinstance(found, DroppedGame):
-                    result.dropped_games.append(found)
+                    result.dropped_games[found] = result.dropped_games.get(found, 0) + 1
                     continue
                 if payload_id is None:
                     payload_id = await store_payload(session, response.raw_events_data)

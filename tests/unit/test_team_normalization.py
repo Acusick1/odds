@@ -65,6 +65,152 @@ class TestNormalizeTeamName:
         assert normalize_team_name("Some Random FC") == "Some Random FC"
 
 
+# Each club's spellings in its 2024-26 seasons: football-data.co.uk, OddsPortal results, and the
+# Odds API's free /events listing on 2026-11-05 (None for a club it no longer lists).
+FOOTBALL_CLUBS: dict[str, list[tuple[str, str, str | None]]] = {
+    "soccer_efl_champ": [
+        ("Birmingham", "Birmingham", "Birmingham City"),
+        ("Blackburn", "Blackburn", "Blackburn Rovers"),
+        ("Bristol City", "Bristol City", "Bristol City"),
+        ("Burnley", "Burnley", "Burnley"),
+        ("Cardiff", "Cardiff", "Cardiff City"),
+        ("Charlton", "Charlton", "Charlton Athletic"),
+        ("Coventry", "Coventry", "Coventry City"),
+        ("Derby", "Derby", "Derby County"),
+        ("Hull", "Hull", "Hull City"),
+        ("Ipswich", "Ipswich", "Ipswich Town"),
+        ("Leeds", "Leeds", "Leeds United"),
+        ("Leicester", "Leicester", None),
+        ("Luton", "Luton", None),
+        ("Middlesbrough", "Middlesbrough", "Middlesbrough"),
+        ("Millwall", "Millwall", "Millwall"),
+        ("Norwich", "Norwich", "Norwich City"),
+        ("Oxford", "Oxford Utd", None),
+        ("Plymouth", "Plymouth", None),
+        ("Portsmouth", "Portsmouth", "Portsmouth"),
+        ("Preston", "Preston", "Preston North End"),
+        ("QPR", "QPR", "Queens Park Rangers"),
+        ("Sheffield United", "Sheffield Utd", "Sheffield United"),
+        ("Sheffield Weds", "Sheffield Wed", None),
+        ("Southampton", "Southampton", "Southampton"),
+        ("Stoke", "Stoke", "Stoke City"),
+        ("Sunderland", "Sunderland", "Sunderland"),
+        ("Swansea", "Swansea", "Swansea City"),
+        ("Watford", "Watford", "Watford"),
+        ("West Brom", "West Brom", "West Bromwich Albion"),
+        ("Wrexham", "Wrexham", "Wrexham AFC"),
+    ],
+    "soccer_spain_la_liga": [
+        ("Alaves", "Alaves", "Alavés"),
+        ("Ath Bilbao", "Ath Bilbao", "Athletic Bilbao"),
+        ("Ath Madrid", "Atl. Madrid", "Atlético Madrid"),
+        ("Barcelona", "Barcelona", "Barcelona"),
+        ("Betis", "Betis", "Real Betis"),
+        ("Celta", "Celta Vigo", "Celta Vigo"),
+        ("Elche", "Elche", "Elche CF"),
+        ("Espanol", "Espanyol", "Espanyol"),
+        ("Getafe", "Getafe", "Getafe"),
+        ("Girona", "Girona", "Girona FC"),
+        ("Las Palmas", "Las Palmas", "Las Palmas"),
+        ("Leganes", "Leganes", "Leganés"),
+        ("Levante", "Levante", "Levante"),
+        ("Mallorca", "Mallorca", "Mallorca"),
+        ("Osasuna", "Osasuna", "CA Osasuna"),
+        ("Oviedo", "Oviedo", "Oviedo"),
+        ("Real Madrid", "Real Madrid", "Real Madrid"),
+        ("Sevilla", "Sevilla", "Sevilla"),
+        ("Sociedad", "Real Sociedad", "Real Sociedad"),
+        ("Valencia", "Valencia", "Valencia"),
+        ("Valladolid", "Valladolid", "Real Valladolid CF"),
+        ("Vallecano", "Rayo Vallecano", "Rayo Vallecano"),
+        ("Villarreal", "Villarreal", "Villarreal"),
+    ],
+    "soccer_italy_serie_a": [
+        ("Atalanta", "Atalanta", "Atalanta BC"),
+        ("Bologna", "Bologna", "Bologna"),
+        ("Cagliari", "Cagliari", "Cagliari"),
+        ("Como", "Como", "Como"),
+        ("Cremonese", "Cremonese", "Cremonese"),
+        ("Empoli", "Empoli", "Empoli"),
+        ("Fiorentina", "Fiorentina", "Fiorentina"),
+        ("Genoa", "Genoa", "Genoa"),
+        ("Inter", "Inter", "Inter Milan"),
+        ("Juventus", "Juventus", "Juventus"),
+        ("Lazio", "Lazio", "Lazio"),
+        ("Lecce", "Lecce", "Lecce"),
+        ("Milan", "AC Milan", "AC Milan"),
+        ("Monza", "Monza", "Monza"),
+        ("Napoli", "Napoli", "Napoli"),
+        ("Parma", "Parma", "Parma"),
+        ("Pisa", "Pisa", "Pisa"),
+        ("Roma", "AS Roma", "AS Roma"),
+        ("Sassuolo", "Sassuolo", "Sassuolo"),
+        ("Torino", "Torino", "Torino"),
+        ("Udinese", "Udinese", "Udinese"),
+        ("Venezia", "Venezia", "Venezia"),
+        ("Verona", "Verona", "Hellas Verona"),
+    ],
+    "soccer_germany_bundesliga": [
+        ("Augsburg", "Augsburg", "Augsburg"),
+        ("Bayern Munich", "Bayern Munich", "Bayern Munich"),
+        ("Bochum", "Bochum", "VfL Bochum"),
+        ("Dortmund", "Dortmund", "Borussia Dortmund"),
+        ("Ein Frankfurt", "Eintracht Frankfurt", "Eintracht Frankfurt"),
+        ("FC Koln", "FC Koln", "1. FC Köln"),
+        ("Freiburg", "Freiburg", "SC Freiburg"),
+        ("Hamburg", "Hamburger SV", "Hamburger SV"),
+        ("Heidenheim", "Heidenheim", "1. FC Heidenheim"),
+        ("Hoffenheim", "Hoffenheim", "TSG Hoffenheim"),
+        ("Holstein Kiel", "Holstein Kiel", "Holstein Kiel"),
+        ("Leverkusen", "Bayer Leverkusen", "Bayer Leverkusen"),
+        ("M'gladbach", "B. Monchengladbach", "Borussia Monchengladbach"),
+        ("Mainz", "Mainz", "FSV Mainz 05"),
+        ("RB Leipzig", "RB Leipzig", "RB Leipzig"),
+        ("St Pauli", "St. Pauli", "FC St. Pauli"),
+        ("Stuttgart", "Stuttgart", "VfB Stuttgart"),
+        ("Union Berlin", "Union Berlin", "Union Berlin"),
+        ("Werder Bremen", "Werder Bremen", "Werder Bremen"),
+        ("Wolfsburg", "Wolfsburg", "VfL Wolfsburg"),
+    ],
+    "soccer_france_ligue_one": [
+        ("Angers", "Angers", "Angers"),
+        ("Auxerre", "Auxerre", "Auxerre"),
+        ("Brest", "Brest", "Brest"),
+        ("Le Havre", "Le Havre", "Le Havre"),
+        ("Lens", "Lens", "RC Lens"),
+        ("Lille", "Lille", "Lille"),
+        ("Lorient", "Lorient", "Lorient"),
+        ("Lyon", "Lyon", "Lyon"),
+        ("Marseille", "Marseille", "Marseille"),
+        ("Metz", "Metz", "Metz"),
+        ("Monaco", "Monaco", "AS Monaco"),
+        ("Montpellier", "Montpellier", "Montpellier"),
+        ("Nantes", "Nantes", "Nantes"),
+        ("Nice", "Nice", "Nice"),
+        ("Paris FC", "Paris FC", "Paris FC"),
+        ("Paris SG", "PSG", "Paris Saint Germain"),
+        ("Reims", "Reims", "Stade de Reims"),
+        ("Rennes", "Rennes", "Rennes"),
+        ("St Etienne", "St Etienne", "Saint Etienne"),
+        ("Strasbourg", "Strasbourg", "Strasbourg"),
+        ("Toulouse", "Toulouse", "Toulouse"),
+    ],
+}
+
+
+class TestFootballLeagueAliases:
+    @pytest.mark.parametrize("sport", list(FOOTBALL_CLUBS))
+    def test_each_club_has_one_name_across_sources(self, sport: str) -> None:
+        for spellings in FOOTBALL_CLUBS[sport]:
+            names = {normalize_team_name(s) for s in spellings if s is not None}
+            assert len(names) == 1, spellings
+
+    @pytest.mark.parametrize("sport", list(FOOTBALL_CLUBS))
+    def test_no_two_clubs_share_a_name(self, sport: str) -> None:
+        clubs = FOOTBALL_CLUBS[sport]
+        assert len({normalize_team_name(fduk) for fduk, _, _ in clubs}) == len(clubs)
+
+
 class TestEventFieldValidator:
     """Test that Event model normalizes team names on construction."""
 

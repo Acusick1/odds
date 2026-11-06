@@ -387,3 +387,49 @@ class FakeBetfairClient:
 
     def list_books(self, sport_cfg: Any, events: list[str]) -> list[Any]:
         return self.books
+
+
+class SessionFactory:
+    """A session factory that hands every caller the test session."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    def __call__(self) -> SessionFactory:
+        return self
+
+    async def __aenter__(self) -> AsyncSession:
+        return self._session
+
+    async def __aexit__(self, *args: object) -> bool:
+        return False
+
+
+class RecordedHttpSession:
+    """Serves one recorded historical response through the client's HTTP layer."""
+
+    def __init__(self, payload: dict[str, Any], headers: dict[str, str]) -> None:
+        self._payload = payload
+        self._headers = headers
+        self.status = 200
+        self.requests: list[dict[str, Any]] = []
+
+    def get(self, url: str, params: dict[str, Any], timeout: Any) -> RecordedHttpSession:
+        self.requests.append({"url": url, **params})
+        return self
+
+    @property
+    def headers(self) -> dict[str, str]:
+        return self._headers
+
+    def raise_for_status(self) -> None:
+        return None
+
+    async def json(self) -> Any:
+        return self._payload
+
+    async def __aenter__(self) -> RecordedHttpSession:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
