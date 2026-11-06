@@ -19,6 +19,7 @@ sources:
   - odds_lambda.storage.event_resolver.resolve_unscheduled_mlb_event
   - odds_lambda.live_events.LiveEventFinder.store_listings
 mentions:
+  - odds_analytics.backfill_executor.BackfillExecutor.execute
   - odds_lambda.mlb_stats_fetcher.MlbStatsFetcher.fetch_results
   - odds_lambda.mlb_stats_fetcher.MlbGameResult
 status: stable

@@ -13,6 +13,8 @@ sources:
   - migrations/versions/9c822a7a3faf_expand_odds_data_model.py
   - odds_core.quotes
   - odds_lambda.oddsportal_adapter.convert_market
+mentions:
+  - odds_analytics.backfill_executor.BackfillExecutor.execute
 status: stable
 ---
 
@@ -49,7 +51,7 @@ status: stable
 | Betfair (`odds_lambda.jobs.fetch_betfair_exchange.ingest_sport`) | `observed` | a list of the run's envelopes (one per event, all its markets), one payload per sport run (EPL, MLB and NBA) |
 | Polymarket live (`odds_lambda.jobs.fetch_polymarket_odds.ingest_sport`, EPL `1x2` and NBA `h2h`) | `observed` | a list of the run's envelopes |
 | Odds API ingestion (`odds_lambda.ingestion.OddsIngestionService.ingest_sport`) | `observed` | the response's list of event envelopes, one payload per run, beside its `fetch_logs` row |
-| Odds API backfill (`odds_analytics.backfill_executor.BackfillExecutor`), on the stored events the games attach to | `observed`: the time is the historical endpoint's own snapshot time, the latest at or before the requested time | the response's list of event envelopes, one payload per call |
+| Odds API backfill (`odds_analytics.backfill_executor.BackfillExecutor.execute`), on the stored events the games attach to | `observed`: the time is the historical endpoint's own snapshot time, the latest at or before the requested time | the response's list of event envelopes, one payload per call |
 | Polymarket history (`odds_lambda.polymarket_odds_backfill.backfill_sport`, EPL and NBA) | `observed` | one envelope per grid point |
 | OddsPortal history (`scripts.ingest_oddsportal._ingest_one_game`, any sport; NBA games with an unknown side are skipped) | `source_stamped` | a list of the game's opening and closing envelopes; none for a game whose event match is ambiguous |
 | football-data.co.uk (`scripts.ingest_football_data_uk._ingest_one_match`) | `upper_bound` (opening) or `close`, stamped as UTC instants from UK local times (`scripts.ingest_football_data_uk.parse_kickoff`, `scripts.ingest_football_data_uk.opening_snapshot_time`) | a list of the game's opening and closing envelopes; none for a game whose event match is ambiguous |
