@@ -15,6 +15,7 @@ from scripts.ingest_football_data_uk import (
     _build_envelope,
     _csv_path,
     _extract_three_way_odds,
+    _extract_totals_close,
     _season_url,
     normalize_team,
     opening_snapshot_time,
@@ -238,6 +239,71 @@ class TestBuildSnapshotRawData:
         assert result is not None
         keys = {bk["key"] for bk in result["bookmakers"]}
         assert "betfair_sportsbook" in keys
+
+
+class TestTotalsClose:
+    CLOSING = {
+        "BFECH": "2.00",
+        "BFECD": "3.50",
+        "BFECA": "4.00",
+        "BFEC>2.5": "1.90",
+        "BFEC<2.5": "2.10",
+    }
+
+    def test_betfair_totals_close_joins_the_three_way_close_entry(self) -> None:
+        result = _build_envelope(self.CLOSING, "Arsenal", "Chelsea", use_closing=True)
+
+        assert result is not None
+        (entry,) = [bk for bk in result["bookmakers"] if bk["key"] == "betfair_exchange"]
+        totals = entry["markets"][1]
+        assert [m["key"] for m in entry["markets"]] == ["1x2", "totals"]
+        assert [(o["name"], o["price_decimal"], o["point"]) for o in totals["outcomes"]] == [
+            ("Over", 1.9, 2.5),
+            ("Under", 2.1, 2.5),
+        ]
+
+    def test_totals_close_without_a_three_way_close_is_its_own_entry(self) -> None:
+        row = {"BFEC>2.5": "1.90", "BFEC<2.5": "2.10"}
+        result = _build_envelope(row, "Arsenal", "Chelsea", use_closing=True)
+
+        assert result is not None
+        (entry,) = result["bookmakers"]
+        assert (entry["key"], [m["key"] for m in entry["markets"]]) == (
+            "betfair_exchange",
+            ["totals"],
+        )
+
+    def test_opening_has_no_totals(self) -> None:
+        row = {**self.CLOSING, "BFEH": "2.0", "BFED": "3.5", "BFEA": "4.0", "BFE>2.5": "1.9"}
+        result = _build_envelope(row, "Arsenal", "Chelsea", use_closing=False)
+
+        assert result is not None
+        assert [m["key"] for bk in result["bookmakers"] for m in bk["markets"]] == ["1x2"]
+
+    @pytest.mark.parametrize(
+        "row",
+        [
+            {"BFEC>2.5": "1.90"},
+            {"BFEC>2.5": "1.90", "BFEC<2.5": ""},
+            {"BFEC>2.5": "1.90", "BFEC<2.5": "1.0"},
+            {"BFEC>2.5": "n/a", "BFEC<2.5": "2.10"},
+        ],
+    )
+    def test_a_missing_or_invalid_side_gives_no_totals_close(self, row: dict[str, str]) -> None:
+        assert _extract_totals_close(row, "BFE") is None
+
+    def test_other_books_get_no_totals_close(self) -> None:
+        row = {
+            "B365CH": "2.0",
+            "B365CD": "3.5",
+            "B365CA": "4.0",
+            "B365C>2.5": "1.9",
+            "B365C<2.5": "2.1",
+        }
+        result = _build_envelope(row, "Arsenal", "Chelsea", use_closing=True)
+
+        assert result is not None
+        assert [m["key"] for bk in result["bookmakers"] for m in bk["markets"]] == ["1x2"]
 
 
 class TestParseKickoff:

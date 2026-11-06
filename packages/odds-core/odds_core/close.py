@@ -70,10 +70,23 @@ POLYMARKET_CLOSE = FallbackSpec(
     arrives_after=timedelta(0),
 )
 
+# The football leagues FDUK closes the three-way and totals markets of.
+FDUK_CLOSED_LEAGUES: tuple[str, ...] = (
+    "soccer_epl",
+    "soccer_efl_champ",
+    "soccer_spain_la_liga",
+    "soccer_italy_serie_a",
+    "soccer_germany_bundesliga",
+    "soccer_france_ligue_one",
+)
+
 # A (sport, market) without an entry has no close (MLB's h2h).
 CLOSES: dict[tuple[str, Market], CloseSpec] = {
-    ("soccer_epl", Market.ONE_X_TWO): CloseSpec(FDUK_CLOSE),
-    ("soccer_epl", Market.TOTALS): CloseSpec(FDUK_CLOSE),
+    **{
+        (league, market): CloseSpec(FDUK_CLOSE)
+        for league in FDUK_CLOSED_LEAGUES
+        for market in (Market.ONE_X_TWO, Market.TOTALS)
+    },
     ("basketball_nba", Market.H2H): CloseSpec(POLYMARKET_CLOSE),
 }
 

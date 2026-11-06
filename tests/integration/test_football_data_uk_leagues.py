@@ -7,8 +7,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from odds_core.close import close_quotes, event_close
 from odds_core.models import Event, EventStatus, OddsSnapshot, Price, SnapshotPayload
-from odds_core.vocabulary import TimeBasis
+from odds_core.vocabulary import PriceOutcome, TimeBasis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -115,7 +116,32 @@ class TestSecondLeague:
                 .order_by(OddsSnapshot.snapshot_time)
             )
         ).scalars()
-        assert [(s.time_basis, s.snapshot_time) for s in snaps.all()] == [
-            (TimeBasis.UPPER_BOUND, datetime(2024, 8, 13, 12, 0, tzinfo=UTC)),
-            (TimeBasis.CLOSE, event.commence_time),
+        assert sorted((s.snapshot_time, s.market, s.time_basis) for s in snaps.all()) == [
+            (datetime(2024, 8, 13, 12, 0, tzinfo=UTC), "1x2", TimeBasis.UPPER_BOUND),
+            (event.commence_time, "1x2", TimeBasis.CLOSE),
+            (event.commence_time, "totals", TimeBasis.CLOSE),
         ]
+
+
+class TestLoadedCloses:
+    @pytest.mark.asyncio
+    async def test_la_liga_closes_are_the_betfair_exchange_prices_stamped_at_kick_off(
+        self, fduk_session: AsyncSession
+    ) -> None:
+        await ingest_season(LA_LIGA, "2024-2025", no_download=True)
+        event = (
+            await fduk_session.execute(select(Event).where(Event.home_team == "Athletic Bilbao"))
+        ).scalar_one()
+
+        quoted = await close_quotes(fduk_session, [event], "1x2")
+        three_way = event_close(quoted[event.id], event.commence_time, event.sport_key, "1x2")
+        quoted = await close_quotes(fduk_session, [event], "totals")
+        totals = event_close(
+            quoted[event.id], event.commence_time, event.sport_key, "totals", line=2.5
+        )
+
+        assert three_way is not None and totals is not None
+        assert three_way.time == totals.time == event.commence_time
+        assert three_way.overround == pytest.approx(1 / 1.63 + 1 / 3.75 + 1 / 8 - 1)
+        assert totals.overround == pytest.approx(1 / 2.68 + 1 / 1.58 - 1)
+        assert totals.fair[PriceOutcome.OVER] == pytest.approx((1 / 2.68) / (1 / 2.68 + 1 / 1.58))

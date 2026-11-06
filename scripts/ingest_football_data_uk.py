@@ -4,7 +4,8 @@
 Downloads a league's season CSVs (main layout, ``mmz4281/<season>/<code>.csv``) from
 football-data.co.uk and stores each match's opening and closing prices as
 ``football_data_uk`` snapshots with their price rows, through the same envelope writer
-as ingest_oddsportal.py.
+as ingest_oddsportal.py. The closing snapshot also carries the Betfair Exchange over/under 2.5
+close as a ``totals`` market.
 
 Usage:
     # EPL from 2015-2016 to the current season (dry-run first)
@@ -32,6 +33,7 @@ import io
 import logging
 import math
 import re
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
@@ -56,7 +58,7 @@ from odds_lambda.storage.event_resolver import (
     resolve_event,
 )
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload, store_shaped_snapshot
-from odds_lambda.storage.snapshot_store import PriceRow, price_row
+from odds_lambda.storage.snapshot_store import PriceRow, SnapshotWriteOutcome, price_row
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from team_names import normalize_team as _normalize_team_central
@@ -72,6 +74,9 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "football_data_uk"
 BASE_URL = "https://www.football-data.co.uk/mmz4281"
 SOURCE_TAG = "football_data_uk"
 MARKET_KEY = "1x2"
+TOTALS_MARKET_KEY = "totals"
+# FDUK's main layout carries one totals line, over/under 2.5 goals.
+TOTALS_LINE = 2.5
 KICKOFF_MISMATCH_TOLERANCE = timedelta(minutes=15)
 SEASON_LABEL = re.compile(r"(\d{4})-(\d{4})")
 SEASON_START_MONTH = 7
@@ -104,6 +109,11 @@ AGGREGATE_PREFIXES: dict[str, str] = {
     "BbMx": "market_max",
     "BbAv": "market_avg",
 }
+
+
+# Column prefixes whose closing over/under 2.5 prices are stored on the closing snapshot, so
+# the Betfair Exchange totals close has a fallback where live collection never ran.
+TOTALS_CLOSE_PREFIXES: dict[str, str] = {"BFE": "betfair_exchange"}
 
 
 class FdukTimeBasis(StrEnum):
@@ -299,6 +309,21 @@ def _extract_three_way_odds(
     }
 
 
+def _extract_totals_close(row: dict[str, str], prefix: str) -> dict[str, Any] | None:
+    """Extract a bookmaker's closing over/under 2.5 prices from a CSV row."""
+    over = _safe_float(row.get(f"{prefix}C>{TOTALS_LINE}"))
+    under = _safe_float(row.get(f"{prefix}C<{TOTALS_LINE}"))
+    if over is None or under is None or over <= 1.0 or under <= 1.0:
+        return None
+    return {
+        "key": TOTALS_MARKET_KEY,
+        "outcomes": [
+            {"name": "Over", PRICE_DECIMAL_KEY: over, "point": TOTALS_LINE},
+            {"name": "Under", PRICE_DECIMAL_KEY: under, "point": TOTALS_LINE},
+        ],
+    }
+
+
 # Match stats columns: (csv_column, json_key) pairs.
 # These are post-match stats from the FDUK CSVs, kept in the archived envelope.
 MATCH_STATS_COLUMNS: list[tuple[str, str]] = [
@@ -365,6 +390,9 @@ def _build_envelope(
             seen.add(bk_key)
             bookmakers.append(bk_data)
 
+    if use_closing:
+        _add_totals_close(row, bookmakers)
+
     if not bookmakers:
         return None
 
@@ -380,6 +408,20 @@ def _build_envelope(
         envelope["match_stats"] = match_stats
 
     return envelope
+
+
+def _add_totals_close(row: dict[str, str], bookmakers: list[dict[str, Any]]) -> None:
+    """Add the closing totals market of each ``TOTALS_CLOSE_PREFIXES`` book to its entry in
+    ``bookmakers``, or as an entry of its own when the book has no three-way close."""
+    for prefix, bk_key in TOTALS_CLOSE_PREFIXES.items():
+        market = _extract_totals_close(row, prefix)
+        if market is None:
+            continue
+        entry = next((bk for bk in bookmakers if bk["key"] == bk_key), None)
+        if entry is None:
+            entry = {"key": bk_key, "title": bk_key, "last_update": "", "markets": []}
+            bookmakers.append(entry)
+        entry["markets"].append(market)
 
 
 async def ingest_season(
@@ -453,12 +495,18 @@ def _report_dry_run(season: str, rows: list[dict[str, str]]) -> None:
     has_pinnacle_closing = sum(1 for r in rows if _safe_float(r.get("PSCH")))
     has_bet365_closing = sum(1 for r in rows if _safe_float(r.get("B365CH")))
     has_betfair = sum(1 for r in rows if _safe_float(r.get("BFEH")))
+    has_betfair_close = sum(
+        1 for r in rows if _extract_three_way_odds(r, "BFEC", "betfair_exchange", "", "")
+    )
+    has_betfair_totals_close = sum(1 for r in rows if _extract_totals_close(r, "BFE"))
 
     log.info(
         f"  {season}: Pinnacle opening={has_pinnacle_opening}, "
         f"Pinnacle closing={has_pinnacle_closing}, "
         f"bet365 closing={has_bet365_closing}, "
-        f"Betfair={has_betfair}"
+        f"Betfair={has_betfair}, "
+        f"Betfair close={has_betfair_close}, "
+        f"Betfair totals close={has_betfair_totals_close}"
     )
 
 
@@ -557,9 +605,9 @@ async def _ingest_one_match(
         .scalars()
         .all()
     )
-    if [await _stored_content(session, snap) for snap in existing_snaps] == [
-        _new_content(event, snap) for snap in new_snapshots
-    ]:
+    if Counter([await _stored_content(session, snap) for snap in existing_snaps]) == Counter(
+        content for snap in new_snapshots for content in _new_contents(event, snap)
+    ):
         return
     if existing_snaps:
         referenced = await _referenced_by_decisions(session, [snap.id for snap in existing_snaps])
@@ -588,8 +636,11 @@ async def _ingest_one_match(
             snap.snapshot_time,
             SnapshotShape(Source.FOOTBALL_DATA_UK, snap.time_basis, payload_id),
         )
-        if write.inserted:
-            stats.snapshots_inserted += 1
+        stats.snapshots_inserted += sum(
+            1
+            for market_write in (write.first, *write.others)
+            if market_write is None or market_write.outcome is SnapshotWriteOutcome.INSERTED
+        )
 
 
 async def _delete_snapshots(session: AsyncSession, snapshots: list[OddsSnapshot]) -> None:
@@ -616,21 +667,37 @@ class NewSnapshot:
     time_basis: TimeBasis
 
 
-# What a re-ingest compares: a snapshot's time basis, time and price rows.
-SnapshotContent = tuple[TimeBasis | None, datetime, frozenset[PriceRow]]
+# What a re-ingest compares: a stored snapshot's time basis, time, market and price rows.
+SnapshotContent = tuple[TimeBasis | None, datetime, str | None, frozenset[PriceRow]]
 
 
 async def _stored_content(session: AsyncSession, snap: OddsSnapshot) -> SnapshotContent:
     prices = (await session.execute(select(Price).where(Price.snapshot_id == snap.id))).scalars()
-    return (snap.time_basis, snap.snapshot_time, frozenset(price_row(p) for p in prices))
+    return (
+        snap.time_basis,
+        snap.snapshot_time,
+        snap.market,
+        frozenset(price_row(p) for p in prices),
+    )
 
 
-def _new_content(event: Event, snap: NewSnapshot) -> SnapshotContent:
+def _new_contents(event: Event, snap: NewSnapshot) -> list[SnapshotContent]:
+    """The contents of the snapshots ``store_shaped_snapshot`` writes for ``snap``, one per
+    market."""
     expanded = expand_envelope(
         snap.envelope, Source.FOOTBALL_DATA_UK, event.home_team, event.away_team
     )
-    rows = frozenset(_spec_row(spec) for market in expanded.markets for spec in market.prices)
-    return (snap.time_basis, snap.snapshot_time, rows)
+    if not expanded.markets:
+        return [(snap.time_basis, snap.snapshot_time, None, frozenset())]
+    return [
+        (
+            snap.time_basis,
+            snap.snapshot_time,
+            market.market,
+            frozenset(_spec_row(spec) for spec in market.prices),
+        )
+        for market in expanded.markets
+    ]
 
 
 def _spec_row(spec: PriceSpec) -> PriceRow:

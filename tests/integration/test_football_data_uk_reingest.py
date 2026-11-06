@@ -496,3 +496,21 @@ class TestAtomicityAndIdempotency:
         assert stats.snapshots_updated == 0
         assert stats.snapshots_inserted == 0
         assert len(await _snaps(session, (await _created_event(session)).id)) == 2
+
+    @pytest.mark.asyncio
+    async def test_unchanged_rerun_with_a_totals_close_reports_no_updates(
+        self, pglite_async_session, fduk_epl: FdukLeague
+    ) -> None:
+        session = pglite_async_session
+        row = {**ROW, "BFECH": "1.30", "BFECD": "5.60", "BFECA": "11.00"}
+        row |= {"BFEC>2.5": "1.90", "BFEC<2.5": "2.10"}
+        first = FdukStats()
+        await ingest_row(session, fduk_epl, row, first)
+        await session.flush()
+        stats = FdukStats()
+        await ingest_row(session, fduk_epl, row, stats)
+        await session.flush()
+
+        assert first.snapshots_inserted == 3
+        assert (stats.snapshots_updated, stats.snapshots_inserted) == (0, 0)
+        assert len(await _snaps(session, (await _created_event(session)).id)) == 3
