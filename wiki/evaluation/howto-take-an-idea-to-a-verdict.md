@@ -4,7 +4,7 @@ title: Take an idea to a verdict
 description: The steps from a candidate idea issue through a development backtest, registration, the forward test and its checkpoints and the parity check, to promoting or killing the candidate.
 sources:
   - odds_cli.commands.candidates
-  - scripts/check_candidate_versions.py
+  - scripts.check_candidate_versions.check
 status: stable
 ---
 

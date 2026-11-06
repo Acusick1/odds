@@ -6,12 +6,14 @@ from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 from odds_analytics import backfill_executor
 from odds_analytics.backfill_executor import BackfillExecutor, CallProgress
 from odds_analytics.backfill_plan import Call, Fixture, Manifest, Target
 from odds_core.api_models import HistoricalOddsResponse, parse_api_event
+from odds_core.config import APIConfig, Settings
 from odds_core.models import OddsSnapshot
 from odds_core.vocabulary import Market, Source, TimeBasis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -138,7 +140,7 @@ def writer(monkeypatch: pytest.MonkeyPatch) -> Iterator[type[FakeWriter]]:
 
     monkeypatch.setattr(backfill_executor, "OddsWriter", FakeWriter)
     monkeypatch.setattr(backfill_executor, "odds_api_finder", finder)
-    monkeypatch.setattr(backfill_executor, "resolve_odds_api_event", resolve)
+    monkeypatch.setattr(backfill_executor, "attach_historical_odds_api_event", resolve)
     monkeypatch.setattr(backfill_executor, "store_payload", payload)
     yield FakeWriter
 
@@ -209,7 +211,7 @@ class TestBackfillExecutor:
         }
         assert [
             (f.sport_key, f.api_quota_remaining, f.api_quota_used) for f in writer.fetch_logs
-        ] == [("soccer_epl", 900, 4000)]
+        ] == [("soccer_epl", None, None)]
         assert (result.fixtures_stored, result.snapshots_stored) == (2, 4)
         assert progress == [CallProgress(T0, "fetched", 2, 20, 900)]
 
@@ -303,7 +305,7 @@ class TestBackfillExecutor:
         assert [p.status for p in progress] == ["fetched", "failed"]
         assert progress[-1].message == "quota exhausted"
 
-    async def test_a_failed_request_records_the_last_quota(self, test_session, writer) -> None:
+    async def test_a_failed_request_is_logged_without_a_quota(self, test_session, writer) -> None:
         client = FakeClient(RuntimeError("429 Too Many Requests"))
 
         async with executor(client, test_session, skip_existing=False) as ex:
@@ -313,10 +315,12 @@ class TestBackfillExecutor:
         assert len(client.requests) == 1
         assert [
             (log.success, log.api_quota_remaining, log.api_quota_used) for log in writer.fetch_logs
-        ] == [(False, 950, 4050)]
+        ] == [(False, None, None)]
         assert "429" in writer.fetch_logs[0].error_message
 
-    async def test_a_failed_store_records_the_quota_and_stops(self, test_session, writer) -> None:
+    async def test_a_failed_store_is_logged_without_a_quota_and_stops(
+        self, test_session, writer
+    ) -> None:
         writer.fail_store = True
         client = FakeClient(response("e1", quota=900), response("e1"))
         client.quota_remaining = 900
@@ -327,5 +331,89 @@ class TestBackfillExecutor:
 
         assert len(client.requests) == 1
         assert [(log.success, log.api_quota_remaining) for log in writer.fetch_logs] == [
-            (False, 900)
+            (False, None)
         ]
+
+
+class _KeyRecordingSession:
+    def __init__(self) -> None:
+        self.api_keys: list[str] = []
+
+    def get(self, url: str, params: dict[str, Any], timeout: Any) -> _KeyRecordingResponse:
+        self.api_keys.append(params["apiKey"])
+        return _KeyRecordingResponse()
+
+    async def close(self) -> None:
+        return None
+
+
+class _KeyRecordingResponse:
+    status = 200
+    headers = {"x-requests-remaining": "900", "x-requests-used": "100", "x-requests-last": "20"}
+
+    def raise_for_status(self) -> None:
+        return None
+
+    async def json(self) -> dict[str, Any]:
+        return {"timestamp": "2026-04-18T09:55:00Z", "data": []}
+
+    async def __aenter__(self) -> _KeyRecordingResponse:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+class TestAcquisitionKey:
+    @pytest.mark.parametrize(
+        "sport", ["soccer_epl", "basketball_nba", "baseball_mlb", "soccer_spain_la_liga"]
+    )
+    async def test_every_manifest_spends_the_acquisition_key(
+        self, test_session, writer, sport: str
+    ) -> None:
+        settings = Settings(
+            api=APIConfig(keys="live,nba-live,purchased", acquisition_key_index=2, _env_file=None),
+            database={"url": "postgresql+asyncpg://localhost/test"},
+        )
+        recorder = _KeyRecordingSession()
+
+        with (
+            patch.object(backfill_executor, "get_settings", return_value=settings),
+            patch("odds_lambda.data_fetcher.get_settings", return_value=settings),
+        ):
+            async with BackfillExecutor(
+                manifest().model_copy(update={"sport": sport}),
+                session_factory=Factory(test_session),
+                skip_existing=False,
+                rate_limit_seconds=0,
+            ) as ex:
+                ex._client.session = recorder  # type: ignore[union-attr]
+                await ex.execute([call(T0, 1)])
+
+        assert recorder.api_keys == ["purchased"]
+
+    async def test_an_unset_acquisition_key_stops_a_real_run(self, test_session, writer) -> None:
+        settings = Settings(
+            api=APIConfig(keys="a,b", _env_file=None),
+            database={"url": "postgresql+asyncpg://localhost/test"},
+        )
+
+        with patch.object(backfill_executor, "get_settings", return_value=settings):
+            with pytest.raises(ValueError, match="ODDS_API_ACQUISITION_KEY_INDEX"):
+                async with BackfillExecutor(manifest(), session_factory=Factory(test_session)):
+                    pass
+
+    async def test_a_dry_run_needs_no_acquisition_key(self, test_session, writer) -> None:
+        settings = Settings(
+            api=APIConfig(keys="a,b", _env_file=None),
+            database={"url": "postgresql+asyncpg://localhost/test"},
+        )
+
+        with patch.object(backfill_executor, "get_settings", return_value=settings):
+            async with BackfillExecutor(
+                manifest(), session_factory=Factory(test_session), dry_run=True
+            ) as ex:
+                result = await ex.execute([call(T0, 1)])
+
+        assert result.would_fetch == 1

@@ -41,6 +41,8 @@ _REQUEST_TIMEOUT_SECONDS = 15.0
 
 # Longest span requested in one schedule call, so a season-long backfill is a handful of calls.
 _RESULTS_CHUNK_DAYS = 30
+# Scores, and the first pitch: the only start of a game MLB lists as TBD.
+_RESULTS_HYDRATE = "linescore,gameInfo"
 
 
 class MlbGameState(StrEnum):
@@ -72,6 +74,8 @@ class MlbGameResult:
     state: MlbGameState = MlbGameState.SCHEDULED
     schedule_date: date | None = None
     resumed: bool = False
+    game_type: str = "R"
+    first_pitch: datetime | None = None
 
     @property
     def day(self) -> date:
@@ -235,7 +239,8 @@ class MlbStatsFetcher:
         return records
 
     async def fetch_results(self, start: date, end: date) -> list[MlbGameResult]:
-        """Fetch every MLB game from ``start`` to ``end``, with scores from the linescore hydration.
+        """Fetch every MLB game from ``start`` to ``end``, with scores and first pitch from the
+        linescore and gameInfo hydrations.
 
         ``start`` and ``end`` are inclusive and resolved by MLBAM in US Eastern time, so pad
         them by a day when matching UTC kick-offs. The range is split into calls of at most
@@ -253,7 +258,7 @@ class MlbStatsFetcher:
                     "sportId": str(_SPORT_ID),
                     "startDate": chunk_start.isoformat(),
                     "endDate": chunk_end.isoformat(),
-                    "hydrate": "linescore",
+                    "hydrate": _RESULTS_HYDRATE,
                 },
             )
             results.extend(_results_from_schedule(data))
@@ -267,7 +272,7 @@ class MlbStatsFetcher:
         """
         data = await self._fetch_json(
             f"{BASE_URL}/schedule",
-            {"sportId": str(_SPORT_ID), "gamePk": str(game_pk), "hydrate": "linescore"},
+            {"sportId": str(_SPORT_ID), "gamePk": str(game_pk), "hydrate": _RESULTS_HYDRATE},
         )
         return _results_from_schedule(data)
 
@@ -396,6 +401,7 @@ def _result_from_game(game: dict[str, Any], schedule_date: date | None) -> MlbGa
         return value if isinstance(value, int) else None
 
     home_score, away_score = score("home"), score("away")
+    first_pitch = (game.get("gameInfo") or {}).get("firstPitch")
     is_final = (game.get("status") or {}).get("abstractGameState") == "Final" and None not in (
         home_score,
         away_score,
@@ -416,4 +422,6 @@ def _result_from_game(game: dict[str, Any], schedule_date: date | None) -> MlbGa
         state=_game_state(game.get("status") or {}),
         schedule_date=schedule_date,
         resumed=bool(game.get("resumedFrom")),
+        game_type=game.get("gameType") or "R",
+        first_pitch=_parse_utc(first_pitch) if first_pitch else None,
     )

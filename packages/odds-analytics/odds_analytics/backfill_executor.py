@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 import structlog
+from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_core.models import FetchLog, OddsSnapshot
 from odds_core.time import utc_isoformat
@@ -18,7 +19,11 @@ from odds_core.utils import is_three_way_sport
 from odds_core.vocabulary import Market, Source, TimeBasis
 from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.live_events import DroppedGame, alert_dropped_games, lock_order
-from odds_lambda.odds_api_events import game_row, odds_api_finder, resolve_odds_api_event
+from odds_lambda.odds_api_events import (
+    attach_historical_odds_api_event,
+    game_row,
+    odds_api_finder,
+)
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload
 from odds_lambda.storage.writers import OddsWriter
 from sqlalchemy import select
@@ -34,7 +39,8 @@ CallStatus = Literal["fetched", "skipped", "would_fetch", "failed"]
 @dataclass
 class BackfillResult:
     """What a run did: ``calls_made`` paid calls, ``calls_skipped`` calls whose fixtures were
-    already stored, ``would_fetch`` calls a dry run did not make."""
+    already stored, ``would_fetch`` calls a dry run did not make. ``dropped_games`` holds each
+    game the run dropped once, with the number of calls that listed it."""
 
     calls_made: int = 0
     calls_skipped: int = 0
@@ -43,7 +49,7 @@ class BackfillResult:
     snapshots_stored: int = 0
     fixtures_stored: int = 0
     quota_remaining: int | None = None
-    dropped_games: list[DroppedGame] = field(default_factory=list)
+    dropped_games: dict[DroppedGame, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -72,8 +78,9 @@ class BackfillExecutor:
     ):
         """
         Args:
-            manifest: Fixes the sport (whose key pays), markets, and bookmakers or regions
-            client: API client (one is created and closed with the executor if not given)
+            manifest: Fixes the sport, markets, and bookmakers or regions
+            client: API client (one spending ``APIConfig.acquisition_key`` is created and closed
+                with the executor if not given, except in a dry run, which needs none)
             session_factory: Creates database sessions (defaults to ``async_session_maker``)
             skip_existing: Skip a call when every fixture it serves already has the snapshot it
                 would return
@@ -89,8 +96,8 @@ class BackfillExecutor:
         self.rate_limit_seconds = rate_limit_seconds
 
     async def __aenter__(self) -> "BackfillExecutor":
-        if self._owns_client:
-            self._client = TheOddsAPIClient()
+        if self._owns_client and not self.dry_run:
+            self._client = TheOddsAPIClient(api_key=get_settings().api.acquisition_key())
             await self._client.__aenter__()
         return self
 
@@ -126,7 +133,7 @@ class BackfillExecutor:
                 if progress.status == "fetched":
                     await asyncio.sleep(self.rate_limit_seconds)
         finally:
-            await alert_dropped_games("odds-backfill", result.dropped_games)
+            await alert_dropped_games("odds-backfill", list(result.dropped_games))
         return result
 
     async def _run_call(self, call: Call, result: BackfillResult) -> CallProgress:
@@ -179,9 +186,9 @@ class BackfillExecutor:
                 key=lambda pair: lock_order(manifest.sport, game_row(pair[0])),
             )
             for event, raw in fixtures:
-                found = await resolve_odds_api_event(finder, session, event)
+                found = await attach_historical_odds_api_event(finder, session, event)
                 if isinstance(found, DroppedGame):
-                    result.dropped_games.append(found)
+                    result.dropped_games[found] = result.dropped_games.get(found, 0) + 1
                     continue
                 if payload_id is None:
                     payload_id = await store_payload(session, response.raw_events_data)
@@ -205,8 +212,6 @@ class BackfillExecutor:
                         }
                     ),
                     success=True,
-                    api_quota_remaining=response.quota_remaining,
-                    api_quota_used=response.quota_used,
                     response_time_ms=response.response_time_ms,
                 )
             )
@@ -223,8 +228,8 @@ class BackfillExecutor:
     async def _log_failed_fetch(
         self, client: TheOddsAPIClient, result: BackfillResult, error: Exception
     ) -> None:
-        """Record a failed call's fetch log in its own transaction, so the key's last balance
-        survives the call's rollback."""
+        """Record a failed call's fetch log in its own transaction, so it survives the call's
+        rollback."""
         result.quota_remaining = client.quota_remaining
         async with self._session_factory() as session:
             await OddsWriter(session).log_fetch(
@@ -234,8 +239,6 @@ class BackfillExecutor:
                     bookmakers_count=0,
                     success=False,
                     error_message=f"{type(error).__name__}: {error}",
-                    api_quota_remaining=client.quota_remaining,
-                    api_quota_used=client.quota_used,
                 )
             )
             await session.commit()

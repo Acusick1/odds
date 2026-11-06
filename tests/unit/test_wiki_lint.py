@@ -373,11 +373,11 @@ def lint_repo(repo: Path) -> wiki_lint.WikiLinter:
 
 class TestCitations:
     def test_leading_dot_slash_is_normalised(self, repo: Path) -> None:
-        write_file(repo, "scripts/tool.py", "x = 1\n")
-        put_a(repo, "`./scripts/tool.py`", sources="  - ./scripts/tool.py")
+        write_file(repo, "scripts/tool.sh", "echo hi\n")
+        put_a(repo, "`./scripts/tool.sh`", sources="  - ./scripts/tool.sh")
         linter = lint_repo(repo)
         assert linter.findings == []
-        assert "scripts/tool.py" in linter.cites
+        assert "scripts/tool.sh" in linter.cites
 
     def test_root_and_nested_non_python_files_are_citations(self, repo: Path) -> None:
         write_file(repo, "deployment/aws/Dockerfile.lambda", "FROM x\n")
@@ -506,9 +506,9 @@ class TestSymbolResolution:
             f"cite as dotted path pkg: {PKG}/__init__.py",
         ]
 
-    def test_non_package_python_file_cited_by_path_is_fine(self, repo: Path) -> None:
-        write_file(repo, "scripts/tool.py", "x = 1\n")
-        put_a(repo, "`scripts/tool.py`")
+    def test_python_outside_packages_and_scripts_cited_by_path_is_fine(self, repo: Path) -> None:
+        write_file(repo, "experiments/tool.py", "x = 1\n")
+        put_a(repo, "`experiments/tool.py`")
         assert run(repo) == []
 
     def test_double_colon_syntax_is_an_error(self, repo: Path) -> None:
@@ -516,9 +516,10 @@ class TestSymbolResolution:
         put_a(repo, f"`{MOD}::Box.run` and `scripts/tool.py::x`", sources="  - pkg.mod.Box")
         findings = run(repo)
         assert kinds(findings, "a") == [Kind.PATH_SYMBOL] * 2
-        assert messages(findings, "a")[0] == (
-            f"use dotted path, not path::symbol: {MOD}::Box.run -> pkg.mod.Box.run"
-        )
+        assert messages(findings, "a") == [
+            f"use dotted path, not path::symbol: {MOD}::Box.run -> pkg.mod.Box.run",
+            "use dotted path, not path::symbol: scripts/tool.py::x -> scripts.tool.x",
+        ]
 
     def test_package_roots_are_injectable(self, repo: Path) -> None:
         write_file(repo, "elsewhere/other/__init__.py", "")
@@ -1287,9 +1288,9 @@ class TestMissingFiles:
 
     @pytest.fixture
     def cited_script(self, committed: Path) -> Path:
-        write_file(committed, "scripts/tool.py", "x = 1\n")
+        write_file(committed, "scripts/tool.sh", "echo hi\n")
         commit(committed, "scripts")
-        put_a(committed, "Runs `scripts/tool.py`.")
+        put_a(committed, "Runs `scripts/tool.sh`.")
         commit(committed, "wiki", message="cite script")
         return committed
 
@@ -1311,14 +1312,14 @@ class TestMissingFiles:
         assert "a" not in {f.slug for f in found}
 
     def test_renamed_cited_file_is_error(self, cited_script: Path) -> None:
-        git(cited_script, "mv", "scripts/tool.py", "scripts/renamed.py")
+        git(cited_script, "mv", "scripts/tool.sh", "scripts/renamed.sh")
         commit(cited_script, "scripts")
         findings, _ = stale(cited_script)
         assert (
             Finding(
                 "a",
                 Kind.PATH_RENAMED,
-                "cited path renamed to scripts/renamed.py: scripts/tool.py",
+                "cited path renamed to scripts/renamed.sh: scripts/tool.sh",
                 (line_of(cited_script, "Runs"),),
             )
             in findings
@@ -1326,7 +1327,7 @@ class TestMissingFiles:
         assert Kind.PATH_MISSING not in kinds(findings, "a")
 
     def test_deleted_cited_file_is_error(self, cited_script: Path) -> None:
-        git(cited_script, "rm", "-q", "scripts/tool.py")
+        git(cited_script, "rm", "-q", "scripts/tool.sh")
         git(cited_script, "commit", "-q", "-m", "delete")
         findings, _ = stale(cited_script)
         assert Kind.PATH_DELETED in kinds(findings, "a")
@@ -1467,14 +1468,14 @@ class TestLocate:
     def test_slug_lists_citations_in_page_order(
         self, repo: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        write_file(repo, "scripts/tool.py", "x = 1\n")
-        put_a(repo, "`pkg.mod.Box.run` and `scripts/tool.py`", sources="  - pkg.mod.calculate")
+        write_file(repo, "scripts/tool.sh", "echo hi\n")
+        put_a(repo, "`pkg.mod.Box.run` and `scripts/tool.sh`", sources="  - pkg.mod.calculate")
         status, out, _ = self.locate(repo, capsys, "a")
         assert status == 0
         assert out == [
             f"pkg.mod.calculate  {MOD}:4-5",
             f"pkg.mod.Box.run  {MOD}:16-16",
-            "scripts/tool.py",
+            "scripts/tool.sh",
         ]
 
     def test_slug_lists_mentions_after_sources(
@@ -1491,3 +1492,143 @@ class TestLocate:
     def test_unknown_slug_fails(self, repo: Path, capsys: pytest.CaptureFixture[str]) -> None:
         status, out, err = self.locate(repo, capsys, "no-such-page")
         assert (status, out, err) == (1, [], "no-such-page  not found\n")
+
+
+TOOL = "scripts/tool.py"
+TOOL_SOURCE = (
+    "LIMIT = 3\n\n\ndef run() -> int:\n    return 1\n\n\n"
+    "def other() -> int:\n    return 2\n\n\n"
+    "class Job:\n    def go(self) -> None: ...\n"
+)
+
+
+@pytest.fixture
+def scripted(repo: Path) -> Path:
+    write_file(repo, TOOL, TOOL_SOURCE)
+    write_file(repo, "scripts/ci/check.py", "def main() -> None: ...\n")
+    return repo
+
+
+class TestScriptCitations:
+    @pytest.mark.parametrize("symbol", ["LIMIT", "run", "other", "Job", "Job.go", "run()"])
+    def test_script_symbols_resolve(self, scripted: Path, symbol: str) -> None:
+        put_a(scripted, f"`scripts.tool.{symbol}`")
+        assert run(scripted) == []
+
+    def test_symbol_citation_registers_the_script_file_and_symbol(self, scripted: Path) -> None:
+        put_a(scripted, "`scripts.tool.Job.go`")
+        linter = lint_repo(scripted)
+        assert linter.findings == []
+        assert wiki_lint.Citation("scripts.tool.Job.go", TOOL, "Job.go") in (
+            linter.pages["a"].citations
+        )
+        assert linter.cites[TOOL] == {"a"}
+
+    def test_module_citation_resolves_to_the_whole_file(self, scripted: Path) -> None:
+        put_a(scripted, "`scripts.tool`")
+        linter = lint_repo(scripted)
+        assert linter.findings == []
+        assert wiki_lint.Citation("scripts.tool", TOOL, None) in linter.pages["a"].citations
+
+    def test_nested_script_directory_without_init_resolves(self, scripted: Path) -> None:
+        put_a(scripted, "`scripts.ci.check.main`")
+        linter = lint_repo(scripted)
+        assert linter.findings == []
+        assert linter.cites["scripts/ci/check.py"] == {"a"}
+
+    def test_script_in_sources_resolves(self, scripted: Path) -> None:
+        put_a(scripted, "Body.", sources="  - scripts.tool.run")
+        assert run(scripted) == []
+
+    @pytest.mark.parametrize(
+        "dotted", ["scripts.tool.gone", "scripts.tool.Job.nope", "scripts.nope.f"]
+    )
+    def test_undefined_script_symbols_are_errors(self, scripted: Path, dotted: str) -> None:
+        put_a(scripted, f"`{dotted}`")
+        assert run(scripted) == [
+            Finding(
+                "a",
+                Kind.SYMBOL_UNDEFINED,
+                f"cited symbol not defined: {dotted}",
+                (line_of(scripted, f"`{dotted}`"),),
+            )
+        ]
+
+    def test_scripts_directories_named_bare_are_prose(self, scripted: Path) -> None:
+        put_a(scripted, "Lives in `scripts` and `scripts.ci`.")
+        linter = lint_repo(scripted)
+        assert linter.findings == []
+        assert not [c for c in linter.pages["a"].citations if c.path.startswith("scripts")]
+
+    def test_script_cited_by_path_must_be_dotted(self, scripted: Path) -> None:
+        put_a(scripted, f"`{TOOL}` and `./scripts/ci/check.py`")
+        findings = run(scripted)
+        assert messages(findings, "a") == [
+            f"cite as dotted path scripts.tool: {TOOL}",
+            "cite as dotted path scripts.ci.check: ./scripts/ci/check.py",
+        ]
+        assert kinds(findings, "a") == [Kind.PYTHON_PATH] * 2
+
+    def test_non_python_script_is_still_cited_by_path(self, scripted: Path) -> None:
+        write_file(scripted, "scripts/run.sh", "echo hi\n")
+        put_a(scripted, "`scripts/run.sh`")
+        linter = lint_repo(scripted)
+        assert linter.findings == []
+        assert linter.cites["scripts/run.sh"] == {"a"}
+
+    def test_scripts_directory_without_python_is_not_a_package(self, repo: Path) -> None:
+        write_file(repo, "scripts/run.sh", "echo hi\n")
+        assert "scripts" not in wiki_lint.WikiLinter(repo / "wiki", repo).packages.names
+
+    def test_script_names_do_not_need_qualifying(self, scripted: Path) -> None:
+        write_file(scripted, "scripts/solo.py", "def solo_helper() -> None: ...\n")
+        put_a(scripted, "`solo_helper`")
+        assert run(scripted) == []
+
+    def test_scripts_are_found_when_package_roots_are_overridden(self, scripted: Path) -> None:
+        linter = wiki_lint.WikiLinter(scripted / "wiki", scripted, package_roots=("elsewhere",))
+        assert list(linter.packages.names) == ["scripts"]
+        assert linter.packages.resolve("scripts.tool.run") == wiki_lint.Resolved(
+            (), wiki_lint.Target(TOOL, "run")
+        )
+
+    def test_locate_prints_the_script_symbol_extent(
+        self, scripted: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        status = wiki_lint.locate(["scripts.tool.run", "scripts.tool"], scripted / "wiki", scripted)
+        assert status == 0
+        assert capsys.readouterr().out.splitlines() == [
+            f"scripts.tool.run  {TOOL}:4-5",
+            f"scripts.tool  {TOOL}",
+        ]
+
+    def test_editing_another_function_leaves_the_citing_page_fresh(self, scripted: Path) -> None:
+        put_a(scripted, "Runs `scripts.tool.run`.")
+        commit(scripted, "scripts", "wiki", message="script and page")
+        write_file(scripted, TOOL, TOOL_SOURCE.replace("return 2", "return 20"))
+        commit(scripted, "scripts")
+        assert stale(scripted) == ([], [])
+
+    def test_editing_the_cited_function_makes_the_page_stale(self, scripted: Path) -> None:
+        put_a(scripted, "Runs `scripts.tool.run`.")
+        commit(scripted, "scripts", "wiki", message="script and page")
+        write_file(scripted, TOOL, TOOL_SOURCE.replace("return 1", "return 10"))
+        sha = commit(scripted, "scripts")
+        errors, found = stale(scripted)
+        assert errors == []
+        assert found == [
+            Finding(
+                "a",
+                Kind.STALE,
+                f"scripts.tool.run (describes) changed in {sha}",
+                (line_of(scripted, "Runs `scripts.tool.run`"),),
+            )
+        ]
+
+    def test_module_citation_goes_stale_on_any_edit(self, scripted: Path) -> None:
+        put_a(scripted, "Runs `scripts.tool`.")
+        commit(scripted, "scripts", "wiki", message="script and page")
+        write_file(scripted, TOOL, TOOL_SOURCE.replace("return 2", "return 20"))
+        sha = commit(scripted, "scripts")
+        _, found = stale(scripted)
+        assert [f.message for f in found] == [f"scripts.tool (describes) changed in {sha}"]
