@@ -34,6 +34,8 @@ from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.event_sync import EventSyncService
 from odds_lambda.ingestion import OddsIngestionService
 from odds_lambda.jobs import fetch_scores
+from odds_lambda.live_events import SkipReason
+from odds_lambda.mlb_game_resolver import mlb_date
 from odds_lambda.mlb_stats_fetcher import MlbGameResult, MlbGameState
 from odds_lambda.odds_api_events import find_event_by_odds_api_id
 from sqlalchemy import select
@@ -149,9 +151,9 @@ def _mlb_game(pk: int, start: datetime, home: str, away: str) -> MlbGameResult:
         away_score=None,
         game_number=1,
         start_time_tbd=False,
-        official_date=start.date(),
+        official_date=mlb_date(start),
         state=MlbGameState.SCHEDULED,
-        schedule_date=start.date(),
+        schedule_date=mlb_date(start),
     )
 
 
@@ -253,10 +255,12 @@ class TestEventSync:
     ) -> None:
         real = odds_api_events.resolve_odds_api_event
 
-        async def _resolve(finder: Any, session: AsyncSession, event: ApiEvent) -> Any:
+        async def _resolve(
+            finder: Any, session: AsyncSession, event: ApiEvent, *, observed_at: datetime
+        ) -> Any:
             if event.odds_api_id == "bad":
                 raise RuntimeError("resolver down")
-            return await real(finder, session, event)
+            return await real(finder, session, event, observed_at=observed_at)
 
         monkeypatch.setattr(odds_api_events, "resolve_odds_api_event", _resolve)
 
@@ -439,6 +443,82 @@ class TestIngestion:
         assert (await session.execute(select(SnapshotPayload))).scalars().all() == []
         log = (await session.execute(select(FetchLog))).scalar_one()
         assert log.success is True
+
+    async def test_a_game_listed_under_way_with_no_event_is_dropped(
+        self, pglite_async_session: AsyncSession, mock_settings: Any
+    ) -> None:
+        session = pglite_async_session
+        tip_off = datetime.now(UTC).replace(microsecond=0) - timedelta(minutes=4, seconds=4)
+
+        result = await self._ingest(
+            session, mock_settings, _listed("apihex1", tip_off), [_book("bet365")]
+        )
+
+        assert result.failures == []
+        assert [d.reason for d in result.dropped_games] == [SkipReason.UNDER_WAY]
+        assert result.success
+        assert await _events(session) == []
+        assert (await session.execute(select(OddsSnapshot))).scalars().all() == []
+
+    async def test_an_mlb_game_listed_under_way_creates_its_event_at_the_scheduled_start(
+        self,
+        pglite_async_session: AsyncSession,
+        mock_settings: Any,
+        mlb_schedule: list[MlbGameResult],
+    ) -> None:
+        session = pglite_async_session
+        scheduled = datetime.now(UTC).replace(second=0, microsecond=0) - timedelta(minutes=20)
+        mlb_schedule.append(_mlb_game(824102, scheduled, "New York Yankees", "Boston Red Sox"))
+        listed = _listed(
+            "apimlb4",
+            scheduled + timedelta(minutes=6, seconds=33),
+            "New York Yankees",
+            "Boston Red Sox",
+            sport_key=MLB,
+            sport_title="MLB",
+        )
+        mock_settings.data_collection.bookmakers[MLB] = ["bet365"]
+        response = OddsResponse(
+            events=[parse_api_event(listed)],
+            raw_events_data=[{**listed, "bookmakers": [_book("bet365")]}],
+            response_time_ms=10,
+            quota_remaining=100,
+            quota_used=400,
+            timestamp=datetime.now(UTC),
+        )
+        service = OddsIngestionService(
+            client=StubOddsClient(response),  # type: ignore[arg-type]
+            settings=mock_settings,
+            session_factory=SessionFactory(session),
+        )
+
+        result = await service.ingest_sport(MLB)
+
+        assert result.dropped_games == []
+        (event,) = await _events(session)
+        assert event.commence_time == scheduled
+        assert await game_pk_of(session, event) == 824102
+
+    async def test_a_game_listed_under_way_is_stored_on_its_event_at_the_scheduled_start(
+        self, pglite_async_session: AsyncSession, mock_settings: Any
+    ) -> None:
+        session = pglite_async_session
+        scheduled = datetime.now(UTC).replace(second=0, microsecond=0) - timedelta(minutes=10)
+        session.add(make_epl_event(1, scheduled))
+        await session.flush()
+
+        result = await self._ingest(
+            session,
+            mock_settings,
+            _listed("apihex1", scheduled + timedelta(minutes=5, seconds=56)),
+            [_book("bet365")],
+        )
+
+        assert result.dropped_games == []
+        events = await _events(session)
+        assert [(e.id, e.commence_time) for e in events] == [(1, scheduled)]
+        snapshots = (await session.execute(select(OddsSnapshot))).scalars().all()
+        assert {s.event_id for s in snapshots} == {1}
 
     async def test_payload_is_written_once_for_a_run_of_events(
         self, pglite_async_session: AsyncSession, mock_settings: Any

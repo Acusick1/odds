@@ -29,7 +29,7 @@ The live jobs create an MLB event only for a game a source prices, so seasons pl
 
 ## Writing
 
-`odds_lambda.mlb_season_load.load_games` resolves each game through `odds_lambda.storage.event_resolver.resolve_event` as a game of source `mlb_stats_api` with its `gamePk` ([resolver](../storage/event-resolver.md)), one transaction per game:
+`odds_lambda.mlb_season_load.load_games` resolves each game through `odds_lambda.storage.event_resolver.resolve_event` as a game of source `mlb_stats_api` with its `gamePk` and no `earliest_created_start`, so a played game with no event is created ([resolver](../storage/event-resolver.md)), one transaction per game:
 
 - An event holding the `gamePk` is reused. Otherwise an event of the same teams within ±2 h that holds no `gamePk` is matched and gains it, unless a doubleheader sibling is scheduled nearer to it. Otherwise a SCHEDULED event is created. A rerun therefore matches the events it made, and the live jobs' events are matched rather than duplicated.
 - The MLB Stats API is MLB's kick-off authority and may move an event to a past start ([kick-off authority](../storage/kickoff-authority.md)), so a reused event moves to the played slot's scheduled start. A TBD game offers no start, so a reused event keeps its time.

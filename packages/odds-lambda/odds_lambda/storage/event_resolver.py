@@ -147,7 +147,7 @@ async def resolve_event(session: AsyncSession, game: ListedGame) -> ResolvedEven
     ``move_kickoff``, which decides whether the source may move the event.
 
     Raises:
-        StaleListing: when no event matches and the game starts before
+        StaleListing: when no event matches and the game starts at or before
             ``game.earliest_created_start``.
         AmbiguousHistoricalMatch: when a historical game is ambiguous (``_match_historical``);
             nothing is written.
@@ -427,7 +427,7 @@ def _anchor(game: ListedGame) -> datetime:
 
 async def _create(session: AsyncSession, game: ListedGame, home_team: str, away_team: str) -> Event:
     start = ensure_utc(_anchor(game))
-    if game.earliest_created_start is not None and start < ensure_utc(game.earliest_created_start):
+    if game.earliest_created_start is not None and start <= ensure_utc(game.earliest_created_start):
         raise StaleListing(
             f"{game.source.value} lists {home_team} v {away_team} at {start.isoformat()}, which "
             "matches no event and is too far past to create one"

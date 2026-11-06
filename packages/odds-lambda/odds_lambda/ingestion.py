@@ -148,9 +148,16 @@ class OddsIngestionService:
             try:
                 async with self._session_factory() as session:
                     writer = OddsWriter(session)
-                    found = await resolve_odds_api_event(finder, session, event)
+                    found = await resolve_odds_api_event(
+                        finder, session, event, observed_at=response.timestamp
+                    )
                     if isinstance(found, DroppedGame):
                         dropped_games.append(found)
+                        logger.info(
+                            "odds_api_game_dropped",
+                            odds_api_id=event.odds_api_id,
+                            game=found.describe(),
+                        )
                         continue
                     if payload_id is None:
                         payload_id = await store_payload(session, response.raw_events_data)

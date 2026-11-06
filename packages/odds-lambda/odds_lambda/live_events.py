@@ -66,6 +66,8 @@ class SkipReason(StrEnum):
     SCHEDULE_UNAVAILABLE = "schedule_unavailable"
     NO_EVENT = "no_event"
     ID_REFUSED = "id_refused"
+    # Listed already under way, at its actual start, and matching no event.
+    UNDER_WAY = "under_way"
 
 
 @dataclass(frozen=True)
@@ -171,20 +173,20 @@ class LiveEventFinder:
         external_id: str | None,
         *,
         now: datetime | None = None,
-        create_stale: bool = False,
+        stale_after: timedelta | None = LIVE_EVENT_STALE_THRESHOLD,
     ) -> ResolvedEvent | DroppedGame:
         """The game's event, recording ``source``'s id for it, or the game dropped from this run.
 
-        With ``create_stale`` a game that started long ago may still create an event,
-        for a source that lists games already under way.
+        A game starting ``stale_after`` or more before ``now`` matches an event but creates none;
+        with ``stale_after`` ``None`` a game creates an event however late.
 
         Without the MLB schedule a game attaches only to the one event of its pair within ±2 h
         and never creates one, since a new event could not carry its ``gamePk``. Flushes; the
         caller commits.
 
         Raises:
-            StaleListing: when the game matches no event and started over
-                ``LIVE_EVENT_STALE_THRESHOLD`` before ``now``.
+            StaleListing: when the game matches no event and started ``stale_after`` or more
+                before ``now``.
         """
         now = now or datetime.now(UTC)
         mlb_game = await self._mlb_game(session, game, source, external_id)
@@ -197,7 +199,7 @@ class LiveEventFinder:
                 source,
                 external_id,
                 mlb_game,
-                earliest_created_start=None if create_stale else now - LIVE_EVENT_STALE_THRESHOLD,
+                earliest_created_start=None if stale_after is None else now - stale_after,
             ),
         )
 
@@ -325,7 +327,9 @@ def describe_refusal(refused: RefusedId) -> str:
 
 
 async def alert_dropped_games(job_name: str, dropped: Sequence[DroppedGame]) -> bool:
-    """Warn that a run dropped listed games, at most every ``stale_reminder_minutes`` per job."""
+    """Warn that a run dropped listed games, at most every ``stale_reminder_minutes`` per job.
+    A game dropped as under way is expected and not alerted."""
+    dropped = [d for d in dropped if d.reason is not SkipReason.UNDER_WAY]
     if not dropped:
         return False
     shown = "; ".join(d.describe() for d in dropped[:DROPPED_GAMES_SHOWN])

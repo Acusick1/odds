@@ -38,6 +38,10 @@ KICKOFF_AUTHORITY: Mapping[SportKey, tuple[Source, ...]] = MappingProxyType(
 # in the past. Every other source is held to the after-kick-off guard in move_kickoff.
 PLAYED_START_SOURCES: frozenset[Source] = frozenset({Source.MLB_STATS_API, Source.FOOTBALL_DATA_UK})
 
+# Sources that list a game already under way at the time it actually started, so their start at or
+# before now is never the schedule.
+IN_PLAY_START_SOURCES: frozenset[Source] = frozenset({Source.ODDS_API})
+
 
 async def _outranked(session: AsyncSession, event: Event, above: tuple[Source, ...]) -> bool:
     if not above:
@@ -73,7 +77,8 @@ async def move_kickoff(
     outranked by one holding an id on the event does not move it. Once the stored kick-off has
     passed, a start at or before ``now`` is refused (an in-play "actual start"), and a start still
     ahead is accepted from any source in the order, so a postponement the top source stopped
-    listing is still followed. A source in ``PLAYED_START_SOURCES`` skips the
+    listing is still followed. A source in ``IN_PLAY_START_SOURCES`` never moves an event to a
+    start at or before ``now``, before the stored kick-off too. A source in ``PLAYED_START_SOURCES`` skips the
     after-kick-off rule: it dates a postponed game by when it was played, which is in the past.
     Such a source that the order ranks below another moves only an event no other source has
     observed (``_observed_by_another``), since ids alone do not show which sources saw the event.
@@ -82,6 +87,8 @@ async def move_kickoff(
     if source not in order or start is None:
         return False
     if ensure_utc(event.commence_time) == ensure_utc(start):
+        return False
+    if source in IN_PLAY_START_SOURCES and ensure_utc(start) <= ensure_utc(now):
         return False
     if source not in PLAYED_START_SOURCES and ensure_utc(now) >= ensure_utc(event.commence_time):
         if ensure_utc(start) <= ensure_utc(now):

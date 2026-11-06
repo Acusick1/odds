@@ -32,7 +32,7 @@ Quota is a per-key monthly balance that only [the client](odds-api-client.md#cos
 
 | Place | What it reads | Reminded | Recorded in `alert_history` |
 |---|---|---|---|
-| `odds_core.models.FetchLog.api_quota_remaining` and `odds_core.models.FetchLog.api_quota_used` | the `x-requests-remaining` and `x-requests-used` headers, written once per sport and run by `odds_lambda.ingestion.OddsIngestionService.ingest_sport`, after its listed games are stored (each resolved to its event through the event resolver; [fetch logs](odds-ingestion-service.md#fetch-logs)) | n/a | n/a |
+| `odds_core.models.FetchLog.api_quota_remaining` and `odds_core.models.FetchLog.api_quota_used` | the `x-requests-remaining` and `x-requests-used` headers, written once per sport and run by `odds_lambda.ingestion.OddsIngestionService.ingest_sport`, after its listed games are stored (each resolved to its event through the event resolver, or dropped and logged; [fetch logs](odds-ingestion-service.md#fetch-logs)) | n/a | n/a |
 | `odds_lambda.health_monitor.HealthMonitor.check_api_quota` | per key, the newest `fetch_logs` row with a non-null remaining and used count of the sports that spend it, ignoring rows over 31 days old (`odds_lambda.storage.readers.OddsReader.get_latest_quota_by_key`), same fraction | yes | yes |
 | `odds status quota` (`odds_cli.commands.status._show_quota`) | per key, the newest 10 `fetch_logs` rows with a non-null remaining quota of its sports, for each key with a reading under 31 days old, headed by the key's plan size, used plus remaining from its newest reading; the per-fetch Used column is the next-older row's remaining minus this row's, `reset` when negative, blank for the oldest | n/a | n/a |
 

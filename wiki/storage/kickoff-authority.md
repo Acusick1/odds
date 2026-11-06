@@ -30,7 +30,7 @@ Measured read-only on a copy of the local database taken 2026-10-25. The copy ho
 - **EPL, OddsPortal against ESPN:** 1659 of 1663 matched events equal; the four differences are 10 to 30 minutes.
 - **EPL, Odds API against ESPN:** 10 of 10 equal, though only 10 of its 83 events fall in ESPN's loaded range. Before kick-off it differed from the stored time on 1 of 167 events, a day early for six days while ESPN and OddsPortal held the original time.
 - **NBA, minute of the hour:** the Odds API's first pre-game value falls on :00 or :30 for 148 of 813 events, the rest 10 minutes later; OddsPortal's event rows do for 4972 of 5001 and Polymarket's `end_date` for 891 of 891. That :00 and :30 are the true tip-offs, so the Odds API is the one that is late, is a reading of those three sources (inferred).
-- **Odds API in-play:** once a game is live it reports the actual start: 78 of 623 NBA events differ from the stored kick-off (up to 14 minutes), 7 of 135 EPL events (up to 2).
+- **Odds API in-play:** once a game is live it reports the actual start: 78 of 623 NBA events differ from the stored kick-off (up to 14 minutes), 7 of 135 EPL events (up to 2). On production on 2026-11-05, 115 NBA FINAL events stored such a start (seconds past the minute, 1 to 18 minutes after ESPN's scheduled start); all 75 of them with archived Odds API payloads first show that start in a poll taken after it ([#784](https://github.com/Acusick1/odds/issues/784)).
 
 OddsPortal above the Odds API rests on the NBA grid and the one EPL reversal, and OddsPortal's response to a postponement was not measured (inferred). The other football leagues take the EPL's order unmeasured, since no source had collected them when it was set (inferred).
 
@@ -42,6 +42,8 @@ Left out of both orders:
 - **football-data.co.uk for NBA:** it covers EPL only. For EPL it ranks last: its kick-off is assumed before 2019-20 (`timing.kickoff_time_assumed`) and 588 of 1597 matched events differ from ESPN, so it moves only an event no better source holds an id on.
 
 ## Before and after the stored kick-off
+
+A source in `odds_lambda.storage.event_kickoff.IN_PLAY_START_SOURCES`, the Odds API, lists a game already under way at its actual start, so its start at or before `now` is refused whatever the stored kick-off. An event stored at the Odds API's late pre-game time (for example 23:40 for a 23:30 game) therefore keeps it when a poll at 23:37 lists the 23:35:56 tip-off.
 
 For every source except those in `odds_lambda.storage.event_kickoff.PLAYED_START_SOURCES`:
 
@@ -65,7 +67,7 @@ Nothing happens when no start is given or it equals the stored kick-off. Otherwi
 - `odds_lambda.jobs.fetch_mlb_results` ([fetch-mlb-results](../collection/results-jobs.md#fetch-mlb-results)), with the MLB Stats API.
 - `odds_lambda.mlb_season_load.load_games` ([MLB season load](../collection/mlb-season-load.md)), through `odds_lambda.storage.event_resolver.resolve_event`, with the MLB Stats API and the played slot's start (none for a TBD start).
 - `odds_lambda.storage.game_pk_backfill.apply_assignment` ([assigning gamePks](event-merge.md#assigning-gamepks)), with the MLB Stats API, after recording the `gamePk` (`odds_lambda.storage.event_resolver.record_game_pk`).
-- `odds_lambda.odds_api_events.resolve_odds_api_event` ([events](events.md#writing-events)), for Odds API ingestion, event sync, `odds discover games` and the historical backfill (the API's reissued id replaces the recorded `odds_api` external id), through `odds_lambda.storage.event_resolver.resolve_event`: the Odds API with the listed start.
+- `odds_lambda.odds_api_events.resolve_odds_api_event` ([events](events.md#writing-events)), for Odds API ingestion, event sync and `odds discover games` (the API's reissued id replaces the recorded `odds_api` external id), through `odds_lambda.storage.event_resolver.resolve_event`: the Odds API with the listed start. Except for MLB, a game listed under way that matches no event is dropped, so its in-play start never becomes a new event's kick-off ([Odds API events](event-matching.md#odds-api-events)).
 
 ## Related
 

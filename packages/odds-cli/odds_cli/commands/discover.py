@@ -70,6 +70,7 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str):
 
     # Track statistics
     total_events_found = 0
+    total_under_way = 0
     total_api_requests = 0
     quota_remaining = None
     all_events: list[ApiEvent] = []
@@ -121,6 +122,11 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str):
                     for event_data in events_data:
                         try:
                             event = parse_api_event(event_data)
+                            # The snapshot is at or before the requested time, and a game already
+                            # under way is listed at its actual start rather than its schedule.
+                            if event.commence_time <= current_date:
+                                total_under_way += 1
+                                continue
                             all_events.append(event)
                         except Exception as e:
                             console.print(
@@ -140,6 +146,8 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str):
     console.print("\n[bold]Discovery Summary:[/bold]")
     console.print(f"  Events found: {total_events_found}")
     console.print(f"  Events parsed: {len(all_events)}")
+    if total_under_way:
+        console.print(f"  Listed under way (skipped): {total_under_way}")
     console.print(f"  API requests made: {total_api_requests}")
     if quota_remaining is not None:
         console.print(f"  API quota remaining: {quota_remaining:,}")
@@ -178,7 +186,10 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str):
                     batch = unique_events[i : i + batch_size]
 
                     try:
-                        resolved = await resolve_odds_api_events(session, finder, batch)
+                        # Every listing kept starts after its own snapshot, so after start_date.
+                        resolved = await resolve_odds_api_events(
+                            session, finder, batch, observed_at=start_date
+                        )
                         await session.commit()
                     except Exception as e:
                         await session.rollback()
