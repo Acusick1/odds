@@ -9,7 +9,7 @@ from odds_core.models import Event, EventExternalId, EventStatus, OddsSnapshot
 from odds_core.vocabulary import Source
 from odds_lambda.storage.event_kickoff import KICKOFF_AUTHORITY, move_kickoff
 
-from tests.test_helpers import TWIN_KICKOFF
+from tests.test_helpers import TWIN_KICKOFF, make_nba_event
 
 MOVED = TWIN_KICKOFF + timedelta(days=2)
 BEFORE = TWIN_KICKOFF - timedelta(days=1)
@@ -96,6 +96,49 @@ class TestMoveKickoff:
         )
 
 
+class TestNbaFollowsEspn:
+    LATE_LISTING = TWIN_KICKOFF + timedelta(minutes=10)
+
+    @pytest.fixture
+    async def nba_event(self, pglite_async_session) -> Event:
+        event = make_nba_event(21, commence_time=self.LATE_LISTING)
+        pglite_async_session.add(event)
+        await pglite_async_session.flush()
+        return event
+
+    async def _hold_ids(self, session, event: Event, *sources: Source) -> None:
+        session.add_all(
+            [
+                EventExternalId(source=s, external_id=f"{s.value}-1", event_id=event.id)
+                for s in sources
+            ]
+        )
+        await session.flush()
+
+    @pytest.mark.asyncio
+    async def test_espn_moves_an_event_the_odds_api_and_oddsportal_hold(
+        self, pglite_async_session, nba_event
+    ) -> None:
+        await self._hold_ids(pglite_async_session, nba_event, Source.ODDS_API, Source.ODDSPORTAL)
+
+        assert await move_kickoff(
+            pglite_async_session, nba_event, Source.ESPN, TWIN_KICKOFF, now=BEFORE
+        )
+        assert nba_event.commence_time == TWIN_KICKOFF
+
+    @pytest.mark.asyncio
+    async def test_the_odds_api_never_moves_an_event_espn_holds_before_kickoff(
+        self, pglite_async_session, nba_event
+    ) -> None:
+        nba_event.commence_time = TWIN_KICKOFF
+        await self._hold_ids(pglite_async_session, nba_event, Source.ESPN)
+
+        assert not await move_kickoff(
+            pglite_async_session, nba_event, Source.ODDS_API, self.LATE_LISTING, now=BEFORE
+        )
+        assert nba_event.commence_time == TWIN_KICKOFF
+
+
 class TestOddsApiInPlayStart:
     @pytest.mark.asyncio
     async def test_a_start_already_past_is_refused_before_the_stored_kickoff(
@@ -129,6 +172,34 @@ class TestOddsApiInPlayStart:
 
 
 class TestMoveKickoffAfterTheStoredKickoff:
+    @pytest.mark.asyncio
+    async def test_a_late_listing_at_kickoff_is_refused(
+        self, pglite_async_session, stored_epl_event
+    ) -> None:
+        await _hold_oddsportal_id(pglite_async_session, stored_epl_event)
+
+        assert not await move_kickoff(
+            pglite_async_session,
+            stored_epl_event,
+            Source.ODDS_API,
+            TWIN_KICKOFF + timedelta(minutes=10),
+            now=TWIN_KICKOFF,
+        )
+        assert stored_epl_event.commence_time == TWIN_KICKOFF
+
+    @pytest.mark.asyncio
+    async def test_a_start_just_under_an_hour_later_is_refused(
+        self, pglite_async_session, stored_epl_event
+    ) -> None:
+        assert not await move_kickoff(
+            pglite_async_session,
+            stored_epl_event,
+            Source.ODDSPORTAL,
+            TWIN_KICKOFF + timedelta(minutes=59),
+            now=TWIN_KICKOFF + timedelta(minutes=1),
+        )
+        assert stored_epl_event.commence_time == TWIN_KICKOFF
+
     @pytest.mark.asyncio
     async def test_an_in_play_start_is_refused(
         self, pglite_async_session, stored_epl_event

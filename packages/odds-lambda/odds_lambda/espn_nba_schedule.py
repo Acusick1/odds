@@ -4,9 +4,9 @@ The NBA has no published schedule the live sources can read: OddsPortal, Betfair
 list only games that already have prices, and Polymarket attaches to existing events and creates
 none. ESPN's scoreboard lists every game of a day with its kick-off, final score and an id of its
 own (``odds_core.vocabulary.Source.ESPN``). The events it creates are the schedule that wakes the
-dormant NBA collectors. It is not a kick-off authority for NBA
-(``odds_lambda.storage.event_kickoff.KICKOFF_AUTHORITY``), so it never moves an event another
-source created.
+dormant NBA collectors. It is NBA's first kick-off authority
+(``odds_lambda.storage.event_kickoff.KICKOFF_AUTHORITY``), so before a game starts it moves the
+event to ESPN's start whichever source created it.
 """
 
 from __future__ import annotations

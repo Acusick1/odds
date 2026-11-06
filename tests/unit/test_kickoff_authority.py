@@ -35,7 +35,7 @@ class TestKickoffAuthorityOrder:
                 "soccer_france_ligue_one",
                 (Source.ODDSPORTAL, Source.ODDS_API, Source.FOOTBALL_DATA_UK),
             ),
-            ("basketball_nba", (Source.ODDSPORTAL, Source.ODDS_API, Source.ESPN)),
+            ("basketball_nba", (Source.ESPN, Source.ODDSPORTAL, Source.ODDS_API)),
         ],
     )
     def test_order_per_sport(self, sport: SportKey, order: tuple[Source, ...]) -> None:
@@ -56,8 +56,9 @@ class TestKickoffAuthorityOrder:
     def test_every_sport_has_an_order(self) -> None:
         assert set(KICKOFF_AUTHORITY) == set(SUPPORTED_SPORTS)
 
-    def test_espn_ranks_last_for_nba_only(self) -> None:
-        assert KICKOFF_AUTHORITY["basketball_nba"][-1] is Source.ESPN
+    def test_espn_ranks_first_for_nba_only(self) -> None:
+        assert KICKOFF_AUTHORITY["basketball_nba"][0] is Source.ESPN
+        assert Source.ESPN not in KICKOFF_AUTHORITY["soccer_epl"]
 
     def test_football_data_uk_ranks_last_for_epl_only(self) -> None:
         assert KICKOFF_AUTHORITY["soccer_epl"][-1] is Source.FOOTBALL_DATA_UK

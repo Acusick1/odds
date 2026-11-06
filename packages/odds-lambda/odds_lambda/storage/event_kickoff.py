@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
 
 import structlog
@@ -30,7 +30,7 @@ KICKOFF_AUTHORITY: Mapping[SportKey, tuple[Source, ...]] = MappingProxyType(
         "soccer_italy_serie_a": _FOOTBALL_ORDER,
         "soccer_germany_bundesliga": _FOOTBALL_ORDER,
         "soccer_france_ligue_one": _FOOTBALL_ORDER,
-        "basketball_nba": (Source.ODDSPORTAL, Source.ODDS_API, Source.ESPN),
+        "basketball_nba": (Source.ESPN, Source.ODDSPORTAL, Source.ODDS_API),
     }
 )
 
@@ -41,6 +41,11 @@ PLAYED_START_SOURCES: frozenset[Source] = frozenset({Source.MLB_STATS_API, Sourc
 # Sources that list a game already under way at the time it actually started, so their start at or
 # before now is never the schedule.
 IN_PLAY_START_SOURCES: frozenset[Source] = frozenset({Source.ODDS_API})
+
+# Once the stored kick-off has passed, a later start is a postponement only this far past it. A
+# start sooner is a late listing (the Odds API lists NBA games 10 minutes after the schedule) or a
+# delayed start, and does not move the event.
+POSTPONEMENT_MIN_DELAY = timedelta(hours=1)
 
 
 async def _outranked(session: AsyncSession, event: Event, above: tuple[Source, ...]) -> bool:
@@ -75,9 +80,10 @@ async def move_kickoff(
     Returns whether the event moved: never for a source outside its sport's authority order, a
     ``None`` start or an unchanged one. Before the stored kick-off (``now`` earlier) a source
     outranked by one holding an id on the event does not move it. Once the stored kick-off has
-    passed, a start at or before ``now`` is refused (an in-play "actual start"), and a start still
-    ahead is accepted from any source in the order, so a postponement the top source stopped
-    listing is still followed. A source in ``IN_PLAY_START_SOURCES`` never moves an event to a
+    passed, a start at or before ``now`` (an in-play "actual start") or less than
+    ``POSTPONEMENT_MIN_DELAY`` after the stored kick-off is refused, and a later start still ahead
+    is accepted from any source in the order, so a postponement the top source stopped listing is
+    still followed. A source in ``IN_PLAY_START_SOURCES`` never moves an event to a
     start at or before ``now``, before the stored kick-off too. A source in ``PLAYED_START_SOURCES`` skips the
     after-kick-off rule: it dates a postponed game by when it was played, which is in the past.
     Such a source that the order ranks below another moves only an event no other source has
@@ -91,7 +97,10 @@ async def move_kickoff(
     if source in IN_PLAY_START_SOURCES and ensure_utc(start) <= ensure_utc(now):
         return False
     if source not in PLAYED_START_SOURCES and ensure_utc(now) >= ensure_utc(event.commence_time):
-        if ensure_utc(start) <= ensure_utc(now):
+        if (
+            ensure_utc(start) <= ensure_utc(now)
+            or ensure_utc(start) - ensure_utc(event.commence_time) < POSTPONEMENT_MIN_DELAY
+        ):
             return False
     elif await _outranked(session, event, order[: order.index(source)]):
         return False
