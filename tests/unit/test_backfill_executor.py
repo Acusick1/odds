@@ -169,7 +169,7 @@ async def seed_snapshot(
                 snapshot_time=at,
                 source=source,
                 market=market,
-                time_basis=TimeBasis.OBSERVED,
+                time_basis=TimeBasis.SOURCE_STAMPED,
             )
         )
     await session.flush()
@@ -193,7 +193,7 @@ class TestBackfillExecutor:
             }
         ]
 
-    async def test_stores_every_returned_event_as_observed_at_the_snapshot_time(
+    async def test_stores_every_returned_event_as_source_stamped_at_the_snapshot_time(
         self, test_session, writer
     ) -> None:
         client = FakeClient(response("e1", "e2", units=20, quota=900))
@@ -207,7 +207,7 @@ class TestBackfillExecutor:
             (2, T0 - timedelta(minutes=5)),
         ]
         assert {(s["shape"].source, s["shape"].time_basis) for s in writer.stored} == {
-            (Source.ODDS_API, TimeBasis.OBSERVED)
+            (Source.ODDS_API, TimeBasis.SOURCE_STAMPED)
         }
         assert [
             (f.sport_key, f.api_quota_remaining, f.api_quota_used) for f in writer.fetch_logs

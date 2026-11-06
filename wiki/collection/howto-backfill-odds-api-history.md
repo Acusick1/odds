@@ -32,7 +32,7 @@ Costs a historical purchase before it is bought, buys it, and fills scores. Exec
    ```bash
    uv run odds backfill execute --manifest backfills/odds-api-epl-2020-26.yaml --season 2024-25 --dry-run
    ```
-   - It makes no API call. It prints the calls, the units they would cost and the acquisition key's balance (unknown when no recent fetch recorded a quota), and counts the calls already stored as skipped.
+   - It makes no API call. It prints the calls, the units they would cost and the acquisition key's balance (unknown when no recent fetch recorded a quota), and counts the calls a backfill already stored as skipped; live Odds API snapshots do not count.
 5. Execute.
    ```bash
    uv run odds backfill execute --manifest backfills/odds-api-epl-2020-26.yaml --season 2024-25

@@ -668,7 +668,7 @@ class TestBackfill:
                 event_id,
                 parse_api_datetime(recorded["timestamp"]),
                 Source.ODDS_API,
-                TimeBasis.OBSERVED,
+                TimeBasis.SOURCE_STAMPED,
             )
             for event_id in (1, 2)
         }

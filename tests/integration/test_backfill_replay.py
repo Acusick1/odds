@@ -27,10 +27,11 @@ from odds_core.models import (
 from odds_core.odds_math import american_to_decimal
 from odds_core.sports import SportKey
 from odds_core.utils import is_three_way_sport
-from odds_core.vocabulary import Market, PriceOutcome, Source
+from odds_core.vocabulary import Market, PriceOutcome, Source, TimeBasis
 from odds_lambda.live_events import SkipReason
 from odds_lambda.mlb_stats_fetcher import MlbGameState
 from odds_lambda.price_rows import RowIssueType
+from odds_lambda.storage.shaped_snapshots import SnapshotShape
 from odds_lambda.storage.writers import OddsWriter
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -569,6 +570,41 @@ class TestRerunSemantics:
 
         assert {r[1] for r in await stored_rows(session, game.event)} == {Market.H2H}
         assert (rerun.calls_made, rerun.calls_skipped, rerun.snapshots_stored) == (1, 0, 0)
+
+    async def test_a_live_snapshot_in_the_window_does_not_skip_the_call(
+        self,
+        pglite_async_session: AsyncSession,
+        replay: BackfillReplay,
+        mlb_schedule: type[FakeMlbStatsFetcher],
+    ) -> None:
+        session = pglite_async_session
+        manifest = load_manifest(NBA)
+        [game, _] = await load_nba(session, mlb_schedule)
+        at = game.start - timedelta(hours=2)
+        fetched_at = at - timedelta(minutes=2, seconds=21)
+        live = game.listing(fetched_at)
+        live["bookmakers"] = [b for b in live["bookmakers"] if b["key"] == "pinnacle"]
+        await OddsWriter(session).store_envelope(
+            event_id=game.event.id,
+            envelope=live,
+            snapshot_time=fetched_at,
+            shape=SnapshotShape(Source.ODDS_API, TimeBasis.OBSERVED, None),
+        )
+        await session.commit()
+        replay.record(at, [game.listing(at)], snapshot=at)
+
+        result = await replay.run(manifest, [replay.call(manifest, at, game.event)])
+
+        assert (result.calls_made, result.calls_skipped) == (1, 0)
+        rows = await stored_rows(session, game.event)
+        assert {r[2] for r in rows if r[0] == at} == STORED_BOOKS
+        bases = await session.execute(
+            select(OddsSnapshot.snapshot_time, OddsSnapshot.time_basis).distinct()
+        )
+        assert set(bases.all()) == {  # type: ignore[comparison-overlap]
+            (fetched_at, TimeBasis.OBSERVED),
+            (at, TimeBasis.SOURCE_STAMPED),
+        }
 
     async def test_a_snapshot_stored_by_another_request_is_kept_never_merged(
         self,

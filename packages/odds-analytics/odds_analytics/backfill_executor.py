@@ -196,7 +196,7 @@ class BackfillExecutor:
                     event_id=found.event.id,
                     envelope=raw,
                     snapshot_time=response.snapshot_time,
-                    shape=SnapshotShape(Source.ODDS_API, TimeBasis.OBSERVED, payload_id),
+                    shape=SnapshotShape(Source.ODDS_API, TimeBasis.SOURCE_STAMPED, payload_id),
                 )
                 result.snapshots_stored += envelope.snapshots_written
                 stored += 1
@@ -244,8 +244,9 @@ class BackfillExecutor:
             await session.commit()
 
     async def _already_stored(self, call: Call) -> bool:
-        """Whether every fixture the call serves has the snapshot it would return: an Odds API
-        snapshot of each requested market in ``(call time - grid step, call time]``."""
+        """Whether every fixture the call serves has the snapshot it would return: a historical
+        Odds API snapshot (``source_stamped``, never a live fetch) of each requested market in
+        ``(call time - grid step, call time]``."""
         wanted = {target.fixture.event_id for target in call.serves}
         if not wanted:
             return True
@@ -270,6 +271,7 @@ async def _stored_markets(
         .where(
             OddsSnapshot.event_id.in_(event_ids),  # type: ignore[attr-defined]
             OddsSnapshot.source == Source.ODDS_API,
+            OddsSnapshot.time_basis == TimeBasis.SOURCE_STAMPED,
             OddsSnapshot.snapshot_time > after,
             OddsSnapshot.snapshot_time <= until,
         )
