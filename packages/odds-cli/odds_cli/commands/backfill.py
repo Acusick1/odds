@@ -331,7 +331,7 @@ async def _probe_backfill_async(manifest: Manifest) -> list[ResponseCheck]:
 
 def _probe_table(manifest: Manifest, checks: list[ResponseCheck]) -> Table:
     table = Table(title=f"Probe, {manifest.probe.units_per_call} units expected per call")
-    for column in ("Snapshot", "Units", "Grid gaps", "Farthest fixture", "Books (events)"):
+    for column in ("Snapshot", "Lag", "Units", "Grid gaps", "Farthest fixture", "Books (events)"):
         table.add_column(column)
 
     def mark(ok: bool, text: str) -> str:
@@ -343,10 +343,11 @@ def _probe_table(manifest: Manifest, checks: list[ResponseCheck]) -> Table:
         )
         table.add_row(
             utc_isoformat(check.snapshot_time),
+            mark(check.lag_ok, _precise(check.lag)),
             mark(check.units_ok, str(check.units)),
             mark(
                 check.grid_ok,
-                f"{_gap(check.previous_gap)} before, {_gap(check.next_gap)} after",
+                f"{_precise(check.previous_gap)} before, {_precise(check.next_gap)} after",
             ),
             mark(check.lead_ok, _gap(check.farthest_lead)),
             mark(check.books_ok, f"{books} of {check.events} events"),
@@ -356,6 +357,14 @@ def _probe_table(manifest: Manifest, checks: list[ResponseCheck]) -> Table:
 
 def _gap(delta: timedelta | None) -> str:
     return "none" if delta is None else _duration(delta)
+
+
+def _precise(delta: timedelta | None) -> str:
+    if delta is None:
+        return "none"
+    total = round(delta.total_seconds())
+    minutes, seconds = divmod(abs(total), 60)
+    return f"{'-' if total < 0 else ''}{minutes}m{seconds:02d}s"
 
 
 @app.command("status")

@@ -28,7 +28,12 @@ from odds_lambda.storage.writers import OddsWriter
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_analytics.backfill_checks import ResponseCheck, check_response, stored_market
+from odds_analytics.backfill_checks import (
+    BOOK_JUDGED_LEAD,
+    ResponseCheck,
+    check_response,
+    stored_market,
+)
 from odds_analytics.backfill_plan import Call, Manifest
 
 logger = structlog.get_logger()
@@ -131,7 +136,7 @@ class BackfillExecutor:
 
         Each call is paid, and a rerun skips the calls already stored, so a failure ends the run
         after reporting it rather than spending on. A guard raises ``BackfillStopped`` when a
-        call's billed units differ from the manifest's or are missing, when the next call would
+        non-empty call's billed units differ from the manifest's or are missing (an empty one bills nothing), when the next call would
         pass ``max_units``, or after ``max_consecutive_gaps`` consecutive sparse responses.
         """
         result = BackfillResult()
@@ -164,8 +169,8 @@ class BackfillExecutor:
     def _guard(self, check: ResponseCheck, sparse_streak: int, result: BackfillResult) -> None:
         if not check.units_ok:
             raise BackfillStopped(
-                f"call billed {check.units} units, the manifest expects "
-                f"{self.manifest.probe.units_per_call}",
+                f"call billed {check.units} units, expected "
+                f"{self.manifest.probe.units_per_call if check.events else 0}",
                 result,
             )
         if sparse_streak >= self.max_consecutive_gaps:
@@ -182,7 +187,9 @@ class BackfillExecutor:
         checks: list[ResponseCheck] = []
         for snapshot in self.manifest.probe.snapshots:
             try:
-                _, check = await self._fetch_and_store(Call(snapshot, ()), result, client)
+                _, check = await self._fetch_and_store(
+                    Call(snapshot, ()), result, client, judge_every_event=True
+                )
             except Exception as e:
                 await self._log_failed_fetch(client, result, e)
                 raise
@@ -223,7 +230,11 @@ class BackfillExecutor:
             raise
 
     async def _fetch_and_store(
-        self, call: Call, result: BackfillResult, client: TheOddsAPIClient
+        self,
+        call: Call,
+        result: BackfillResult,
+        client: TheOddsAPIClient,
+        judge_every_event: bool = False,
     ) -> tuple[CallProgress, ResponseCheck]:
         manifest = self.manifest
         response = await client.get_historical_odds(
@@ -245,6 +256,7 @@ class BackfillExecutor:
         )
 
         stored = 0
+        attached: dict[int, dict[str, Any]] = {}
         async with self._session_factory() as session:
             writer = OddsWriter(session)
             finder = await odds_api_finder(manifest.sport, response.events)
@@ -268,6 +280,7 @@ class BackfillExecutor:
                     shape=SnapshotShape(Source.ODDS_API, TimeBasis.SOURCE_STAMPED, payload_id),
                 )
                 result.snapshots_stored += envelope.snapshots_written
+                attached[found.event.id] = raw
                 stored += 1
             await writer.log_fetch(
                 FetchLog(
@@ -293,7 +306,26 @@ class BackfillExecutor:
             units_used=response.units_used,
             quota_remaining=response.quota_remaining,
         )
-        return progress, check_response(manifest, response)
+        served = {target.fixture.event_id for target in call.serves}
+        near = {
+            target.fixture.event_id
+            for target in call.serves
+            if target.fixture.kickoff - response.snapshot_time <= BOOK_JUDGED_LEAD
+        }
+        judged = (
+            response.raw_events_data
+            if judge_every_event
+            else [raw for event_id, raw in attached.items() if event_id in near] or None
+        )
+        check = check_response(
+            manifest,
+            response,
+            call.time,
+            judged_events=judged,
+            served=len(served),
+            served_stored=len(served & attached.keys()),
+        )
+        return progress, check
 
     async def _log_failed_fetch(
         self, client: TheOddsAPIClient, result: BackfillResult, error: Exception

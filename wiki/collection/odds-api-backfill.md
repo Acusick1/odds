@@ -71,10 +71,11 @@ A call costs `odds_analytics.backfill_plan.Manifest.units_per_call`: 10 units pe
 
 `odds_analytics.backfill_executor.BackfillExecutor.probe` requests only the manifest's `probe.snapshots`, one call each, and stores what each returns through the same path as a run. `odds_analytics.backfill_checks.check_response` judges each response (`odds_analytics.backfill_checks.ResponseCheck`):
 
-- **Units.** The billed units (`x-requests-last`) equal `probe.units_per_call`; a response with no such header fails.
-- **Grid.** The snapshot before the response's is one grid step earlier, the step in force at that earlier snapshot, and the one after is one step later, the step in force at the response's own. The API's `previous_timestamp` and `next_timestamp` give them, and a response without either fails.
+- **Lag.** The returned snapshot is the requested time to within 60 s (`odds_analytics.backfill_checks.TIMESTAMP_TOLERANCE`). The planner assumes a stored snapshot's time is the grid time it requested, which the coverage bands and the skip rule rely on, so a larger lag fails the probe, and the table prints the lag.
+- **Units.** The billed units (`x-requests-last`) equal `probe.units_per_call`; a response with no such header fails. A response with no events is billed nothing, which the API does not count against the quota ([Odds API](https://the-odds-api.com/liveapi/guides/v4/#usage-quota-costs)), so it expects 0 or no header.
+- **Grid.** The snapshot before the response's is one grid step earlier, the step in force at that earlier snapshot, and the one after is one step later, the step in force at the response's own, each to within 60 s since the provider's timestamps carry seconds of jitter. The API's `previous_timestamp` and `next_timestamp` give them, and a response without either fails. The table prints the gaps to the second.
 - **Lead.** The farthest listed fixture kicks off at least `probe.min_fixture_lead_hours` after the snapshot.
-- **Books.** Each `probe.required_bookmakers` book appears on its market (soccer's `h2h` is `1x2` in the response), and the check counts the events carrying it; none fails.
+- **Books.** Each `probe.required_bookmakers` book, canonicalised with `odds_core.bookmakers.ODDS_API_BOOKMAKER_KEY_MAP` as the response's keys are, appears on its market (soccer's `h2h` is `1x2` in the response), and the check counts the events carrying it; none fails. The probe judges every listed event.
 
 A call that errors stops the probe, which logs the failed fetch as a run does.
 
@@ -92,9 +93,9 @@ A call that errors stops the probe, which logs the failed fetch as a run does.
 
 Any exception from a call stops the run after it is reported, since every call is paid. Three guards also stop it, raising `odds_analytics.backfill_executor.BackfillStopped` with the reason and the result so far, from the same `odds_analytics.backfill_checks.ResponseCheck` the probe uses:
 
-- **Units.** A fetched call's billed units differ from `units_per_call`, or are missing. The call's rows are stored first, since it is paid.
+- **Units.** A fetched call with events whose billed units differ from `units_per_call`, or are missing, or an empty one billed anything. The call's rows are stored first, since it is paid.
 - **Cap.** With `max_units` set (`--max-units`), the run stops before a call that would take the run's billed units past it. A dry run bills nothing, so it never reaches the cap.
-- **Sparse streak.** `max_consecutive_gaps` (`--max-consecutive-gaps`, default 10, at least 1) consecutive fetched calls return no events or lack a required book on a market. A response with books and events resets the streak and a skipped call leaves it unchanged, so one sparse snapshot does not stop a run.
+- **Sparse streak.** `max_consecutive_gaps` (`--max-consecutive-gaps`, default 10, at least 1) consecutive fetched calls are sparse, so one sparse snapshot does not stop a run. A call is sparse when it returns no events (billed nothing), when none of the fixtures it serves was stored (an unmatched or dropped listing, such as a broken matcher), or when a required book is missing from a market. The books are judged only on the stored fixtures the call serves that kick off within 24 h of the snapshot (`odds_analytics.backfill_checks.BOOK_JUDGED_LEAD`), since the exchange's totals and Pinnacle's MLB totals are not posted days ahead, which is all a call lists across a break (an All-Star or international break); a call serving no such fixture is not judged on books. A good call resets the streak and a skipped call leaves it unchanged.
 
 The result counts calls made, skipped and would-be-made, the units used (the sum of the responses' `x-requests-last`), the fixtures and snapshots stored, the dropped games (each distinct game once, with the number of calls that listed it, so the summary table and the `games_dropped:odds-backfill` alert count games, not listings) and the last quota remaining (`odds_analytics.backfill_executor.BackfillResult`).
 
