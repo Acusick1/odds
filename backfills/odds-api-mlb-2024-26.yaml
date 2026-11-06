@@ -1,11 +1,11 @@
 # Odds API historical backfill of MLB 2024, 2025 and 2026 (#785, map #774). Never edit once frozen; a
 # top-up is a new manifest. Granularity and billing are unconfirmed until the day-1 probe.
 sport: baseball_mlb
-# Calendar-year windows: the regular season, post-season and the 2026 All-Star Game (see the PR) fall inside each.
+# Calendar-year windows: each holds its regular season and post-season; 2026 also holds the All-Star Game.
 seasons:
-  "2024": {start: 2024-01-01T00:00:00Z, end: 2024-11-15T00:00:00Z}
-  "2025": {start: 2025-01-01T00:00:00Z, end: 2025-11-15T00:00:00Z}
-  "2026": {start: 2026-01-01T00:00:00Z, end: 2026-11-15T00:00:00Z}
+  "2024": {start: 2024-01-01T00:00:00Z, end: 2025-01-01T00:00:00Z}
+  "2025": {start: 2025-01-01T00:00:00Z, end: 2026-01-01T00:00:00Z}
+  "2026": {start: 2026-01-01T00:00:00Z, end: 2027-01-01T00:00:00Z}
 markets: [h2h, totals]
 bookmakers:
   - pinnacle

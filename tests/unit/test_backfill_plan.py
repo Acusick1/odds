@@ -183,9 +183,6 @@ class TestManifest:
         assert committed.markets == reference.markets
         assert committed.coverage == reference.coverage
         assert committed.units_per_call == 20
-        for snapshot in committed.probe.snapshots:
-            assert any(s.start <= snapshot < s.end for s in committed.seasons.values())
-            committed.grid_step_at(snapshot)
 
     @pytest.mark.parametrize(
         ("books", "regions", "units"),
@@ -243,6 +240,9 @@ class TestManifest:
                 {"required_bookmakers": {"totals": ["book0"]}, "units_per_call": 10},
                 "unrequested market",
             ),
+            (None, {"snapshots": ["2023-09-16T10:00:00Z"]}, "outside every season"),
+            (None, {"snapshots": ["2020-01-01T00:00:00Z"]}, "outside every season"),
+            (None, {"snapshots": ["2022-09-17T10:02:00Z"]}, "off the grid"),
         ],
     )
     def test_the_probe_matches_the_request(
