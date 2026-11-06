@@ -154,43 +154,84 @@ class TestCheckpoint:
         )
 
 
+class TestCurrentEstimate:
+    """The current estimate is separate from the verdict's checkpoints."""
+
+    def test_below_a_checkpoint_there_is_an_estimate_and_no_checkpoint(self) -> None:
+        summary = summary_of(trades(64, 0.5))
+        assert summary.checkpoint is None and summary.checkpoints == ()
+        assert summary.current is not None and summary.current.n == 64
+        assert summary.verdict is Verdict.NOT_YET
+
+    def test_one_event_has_no_estimate(self) -> None:
+        sequence = [trade(i, event_id=1) for i in range(5)]
+        assert summary_of(sequence).current is None
+
+    def test_no_bets_with_a_close_have_no_estimate(self) -> None:
+        assert summary_of([trade(0, None)]).current is None
+
+    def test_the_verdict_checkpoint_is_frozen_while_the_estimate_follows_the_bets(self) -> None:
+        summary = summary_of(trades(100, 0.5) + trades(100, -0.5, start=100))
+        assert summary.verdict is Verdict.PROMOTE
+        assert summary.checkpoint is not None and summary.checkpoint.n == 100
+        assert [c.n for c in summary.checkpoints] == [100]
+        assert summary.current is not None and summary.current.n == 200
+        assert summary.current.mean_ev == pytest.approx(0.0)
+        assert summary.checkpoint.mean_ev == pytest.approx(0.5)
+
+    def test_the_estimate_is_the_checkpoint_when_both_score_the_same_bets(self) -> None:
+        summary = summary_of(trades(100, 0.5))
+        assert summary.current is summary.checkpoint
+
+    def test_the_estimate_uses_the_family_size_now(self) -> None:
+        registry = [mechanical("a"), mechanical("b")]
+        decisions = {("a", 1): LONG_AGO, ("b", 1): NOW - timedelta(days=1)}
+        summaries = summarize_candidates(
+            [trade(i, name="a") for i in range(150)], registry, NOW, decisions, N_BOOT
+        )
+        a = next(s for s in summaries if s.name == "a")
+        assert a.checkpoint is not None and a.checkpoint.family_versions == 1
+        assert a.current is not None and a.current.family_versions == 2
+        assert a.current.promote_level == promote_level(2)
+
+
 class TestVerdict:
     def test_promote_when_99_lower_bound_above_zero(self) -> None:
-        verdict, checkpoint = judge(trades(100, 0.5), one, N_BOOT, 0)
+        verdict, checkpoints = judge(trades(100, 0.5), one, N_BOOT, 0)
         assert verdict is Verdict.PROMOTE
-        assert checkpoint is not None and checkpoint.n == 100
+        assert [c.n for c in checkpoints] == [100]
 
     def test_kill_when_95_upper_bound_at_or_below_zero(self) -> None:
         assert judge(trades(100, -0.5), one, N_BOOT, 0)[0] is Verdict.KILL
 
     def test_continue_when_interval_straddles_zero(self) -> None:
-        verdict, checkpoint = judge(noise(400), one, N_BOOT, 0)
+        verdict, checkpoints = judge(noise(400), one, N_BOOT, 0)
         assert verdict is Verdict.CONTINUE
-        assert checkpoint is not None and checkpoint.n == 400
+        assert [c.n for c in checkpoints] == [100, 200, 300, 400]
 
     def test_kill_at_500_without_promotion(self) -> None:
-        verdict, checkpoint = judge(noise(500), one, N_BOOT, 0)
+        verdict, checkpoints = judge(noise(500), one, N_BOOT, 0)
         assert verdict is Verdict.KILL
-        assert checkpoint is not None and checkpoint.n == 500
+        assert checkpoints[-1].n == 500
 
     def test_promotion_at_500_beats_the_kill_limit(self) -> None:
         assert judge(trades(500, 0.5), one, N_BOOT, 0)[0] is Verdict.PROMOTE
 
     def test_no_checkpoint_is_not_yet(self) -> None:
-        assert judge(trades(99), one, N_BOOT, 0) == (Verdict.NOT_YET, None)
+        assert judge(trades(99), one, N_BOOT, 0) == (Verdict.NOT_YET, [])
 
     def test_first_verdict_stands_when_later_bets_reverse_the_estimate(self) -> None:
         sequence = trades(100, 0.5) + trades(300, -0.5, start=100)
-        verdict, checkpoint = judge(sequence, one, N_BOOT, 0)
+        verdict, checkpoints = judge(sequence, one, N_BOOT, 0)
         assert verdict is Verdict.PROMOTE
-        assert checkpoint is not None and checkpoint.n == 100
+        assert [c.n for c in checkpoints] == [100]
         assert checkpoint_at(sequence, 400, 1, N_BOOT, 0).promote_ci[0] < 0
 
     def test_a_kill_stands_when_later_bets_recover(self) -> None:
         sequence = trades(100, -0.5) + trades(300, 0.5, start=100)
-        verdict, checkpoint = judge(sequence, one, N_BOOT, 0)
+        verdict, checkpoints = judge(sequence, one, N_BOOT, 0)
         assert verdict is Verdict.KILL
-        assert checkpoint is not None and checkpoint.n == 100
+        assert [c.n for c in checkpoints] == [100]
 
     def test_summary_carries_the_checkpoint_of_the_verdict(self) -> None:
         summary = summary_of(trades(100, 0.5) + trades(100, -0.5, start=100))
@@ -398,11 +439,11 @@ class TestKAtEachCheckpoint:
 
     def test_each_checkpoint_uses_the_family_at_its_nth_bet(self) -> None:
         sequence = noise(300)
-        verdict, checkpoint = judge(
+        verdict, checkpoints = judge(
             sequence, lambda when: 1 if when < LONG_AGO + timedelta(minutes=200) else 3, N_BOOT, 0
         )
         assert verdict is Verdict.CONTINUE
-        assert checkpoint is not None and checkpoint.family_versions == 3
+        assert [c.family_versions for c in checkpoints] == [1, 1, 3]
 
     def test_every_version_of_a_name_takes_the_family_of_its_registry_entry(self) -> None:
         registry = [mechanical("a", version=2)]

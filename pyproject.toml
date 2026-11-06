@@ -5,6 +5,7 @@ members = [
     "packages/odds-analytics",
     "packages/odds-cli",
     "packages/odds-mcp",
+    "packages/odds-web",
 ]
 
 [project]
@@ -22,6 +23,7 @@ dependencies = [
     "odds-analytics[training]",
     "odds-cli",
     "odds-mcp",
+    "odds-web",
     "alembic>=1.17.1",
 ]
 
@@ -31,6 +33,7 @@ odds-lambda = { workspace = true }
 odds-analytics = { workspace = true }
 odds-cli = { workspace = true }
 odds-mcp = { workspace = true }
+odds-web = { workspace = true }
 
 [dependency-groups]
 dev = [

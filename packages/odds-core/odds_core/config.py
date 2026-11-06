@@ -85,6 +85,11 @@ class DatabaseConfig(BaseSettings):
         validation_alias="AGENT_DATABASE_URL",
         description="DSN of the restricted odds_agent role the agent subprocess runs as",
     )
+    web_url: str | None = Field(
+        default=None,
+        validation_alias="WEB_DATABASE_URL",
+        description="DSN of the read-only odds_web role the web UI runs as; the UI has no other",
+    )
     prod_url: str | None = Field(
         default=None,
         validation_alias="PROD_DATABASE_URL",

@@ -24,6 +24,7 @@ from odds_cli.commands import (
     status,
     train,
     validate,
+    web,
 )
 
 app = typer.Typer(
@@ -51,6 +52,7 @@ app.add_typer(scrape.app, name="scrape", help="Scrape odds from OddsPortal")
 app.add_typer(paper.app, name="paper", help="Paper trade management")
 app.add_typer(candidates.app, name="candidates", help="Betting candidates in the registry")
 app.add_typer(agent.app, name="agent", help="Run the sport agent subprocess directly")
+app.add_typer(web.app, name="web", help="Read-only web UI")
 
 console = Console()
 

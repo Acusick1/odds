@@ -61,6 +61,7 @@ class TestSwapDbname:
 def base_database_url(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     monkeypatch.setenv("DATABASE_URL", BASE_URL)
     monkeypatch.delenv("AGENT_DATABASE_URL", raising=False)
+    monkeypatch.delenv("WEB_DATABASE_URL", raising=False)
     reset_settings_cache()
     yield
     reset_settings_cache()
@@ -107,3 +108,17 @@ class TestOverrideDatabaseUrl:
         agent_url = make_url(_build_agent_subprocess_env()["DATABASE_URL"])
         assert agent_url.username == "odds_agent"
         assert agent_url.database == "odds_test"
+
+    def test_web_dsn_keeps_role_and_takes_override_dbname(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(
+            "WEB_DATABASE_URL", "postgresql+asyncpg://odds_web:pw@localhost:5433/odds"
+        )
+        reset_settings_cache()
+
+        override_database_url("odds_test")
+
+        web_url = make_url(get_settings().database.web_url or "")
+        assert web_url.username == "odds_web"
+        assert web_url.database == "odds_test"
