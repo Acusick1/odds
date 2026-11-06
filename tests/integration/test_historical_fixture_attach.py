@@ -136,7 +136,7 @@ def manifest(sport: SportKey) -> Manifest:
             "seasons": {
                 "2024-25": {"start": "2024-07-01T00:00:00Z", "end": "2025-07-01T00:00:00Z"}
             },
-            "markets": [{"key": "h2h"}],
+            "markets": ["h2h"],
             "bookmakers": ["pinnacle"],
             "coverage": [
                 {"min_lead_minutes": 10, "max_lead_minutes": 120, "max_input_age_minutes": 10}
