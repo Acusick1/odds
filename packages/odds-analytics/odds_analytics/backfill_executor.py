@@ -15,7 +15,6 @@ from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_core.models import FetchLog, OddsSnapshot
 from odds_core.time import utc_isoformat
-from odds_core.utils import is_three_way_sport
 from odds_core.vocabulary import Market, Source, TimeBasis
 from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.live_events import DroppedGame, alert_dropped_games, lock_order
@@ -29,6 +28,7 @@ from odds_lambda.storage.writers import OddsWriter
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from odds_analytics.backfill_checks import ResponseCheck, check_response, stored_market
 from odds_analytics.backfill_plan import Call, Manifest
 
 logger = structlog.get_logger()
@@ -64,6 +64,14 @@ class CallProgress:
     message: str | None = None
 
 
+class BackfillStopped(Exception):
+    """A guard ended the run; ``result`` is what it did before."""
+
+    def __init__(self, reason: str, result: BackfillResult) -> None:
+        super().__init__(reason)
+        self.result = result
+
+
 class BackfillExecutor:
     """Executes a manifest's planned calls against the Odds API."""
 
@@ -75,6 +83,8 @@ class BackfillExecutor:
         skip_existing: bool = True,
         dry_run: bool = False,
         rate_limit_seconds: float = 1.0,
+        max_units: int | None = None,
+        max_consecutive_gaps: int = 10,
     ):
         """
         Args:
@@ -86,6 +96,9 @@ class BackfillExecutor:
                 would return
             dry_run: Make no API call and write nothing
             rate_limit_seconds: Pause after each paid call
+            max_units: Stop before a call that would take the run's billed units past this
+            max_consecutive_gaps: Stop after this many consecutive fetched calls that return no
+                events or lack a required bookmaker on a market
         """
         self.manifest = manifest
         self._client = client
@@ -94,6 +107,8 @@ class BackfillExecutor:
         self.skip_existing = skip_existing
         self.dry_run = dry_run
         self.rate_limit_seconds = rate_limit_seconds
+        self.max_units = max_units
+        self.max_consecutive_gaps = max_consecutive_gaps
 
     async def __aenter__(self) -> "BackfillExecutor":
         if self._owns_client and not self.dry_run:
@@ -110,12 +125,15 @@ class BackfillExecutor:
         calls: list[Call],
         progress_callback: Callable[[CallProgress], None] | None = None,
     ) -> BackfillResult:
-        """Run ``calls`` in order, stopping at the first exception.
+        """Run ``calls`` in order, stopping at the first exception or guard.
 
         Each call is paid, and a rerun skips the calls already stored, so a failure ends the run
-        after reporting it rather than spending on.
+        after reporting it rather than spending on. A guard raises ``BackfillStopped`` when a
+        call's billed units differ from the manifest's or are missing, when the next call would
+        pass ``max_units``, or after ``max_consecutive_gaps`` consecutive sparse responses.
         """
         result = BackfillResult()
+        sparse_streak = 0
 
         def report(progress: CallProgress) -> None:
             if progress_callback:
@@ -124,29 +142,76 @@ class BackfillExecutor:
         try:
             for call in calls:
                 try:
-                    progress = await self._run_call(call, result)
+                    progress, check = await self._run_call(call, result)
+                    report(progress)
+                    if check is not None:
+                        sparse_streak = sparse_streak + 1 if check.sparse_reason else 0
+                        self._guard(check, sparse_streak, result)
                 except Exception as e:
                     logger.error("backfill_call_failed", call_time=utc_isoformat(call.time))
                     report(CallProgress(call.time, "failed", message=str(e)))
                     raise
-                report(progress)
                 if progress.status == "fetched":
                     await asyncio.sleep(self.rate_limit_seconds)
         finally:
             await alert_dropped_games("odds-backfill", list(result.dropped_games))
         return result
 
-    async def _run_call(self, call: Call, result: BackfillResult) -> CallProgress:
+    def _guard(self, check: ResponseCheck, sparse_streak: int, result: BackfillResult) -> None:
+        if not check.units_ok:
+            raise BackfillStopped(
+                f"call billed {check.units} units, the manifest expects "
+                f"{self.manifest.probe.units_per_call}",
+                result,
+            )
+        if sparse_streak >= self.max_consecutive_gaps:
+            raise BackfillStopped(
+                f"{sparse_streak} consecutive sparse responses, the last {check.sparse_reason}",
+                result,
+            )
+
+    async def probe(self) -> list[ResponseCheck]:
+        """Request the manifest's probe snapshots, store what they return as a run does, and
+        judge each response against the manifest. An erroring call stops the probe."""
+        result = BackfillResult()
+        client = self._require_client()
+        checks: list[ResponseCheck] = []
+        for snapshot in self.manifest.probe.snapshots:
+            try:
+                _, check = await self._fetch_and_store(Call(snapshot, ()), result, client)
+            except Exception as e:
+                await self._log_failed_fetch(client, result, e)
+                raise
+            checks.append(check)
+            await asyncio.sleep(self.rate_limit_seconds)
+        await alert_dropped_games("odds-backfill", list(result.dropped_games))
+        return checks
+
+    def _require_client(self) -> TheOddsAPIClient:
+        if self._client is None:
+            raise RuntimeError("BackfillExecutor client not initialized")
+        return self._client
+
+    async def _run_call(
+        self, call: Call, result: BackfillResult
+    ) -> tuple[CallProgress, ResponseCheck | None]:
         if self.skip_existing and await self._already_stored(call):
             result.calls_skipped += 1
-            return CallProgress(call.time, "skipped", message="Already stored")
+            return CallProgress(call.time, "skipped", message="Already stored"), None
         if self.dry_run:
             result.would_fetch += 1
-            return CallProgress(call.time, "would_fetch")
+            return CallProgress(call.time, "would_fetch"), None
 
-        client = self._client
-        if client is None:
-            raise RuntimeError("BackfillExecutor client not initialized")
+        client = self._require_client()
+        if (
+            self.max_units is not None
+            and result.units_used + self.manifest.units_per_call > self.max_units
+        ):
+            raise BackfillStopped(
+                f"the next call would pass --max-units {self.max_units} "
+                f"({result.units_used} billed)",
+                result,
+            )
         try:
             return await self._fetch_and_store(call, result, client)
         except Exception as e:
@@ -155,7 +220,7 @@ class BackfillExecutor:
 
     async def _fetch_and_store(
         self, call: Call, result: BackfillResult, client: TheOddsAPIClient
-    ) -> CallProgress:
+    ) -> tuple[CallProgress, ResponseCheck]:
         manifest = self.manifest
         response = await client.get_historical_odds(
             sport=manifest.sport,
@@ -217,13 +282,14 @@ class BackfillExecutor:
             )
             await session.commit()
         result.fixtures_stored += stored
-        return CallProgress(
+        progress = CallProgress(
             call.time,
             "fetched",
             fixtures_stored=stored,
             units_used=response.units_used,
             quota_remaining=response.quota_remaining,
         )
+        return progress, check_response(manifest, response)
 
     async def _log_failed_fetch(
         self, client: TheOddsAPIClient, result: BackfillResult, error: Exception
@@ -251,13 +317,7 @@ class BackfillExecutor:
         wanted = {target.fixture.event_id for target in call.serves}
         if not wanted:
             return True
-        # Soccer's three-way h2h is stored as 1x2 (odds_core.utils.relabel_three_way_markets).
-        markets = {
-            Market.ONE_X_TWO
-            if market == Market.H2H and is_three_way_sport(self.manifest.sport)
-            else Market(market)
-            for market in self.manifest.markets
-        }
+        markets = {stored_market(self.manifest, market) for market in self.manifest.markets}
         step = self.manifest.grid_step_at(call.time)
         async with self._session_factory() as session:
             stored = await _stored_markets(session, wanted, call.time - step, call.time)

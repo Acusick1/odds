@@ -5,7 +5,13 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import typer
-from odds_analytics.backfill_executor import BackfillExecutor, CallProgress
+from odds_analytics.backfill_checks import ResponseCheck
+from odds_analytics.backfill_executor import (
+    BackfillExecutor,
+    BackfillResult,
+    BackfillStopped,
+    CallProgress,
+)
 from odds_analytics.backfill_plan import (
     Fixture,
     Manifest,
@@ -145,29 +151,44 @@ def execute_backfill(
         "--skip-existing/--no-skip-existing",
         help="Skip calls whose fixtures already have the snapshot the call returns",
     ),
+    max_units: int | None = typer.Option(
+        None, "--max-units", help="Stop before a call that would take the run past this many units"
+    ),
+    max_consecutive_gaps: int = typer.Option(
+        10,
+        "--max-consecutive-gaps",
+        help="Stop after this many consecutive calls with no events or a required book missing",
+    ),
 ):
     """
     Make the Odds API historical calls an acquisition manifest plans and store what they return.
 
-    Spends paid quota on the acquisition key (ODDS_API_ACQUISITION_KEY_INDEX, required). Use --dry-run first to count the calls.
+    Spends paid quota on the acquisition key (ODDS_API_ACQUISITION_KEY_INDEX, required). Use --dry-run first to count the calls, and run `odds backfill probe` before the first real run.
+    Stops when a call's billed units differ from the manifest's, when the next call would pass
+    --max-units, and after --max-consecutive-gaps consecutive sparse responses.
 
     Example:
         odds backfill execute --manifest backfills/odds-api-epl-2020-26.yaml --season 2024-25 --dry-run
     """
     manifest = Manifest.load(Path(manifest_file))
     seasons = _select_seasons(manifest, season)
-    asyncio.run(_execute_backfill_async(manifest, seasons, dry_run, skip_existing))
+    asyncio.run(
+        _execute_backfill_async(
+            manifest, seasons, dry_run, skip_existing, max_units, max_consecutive_gaps
+        )
+    )
 
 
 async def _execute_backfill_async(
-    manifest: Manifest, seasons: dict[str, Season], dry_run: bool, skip_existing: bool
+    manifest: Manifest,
+    seasons: dict[str, Season],
+    dry_run: bool,
+    skip_existing: bool,
+    max_units: int | None,
+    max_consecutive_gaps: int,
 ) -> None:
     if not dry_run:
-        try:
-            get_settings().api.acquisition_key()
-        except ValueError as e:
-            console.print(f"[red]{e}[/red]")
-            raise typer.Exit(1) from e
+        _require_acquisition_key()
     fixtures, balance = await _load_season_fixtures(manifest, seasons)
     calls = [
         call for season_fixtures in fixtures.values() for call in plan(manifest, season_fixtures)
@@ -191,7 +212,13 @@ async def _execute_backfill_async(
             console.print("[red]Aborted[/red]")
             raise typer.Exit(0)
 
-    async with BackfillExecutor(manifest, skip_existing=skip_existing, dry_run=dry_run) as executor:
+    async with BackfillExecutor(
+        manifest,
+        skip_existing=skip_existing,
+        dry_run=dry_run,
+        max_units=max_units,
+        max_consecutive_gaps=max_consecutive_gaps,
+    ) as executor:
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -205,9 +232,26 @@ async def _execute_backfill_async(
                 progress.console.print(_progress_line(update))
                 progress.advance(task)
 
-            result = await executor.execute(calls, progress_callback=on_progress)
+            try:
+                result = await executor.execute(calls, progress_callback=on_progress)
+            except BackfillStopped as stop:
+                console.print(f"[red]Stopped: {stop}[/red]")
+                console.print(_result_table(stop.result, dry_run, "Backfill stopped"))
+                raise typer.Exit(1) from stop
 
-    table = Table(title="Backfill complete")
+    console.print(_result_table(result, dry_run, "Backfill complete"))
+
+
+def _require_acquisition_key() -> None:
+    try:
+        get_settings().api.acquisition_key()
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1) from e
+
+
+def _result_table(result: BackfillResult, dry_run: bool, title: str) -> Table:
+    table = Table(title=title)
     table.add_column("Metric", style="cyan")
     table.add_column("Value", style="green")
     table.add_row("Calls made", f"{result.calls_made:,}")
@@ -220,7 +264,7 @@ async def _execute_backfill_async(
     table.add_row("Dropped games", f"{len(result.dropped_games):,}")
     if result.quota_remaining is not None:
         table.add_row("Key quota remaining", f"{result.quota_remaining:,}")
-    console.print(table)
+    return table
 
 
 def _progress_line(update: CallProgress) -> str:
@@ -235,6 +279,78 @@ def _progress_line(update: CallProgress) -> str:
     if update.status == "would_fetch":
         return f"[dim]would fetch[/dim] {when}"
     return f"[red]failed[/red] {when}  {update.message}"
+
+
+@app.command("probe")
+def probe_backfill(
+    manifest_file: str = typer.Option(..., "--manifest", "-m", help="Acquisition manifest YAML"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="List the calls the probe would make without making any"
+    ),
+):
+    """
+    Request a manifest's probe snapshots and check what comes back against the manifest.
+
+    Spends paid quota on the acquisition key (ODDS_API_ACQUISITION_KEY_INDEX, required), one call
+    per probe snapshot, and stores what they return as `execute` does. Prints each snapshot's
+    checks and exits non-zero if any fails. A call that errors stops the probe.
+
+    Example:
+        odds backfill probe --manifest backfills/odds-api-epl-2020-26.yaml --dry-run
+    """
+    manifest = Manifest.load(Path(manifest_file))
+    units = manifest.units_per_call
+    snapshots = manifest.probe.snapshots
+    console.print(f"[bold]Calls:[/bold] {len(snapshots)}")
+    console.print(f"[bold]Estimated units:[/bold] {len(snapshots) * units:,}")
+    if dry_run:
+        for snapshot in snapshots:
+            console.print(f"  would fetch {utc_isoformat(snapshot)}  {units} units")
+        console.print("\n[yellow]DRY RUN - No API calls will be made[/yellow]")
+        return
+    _require_acquisition_key()
+    console.print("\n[yellow]This will consume API quota. Continue?[/yellow]")
+    if not typer.confirm("Proceed with probe?"):
+        console.print("[red]Aborted[/red]")
+        raise typer.Exit(0)
+    checks = asyncio.run(_probe_backfill_async(manifest))
+    console.print(_probe_table(manifest, checks))
+    if not all(check.ok for check in checks):
+        raise typer.Exit(1)
+
+
+async def _probe_backfill_async(manifest: Manifest) -> list[ResponseCheck]:
+    async with BackfillExecutor(manifest) as executor:
+        return await executor.probe()
+
+
+def _probe_table(manifest: Manifest, checks: list[ResponseCheck]) -> Table:
+    table = Table(title=f"Probe, {manifest.probe.units_per_call} units expected per call")
+    for column in ("Snapshot", "Units", "Grid gaps", "Farthest fixture", "Books (events)"):
+        table.add_column(column)
+
+    def mark(ok: bool, text: str) -> str:
+        return f"[green]ok[/green] {text}" if ok else f"[red]FAIL[/red] {text}"
+
+    for check in checks:
+        books = ", ".join(
+            f"{book}/{market}: {count}" for (market, book), count in check.book_events.items()
+        )
+        table.add_row(
+            utc_isoformat(check.snapshot_time),
+            mark(check.units_ok, str(check.units)),
+            mark(
+                check.grid_ok,
+                f"{_gap(check.previous_gap)} before, {_gap(check.next_gap)} after",
+            ),
+            mark(check.lead_ok, _gap(check.farthest_lead)),
+            mark(check.books_ok, f"{books} of {check.events} events"),
+        )
+    return table
+
+
+def _gap(delta: timedelta | None) -> str:
+    return "none" if delta is None else _duration(delta)
 
 
 @app.command("status")

@@ -8,6 +8,7 @@ sources:
   - odds_cli.commands.backfill
   - odds_analytics.backfill_plan.Manifest
   - odds_analytics.backfill_executor.BackfillExecutor
+  - odds_analytics.backfill_executor.BackfillExecutor.probe
 status: stable
 ---
 
@@ -33,13 +34,21 @@ Costs a historical purchase before it is bought, buys it, and fills scores. Exec
    uv run odds backfill execute --manifest backfills/odds-api-epl-2020-26.yaml --season 2024-25 --dry-run
    ```
    - It makes no API call. It prints the calls, the units they would cost and the acquisition key's balance (unknown when no recent fetch recorded a quota), and counts the calls a backfill already stored as skipped; live Odds API snapshots do not count.
-5. Execute.
+5. Probe the manifest.
+   ```bash
+   uv run odds backfill probe --manifest backfills/odds-api-epl-2020-26.yaml --dry-run
+   uv run odds backfill probe --manifest backfills/odds-api-epl-2020-26.yaml
+   ```
+   - The dry run lists the calls and their units without a key or a database; the real run spends them on the acquisition key and stores what comes back.
+   - It exits non-zero if the billed units, the grid gaps, the farthest fixture's lead or the required books disagree with the manifest ([probe](odds-api-backfill.md#probing-a-manifest)). Fix the manifest, or stop, before executing.
+6. Execute.
    ```bash
    uv run odds backfill execute --manifest backfills/odds-api-epl-2020-26.yaml --season 2024-25
    ```
    > [!WARNING]
    > `odds backfill execute` spends paid historical quota on the acquisition key (`ODDS_API_ACQUISITION_KEY_INDEX`, which must be set), whatever the manifest's sport, 10 units per region per market per call. Confirm the prompt only when the estimated units fit the key's balance.
 
+   - Add `--max-units N` to cap the units the run may bill. The run also stops when a call's billed units differ from the manifest's or several consecutive calls return no events or lack a required book (`--max-consecutive-gaps`) ([guards](odds-api-backfill.md#executing-calls)).
    - A call that fails stops the run. Rerun the same command: calls with a stored snapshot for any fixture they serve are skipped, unless you pass `--no-skip-existing`.
    - Each call logs its real cost, and the run ends with the key's remaining quota. Backfill calls record no quota in `fetch_logs`, so `odds status quota` does not show their spend.
    - The summary's dropped games are distinct games the calls listed but no stored event took ([historical listings](../storage/event-matching.md#historical-odds-api-listings)); an `id_refused` drop names a second event holding the game's Odds API id.

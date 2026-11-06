@@ -6,15 +6,18 @@ This module contains shared fixtures for integration testing.
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import EllipsisType
 from typing import Any
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 import pytest
 from odds_analytics import backfill_executor
+from odds_analytics.backfill_checks import ResponseCheck
 from odds_analytics.backfill_executor import BackfillExecutor, BackfillResult
 from odds_analytics.backfill_plan import Call, Fixture, Manifest, Target
 from odds_core.config import APIConfig, Settings
@@ -232,14 +235,31 @@ class BackfillReplay:
         self._session = session
         self._responses: dict[str, dict[str, Any]] = {}
         self.requests: list[dict[str, Any]] = []
+        self._billed: int | None | EllipsisType = ...
+
+    def bill(self, units: int | None) -> None:
+        """Bill each later call ``units`` in ``x-requests-last`` (None: send no such header)."""
+        self._billed = units
 
     def record(
-        self, at: datetime, games: list[dict[str, Any]], *, snapshot: datetime | None = None
+        self,
+        at: datetime,
+        games: list[dict[str, Any]],
+        *,
+        snapshot: datetime | None = None,
+        previous_gap: timedelta | None = timedelta(minutes=5),
+        next_gap: timedelta | None = timedelta(minutes=5),
     ) -> None:
         """The response a call at ``at`` gets: the provider's snapshot, by default 5 minutes
-        earlier, with ``games``."""
+        earlier, with ``games`` and the neighbouring snapshots ``previous_gap`` before and
+        ``next_gap`` after it (None leaves that timestamp out)."""
         taken = snapshot or at - timedelta(minutes=5)
-        self._responses[utc_isoformat(at)] = {"timestamp": utc_isoformat(taken), "data": games}
+        response: dict[str, Any] = {"timestamp": utc_isoformat(taken), "data": games}
+        if previous_gap is not None:
+            response["previous_timestamp"] = utc_isoformat(taken - previous_gap)
+        if next_gap is not None:
+            response["next_timestamp"] = utc_isoformat(taken + next_gap)
+        self._responses[utc_isoformat(at)] = response
 
     @staticmethod
     def call(manifest: Manifest, at: datetime, *serves: Event) -> Call:
@@ -254,19 +274,16 @@ class BackfillReplay:
             ),
         )
 
-    async def run(
-        self, manifest: Manifest, calls: list[Call], *, skip_existing: bool = True
-    ) -> BackfillResult:
-        """Run ``calls``, building the client from the acquisition key as a real run does.
-        Reports each request in ``requests``."""
-        http = ReplayHttpSession(
-            self._responses,
-            {
-                "x-requests-last": str(manifest.units_per_call),
-                "x-requests-remaining": "4900000",
-                "x-requests-used": "100000",
-            },
-        )
+    @asynccontextmanager
+    async def _executor(
+        self, manifest: Manifest, **options: Any
+    ) -> AsyncIterator[BackfillExecutor]:
+        """An executor building its client from the acquisition key, as a real run does."""
+        headers = {"x-requests-remaining": "4900000", "x-requests-used": "100000"}
+        billed = manifest.units_per_call if self._billed is ... else self._billed
+        if billed is not None:
+            headers["x-requests-last"] = str(billed)
+        http = ReplayHttpSession(self._responses, headers)
         settings = Settings(
             api=APIConfig(
                 keys=f"live,nba-live,{ACQUISITION_KEY}", acquisition_key_index=2, _env_file=None
@@ -286,13 +303,24 @@ class BackfillReplay:
                 async with BackfillExecutor(
                     manifest,
                     session_factory=lambda: AsyncSession(self._engine, expire_on_commit=False),
-                    skip_existing=skip_existing,
                     rate_limit_seconds=0,
+                    **options,
                 ) as executor:
-                    return await executor.execute(calls)
+                    yield executor
         finally:
             self.requests += http.requests
             self._session.expunge_all()
+
+    async def run(
+        self, manifest: Manifest, calls: list[Call], *, skip_existing: bool = True, **options: Any
+    ) -> BackfillResult:
+        """Run ``calls``. Reports each request in ``requests``."""
+        async with self._executor(manifest, skip_existing=skip_existing, **options) as executor:
+            return await executor.execute(calls)
+
+    async def probe(self, manifest: Manifest) -> list[ResponseCheck]:
+        async with self._executor(manifest) as executor:
+            return await executor.probe()
 
 
 @pytest.fixture
