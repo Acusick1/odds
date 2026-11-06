@@ -13,6 +13,8 @@ sources:
   - .github/workflows/deploy-dev.yml
   - .github/workflows/deploy-prod.yml
   - .github/workflows/live-api.yml
+mentions:
+  - odds_core.config.APIConfig.keys
 status: stable
 ---
 
@@ -24,9 +26,9 @@ How to run the tests is in [Set up and run locally](howto-develop-locally.md#run
 
 ```
 tests/unit/         ~110 flat files across all five packages; `conftest.py` holds the OddsPortal feed fixtures
-tests/integration/  shared fixtures in conftest.py (e.g. an event with child rows (a snapshot with price rows, a paper trade and a match brief), an EPL event with a Betfair `1x2` snapshot without prices, `mixed_source_event` (an EPL event kicking off 2026-04-18 with an Odds API snapshot 3 h out and a later Polymarket one carrying mid, ask and bid price rows), and `job_session`, the test session handed to the OddsPortal and Betfair jobs as their session factory)
+tests/integration/  shared fixtures in conftest.py (e.g. an event with child rows (a snapshot with price rows, a paper trade and a match brief), an EPL event with a Betfair `1x2` snapshot without prices, `mixed_source_event` (an EPL event kicking off 2026-04-18 with an Odds API snapshot 3 h out and a later Polymarket one carrying mid, ask and bid price rows), `job_session`, the test session handed to the OddsPortal and Betfair jobs as their session factory, and `fduk_epl` and `fduk_session`, the EPL league and the test session handed to the FDUK loader, reading CSVs from `tests/fixtures/football_data_uk/`)
 tests/migration/    schema and CLI checks against a real database
-tests/fixtures/     sample Odds API JSON
+tests/fixtures/     sample Odds API JSON; trimmed FDUK CSVs (EPL and La Liga) and the EPL golden load they must reproduce
 ```
 
 ## Configuration
@@ -36,7 +38,7 @@ tests/fixtures/     sample Odds API JSON
 - `tests/test_helpers.py` builds tagged snapshots: `make_tagged_snapshot` returns a `TaggedSnapshot` dataclass (an envelope's bookmakers, a source tag and, for FDUK, a timing basis), `make_quotes` gives a unit test the `odds_core.quotes.Quote` rows the writers would store for one, and `store_tagged` stores it with its price rows through `odds_lambda.storage.shaped_snapshots.store_shaped_snapshot` in an integration test, returning the stored snapshot of its first market. It also holds `make_epl_event` and `make_nba_event`, which build an event of that sport, `StubOddsClient`, a stand-in for the Odds API client that returns canned `odds_core.api_models` responses, `RecordedHttpSession`, which serves one recorded historical response through the real client's HTTP layer, and `SessionFactory`, which hands a writer the test session as its session factory, and the gamePk helpers: `with_game_pk` marks an event to hold a gamePk, `hold_game_pks` records it as the event's `mlb_stats_api` external id, and `game_pk_of` reads it back through `odds_lambda.storage.game_pks`. A snapshot added to the session alone has no price rows, so the readers of `odds_core.quotes.quotes` see nothing. `TIER_HOURS_BEFORE` gives each fetch tier an hours-before-kick-off that lands in it.
 - Default run: `testpaths` is `tests/unit` and `tests/integration`, and `addopts` deselects `live_api`, so a bare `uv run pytest` from the repo root runs the offline suite and never collects `tests/migration` (root `pyproject.toml`). Run from a subdirectory, pytest ignores `testpaths` and collects from that directory. A path on the command line replaces `testpaths`; a second `-m` replaces the `addopts` one, so `-m live_api` selects the live tests and any other `-m` expression drops the `live_api` exclusion, while a live-API test named by path alone is still deselected.
 - Markers: `integration` tags tests in `tests/integration` (most run on py-pglite, and no run selects on it), and `live_api` tags tests that call third-party HTTP APIs, which the scheduled live-API workflow runs (`.github/workflows/live-api.yml`). CI runs the default run on the interpreter `uv sync` picks from `requires-python` ([CI/CD workflows](../operations/ci-cd-workflows.md)) and, before the tests, a `deptry` check per package for undeclared imports (`.github/workflows/test.yml`, [Dependency checks](code-conventions.md#dependency-checks)).
-- Importing the jobs, the CLI or `odds_core.alerts` builds settings (`tests/conftest.py`'s `mock_settings` fixture builds its own, with per-sport bookmakers for NBA only), so tests need a `DATABASE_URL`: pytest-env (`env` in the root `pyproject.toml`) sets `ODDS_API_KEY` to an empty string, overriding the shell (an `ODDS_API_KEYS` list in the environment or `.env` still takes precedence in `odds_core.config.APIConfig`), and CI supplies `DATABASE_URL` from a secret ([Workspace packages](workspace-packages.md#odds-core)). It overwrites `DISCORD_WEBHOOK_URL` and `DEAD_MANS_SWITCH_URL` with empty values and `ALERT_ENABLED` with `false`, so a webhook or monitor in the developer's shell or `.env` never receives test alerts or pings.
+- Importing the jobs, the CLI or `odds_core.alerts` builds settings (`tests/conftest.py`'s `mock_settings` fixture builds its own, with per-sport bookmakers for NBA only), so tests need a `DATABASE_URL`: pytest-env (`env` in the root `pyproject.toml`) sets `ODDS_API_KEY` to an empty string, overriding the shell (an `ODDS_API_KEYS` list in the environment or `.env` still takes precedence in `odds_core.config.APIConfig.keys`), and CI supplies `DATABASE_URL` from a secret ([Workspace packages](workspace-packages.md#odds-core)). It overwrites `DISCORD_WEBHOOK_URL` and `DEAD_MANS_SWITCH_URL` with empty values and `ALERT_ENABLED` with `false`, so a webhook or monitor in the developer's shell or `.env` never receives test alerts or pings.
 
 ## Unit and integration databases
 

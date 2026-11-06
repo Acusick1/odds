@@ -682,7 +682,7 @@ def _manifest() -> Manifest:
             "seasons": {
                 "2025-26": {"start": "2025-07-01T00:00:00Z", "end": "2026-07-01T00:00:00Z"}
             },
-            "markets": [{"key": "h2h"}, {"key": "totals", "line": 2.5}],
+            "markets": ["h2h", "totals"],
             "regions": ["uk"],
             "coverage": [
                 {"min_lead_minutes": 1, "max_lead_minutes": 120, "max_input_age_minutes": 10}
@@ -757,7 +757,7 @@ class TestBackfill:
         assert [
             (log.sport_key, log.events_count, log.api_quota_remaining, log.api_quota_used)
             for log in logs
-        ] == [("soccer_epl", 2, 12345, 655)]
+        ] == [("soccer_epl", 2, None, None)]
         assert (result.calls_made, result.units_used, result.fixtures_stored) == (1, 20, 2)
         assert result.quota_remaining == 12345
 

@@ -2,18 +2,26 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from scripts.ingest_football_data_uk import (
-    SEASONS,
+    BASE_URL,
+    DATA_DIR,
     UK_TZ,
+    FdukLeague,
     _build_envelope,
+    _csv_path,
     _extract_three_way_odds,
+    _extract_totals_close,
+    _season_url,
     normalize_team,
     opening_snapshot_time,
     parse_kickoff,
+    season_code,
+    seasons_since,
 )
 
 
@@ -233,28 +241,100 @@ class TestBuildSnapshotRawData:
         assert "betfair_sportsbook" in keys
 
 
+class TestTotalsClose:
+    CLOSING = {
+        "BFECH": "2.00",
+        "BFECD": "3.50",
+        "BFECA": "4.00",
+        "BFEC>2.5": "1.90",
+        "BFEC<2.5": "2.10",
+    }
+
+    def test_betfair_totals_close_joins_the_three_way_close_entry(self) -> None:
+        result = _build_envelope(self.CLOSING, "Arsenal", "Chelsea", use_closing=True)
+
+        assert result is not None
+        (entry,) = [bk for bk in result["bookmakers"] if bk["key"] == "betfair_exchange"]
+        totals = entry["markets"][1]
+        assert [m["key"] for m in entry["markets"]] == ["1x2", "totals"]
+        assert [(o["name"], o["price_decimal"], o["point"]) for o in totals["outcomes"]] == [
+            ("Over", 1.9, 2.5),
+            ("Under", 2.1, 2.5),
+        ]
+
+    def test_totals_close_without_a_three_way_close_is_its_own_entry(self) -> None:
+        row = {"BFEC>2.5": "1.90", "BFEC<2.5": "2.10"}
+        result = _build_envelope(row, "Arsenal", "Chelsea", use_closing=True)
+
+        assert result is not None
+        (entry,) = result["bookmakers"]
+        assert (entry["key"], [m["key"] for m in entry["markets"]]) == (
+            "betfair_exchange",
+            ["totals"],
+        )
+
+    def test_opening_has_no_totals(self) -> None:
+        row = {**self.CLOSING, "BFEH": "2.0", "BFED": "3.5", "BFEA": "4.0", "BFE>2.5": "1.9"}
+        result = _build_envelope(row, "Arsenal", "Chelsea", use_closing=False)
+
+        assert result is not None
+        assert [m["key"] for bk in result["bookmakers"] for m in bk["markets"]] == ["1x2"]
+
+    @pytest.mark.parametrize(
+        "row",
+        [
+            {"BFEC>2.5": "1.90"},
+            {"BFEC>2.5": "1.90", "BFEC<2.5": ""},
+            {"BFEC>2.5": "1.90", "BFEC<2.5": "1.0"},
+            {"BFEC>2.5": "n/a", "BFEC<2.5": "2.10"},
+        ],
+    )
+    def test_a_missing_or_invalid_side_gives_no_totals_close(self, row: dict[str, str]) -> None:
+        assert _extract_totals_close(row, "BFE") is None
+
+    def test_other_books_get_no_totals_close(self) -> None:
+        row = {
+            "B365CH": "2.0",
+            "B365CD": "3.5",
+            "B365CA": "4.0",
+            "B365C>2.5": "1.9",
+            "B365C<2.5": "2.1",
+        }
+        result = _build_envelope(row, "Arsenal", "Chelsea", use_closing=True)
+
+        assert result is not None
+        assert [m["key"] for bk in result["bookmakers"] for m in bk["markets"]] == ["1x2"]
+
+
 class TestParseKickoff:
     def test_winter_kickoff_is_gmt(self) -> None:
-        kickoff = parse_kickoff({"Date": "01/01/2025", "Time": "15:00"})
+        kickoff = parse_kickoff({"Date": "01/01/2025", "Time": "15:00"}, UK_TZ)
         assert kickoff.commence_time == datetime(2025, 1, 1, 15, 0, tzinfo=UTC)
         assert not kickoff.time_assumed
 
     def test_summer_kickoff_converts_bst_to_utc(self) -> None:
-        kickoff = parse_kickoff({"Date": "16/08/2024", "Time": "20:00"})
+        kickoff = parse_kickoff({"Date": "16/08/2024", "Time": "20:00"}, UK_TZ)
         assert kickoff.commence_time == datetime(2024, 8, 16, 19, 0, tzinfo=UTC)
 
     def test_two_digit_year(self) -> None:
-        kickoff = parse_kickoff({"Date": "13/08/16", "Time": "12:30"})
+        kickoff = parse_kickoff({"Date": "13/08/16", "Time": "12:30"}, UK_TZ)
         assert kickoff.commence_time == datetime(2016, 8, 13, 11, 30, tzinfo=UTC)
 
     @pytest.mark.parametrize("row", [{"Date": "17/08/2024"}, {"Date": "17/08/2024", "Time": ""}])
     def test_missing_time_assumes_1500_local(self, row: dict[str, str]) -> None:
-        kickoff = parse_kickoff(row)
+        kickoff = parse_kickoff(row, UK_TZ)
         assert kickoff.commence_time == datetime(2024, 8, 17, 14, 0, tzinfo=UTC)
         assert kickoff.time_assumed
 
+    def test_reads_the_time_in_the_given_timezone(self) -> None:
+        kickoff = parse_kickoff({"Date": "16/08/2024", "Time": "20:00"}, ZoneInfo("Europe/Madrid"))
+        assert kickoff.commence_time == datetime(2024, 8, 16, 18, 0, tzinfo=UTC)
+
     def test_result_is_utc(self) -> None:
-        assert parse_kickoff({"Date": "01/01/2025", "Time": "15:00"}).commence_time.tzinfo == UTC
+        assert (
+            parse_kickoff({"Date": "01/01/2025", "Time": "15:00"}, UK_TZ).commence_time.tzinfo
+            == UTC
+        )
 
 
 class TestOpeningSnapshotTime:
@@ -364,5 +444,37 @@ class TestDuplicateBookmakerKeys:
 
 
 class TestSeasons:
-    def test_2026_2027_registered(self) -> None:
-        assert SEASONS["2026-2027"] == "2627"
+    @pytest.mark.parametrize(
+        ("season", "code"), [("2015-2016", "1516"), ("2020-2021", "2021"), ("2026-2027", "2627")]
+    )
+    def test_season_code(self, season: str, code: str) -> None:
+        assert season_code(season) == code
+
+    @pytest.mark.parametrize("season", ["2024-2026", "2024/2025", "24-25", "2024-2025 "])
+    def test_malformed_season_is_rejected(self, season: str) -> None:
+        with pytest.raises(ValueError, match="2024-2025"):
+            season_code(season)
+
+    @pytest.mark.parametrize(
+        ("today", "last"),
+        [(date(2026, 6, 30), "2025-2026"), (date(2026, 7, 1), "2026-2027")],
+    )
+    def test_seasons_since_end_at_the_current_season(self, today: date, last: str) -> None:
+        seasons = seasons_since("2023-2024", today)
+        assert seasons[0] == "2023-2024"
+        assert seasons[-1] == last
+
+    def test_seasons_since_rejects_a_malformed_first_season(self) -> None:
+        with pytest.raises(ValueError):
+            seasons_since("2023", date(2026, 1, 1))
+
+    def test_seasons_since_rejects_a_season_not_yet_started(self) -> None:
+        with pytest.raises(ValueError, match="not started"):
+            seasons_since("2026-2027", date(2026, 6, 30))
+
+
+class TestLeagueFiles:
+    def test_url_and_path_name_the_league_and_season(self) -> None:
+        league = FdukLeague("SP1", "soccer_spain_la_liga", "La Liga")
+        assert _season_url(league, "2024-2025") == f"{BASE_URL}/2425/SP1.csv"
+        assert _csv_path(league, "2024-2025") == DATA_DIR / "SP1_2425.csv"

@@ -786,6 +786,22 @@ class TestValidateCandidateRules:
         resolve_rule(_candidate(sport=sport, market=market))
 
     @pytest.mark.parametrize(
+        "sport",
+        [
+            "soccer_efl_champ",
+            "soccer_spain_la_liga",
+            "soccer_italy_serie_a",
+            "soccer_germany_bundesliga",
+            "soccer_france_ligue_one",
+        ],
+    )
+    @pytest.mark.parametrize("market", ["1x2", "totals"])
+    def test_each_football_league_decides_the_three_way_and_totals(
+        self, sport: str, market: str
+    ) -> None:
+        resolve_rule(_candidate(sport=sport, market=market))
+
+    @pytest.mark.parametrize(
         ("sport", "market"),
         [("soccer_epl", "h2h"), ("baseball_mlb", "1x2"), ("basketball_nba", "totals")],
     )

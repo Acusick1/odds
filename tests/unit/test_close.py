@@ -347,6 +347,23 @@ class TestCloseDefinedPerSport:
         assert close_spec("soccer_epl", "totals") is not None
         assert close_spec("basketball_nba", "h2h") is not None
 
+    @pytest.mark.parametrize(
+        "sport",
+        [
+            "soccer_efl_champ",
+            "soccer_spain_la_liga",
+            "soccer_italy_serie_a",
+            "soccer_germany_bundesliga",
+            "soccer_france_ligue_one",
+        ],
+    )
+    def test_fduk_leagues_close_the_three_way_and_totals_by_fduk(self, sport: str) -> None:
+        for market in ("1x2", "totals"):
+            spec = close_spec(sport, market)
+            assert spec is not None and spec.fallback == FDUK_CLOSE_SPEC
+        assert close_spec(sport, "h2h") is None
+        assert close_grace(sport, "1x2") == timedelta(days=7)
+
     def test_mlb_h2h_has_no_close(self) -> None:
         mlb = make_nba_event(3, KICKOFF, sport_key="baseball_mlb")
         quoted = _nba_betfair(5, BETFAIR_NBA)

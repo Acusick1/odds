@@ -35,9 +35,15 @@ from odds_lambda.candidate_rules.market_state import Line, MarketState, load_mar
 
 # What a bet is on: an outcome on a line, the line None in a market without lines.
 Selection = tuple[Outcome, Line]
+_FOOTBALL_MARKETS = frozenset({Market.ONE_X_TWO, Market.TOTALS})
 # The markets a candidate of each sport can decide.
 SPORT_MARKETS: dict[str, frozenset[Market]] = {
-    "soccer_epl": frozenset({Market.ONE_X_TWO, Market.TOTALS}),
+    "soccer_epl": _FOOTBALL_MARKETS,
+    "soccer_efl_champ": _FOOTBALL_MARKETS,
+    "soccer_spain_la_liga": _FOOTBALL_MARKETS,
+    "soccer_italy_serie_a": _FOOTBALL_MARKETS,
+    "soccer_germany_bundesliga": _FOOTBALL_MARKETS,
+    "soccer_france_ligue_one": _FOOTBALL_MARKETS,
     "baseball_mlb": frozenset({Market.H2H, Market.TOTALS}),
     "basketball_nba": frozenset({Market.H2H}),
 }

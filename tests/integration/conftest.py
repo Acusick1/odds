@@ -7,6 +7,8 @@ This module contains shared fixtures for integration testing.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 from odds_core.models import Event, OddsSnapshot
@@ -15,6 +17,8 @@ from odds_lambda import collection_calendar
 from odds_lambda.jobs import fetch_betfair_exchange, fetch_oddsportal
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from scripts import ingest_football_data_uk
+from scripts.ingest_football_data_uk import FdukLeague
 from tests.test_helpers import (
     TWIN_EVENT_ID,
     TWIN_KICKOFF,
@@ -43,6 +47,35 @@ def job_session(
 
     for module in (fetch_oddsportal, fetch_betfair_exchange, collection_calendar):
         monkeypatch.setattr(module, "async_session_maker", _Maker())
+    return pglite_async_session
+
+
+FDUK_FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "football_data_uk"
+
+
+@pytest.fixture
+def fduk_epl() -> FdukLeague:
+    return FdukLeague("E0", "soccer_epl", "EPL", ZoneInfo("Europe/London"))
+
+
+@pytest.fixture
+def fduk_session(
+    pglite_async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> AsyncSession:
+    """The test session, handed to the FDUK loader as its session, reading the fixture CSVs."""
+
+    class _Maker:
+        def __call__(self) -> _Maker:
+            return self
+
+        async def __aenter__(self) -> AsyncSession:
+            return pglite_async_session
+
+        async def __aexit__(self, *args: object) -> bool:
+            return False
+
+    monkeypatch.setattr(ingest_football_data_uk, "async_session_maker", _Maker())
+    monkeypatch.setattr(ingest_football_data_uk, "DATA_DIR", FDUK_FIXTURES)
     return pglite_async_session
 
 

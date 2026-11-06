@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Any, Literal
 
 import structlog
+from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_core.models import FetchLog, OddsSnapshot
 from odds_core.time import utc_isoformat
@@ -77,8 +78,9 @@ class BackfillExecutor:
     ):
         """
         Args:
-            manifest: Fixes the sport (whose key pays), markets, and bookmakers or regions
-            client: API client (one is created and closed with the executor if not given)
+            manifest: Fixes the sport, markets, and bookmakers or regions
+            client: API client (one spending ``APIConfig.acquisition_key`` is created and closed
+                with the executor if not given, except in a dry run, which needs none)
             session_factory: Creates database sessions (defaults to ``async_session_maker``)
             skip_existing: Skip a call when every fixture it serves already has the snapshot it
                 would return
@@ -94,8 +96,8 @@ class BackfillExecutor:
         self.rate_limit_seconds = rate_limit_seconds
 
     async def __aenter__(self) -> "BackfillExecutor":
-        if self._owns_client:
-            self._client = TheOddsAPIClient()
+        if self._owns_client and not self.dry_run:
+            self._client = TheOddsAPIClient(api_key=get_settings().api.acquisition_key())
             await self._client.__aenter__()
         return self
 
@@ -158,7 +160,7 @@ class BackfillExecutor:
         response = await client.get_historical_odds(
             sport=manifest.sport,
             date=utc_isoformat(call.time),
-            markets=[str(market.key) for market in manifest.markets],
+            markets=[str(market) for market in manifest.markets],
             regions=list(manifest.regions) or None,
             bookmakers=list(manifest.bookmakers) or None,
         )
@@ -210,8 +212,6 @@ class BackfillExecutor:
                         }
                     ),
                     success=True,
-                    api_quota_remaining=response.quota_remaining,
-                    api_quota_used=response.quota_used,
                     response_time_ms=response.response_time_ms,
                 )
             )
@@ -228,8 +228,8 @@ class BackfillExecutor:
     async def _log_failed_fetch(
         self, client: TheOddsAPIClient, result: BackfillResult, error: Exception
     ) -> None:
-        """Record a failed call's fetch log in its own transaction, so the key's last balance
-        survives the call's rollback."""
+        """Record a failed call's fetch log in its own transaction, so it survives the call's
+        rollback."""
         result.quota_remaining = client.quota_remaining
         async with self._session_factory() as session:
             await OddsWriter(session).log_fetch(
@@ -239,8 +239,6 @@ class BackfillExecutor:
                     bookmakers_count=0,
                     success=False,
                     error_message=f"{type(error).__name__}: {error}",
-                    api_quota_remaining=client.quota_remaining,
-                    api_quota_used=client.quota_used,
                 )
             )
             await session.commit()
@@ -254,8 +252,8 @@ class BackfillExecutor:
         # Soccer's three-way h2h is stored as 1x2 (odds_core.utils.relabel_three_way_markets).
         markets = {
             Market.ONE_X_TWO
-            if market.key == Market.H2H and is_three_way_sport(self.manifest.sport)
-            else Market(market.key)
+            if market == Market.H2H and is_three_way_sport(self.manifest.sport)
+            else Market(market)
             for market in self.manifest.markets
         }
         step = self.manifest.grid_step_at(call.time)

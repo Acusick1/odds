@@ -39,7 +39,7 @@ sources:
   - odds_cli.commands.nba_stats
   - odds_cli.commands.pbpstats
   - odds_analytics.injury_features.nba_seasons_through
-  - odds_cli.commands.backfill
+  - odds_cli.commands.backfill.backfill_scores
 status: stable
 ---
 

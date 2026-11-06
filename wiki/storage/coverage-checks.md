@@ -22,7 +22,7 @@ sources:
   - odds_lambda.fetch_tier.FetchTier.max_hours
   - odds_cli.commands.validate
   - odds_cli.commands.quality
-  - scripts/check_games_in_database.py
+  - scripts.check_games_in_database.check_upcoming_games
 status: stable
 ---
 

@@ -1,22 +1,27 @@
 #!/usr/bin/env python3
-"""Ingest football-data.co.uk EPL CSVs into the database.
+"""Ingest football-data.co.uk league CSVs into the database.
 
-Downloads CSVs from football-data.co.uk and stores each match's opening and closing
-prices as ``football_data_uk`` snapshots with their price rows, through the same
-envelope writer as ingest_oddsportal.py.
+Downloads a league's season CSVs (main layout, ``mmz4281/<season>/<code>.csv``) from
+football-data.co.uk and stores each match's opening and closing prices as
+``football_data_uk`` snapshots with their price rows, through the same envelope writer
+as ingest_oddsportal.py. The closing snapshot also carries the Betfair Exchange over/under 2.5
+close as a ``totals`` market.
 
 Usage:
-    # Download and ingest all seasons (dry-run first)
-    uv run python scripts/ingest_football_data_uk.py --all --dry-run
+    # EPL from 2015-2016 to the current season (dry-run first)
+    uv run python scripts/ingest_football_data_uk.py \
+        --league E0 --sport-key soccer_epl --sport-title EPL --since 2015-2016 --dry-run
 
-    # Ingest specific seasons
-    uv run python scripts/ingest_football_data_uk.py --seasons 2024-2025
+    # Specific seasons of another league
+    uv run python scripts/ingest_football_data_uk.py \
+        --league SP1 --sport-key soccer_spain_la_liga --sport-title "La Liga" \
+        --seasons 2024-2025 2025-2026
 
     # Ingest from already-downloaded CSVs
-    uv run python scripts/ingest_football_data_uk.py --all --no-download
+    uv run python scripts/ingest_football_data_uk.py <league options> --seasons 2024-2025 --no-download
 
     # Download only (no database writes)
-    uv run python scripts/ingest_football_data_uk.py --all --download-only
+    uv run python scripts/ingest_football_data_uk.py <league options> --seasons 2024-2025 --download-only
 """
 
 from __future__ import annotations
@@ -27,13 +32,15 @@ import csv
 import io
 import logging
 import math
+import re
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot, Price, SnapshotPayload
@@ -51,7 +58,7 @@ from odds_lambda.storage.event_resolver import (
     resolve_event,
 )
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload, store_shaped_snapshot
-from odds_lambda.storage.snapshot_store import PriceRow, price_row
+from odds_lambda.storage.snapshot_store import PriceRow, SnapshotWriteOutcome, price_row
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from team_names import normalize_team as _normalize_team_central
@@ -66,26 +73,13 @@ log = logging.getLogger("ingest_football_data_uk")
 DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "football_data_uk"
 BASE_URL = "https://www.football-data.co.uk/mmz4281"
 SOURCE_TAG = "football_data_uk"
-SPORT_KEY = "soccer_epl"
-SPORT_TITLE = "EPL"
 MARKET_KEY = "1x2"
+TOTALS_MARKET_KEY = "totals"
+# FDUK's main layout carries one totals line, over/under 2.5 goals.
+TOTALS_LINE = 2.5
 KICKOFF_MISMATCH_TOLERANCE = timedelta(minutes=15)
-
-# Season label → URL path segment
-SEASONS: dict[str, str] = {
-    "2015-2016": "1516",
-    "2016-2017": "1617",
-    "2017-2018": "1718",
-    "2018-2019": "1819",
-    "2019-2020": "1920",
-    "2020-2021": "2021",
-    "2021-2022": "2122",
-    "2022-2023": "2223",
-    "2023-2024": "2324",
-    "2024-2025": "2425",
-    "2025-2026": "2526",
-    "2026-2027": "2627",
-}
+SEASON_LABEL = re.compile(r"(\d{4})-(\d{4})")
+SEASON_START_MONTH = 7
 
 # Bookmaker column prefixes → pipeline bookmaker key.
 # Each entry maps (home_col, draw_col, away_col) derived from prefix + H/D/A.
@@ -117,6 +111,11 @@ AGGREGATE_PREFIXES: dict[str, str] = {
 }
 
 
+# Column prefixes whose closing over/under 2.5 prices are stored on the closing snapshot, so
+# the Betfair Exchange totals close has a fallback where live collection never ran.
+TOTALS_CLOSE_PREFIXES: dict[str, str] = {"BFE": "betfair_exchange"}
+
+
 class FdukTimeBasis(StrEnum):
     """``timing.basis`` of a football-data.co.uk envelope: what its snapshot time means."""
 
@@ -126,6 +125,16 @@ class FdukTimeBasis(StrEnum):
 
 UK_TZ = ZoneInfo("Europe/London")
 DEFAULT_KICKOFF = time(15, 0)
+
+
+@dataclass(frozen=True)
+class FdukLeague:
+    """A football-data.co.uk league and the sport its events are stored under."""
+
+    code: str
+    sport_key: str
+    sport_title: str
+    timezone: ZoneInfo = UK_TZ
 
 
 @dataclass(frozen=True)
@@ -162,22 +171,37 @@ def normalize_team(name: str) -> str:
     return _normalize_team_central(name)
 
 
-def _season_url(season: str) -> str:
+def season_code(season: str) -> str:
+    """The URL path segment of a season label: ``2024-2025`` is ``2425``."""
+    match = SEASON_LABEL.fullmatch(season)
+    if match is None or int(match[2]) != int(match[1]) + 1:
+        raise ValueError(f"Season must look like 2024-2025, got {season!r}")
+    return f"{match[1][2:]}{match[2][2:]}"
+
+
+def seasons_since(first: str, today: date) -> list[str]:
+    """Season labels from ``first`` through the season under way on ``today``."""
+    season_code(first)
+    current = today.year if today.month >= SEASON_START_MONTH else today.year - 1
+    if int(first[:4]) > current:
+        raise ValueError(f"Season {first} has not started yet")
+    return [f"{year}-{year + 1}" for year in range(int(first[:4]), current + 1)]
+
+
+def _season_url(league: FdukLeague, season: str) -> str:
     """Build CSV download URL for a season."""
-    code = SEASONS[season]
-    return f"{BASE_URL}/{code}/E0.csv"
+    return f"{BASE_URL}/{season_code(season)}/{league.code}.csv"
 
 
-def _csv_path(season: str) -> Path:
+def _csv_path(league: FdukLeague, season: str) -> Path:
     """Local CSV storage path for a season."""
-    code = SEASONS[season]
-    return DATA_DIR / f"E0_{code}.csv"
+    return DATA_DIR / f"{league.code}_{season_code(season)}.csv"
 
 
-def download_csv(season: str) -> Path:
+def download_csv(league: FdukLeague, season: str) -> Path:
     """Download a season CSV from football-data.co.uk."""
-    url = _season_url(season)
-    path = _csv_path(season)
+    url = _season_url(league, season)
+    path = _csv_path(league, season)
     path.parent.mkdir(parents=True, exist_ok=True)
 
     with urlopen(url, timeout=30) as resp:  # noqa: S310
@@ -198,8 +222,8 @@ def read_csv(path: Path) -> list[dict[str, str]]:
     return [row for row in reader if row.get("HomeTeam")]
 
 
-def parse_kickoff(row: dict[str, str]) -> Kickoff:
-    """Parse the match date and UK-local kick-off time into a UTC instant.
+def parse_kickoff(row: dict[str, str], tz: ZoneInfo) -> Kickoff:
+    """Parse the match date and ``tz``-local kick-off time into a UTC instant.
 
     Date format is DD/MM/YYYY or DD/MM/YY. Seasons before 2019-20 have no Time
     column; those kick-offs are assumed to be 15:00 and flagged.
@@ -208,7 +232,7 @@ def parse_kickoff(row: dict[str, str]) -> Kickoff:
     time_str = (row.get("Time") or "").strip()
     fmt = "%d/%m/%Y" if len(date_str.split("/")[-1]) == 4 else "%d/%m/%y"
     kickoff = time_str or DEFAULT_KICKOFF.strftime("%H:%M")
-    local = datetime.strptime(f"{date_str} {kickoff}", f"{fmt} %H:%M").replace(tzinfo=UK_TZ)
+    local = datetime.strptime(f"{date_str} {kickoff}", f"{fmt} %H:%M").replace(tzinfo=tz)
     return Kickoff(commence_time=local.astimezone(UTC), time_assumed=not time_str)
 
 
@@ -285,6 +309,21 @@ def _extract_three_way_odds(
     }
 
 
+def _extract_totals_close(row: dict[str, str], prefix: str) -> dict[str, Any] | None:
+    """Extract a bookmaker's closing over/under 2.5 prices from a CSV row."""
+    over = _safe_float(row.get(f"{prefix}C>{TOTALS_LINE}"))
+    under = _safe_float(row.get(f"{prefix}C<{TOTALS_LINE}"))
+    if over is None or under is None or over <= 1.0 or under <= 1.0:
+        return None
+    return {
+        "key": TOTALS_MARKET_KEY,
+        "outcomes": [
+            {"name": "Over", PRICE_DECIMAL_KEY: over, "point": TOTALS_LINE},
+            {"name": "Under", PRICE_DECIMAL_KEY: under, "point": TOTALS_LINE},
+        ],
+    }
+
+
 # Match stats columns: (csv_column, json_key) pairs.
 # These are post-match stats from the FDUK CSVs, kept in the archived envelope.
 MATCH_STATS_COLUMNS: list[tuple[str, str]] = [
@@ -351,6 +390,9 @@ def _build_envelope(
             seen.add(bk_key)
             bookmakers.append(bk_data)
 
+    if use_closing:
+        _add_totals_close(row, bookmakers)
+
     if not bookmakers:
         return None
 
@@ -368,19 +410,34 @@ def _build_envelope(
     return envelope
 
 
+def _add_totals_close(row: dict[str, str], bookmakers: list[dict[str, Any]]) -> None:
+    """Add the closing totals market of each ``TOTALS_CLOSE_PREFIXES`` book to its entry in
+    ``bookmakers``, or as an entry of its own when the book has no three-way close."""
+    for prefix, bk_key in TOTALS_CLOSE_PREFIXES.items():
+        market = _extract_totals_close(row, prefix)
+        if market is None:
+            continue
+        entry = next((bk for bk in bookmakers if bk["key"] == bk_key), None)
+        if entry is None:
+            entry = {"key": bk_key, "title": bk_key, "last_update": "", "markets": []}
+            bookmakers.append(entry)
+        entry["markets"].append(market)
+
+
 async def ingest_season(
+    league: FdukLeague,
     season: str,
     *,
     dry_run: bool = False,
     no_download: bool = False,
 ) -> FdukStats:
-    """Ingest one season of football-data.co.uk data."""
+    """Ingest one season of a league's football-data.co.uk data."""
     stats = FdukStats()
 
-    path = _csv_path(season)
+    path = _csv_path(league, season)
     if not no_download:
         try:
-            path = download_csv(season)
+            path = download_csv(league, season)
         except OSError as e:
             log.error(f"  {season}: download failed — {e}")
             stats.errors.append(f"{season}: download failed — {e}")
@@ -404,7 +461,7 @@ async def ingest_season(
 
     async with async_session_maker() as session:
         for row in rows:
-            await ingest_row(session, row, stats)
+            await ingest_row(session, league, row, stats)
             # One commit per match releases the fixture lock the resolver took.
             await session.commit()
 
@@ -413,13 +470,14 @@ async def ingest_season(
 
 async def ingest_row(
     session: AsyncSession,
+    league: FdukLeague,
     row: dict[str, str],
     stats: FdukStats,
 ) -> None:
     """Ingest one CSV row in a savepoint so a failure leaves the event's rows untouched."""
     try:
         async with session.begin_nested():
-            await _ingest_one_match(session, row, stats)
+            await _ingest_one_match(session, league, row, stats)
     except AmbiguousHistoricalMatch as e:
         stats.games_skipped += 1
         log.warning(f"  Skipped: {e}")
@@ -437,17 +495,24 @@ def _report_dry_run(season: str, rows: list[dict[str, str]]) -> None:
     has_pinnacle_closing = sum(1 for r in rows if _safe_float(r.get("PSCH")))
     has_bet365_closing = sum(1 for r in rows if _safe_float(r.get("B365CH")))
     has_betfair = sum(1 for r in rows if _safe_float(r.get("BFEH")))
+    has_betfair_close = sum(
+        1 for r in rows if _extract_three_way_odds(r, "BFEC", "betfair_exchange", "", "")
+    )
+    has_betfair_totals_close = sum(1 for r in rows if _extract_totals_close(r, "BFE"))
 
     log.info(
         f"  {season}: Pinnacle opening={has_pinnacle_opening}, "
         f"Pinnacle closing={has_pinnacle_closing}, "
         f"bet365 closing={has_bet365_closing}, "
-        f"Betfair={has_betfair}"
+        f"Betfair={has_betfair}, "
+        f"Betfair close={has_betfair_close}, "
+        f"Betfair totals close={has_betfair_totals_close}"
     )
 
 
 async def _ingest_one_match(
     session: AsyncSession,
+    league: FdukLeague,
     row: dict[str, str],
     stats: FdukStats,
 ) -> None:
@@ -460,14 +525,14 @@ async def _ingest_one_match(
 
     home_team = normalize_team(home_raw)
     away_team = normalize_team(away_raw)
-    kickoff = parse_kickoff(row)
+    kickoff = parse_kickoff(row, league.timezone)
 
     resolved = await resolve_event(
         session,
         ListedGame(
             source=Source.FOOTBALL_DATA_UK,
-            sport_key=SPORT_KEY,
-            sport_title=SPORT_TITLE,
+            sport_key=league.sport_key,
+            sport_title=league.sport_title,
             home_team=home_team,
             away_team=away_team,
             commence_time=kickoff.commence_time,
@@ -540,9 +605,9 @@ async def _ingest_one_match(
         .scalars()
         .all()
     )
-    if [await _stored_content(session, snap) for snap in existing_snaps] == [
-        _new_content(event, snap) for snap in new_snapshots
-    ]:
+    if Counter([await _stored_content(session, snap) for snap in existing_snaps]) == Counter(
+        content for snap in new_snapshots for content in _new_contents(event, snap)
+    ):
         return
     if existing_snaps:
         referenced = await _referenced_by_decisions(session, [snap.id for snap in existing_snaps])
@@ -571,8 +636,11 @@ async def _ingest_one_match(
             snap.snapshot_time,
             SnapshotShape(Source.FOOTBALL_DATA_UK, snap.time_basis, payload_id),
         )
-        if write.inserted:
-            stats.snapshots_inserted += 1
+        stats.snapshots_inserted += sum(
+            1
+            for market_write in (write.first, *write.others)
+            if market_write is None or market_write.outcome is SnapshotWriteOutcome.INSERTED
+        )
 
 
 async def _delete_snapshots(session: AsyncSession, snapshots: list[OddsSnapshot]) -> None:
@@ -599,21 +667,37 @@ class NewSnapshot:
     time_basis: TimeBasis
 
 
-# What a re-ingest compares: a snapshot's time basis, time and price rows.
-SnapshotContent = tuple[TimeBasis | None, datetime, frozenset[PriceRow]]
+# What a re-ingest compares: a stored snapshot's time basis, time, market and price rows.
+SnapshotContent = tuple[TimeBasis | None, datetime, str | None, frozenset[PriceRow]]
 
 
 async def _stored_content(session: AsyncSession, snap: OddsSnapshot) -> SnapshotContent:
     prices = (await session.execute(select(Price).where(Price.snapshot_id == snap.id))).scalars()
-    return (snap.time_basis, snap.snapshot_time, frozenset(price_row(p) for p in prices))
+    return (
+        snap.time_basis,
+        snap.snapshot_time,
+        snap.market,
+        frozenset(price_row(p) for p in prices),
+    )
 
 
-def _new_content(event: Event, snap: NewSnapshot) -> SnapshotContent:
+def _new_contents(event: Event, snap: NewSnapshot) -> list[SnapshotContent]:
+    """The contents of the snapshots ``store_shaped_snapshot`` writes for ``snap``, one per
+    market."""
     expanded = expand_envelope(
         snap.envelope, Source.FOOTBALL_DATA_UK, event.home_team, event.away_team
     )
-    rows = frozenset(_spec_row(spec) for market in expanded.markets for spec in market.prices)
-    return (snap.time_basis, snap.snapshot_time, rows)
+    if not expanded.markets:
+        return [(snap.time_basis, snap.snapshot_time, None, frozenset())]
+    return [
+        (
+            snap.time_basis,
+            snap.snapshot_time,
+            market.market,
+            frozenset(_spec_row(spec) for spec in market.prices),
+        )
+        for market in expanded.markets
+    ]
 
 
 def _spec_row(spec: PriceSpec) -> PriceRow:
@@ -643,18 +727,31 @@ async def _referenced_by_decisions(session: AsyncSession, snapshot_ids: list[int
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Ingest football-data.co.uk EPL data into the database"
+        description="Ingest a football-data.co.uk league into the database"
     )
     parser.add_argument(
+        "--league", required=True, help="football-data.co.uk league code (e.g. E0, SP1)"
+    )
+    parser.add_argument(
+        "--sport-key", required=True, help="Sport key of the events (e.g. soccer_epl)"
+    )
+    parser.add_argument(
+        "--sport-title", required=True, help="Sport title of created events (e.g. EPL)"
+    )
+    parser.add_argument(
+        "--timezone",
+        default=UK_TZ.key,
+        help=f"Timezone of the CSV's Date and Time columns (default {UK_TZ.key})",
+    )
+    season_group = parser.add_mutually_exclusive_group(required=True)
+    season_group.add_argument(
         "--seasons",
         nargs="+",
-        default=None,
         help="Seasons to ingest (e.g. 2024-2025)",
     )
-    parser.add_argument(
-        "--all",
-        action="store_true",
-        help="Ingest all available seasons (2015-2027)",
+    season_group.add_argument(
+        "--since",
+        help="Ingest every season from this one (e.g. 2015-2016) through the current one",
     )
     parser.add_argument(
         "--dry-run",
@@ -673,18 +770,24 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if args.all:
-        seasons = list(SEASONS.keys())
-    elif args.seasons:
-        for s in args.seasons:
-            if s not in SEASONS:
-                parser.error(f"Unknown season: {s}. Available: {list(SEASONS.keys())}")
-        seasons = args.seasons
-    else:
-        parser.error("Specify --seasons or --all")
+    try:
+        tz = ZoneInfo(args.timezone)
+    except (ZoneInfoNotFoundError, ValueError):
+        parser.error(f"Unknown timezone: {args.timezone!r}")
+    league = FdukLeague(args.league, args.sport_key, args.sport_title, tz)
+    try:
+        if args.since:
+            seasons = seasons_since(args.since, datetime.now(UTC).date())
+        else:
+            seasons = args.seasons
+            for season in seasons:
+                season_code(season)
+    except ValueError as e:
+        parser.error(str(e))
 
     asyncio.run(
         _run(
+            league,
             seasons,
             dry_run=args.dry_run,
             no_download=args.no_download,
@@ -694,6 +797,7 @@ def main() -> None:
 
 
 async def _run(
+    league: FdukLeague,
     seasons: list[str],
     *,
     dry_run: bool,
@@ -707,7 +811,7 @@ async def _run(
 
         if download_only:
             try:
-                download_csv(season)
+                download_csv(league, season)
                 totals.seasons_downloaded += 1
             except OSError as e:
                 log.error(f"  {season}: download failed — {e}")
@@ -715,6 +819,7 @@ async def _run(
             continue
 
         stats = await ingest_season(
+            league,
             season,
             dry_run=dry_run,
             no_download=no_download,

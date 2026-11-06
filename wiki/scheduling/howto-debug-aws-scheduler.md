@@ -3,7 +3,7 @@ type: howto
 title: Debug the AWS self-scheduling jobs
 description: A read-only workflow for stale data or missing tiers on AWS covering rules, CloudWatch logs, database versus fixtures, tier coverage and a safe manual invoke.
 sources:
-  - scripts/check_games_in_database.py
+  - scripts.check_games_in_database.check_upcoming_games
   - scripts/verify-schedules.sh
   - odds_lambda.scheduling.decision
   - odds_lambda.scheduling.backends.aws
@@ -25,7 +25,7 @@ Use when data looks stale or a tier is missing. Background: [Self-scheduling](se
 
 Deployed Lambda and rule state cannot be verified from the repo; every command below checks the live account. The AWS stack is dormant, with its rules disabled, and production runs on a single local host ([Where each job runs](job-deployment-matrix.md#dormant-aws-rules)); a disabled rule is the expected state, not a dead chain. For stale data in production, start from `odds scheduler list-jobs` on the production host and any `stale_data:<source>:<sport>:<market>` or `dead_schedule_chain` alert ([Local scheduler](local-scheduler.md#cli)).
 
-**Safety:** against production use only read-only commands: `scripts/check_games_in_database.py` and `odds validate`. Never run migrations, `odds fetch` or any write there ([Databases and environments](../foundations/databases-and-environments.md)). The Lambdas' database is the Neon archive, which `PROD_DATABASE_URL` names on existing machines; point a script at it with `DATABASE_URL="<archive_url>"` ([environments](../foundations/databases-and-environments.md#environments)).
+**Safety:** against production use only read-only commands: `scripts.check_games_in_database.check_upcoming_games` and `odds validate`. Never run migrations, `odds fetch` or any write there ([Databases and environments](../foundations/databases-and-environments.md)). The Lambdas' database is the Neon archive, which `PROD_DATABASE_URL` names on existing machines; point a script at it with `DATABASE_URL="<archive_url>"` ([environments](../foundations/databases-and-environments.md#environments)).
 
 ## Where things are
 

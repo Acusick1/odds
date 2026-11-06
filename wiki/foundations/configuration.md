@@ -15,13 +15,12 @@ sources:
   - odds_core.alerts.alert_manager
   - odds_cli.db_override.override_database_url
   - odds_lambda.scheduling.backends.aws
-  - .env.example
 status: stable
 ---
 
 # Configuration (Settings)
 
-`odds_core.config` defines operator settings and environment names. `odds_core.job_specs.JOB_SPECS` owns scheduling metadata and supplies default bootstrap membership, heartbeat expectations and forward polling cadences. `odds_core.config.SchedulerConfig.bootstrap_jobs` and `odds_core.config.AlertConfig.heartbeat_expectations` remain environment overrides; other defaults, including alert reminder intervals, belong to their settings classes. No setting names a season or its months: collectors go dormant from the fixture calendar ([dormancy](../scheduling/decision-engine.md#dormancy)). Per-sport Polymarket identifiers live in `odds_lambda.polymarket_sports.POLYMARKET_SPORTS`. `odds_core.config.Settings` composes one `BaseSettings` class per concern; `odds_core.config.get_settings()` returns a cached instance and `odds_core.config.reset_settings_cache()` clears it. `odds_core.config.Settings.alerts_deliverable` is the one switch the alert paths read: `alert_enabled` and not `SCHEDULER_DRY_RUN`. `.env.example` is the variable template. The `project_root` field of `odds_core.config.Settings` is the repo root derived from the file location. To add a field, see [Set up and run locally](howto-add-setting.md).
+`odds_core.config` defines operator settings and environment names. `odds_core.job_specs.JOB_SPECS` owns scheduling metadata and supplies default bootstrap membership, heartbeat expectations and forward polling cadences. `odds_core.config.SchedulerConfig.bootstrap_jobs` and `odds_core.config.AlertConfig.heartbeat_expectations` remain environment overrides; other defaults, including alert reminder intervals, belong to their settings classes. No setting names a season or its months: collectors go dormant from the fixture calendar ([dormancy](../scheduling/decision-engine.md#dormancy)). Per-sport Polymarket identifiers live in `odds_lambda.polymarket_sports.POLYMARKET_SPORTS`. `odds_core.config.Settings` composes one `BaseSettings` class per concern; `odds_core.config.get_settings()` returns a cached instance and `odds_core.config.reset_settings_cache()` clears it. `odds_core.config.Settings.alerts_deliverable` is the one switch the alert paths read: `alert_enabled` and not `SCHEDULER_DRY_RUN`. The variable template is described in [Databases and environments](databases-and-environments.md#environments). The `project_root` field of `odds_core.config.Settings` is the repo root derived from the file location. To add a field, see [Set up and run locally](howto-add-setting.md).
 
 `ODDS_API_KEYS` and `ODDS_API_KEY` are both optional; settings import without either of them, and `odds_lambda.data_fetcher.TheOddsAPIClient` raises when neither is set, or when a sport's key index (`ODDS_API_KEY_INDEX_BY_SPORT`, a JSON object; NBA is 1, every other sport 0) has no key ([keys](../collection/odds-api-client.md#retry-and-keys)). No setting holds a key's plan size; the client reads it from each response's quota headers ([cost per call](../collection/odds-api-client.md#cost-per-call)).
 
@@ -31,7 +30,7 @@ Model and feature settings (`target_type`, `sharp_bookmakers`) are not here: the
 
 | Attribute | Class | Env names | Owning page |
 |---|---|---|---|
-| `api` | `odds_core.config.APIConfig` | `ODDS_API_KEY`, `ODDS_API_KEYS`, `ODDS_API_KEY_INDEX_BY_SPORT`, `ODDS_API_BASE_URL` | [Odds API client](../collection/odds-api-client.md) |
+| `api` | `odds_core.config.APIConfig` | `ODDS_API_KEY`, `ODDS_API_KEYS`, `ODDS_API_KEY_INDEX_BY_SPORT`, `ODDS_API_ACQUISITION_KEY_INDEX` (unset by default; `odds backfill execute` needs it), `ODDS_API_BASE_URL` | [Odds API client](../collection/odds-api-client.md) |
 | `database` | `odds_core.config.DatabaseConfig` | `DATABASE_URL`, `DATABASE_POOL_SIZE`; `AGENT_DATABASE_URL` as `agent_url` ([Database role](../agent/agent-run-job.md#database-role)), `PROD_DATABASE_URL` and `LOCAL_DATABASE_URL` as `prod_url` and `local_url` ([copy production data](howto-copy-production-data.md)) | [Databases and environments](databases-and-environments.md) |
 | `data_collection` | `odds_core.config.DataCollectionConfig` | `SPORTS` (default: EPL, MLB and NBA), `BOOKMAKERS`, `MARKETS`, `REGIONS` (bare) | [Sport, market and bookmaker keys](../collection/sport-and-market-keys.md) |
 | `scheduler` | `odds_core.config.SchedulerConfig` | `SCHEDULER_BACKEND` (`local` or `aws`), `_DRY_RUN`, `_LOOKAHEAD_DAYS`, `_BOOTSTRAP_JOBS` | [Local scheduler](../scheduling/local-scheduler.md) |
@@ -46,7 +45,7 @@ Eight sections carry an env prefix and three are bare (`SPORTS`, `ALERT_ENABLED`
 
 ## List fields and the template
 
-List fields (`SPORTS`, `MARKETS`, `REGIONS`, `SCHEDULER_BOOTSTRAP_JOBS`) are parsed as JSON arrays, and `BOOKMAKERS` as a JSON object of sport key to bookmaker list that replaces the whole default map; a comma-separated value makes `odds_core.config.get_settings()` raise `SettingsError`. `.env.example` leaves these fields commented out with JSON examples, so a copy of it uses the code defaults; the configuration unit tests load the template with and without its commented assignments enabled. `odds_core.config.SchedulerConfig` generates the code default for `SCHEDULER_BOOTSTRAP_JOBS` from `odds_core.job_specs.default_bootstrap_jobs`: the production job set, which includes `run-candidates`, `fetch-injuries`, `fetch-mlb-results` and `backup-database`, with `agent-run` excluded by its record ([Where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs)).
+List fields (`SPORTS`, `MARKETS`, `REGIONS`, `SCHEDULER_BOOTSTRAP_JOBS`) are parsed as JSON arrays, and `BOOKMAKERS` as a JSON object of sport key to bookmaker list that replaces the whole default map; a comma-separated value makes `odds_core.config.get_settings()` raise `SettingsError`. The template leaves these fields commented out ([Databases and environments](databases-and-environments.md#environments)). `odds_core.config.SchedulerConfig` generates the code default for `SCHEDULER_BOOTSTRAP_JOBS` from `odds_core.job_specs.default_bootstrap_jobs`: the production job set, which includes `run-candidates`, `fetch-injuries`, `fetch-mlb-results` and `backup-database`, with `agent-run` excluded by its record ([Where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs)).
 
 ## Read at import
 
