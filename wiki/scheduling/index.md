@@ -24,5 +24,5 @@ Every data job is registered once, decides its own next run, and books that run 
 
 - [Add a scheduler job](howto-add-scheduler-job.md) — Steps to add a job (entry point, registry, per-sport, sport allowlist or cron registration, self-scheduling, alert wrapper and heartbeat, production bootstrap and matrix update) and the traps in each.
 - [Debug the AWS self-scheduling jobs](howto-debug-aws-scheduler.md) — A read-only workflow for stale data or missing tiers on AWS covering rules, CloudWatch logs, database versus fixtures, tier coverage and a safe manual invoke.
-- [Run the scheduler as a systemd service](howto-run-scheduler-service.md) — Install the scheduler's systemd unit on the production host, optionally keep WSL running from Windows boot, and redeploy production with deploy.sh.
+- [Run the scheduler as a systemd service](howto-run-scheduler-service.md) — Install the scheduler's systemd unit on the production host, optionally keep WSL running from Windows boot, and redeploy production (the scheduler and the web UI) with deploy.sh.
 <!-- pages:end -->

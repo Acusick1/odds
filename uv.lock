@@ -2989,15 +2989,12 @@ name = "odds-web"
 version = "0.1.0"
 source = { editable = "packages/odds-web" }
 dependencies = [
-    { name = "asyncpg" },
     { name = "fastapi" },
     { name = "jinja2" },
     { name = "odds-analytics" },
     { name = "odds-core" },
     { name = "odds-lambda" },
     { name = "sqlalchemy" },
-    { name = "structlog" },
-    { name = "uvicorn" },
 ]
 
 [package.dev-dependencies]
@@ -3007,15 +3004,12 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "asyncpg", specifier = ">=0.30.0" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "odds-analytics", editable = "packages/odds-analytics" },
     { name = "odds-core", editable = "packages/odds-core" },
     { name = "odds-lambda", editable = "packages/odds-lambda" },
     { name = "sqlalchemy", specifier = ">=2.0.44" },
-    { name = "structlog", specifier = ">=25.5.0" },
-    { name = "uvicorn", specifier = ">=0.30" },
 ]
 
 [package.metadata.requires-dev]

@@ -196,6 +196,14 @@ class TestPortfolioPage:
 
         assert "<table" in fragment and "<html" not in fragment
 
+    def test_the_page_links_by_path_and_serves_its_static_files(self, client: TestClient) -> None:
+        body = client.get("/").text
+
+        assert "http://" not in body and "https://" not in body
+        assert 'href="/static/app.css"' in body
+        assert client.get("/static/app.css").status_code == 200
+        assert client.get("/static/vendor/htmx.min.js").status_code == 200
+
     def test_the_report_is_cached_between_requests(
         self, client: TestClient, report: dict[str, object], registry: list
     ) -> None:

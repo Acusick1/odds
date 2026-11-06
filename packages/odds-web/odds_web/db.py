@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from odds_core.config import get_settings
+from sqlalchemy import Connection, event
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -26,24 +28,26 @@ class WebDatabase:
     session_maker: async_sessionmaker[AsyncSession]
 
 
-def build_web_database(url: str, statement_timeout_ms: int = STATEMENT_TIMEOUT_MS) -> WebDatabase:
-    """An engine whose sessions are read-only and cancel any statement running past the timeout.
+def restrict_transactions(
+    engine: AsyncEngine, statement_timeout_ms: int
+) -> Callable[[Connection], None]:
+    """Make every transaction on ``engine`` read-only and cancel statements past the timeout.
 
-    The ``odds_web`` role's grants are what stop a write; the read-only default keeps a DSN that
-    is not that role from writing through this app.
+    Set per transaction, so nothing a session runs can lift it. The ``odds_web`` role's grants are
+    what stop a write; this keeps a DSN that is not that role from writing through this app.
     """
-    engine = create_async_engine(
-        url,
-        pool_size=POOL_SIZE,
-        max_overflow=0,
-        pool_pre_ping=True,
-        connect_args={
-            "server_settings": {
-                "statement_timeout": str(statement_timeout_ms),
-                "default_transaction_read_only": "on",
-            }
-        },
-    )
+
+    @event.listens_for(engine.sync_engine, "begin")
+    def restrict(connection: Connection) -> None:
+        connection.exec_driver_sql("SET TRANSACTION READ ONLY")
+        connection.exec_driver_sql(f"SET LOCAL statement_timeout = {int(statement_timeout_ms)}")
+
+    return restrict
+
+
+def build_web_database(url: str, statement_timeout_ms: int = STATEMENT_TIMEOUT_MS) -> WebDatabase:
+    engine = create_async_engine(url, pool_size=POOL_SIZE, max_overflow=0, pool_pre_ping=True)
+    restrict_transactions(engine, statement_timeout_ms)
     return WebDatabase(engine, async_sessionmaker(engine, expire_on_commit=False))
 
 

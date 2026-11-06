@@ -5,6 +5,9 @@
 -- pg_read_all_data, and no default privileges, so a table added later stays unreadable until
 -- it is listed here. The APScheduler tables exist only after the scheduler has booted once.
 
+-- Role-level defaults, beside the app's own per-transaction read-only and statement timeout.
+ALTER ROLE odds_web SET default_transaction_read_only = on;
+
 GRANT USAGE ON SCHEMA public TO odds_web;
 
 GRANT SELECT ON

@@ -1,4 +1,4 @@
-<div id="portfolio" hx-get="{{ url_for('portfolio_fragment') }}" hx-trigger="every 60s" hx-swap="outerHTML">
+<div id="portfolio" hx-get="{{ url_path('portfolio_fragment') }}" hx-trigger="every 60s" hx-swap="outerHTML">
 {% if portfolio.error %}
 <p class="unavailable">Unavailable · last good data {{ portfolio.as_of | clock }}</p>
 {% endif %}

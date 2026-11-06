@@ -58,14 +58,16 @@ def create_app(
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         yield
         executor.shutdown(wait=False, cancel_futures=True)
-        await database.engine.dispose()
 
     app = FastAPI(title="odds-web", lifespan=lifespan, docs_url=None, redoc_url=None)
     app.mount("/static", StaticFiles(directory=PACKAGE_DIR / "static"), name="static")
     templates = Jinja2Templates(directory=PACKAGE_DIR / "templates")
     templates.env.filters["signed"] = _signed
     templates.env.filters["clock"] = _clock
-    templates.env.globals.update(axis_percent=f"{AXIS_PERCENT:g}", forest_width=FOREST_WIDTH)
+    # Paths, not absolute URLs: behind `tailscale serve` the app sees http while the page is https.
+    templates.env.globals.update(
+        axis_percent=f"{AXIS_PERCENT:g}", forest_width=FOREST_WIDTH, url_path=app.url_path_for
+    )
 
     async def load_portfolio() -> list[PortfolioRow]:
         registry = load_candidates(registry_dir or candidates_dir())
@@ -79,13 +81,13 @@ def create_app(
     @app.get("/", response_class=HTMLResponse)
     async def portfolio(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
-            request, "portfolio.html", {"portfolio": await portfolio_section()}
+            request, "portfolio.html.j2", {"portfolio": await portfolio_section()}
         )
 
     @app.get("/fragments/portfolio", response_class=HTMLResponse)
     async def portfolio_fragment(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
-            request, "_portfolio.html", {"portfolio": await portfolio_section()}
+            request, "_portfolio.html.j2", {"portfolio": await portfolio_section()}
         )
 
     return app

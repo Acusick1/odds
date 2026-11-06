@@ -34,7 +34,7 @@ Once, on the production host. Until these steps are done the nightly job does no
    - It takes about 30 s and the dump is about 100 MB at the time of writing. The nightly job prunes only its own `nightly` dumps, so delete labelled dumps by hand.
 2. **Check the printed path,** then make the write.
 
-`deploy.sh` runs the script with the label `pre-deploy-<short sha of the new HEAD>` after stopping the scheduler and before `alembic upgrade head`, so the dump is the exact state the migration starts from. A failed dump aborts the deploy before the migration, with the scheduler stopped. A deploy with no pending migration takes no dump.
+`deploy.sh` runs the script with the label `pre-deploy-<short sha of the new HEAD>` after stopping the scheduler and the web UI and before `alembic upgrade head`, so the dump is the exact state the migration starts from. A failed dump aborts the deploy before the migration, with the scheduler and the web UI stopped. A deploy with no pending migration takes no dump.
 
 ## Check a dump restores
 

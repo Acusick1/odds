@@ -66,7 +66,7 @@ class PortfolioRow:
 def forest_for(current: Checkpoint) -> Forest:
     def x(percent: float) -> float:
         clamped = max(-AXIS_PERCENT, min(AXIS_PERCENT, percent))
-        return (clamped + AXIS_PERCENT) / (2 * AXIS_PERCENT) * FOREST_WIDTH
+        return round((clamped + AXIS_PERCENT) / (2 * AXIS_PERCENT) * FOREST_WIDTH, 1)
 
     ci95 = (current.ci95[0] * 100, current.ci95[1] * 100)
     promote = (current.promote_ci[0] * 100, current.promote_ci[1] * 100)

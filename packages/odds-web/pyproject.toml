@@ -10,10 +10,7 @@ dependencies = [
     "odds-lambda",
     "fastapi>=0.115",
     "jinja2>=3.1",
-    "uvicorn>=0.30",
     "sqlalchemy>=2.0.44",
-    "asyncpg>=0.30.0",
-    "structlog>=25.5.0",
 ]
 
 [tool.uv.sources]
@@ -32,3 +29,8 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["odds_web"]
+
+[tool.deptry.per_rule_ignores]
+# jinja2 is loaded by Starlette's template support; odds-lambda is the dependency the status
+# strip of the data-health page reads job and quota state through.
+DEP002 = ["jinja2", "odds-lambda"]
