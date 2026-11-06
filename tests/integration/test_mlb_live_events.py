@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock
 
-import httpx
 import pytest
 from odds_core.config import get_settings
 from odds_core.mlb_data_models import MlbProbablePitchers
@@ -26,7 +25,7 @@ from odds_lambda.jobs import fetch_betfair_exchange, fetch_oddsportal
 from odds_lambda.jobs.fetch_oddsportal import LEAGUE_SPEC_BY_NAME, LeagueScrape, ingest_league
 from odds_lambda.live_events import DroppedGame, SkipReason, alert_dropped_games
 from odds_lambda.mlb_game_resolver import GameRow
-from odds_lambda.mlb_stats_fetcher import MlbGameResult, MlbGameState
+from odds_lambda.mlb_stats_fetcher import MlbGameState
 from odds_lambda.oddsportal_adapter import MatchOdds
 from odds_lambda.storage.event_merge import ConflictingGamePks, EventMerger
 from odds_lambda.storage.event_resolver import ListedGame, ResolvedEvent
@@ -36,9 +35,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.test_helpers import (
     FakeBetfairClient,
+    FakeMlbStatsFetcher,
     game_pk_of,
     hold_game_pks,
     make_epl_event,
+    mlb_game,
     with_game_pk,
 )
 
@@ -50,61 +51,6 @@ EVENING = (datetime.now(UTC) + timedelta(days=1)).replace(
     hour=23, minute=10, second=0, microsecond=0
 )
 AFTERNOON = EVENING.replace(hour=17, minute=5)
-
-
-def _game(
-    pk: int,
-    start: datetime,
-    home: str,
-    away: str,
-    game_number: int = 1,
-    *,
-    tbd: bool = False,
-    state: MlbGameState = MlbGameState.SCHEDULED,
-) -> MlbGameResult:
-    return MlbGameResult(
-        game_pk=pk,
-        start_time=start,
-        home_team=home,
-        away_team=away,
-        is_final=False,
-        home_score=None,
-        away_score=None,
-        game_number=game_number,
-        start_time_tbd=tbd,
-        official_date=start.date(),
-        state=state,
-        schedule_date=start.date(),
-    )
-
-
-class FakeMlbStatsFetcher:
-    """Stands in for MlbStatsFetcher: a scripted schedule, or an outage."""
-
-    schedule: list[MlbGameResult] = []
-    down: bool = False
-    requests: int = 0
-
-    async def __aenter__(self) -> FakeMlbStatsFetcher:
-        return self
-
-    async def __aexit__(self, *args: object) -> None:
-        return None
-
-    async def fetch_results(self, start: date, end: date) -> list[MlbGameResult]:
-        type(self).requests += 1
-        if self.down:
-            raise httpx.ConnectError("statsapi.mlb.com unreachable")
-        return list(self.schedule)
-
-
-@pytest.fixture
-def mlb_schedule(monkeypatch: pytest.MonkeyPatch) -> type[FakeMlbStatsFetcher]:
-    monkeypatch.setattr(FakeMlbStatsFetcher, "schedule", [])
-    monkeypatch.setattr(FakeMlbStatsFetcher, "down", False)
-    monkeypatch.setattr(FakeMlbStatsFetcher, "requests", 0)
-    monkeypatch.setattr("odds_lambda.live_events.MlbStatsFetcher", FakeMlbStatsFetcher)
-    return FakeMlbStatsFetcher
 
 
 def _op_match(home: str, away: str, start: datetime) -> MatchOdds:
@@ -204,7 +150,7 @@ class TestLiveMlbEventsCarryGamePk:
     async def test_resolved_game_creates_an_event_with_its_game_pk(
         self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
     ) -> None:
-        mlb_schedule.schedule = [_game(813001, EVENING, YANKEES, RED_SOX)]
+        mlb_schedule.schedule = [mlb_game(813001, EVENING, YANKEES, RED_SOX)]
 
         stats = await _ingest_op(_op_match(YANKEES, RED_SOX, EVENING))
 
@@ -215,7 +161,7 @@ class TestLiveMlbEventsCarryGamePk:
     async def test_second_source_with_the_same_game_pk_lands_on_the_same_event(
         self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
     ) -> None:
-        mlb_schedule.schedule = [_game(813001, EVENING, YANKEES, RED_SOX)]
+        mlb_schedule.schedule = [mlb_game(813001, EVENING, YANKEES, RED_SOX)]
         await _ingest_op(_op_match(YANKEES, RED_SOX, EVENING + timedelta(minutes=1)))
 
         # Betfair lists the game 3 h later than OddsPortal: outside the ±2 h team match.
@@ -237,8 +183,8 @@ class TestLiveMlbEventsCarryGamePk:
         self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
     ) -> None:
         mlb_schedule.schedule = [
-            _game(824101, AFTERNOON, CUBS, CARDINALS, game_number=1),
-            _game(824102, EVENING, CUBS, CARDINALS, game_number=2),
+            mlb_game(824101, AFTERNOON, CUBS, CARDINALS, game_number=1),
+            mlb_game(824102, EVENING, CUBS, CARDINALS, game_number=2),
         ]
 
         stats = await _ingest_betfair(
@@ -254,7 +200,7 @@ class TestLiveMlbEventsCarryGamePk:
     async def test_unresolved_game_is_skipped_and_counted(
         self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
     ) -> None:
-        mlb_schedule.schedule = [_game(813001, EVENING, YANKEES, RED_SOX)]
+        mlb_schedule.schedule = [mlb_game(813001, EVENING, YANKEES, RED_SOX)]
 
         stats = await _ingest_op(
             _op_match(YANKEES, RED_SOX, EVENING), _op_match(CUBS, CARDINALS, EVENING)
@@ -481,8 +427,8 @@ class TestDoubleheaderClaims:
         await job_session.commit()
         placeholder = AFTERNOON + timedelta(minutes=6)
         mlb_schedule.schedule = [
-            _game(901, AFTERNOON, CUBS, CARDINALS, 1),
-            _game(902, placeholder, CUBS, CARDINALS, 2, tbd=True),
+            mlb_game(901, AFTERNOON, CUBS, CARDINALS, 1),
+            mlb_game(902, placeholder, CUBS, CARDINALS, 2, tbd=True),
         ]
 
         stats = await _ingest_betfair(
@@ -511,8 +457,8 @@ class TestDoubleheaderClaims:
         )
         await job_session.commit()
         mlb_schedule.schedule = [
-            _game(901, AFTERNOON, CUBS, CARDINALS, 1),
-            _game(902, AFTERNOON + timedelta(minutes=6), CUBS, CARDINALS, 2, tbd=True),
+            mlb_game(901, AFTERNOON, CUBS, CARDINALS, 1),
+            mlb_game(902, AFTERNOON + timedelta(minutes=6), CUBS, CARDINALS, 2, tbd=True),
         ]
 
         stats = await _ingest_op(
@@ -529,8 +475,8 @@ class TestDoubleheaderClaims:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         mlb_schedule.schedule = [
-            _game(824101, EVENING, CUBS, CARDINALS),
-            _game(813001, EVENING, YANKEES, RED_SOX),
+            mlb_game(824101, EVENING, CUBS, CARDINALS),
+            mlb_game(813001, EVENING, YANKEES, RED_SOX),
         ]
         resolve = live_events.resolve_event
 
@@ -570,8 +516,8 @@ class TestRescheduledGame:
         await hold_game_pks(job_session)
         await job_session.commit()
         mlb_schedule.schedule = [
-            _game(813001, postponed_slot, YANKEES, RED_SOX, state=MlbGameState.POSTPONED),
-            _game(813001, EVENING, YANKEES, RED_SOX),
+            mlb_game(813001, postponed_slot, YANKEES, RED_SOX, state=MlbGameState.POSTPONED),
+            mlb_game(813001, EVENING, YANKEES, RED_SOX),
         ]
 
         await _ingest_op(_op_match(YANKEES, RED_SOX, EVENING + timedelta(minutes=1)))
@@ -591,8 +537,8 @@ class TestRescheduledGame:
     ) -> None:
         listed = AFTERNOON + timedelta(hours=3, minutes=30)
         mlb_schedule.schedule = [
-            _game(901, AFTERNOON, CUBS, CARDINALS, 1, state=MlbGameState.FINAL),
-            _game(902, AFTERNOON + timedelta(minutes=6), CUBS, CARDINALS, 2, tbd=True),
+            mlb_game(901, AFTERNOON, CUBS, CARDINALS, 1, state=MlbGameState.FINAL),
+            mlb_game(902, AFTERNOON + timedelta(minutes=6), CUBS, CARDINALS, 2, tbd=True),
         ]
 
         await _ingest_op(_op_match(CUBS, CARDINALS, listed))
@@ -714,7 +660,7 @@ class TestBetfairUnpricedBooks:
     async def test_an_in_play_book_started_before_the_mlb_start_accounts_for_its_game_pk(
         self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
     ) -> None:
-        mlb_schedule.schedule = [_game(813001, EVENING, YANKEES, RED_SOX)]
+        mlb_schedule.schedule = [mlb_game(813001, EVENING, YANKEES, RED_SOX)]
 
         stats = await _ingest_betfair(
             _book(LISTED, self.BETFAIR_START, YANKEES, RED_SOX, inplay=True),
@@ -729,7 +675,7 @@ class TestBetfairUnpricedBooks:
     async def test_a_pre_play_book_past_its_betfair_start_is_stored_against_the_game(
         self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
     ) -> None:
-        mlb_schedule.schedule = [_game(813001, EVENING, YANKEES, RED_SOX)]
+        mlb_schedule.schedule = [mlb_game(813001, EVENING, YANKEES, RED_SOX)]
 
         stats = await _ingest_betfair(
             _book(LISTED, self.BETFAIR_START, YANKEES, RED_SOX), snapshot_time=self.SNAPSHOT
@@ -750,7 +696,7 @@ class TestBetfairUnpricedBooks:
     async def test_a_priceless_open_book_past_its_betfair_start_passes_the_empty_run_check(
         self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
     ) -> None:
-        mlb_schedule.schedule = [_game(813001, EVENING, YANKEES, RED_SOX)]
+        mlb_schedule.schedule = [mlb_game(813001, EVENING, YANKEES, RED_SOX)]
         job_session.add(
             MlbProbablePitchers(
                 game_pk=813001,
@@ -779,7 +725,7 @@ class TestBetfairUnpricedBooks:
     async def test_a_closed_book_past_its_betfair_start_accounts_for_its_game(
         self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
     ) -> None:
-        mlb_schedule.schedule = [_game(813001, EVENING, YANKEES, RED_SOX)]
+        mlb_schedule.schedule = [mlb_game(813001, EVENING, YANKEES, RED_SOX)]
 
         stats = await _ingest_betfair(
             _book(LISTED, self.BETFAIR_START, YANKEES, RED_SOX, status="CLOSED"),
@@ -791,7 +737,7 @@ class TestBetfairUnpricedBooks:
     async def test_a_suspended_book_with_no_prices_accounts_for_its_game(
         self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
     ) -> None:
-        mlb_schedule.schedule = [_game(813001, EVENING, YANKEES, RED_SOX)]
+        mlb_schedule.schedule = [mlb_game(813001, EVENING, YANKEES, RED_SOX)]
 
         stats = await _ingest_betfair(
             _book(LISTED, EVENING, YANKEES, RED_SOX, status="SUSPENDED", priced=False),
@@ -804,7 +750,7 @@ class TestBetfairUnpricedBooks:
     async def test_an_unpriced_book_that_is_open_accounts_for_its_game(
         self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
     ) -> None:
-        mlb_schedule.schedule = [_game(813001, EVENING, YANKEES, RED_SOX)]
+        mlb_schedule.schedule = [mlb_game(813001, EVENING, YANKEES, RED_SOX)]
 
         stats = await _ingest_betfair(
             _book(LISTED, EVENING, YANKEES, RED_SOX, priced=False), snapshot_time=self.SNAPSHOT
@@ -816,7 +762,7 @@ class TestBetfairUnpricedBooks:
     async def test_a_book_with_no_start_time_stores_and_accounts_for_nothing(
         self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher], inplay: bool
     ) -> None:
-        mlb_schedule.schedule = [_game(813001, EVENING, YANKEES, RED_SOX)]
+        mlb_schedule.schedule = [mlb_game(813001, EVENING, YANKEES, RED_SOX)]
 
         stats = await _ingest_betfair(
             _book(LISTED, None, YANKEES, RED_SOX, inplay=inplay), snapshot_time=self.SNAPSHOT
@@ -828,7 +774,7 @@ class TestBetfairUnpricedBooks:
     async def test_a_priced_pre_play_book_still_stores_and_accounts_for_nothing(
         self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
     ) -> None:
-        mlb_schedule.schedule = [_game(813001, EVENING, YANKEES, RED_SOX)]
+        mlb_schedule.schedule = [mlb_game(813001, EVENING, YANKEES, RED_SOX)]
 
         stats = await _ingest_betfair(
             _book(LISTED, EVENING, YANKEES, RED_SOX), snapshot_time=self.SNAPSHOT
@@ -857,8 +803,8 @@ class TestBetfairUnpricedBooks:
         row_start = game_one + timedelta(minutes=40)
         snapshot_time = row_start + timedelta(minutes=5)
         mlb_schedule.schedule = [
-            _game(813001, game_one, YANKEES, RED_SOX, state=MlbGameState.LIVE),
-            _game(813002, game_two, YANKEES, RED_SOX),
+            mlb_game(813001, game_one, YANKEES, RED_SOX, state=MlbGameState.LIVE),
+            mlb_game(813002, game_two, YANKEES, RED_SOX),
         ]
         job_session.add_all(
             MlbProbablePitchers(

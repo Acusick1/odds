@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -19,77 +18,19 @@ from odds_lambda.mlb_game_resolver import GameRow, ResolutionRule, ResolvedGame
 from odds_lambda.storage.event_resolver import (
     REFUSED_ID_ISSUE,
     ListedGame,
-    MatchWindow,
     ResolvedEvent,
     resolve_event,
 )
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.test_helpers import RecordedHttpSession, SessionFactory
-
-
-@dataclass(frozen=True)
-class LeagueFixture:
-    """One 2024-25 match as football-data.co.uk and the Odds API spell it."""
-
-    sport: SportKey
-    sport_title: str
-    fduk_home: str
-    fduk_away: str
-    api_home: str
-    api_away: str
-    kickoff: datetime
-
-
-# Kick-offs are the FDUK files' UK times in UTC.
-LEAGUE_FIXTURES = [
-    LeagueFixture(
-        "soccer_efl_champ",
-        "Championship",
-        "Sheffield Weds",
-        "QPR",
-        "Sheffield Wednesday",
-        "Queens Park Rangers",
-        datetime(2024, 9, 14, 14, 0, tzinfo=UTC),
-    ),
-    LeagueFixture(
-        "soccer_spain_la_liga",
-        "La Liga - Spain",
-        "Ath Madrid",
-        "Betis",
-        "Atlético Madrid",
-        "Real Betis",
-        datetime(2025, 5, 18, 17, 0, tzinfo=UTC),
-    ),
-    LeagueFixture(
-        "soccer_italy_serie_a",
-        "Serie A - Italy",
-        "Inter",
-        "Milan",
-        "Inter Milan",
-        "AC Milan",
-        datetime(2024, 9, 22, 18, 45, tzinfo=UTC),
-    ),
-    LeagueFixture(
-        "soccer_germany_bundesliga",
-        "Bundesliga - Germany",
-        "M'gladbach",
-        "Ein Frankfurt",
-        "Borussia Monchengladbach",
-        "Eintracht Frankfurt",
-        datetime(2025, 2, 8, 17, 30, tzinfo=UTC),
-    ),
-    LeagueFixture(
-        "soccer_france_ligue_one",
-        "Ligue 1 - France",
-        "Paris SG",
-        "St Etienne",
-        "Paris Saint Germain",
-        "Saint Etienne",
-        datetime(2025, 1, 12, 19, 45, tzinfo=UTC),
-    ),
-]
+from tests.test_helpers import (
+    LEAGUE_FIXTURES,
+    LeagueFixture,
+    RecordedHttpSession,
+    SessionFactory,
+    load_fduk_fixture,
+)
 
 # Valencia v Real Madrid, postponed from 3 Nov 2024 by the Valencia floods and played 3 Jan 2025.
 VALENCIA_REAL = LeagueFixture(
@@ -105,28 +46,6 @@ VALENCIA_REAL_ORIGINAL = datetime(2024, 11, 3, 20, 0, tzinfo=UTC)
 
 MLB = "baseball_mlb"
 YANKEES, RED_SOX = "New York Yankees", "Boston Red Sox"
-
-
-async def load_fduk_fixture(session: AsyncSession, fixture: LeagueFixture) -> Event:
-    """The fixture as the football-data.co.uk loader stores a played match: FINAL with scores."""
-    resolved = await resolve_event(
-        session,
-        ListedGame(
-            source=Source.FOOTBALL_DATA_UK,
-            sport_key=fixture.sport,
-            sport_title=fixture.sport_title,
-            home_team=fixture.fduk_home,
-            away_team=fixture.fduk_away,
-            commence_time=fixture.kickoff,
-            match_window=MatchWindow.HISTORICAL,
-        ),
-    )
-    event = resolved.event
-    event.status = EventStatus.FINAL
-    event.home_score, event.away_score = 1, 1
-    event.completed_at = fixture.kickoff + timedelta(hours=2)
-    await session.flush()
-    return event
 
 
 def manifest(sport: SportKey) -> Manifest:

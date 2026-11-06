@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
+import httpx
 from odds_core.api_models import EventsResponse, OddsResponse
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.quotes import Quote
+from odds_core.sports import SportKey
 from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.fetch_tier import FetchTier
+from odds_lambda.mlb_stats_fetcher import MlbGameResult, MlbGameState
 from odds_lambda.price_rows import expand_envelope
+from odds_lambda.storage.event_resolver import ListedGame, MatchWindow, resolve_event
 from odds_lambda.storage.game_pks import game_pks_of
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_shaped_snapshot
 from sqlalchemy import text
@@ -32,6 +36,146 @@ TIER_HOURS_BEFORE: dict[FetchTier, float] = {
 async def add_event(session: AsyncSession, event: Event) -> Event:
     """Store ``event`` as it is, without resolving it against other events."""
     session.add(event)
+    await session.flush()
+    return event
+
+
+def mlb_game(
+    pk: int,
+    start: datetime,
+    home: str,
+    away: str,
+    game_number: int = 1,
+    *,
+    tbd: bool = False,
+    state: MlbGameState = MlbGameState.SCHEDULED,
+) -> MlbGameResult:
+    return MlbGameResult(
+        game_pk=pk,
+        start_time=start,
+        home_team=home,
+        away_team=away,
+        is_final=False,
+        home_score=None,
+        away_score=None,
+        game_number=game_number,
+        start_time_tbd=tbd,
+        official_date=start.date(),
+        state=state,
+        schedule_date=start.date(),
+    )
+
+
+class FakeMlbStatsFetcher:
+    """Stands in for MlbStatsFetcher: a scripted schedule, or an outage."""
+
+    schedule: list[MlbGameResult] = []
+    down: bool = False
+    requests: int = 0
+
+    async def __aenter__(self) -> FakeMlbStatsFetcher:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+    async def fetch_results(self, start: date, end: date) -> list[MlbGameResult]:
+        type(self).requests += 1
+        if self.down:
+            raise httpx.ConnectError("statsapi.mlb.com unreachable")
+        return list(self.schedule)
+
+
+@dataclass(frozen=True)
+class LeagueFixture:
+    """One 2024-25 match as football-data.co.uk and the Odds API spell it."""
+
+    sport: SportKey
+    sport_title: str
+    fduk_home: str
+    fduk_away: str
+    api_home: str
+    api_away: str
+    kickoff: datetime
+
+
+# Kick-offs are the FDUK files' UK times in UTC.
+LEAGUE_FIXTURES = [
+    LeagueFixture(
+        "soccer_efl_champ",
+        "Championship",
+        "Sheffield Weds",
+        "QPR",
+        "Sheffield Wednesday",
+        "Queens Park Rangers",
+        datetime(2024, 9, 14, 14, 0, tzinfo=UTC),
+    ),
+    LeagueFixture(
+        "soccer_spain_la_liga",
+        "La Liga - Spain",
+        "Ath Madrid",
+        "Betis",
+        "Atlético Madrid",
+        "Real Betis",
+        datetime(2025, 5, 18, 17, 0, tzinfo=UTC),
+    ),
+    LeagueFixture(
+        "soccer_italy_serie_a",
+        "Serie A - Italy",
+        "Inter",
+        "Milan",
+        "Inter Milan",
+        "AC Milan",
+        datetime(2024, 9, 22, 18, 45, tzinfo=UTC),
+    ),
+    LeagueFixture(
+        "soccer_germany_bundesliga",
+        "Bundesliga - Germany",
+        "M'gladbach",
+        "Ein Frankfurt",
+        "Borussia Monchengladbach",
+        "Eintracht Frankfurt",
+        datetime(2025, 2, 8, 17, 30, tzinfo=UTC),
+    ),
+    LeagueFixture(
+        "soccer_france_ligue_one",
+        "Ligue 1 - France",
+        "Paris SG",
+        "St Etienne",
+        "Paris Saint Germain",
+        "Saint Etienne",
+        datetime(2025, 1, 12, 19, 45, tzinfo=UTC),
+    ),
+    LeagueFixture(
+        "soccer_epl",
+        "EPL",
+        "Man United",
+        "Newcastle",
+        "Manchester United",
+        "Newcastle United",
+        datetime(2025, 4, 13, 15, 30, tzinfo=UTC),
+    ),
+]
+
+
+async def load_fduk_fixture(session: AsyncSession, fixture: LeagueFixture) -> Event:
+    """The fixture as the football-data.co.uk loader stores a played match: FINAL with scores."""
+    resolved = await resolve_event(
+        session,
+        ListedGame(
+            source=Source.FOOTBALL_DATA_UK,
+            sport_key=fixture.sport,
+            sport_title=fixture.sport_title,
+            home_team=fixture.fduk_home,
+            away_team=fixture.fduk_away,
+            commence_time=fixture.kickoff,
+            match_window=MatchWindow.HISTORICAL,
+        ),
+    )
+    event = resolved.event
+    event.status = EventStatus.FINAL
+    event.home_score, event.away_score = 1, 1
+    event.completed_at = fixture.kickoff + timedelta(hours=2)
     await session.flush()
     return event
 
@@ -433,3 +577,66 @@ class RecordedHttpSession:
 
     async def __aexit__(self, *exc: object) -> None:
         return None
+
+
+class ReplayHttpSession(RecordedHttpSession):
+    """Serves the recorded response of each requested ``date``; a date with none is a call the
+    test did not expect to spend."""
+
+    def __init__(self, responses: dict[str, dict[str, Any]], headers: dict[str, str]) -> None:
+        super().__init__({}, headers)
+        self._responses = responses
+
+    def get(self, url: str, params: dict[str, Any], timeout: Any) -> ReplayHttpSession:
+        if params["date"] not in self._responses:
+            raise AssertionError(f"no recorded response for {params['date']}")
+        self._payload = self._responses[params["date"]]
+        return super().get(url, params, timeout)  # type: ignore[return-value]
+
+
+def odds_api_quote(key: str, outcomes: list[dict[str, Any]], stamp: str) -> dict[str, Any]:
+    return {"key": key, "last_update": stamp, "outcomes": outcomes}
+
+
+def odds_api_h2h(prices: dict[str, int], stamp: str) -> dict[str, Any]:
+    """The h2h market in the API's shape: outcome names to American prices."""
+    return odds_api_quote(
+        "h2h", [{"name": name, "price": price} for name, price in prices.items()], stamp
+    )
+
+
+def odds_api_totals(line: float, over: int, under: int, stamp: str) -> dict[str, Any]:
+    """The totals market at one line, as a book returns it."""
+    return odds_api_quote(
+        "totals",
+        [
+            {"name": "Over", "price": over, "point": line},
+            {"name": "Under", "price": under, "point": line},
+        ],
+        stamp,
+    )
+
+
+def odds_api_game(
+    api_id: str,
+    sport: SportKey,
+    sport_title: str,
+    home: str,
+    away: str,
+    start: datetime,
+    books: dict[str, list[dict[str, Any]]],
+    stamp: str,
+) -> dict[str, Any]:
+    """One game of a historical response: the book keys the API uses, each with its markets."""
+    return {
+        "id": api_id,
+        "sport_key": sport,
+        "sport_title": sport_title,
+        "commence_time": start.isoformat().replace("+00:00", "Z"),
+        "home_team": home,
+        "away_team": away,
+        "bookmakers": [
+            {"key": key, "title": key, "last_update": stamp, "markets": markets}
+            for key, markets in books.items()
+        ],
+    }
