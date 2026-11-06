@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from odds_core.sports import SportKey
+from odds_core.sports import SUPPORTED_SPORTS, SportKey
 from odds_core.vocabulary import Source
 from odds_lambda.storage.event_kickoff import (
     IN_PLAY_START_SOURCES,
@@ -18,6 +18,23 @@ class TestKickoffAuthorityOrder:
         [
             ("baseball_mlb", (Source.MLB_STATS_API,)),
             ("soccer_epl", (Source.ODDSPORTAL, Source.ODDS_API, Source.FOOTBALL_DATA_UK)),
+            ("soccer_efl_champ", (Source.ODDSPORTAL, Source.ODDS_API, Source.FOOTBALL_DATA_UK)),
+            (
+                "soccer_spain_la_liga",
+                (Source.ODDSPORTAL, Source.ODDS_API, Source.FOOTBALL_DATA_UK),
+            ),
+            (
+                "soccer_italy_serie_a",
+                (Source.ODDSPORTAL, Source.ODDS_API, Source.FOOTBALL_DATA_UK),
+            ),
+            (
+                "soccer_germany_bundesliga",
+                (Source.ODDSPORTAL, Source.ODDS_API, Source.FOOTBALL_DATA_UK),
+            ),
+            (
+                "soccer_france_ligue_one",
+                (Source.ODDSPORTAL, Source.ODDS_API, Source.FOOTBALL_DATA_UK),
+            ),
             ("basketball_nba", (Source.ODDSPORTAL, Source.ODDS_API, Source.ESPN)),
         ],
     )
@@ -35,6 +52,9 @@ class TestKickoffAuthorityOrder:
         self, sport: SportKey, unranked: set[Source]
     ) -> None:
         assert not unranked & set(KICKOFF_AUTHORITY[sport])
+
+    def test_every_sport_has_an_order(self) -> None:
+        assert set(KICKOFF_AUTHORITY) == set(SUPPORTED_SPORTS)
 
     def test_espn_ranks_last_for_nba_only(self) -> None:
         assert KICKOFF_AUTHORITY["basketball_nba"][-1] is Source.ESPN

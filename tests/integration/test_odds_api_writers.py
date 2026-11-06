@@ -40,27 +40,17 @@ from odds_lambda.odds_api_events import find_event_by_odds_api_id
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.test_helpers import StubOddsClient, game_pk_of, make_epl_event
+from tests.test_helpers import (
+    RecordedHttpSession,
+    SessionFactory,
+    StubOddsClient,
+    game_pk_of,
+    make_epl_event,
+)
 
 KICKOFF = (datetime.now(UTC) + timedelta(days=2)).replace(minute=0, second=0, microsecond=0)
 MLB = "baseball_mlb"
 FIXTURES = Path(__file__).parents[1] / "fixtures"
-
-
-class _Factory:
-    """A session factory that hands every caller the test session."""
-
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
-
-    def __call__(self) -> _Factory:
-        return self
-
-    async def __aenter__(self) -> AsyncSession:
-        return self._session
-
-    async def __aexit__(self, *args: object) -> bool:
-        return False
 
 
 def _listed(
@@ -114,7 +104,7 @@ def _sync(session: AsyncSession, listed: list[dict[str, Any]], sport_key: str = 
         OddsResponse([], [], 0, None, None, datetime.now(UTC)),
         EventsResponse(events, 0, None, None, datetime.now(UTC)),
     )
-    service = EventSyncService(client=client, session_factory=_Factory(session))  # type: ignore[arg-type]
+    service = EventSyncService(client=client, session_factory=SessionFactory(session))  # type: ignore[arg-type]
     return service.sync_sport(sport_key)
 
 
@@ -370,7 +360,7 @@ class TestIngestion:
         service = OddsIngestionService(
             client=StubOddsClient(response),  # type: ignore[arg-type]
             settings=mock_settings,
-            session_factory=_Factory(session),
+            session_factory=SessionFactory(session),
         )
         return await service.ingest_sport("soccer_epl")
 
@@ -441,7 +431,7 @@ class TestIngestion:
         service = OddsIngestionService(
             client=StubOddsClient(response),  # type: ignore[arg-type]
             settings=mock_settings,
-            session_factory=_Factory(session),
+            session_factory=SessionFactory(session),
         )
 
         result = await service.ingest_sport(MLB)
@@ -498,7 +488,7 @@ class TestIngestion:
         service = OddsIngestionService(
             client=StubOddsClient(response),  # type: ignore[arg-type]
             settings=mock_settings,
-            session_factory=_Factory(session),
+            session_factory=SessionFactory(session),
         )
 
         result = await service.ingest_sport(MLB)
@@ -552,7 +542,7 @@ class TestIngestion:
         service = OddsIngestionService(
             client=StubOddsClient(response),  # type: ignore[arg-type]
             settings=mock_settings,
-            session_factory=_Factory(session),
+            session_factory=SessionFactory(session),
         )
 
         await service.ingest_sport("soccer_epl")
@@ -579,7 +569,7 @@ class TestIngestion:
         service = OddsIngestionService(
             client=StubOddsClient(response),  # type: ignore[arg-type]
             settings=mock_settings,
-            session_factory=_Factory(session),
+            session_factory=SessionFactory(session),
         )
 
         await service.ingest_sport("soccer_epl")
@@ -673,7 +663,7 @@ class TestScores:
                 return type("Response", (), {"scores_data": scores})()
 
         monkeypatch.setattr(fetch_scores, "TheOddsAPIClient", _Client)
-        monkeypatch.setattr(fetch_scores, "async_session_maker", _Factory(session))
+        monkeypatch.setattr(fetch_scores, "async_session_maker", SessionFactory(session))
 
         result = await fetch_scores.update_scores("soccer_epl")
 
@@ -682,36 +672,6 @@ class TestScores:
         event = await session.get(Event, 1, populate_existing=True)
         assert event is not None
         assert (event.status, event.home_score, event.away_score) == (EventStatus.FINAL, 2, 1)
-
-
-class _RecordedSession:
-    """Serves one recorded historical response through the client's HTTP layer."""
-
-    def __init__(self, payload: dict[str, Any], headers: dict[str, str]) -> None:
-        self._payload = payload
-        self._headers = headers
-        self.status = 200
-        self.requests: list[dict[str, Any]] = []
-
-    def get(self, url: str, params: dict[str, Any], timeout: Any) -> _RecordedSession:
-        self.requests.append({"url": url, **params})
-        return self
-
-    @property
-    def headers(self) -> dict[str, str]:
-        return self._headers
-
-    def raise_for_status(self) -> None:
-        return None
-
-    async def json(self) -> Any:
-        return self._payload
-
-    async def __aenter__(self) -> _RecordedSession:
-        return self
-
-    async def __aexit__(self, *exc: object) -> None:
-        return None
 
 
 def _manifest() -> Manifest:
@@ -764,7 +724,7 @@ class TestBackfill:
         )
         # The fixtures' lock order must not depend on the order the API lists them in.
         served = recorded | {"data": recorded["data"][::-1] if reverse else recorded["data"]}
-        http = _RecordedSession(
+        http = RecordedHttpSession(
             served,
             {"x-requests-last": "20", "x-requests-remaining": "12345", "x-requests-used": "655"},
         )
@@ -772,7 +732,7 @@ class TestBackfill:
         client.session = http  # type: ignore[assignment]
 
         async with BackfillExecutor(
-            manifest, client=client, session_factory=_Factory(session), rate_limit_seconds=0
+            manifest, client=client, session_factory=SessionFactory(session), rate_limit_seconds=0
         ) as executor:
             result = await executor.execute([call])
 
@@ -801,7 +761,7 @@ class TestBackfill:
         assert result.quota_remaining == 12345
 
         async with BackfillExecutor(
-            manifest, client=client, session_factory=_Factory(session), rate_limit_seconds=0
+            manifest, client=client, session_factory=SessionFactory(session), rate_limit_seconds=0
         ) as executor:
             rerun = await executor.execute([call])
 

@@ -385,3 +385,29 @@ def gamma_nba_event() -> Callable[..., dict[str, Any]]:
         }
 
     return build
+
+
+@pytest.fixture
+def recorded_mlb_schedule() -> dict[str, Any]:
+    """MLB Stats API ``/schedule`` slots of 2024 (``hydrate=linescore,gameInfo``), as recorded:
+    postponed, cancelled and resumed games, a traditional doubleheader with a TBD game 2, a
+    split doubleheader, spring training, exhibition, All-Star and World Series games."""
+    fixture_path = Path(__file__).parent / "fixtures" / "mlb_stats_api" / "schedule_2024.json"
+    with open(fixture_path) as f:
+        return json.load(f)
+
+
+@pytest.fixture
+def recorded_mlb_fetcher(recorded_mlb_schedule: dict[str, Any]) -> Any:
+    """An ``MlbStatsFetcher`` that serves each schedule request the recorded dates it spans."""
+    import httpx
+    from odds_lambda.mlb_stats_fetcher import MlbStatsFetcher
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        start, end = request.url.params["startDate"], request.url.params["endDate"]
+        dates = [day for day in recorded_mlb_schedule["dates"] if start <= day["date"] <= end]
+        return httpx.Response(200, json={"dates": dates})
+
+    return MlbStatsFetcher(
+        client=httpx.AsyncClient(transport=httpx.MockTransport(respond)), request_delay_seconds=0
+    )

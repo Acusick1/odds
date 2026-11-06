@@ -16,13 +16,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = structlog.get_logger()
 
+_FOOTBALL_ORDER = (Source.ODDSPORTAL, Source.ODDS_API, Source.FOOTBALL_DATA_UK)
+
 # Per sport, the sources whose kick-off times an event follows, best first. A source moves an
 # event only when no source ranked above it holds an id on the event. An empty order means no
 # source moves that sport's events.
 KICKOFF_AUTHORITY: Mapping[SportKey, tuple[Source, ...]] = MappingProxyType(
     {
         "baseball_mlb": (Source.MLB_STATS_API,),
-        "soccer_epl": (Source.ODDSPORTAL, Source.ODDS_API, Source.FOOTBALL_DATA_UK),
+        "soccer_epl": _FOOTBALL_ORDER,
+        "soccer_efl_champ": _FOOTBALL_ORDER,
+        "soccer_spain_la_liga": _FOOTBALL_ORDER,
+        "soccer_italy_serie_a": _FOOTBALL_ORDER,
+        "soccer_germany_bundesliga": _FOOTBALL_ORDER,
+        "soccer_france_ligue_one": _FOOTBALL_ORDER,
         "basketball_nba": (Source.ODDSPORTAL, Source.ODDS_API, Source.ESPN),
     }
 )
