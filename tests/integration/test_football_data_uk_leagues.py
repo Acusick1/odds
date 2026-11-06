@@ -103,7 +103,7 @@ class TestSecondLeague:
         await ingest_season(LA_LIGA, "2024-2025", no_download=True)
 
         event = (
-            await fduk_session.execute(select(Event).where(Event.home_team == "Ath Bilbao"))
+            await fduk_session.execute(select(Event).where(Event.home_team == "Athletic Bilbao"))
         ).scalar_one()
         assert event.away_team == "Getafe"
         assert event.commence_time == datetime(2024, 8, 15, 17, 0, tzinfo=UTC)
