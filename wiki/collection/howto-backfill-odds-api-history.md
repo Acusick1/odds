@@ -40,7 +40,7 @@ Costs a historical purchase before it is bought, buys it, and fills scores. Exec
    uv run odds backfill probe --manifest backfills/odds-api-epl-2020-26.yaml
    ```
    - The dry run lists the calls and their units without a key or a database; the real run spends them on the acquisition key and stores what comes back.
-   - It exits non-zero if the snapshot lag, the billed units, the grid gaps, the farthest fixture's lead or the required books disagree with the manifest ([probe](odds-api-backfill.md#probing-a-manifest)). Fix the manifest, or stop, before executing.
+   - It exits non-zero if the snapshot lag, the billed units, the grid gaps, the farthest fixture's lead, the required books or how far ahead they are listed disagree with the manifest ([probe](odds-api-backfill.md#probing-a-manifest)). Fix the manifest, or stop, before executing.
 6. Execute.
    ```bash
    uv run odds backfill execute --manifest backfills/odds-api-epl-2020-26.yaml --season 2024-25

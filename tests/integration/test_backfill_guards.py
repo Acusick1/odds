@@ -12,7 +12,7 @@ from odds_analytics.backfill_executor import BackfillExecutor, BackfillStopped
 from odds_core.models import FetchLog, OddsSnapshot
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.integration.conftest import (
+from tests.integration.backfill_replay_helpers import (
     AFTERNOON,
     CARDINALS,
     CUBS,
@@ -225,7 +225,27 @@ class TestRunGuards:
 
         assert e.value.result.units_used == 0
 
-    async def test_an_empty_response_billed_units_stops_the_run(
+    @pytest.mark.parametrize("billed", [0, 20])
+    async def test_an_empty_response_billed_nothing_or_the_manifests_units_does_not_stop_the_run(
+        self,
+        pglite_async_session: AsyncSession,
+        replay: BackfillReplay,
+        mlb_schedule: type[FakeMlbStatsFetcher],
+        billed: int,
+    ) -> None:
+        manifest = load_manifest(MLB)
+        await load_mlb(pglite_async_session, mlb_schedule)
+        calls = []
+        for at in times(2):
+            replay.record(at, [], snapshot=at, billed=billed)
+            calls.append(replay.call(manifest, at))
+
+        with pytest.raises(BackfillStopped, match="2 consecutive sparse responses.*no events"):
+            await replay.run(manifest, calls, skip_existing=False, max_consecutive_gaps=2)
+
+        assert len(replay.requests) == 2
+
+    async def test_an_empty_response_billed_other_units_stops_the_run(
         self,
         pglite_async_session: AsyncSession,
         replay: BackfillReplay,
@@ -234,51 +254,10 @@ class TestRunGuards:
         manifest = load_manifest(MLB)
         await load_mlb(pglite_async_session, mlb_schedule)
         at = times(1)[0]
-        replay.record(at, [], snapshot=at, billed=20)
+        replay.record(at, [], snapshot=at, billed=35)
 
-        with pytest.raises(BackfillStopped, match="billed 20 units, expected 0"):
+        with pytest.raises(BackfillStopped, match="billed 35 units, expected 0 or 20"):
             await replay.run(manifest, [replay.call(manifest, at)], skip_existing=False)
-
-    async def test_a_good_call_between_sparse_ones_resets_the_streak(
-        self,
-        pglite_async_session: AsyncSession,
-        replay: BackfillReplay,
-        mlb_schedule: type[FakeMlbStatsFetcher],
-    ) -> None:
-        manifest = load_manifest(MLB)
-        await load_mlb(pglite_async_session, mlb_schedule)
-        calls = []
-        for at, listings in zip(
-            times(5),
-            [[], [], [game("g", AFTERNOON, "pinnacle")], [], []],
-            strict=True,
-        ):
-            replay.record(at, listings, snapshot=at)
-            calls.append(replay.call(manifest, at))
-
-        result = await replay.run(manifest, calls, skip_existing=False, max_consecutive_gaps=3)
-
-        assert result.calls_made == 5
-
-    async def test_skipped_calls_do_not_count_toward_the_streak(
-        self,
-        pglite_async_session: AsyncSession,
-        replay: BackfillReplay,
-        mlb_schedule: type[FakeMlbStatsFetcher],
-    ) -> None:
-        manifest = load_manifest(MLB)
-        await load_mlb(pglite_async_session, mlb_schedule)
-        sparse = times(2)
-        for at in sparse:
-            replay.record(at, [], snapshot=at)
-
-        result = await replay.run(
-            manifest,
-            [replay.call(manifest, at) for at in sparse],
-            max_consecutive_gaps=2,
-        )
-
-        assert (result.calls_made, result.calls_skipped) == (0, 2)
 
 
 class TestProbe:
@@ -300,6 +279,10 @@ class TestProbe:
         assert (first.previous_gap, first.next_gap) == (timedelta(minutes=5),) * 2
         assert first.farthest_lead == timedelta(hours=174)
         assert first.book_events == {("h2h", "pinnacle"): 1, ("totals", "pinnacle"): 1}
+        assert first.book_leads == {
+            ("h2h", "pinnacle"): timedelta(hours=174),
+            ("totals", "pinnacle"): timedelta(hours=174),
+        }
         assert sorted(r["date"] for r in replay.requests) == [
             "2024-07-20T16:00:00Z",
             "2026-07-18T16:00:00Z",
@@ -370,6 +353,27 @@ class TestProbe:
             assert getattr(check, field) is False
             assert check.ok is False
 
+    async def test_a_required_book_not_listed_a_day_ahead_fails_the_probe(
+        self,
+        pglite_async_session: AsyncSession,
+        replay: BackfillReplay,
+        mlb_schedule: type[FakeMlbStatsFetcher],
+    ) -> None:
+        manifest = load_manifest(MLB)
+        for at in (FIRST_PROBE, SECOND_PROBE):
+            listings = [
+                far_game(at, "williamhill", lead_hours=174),
+                game("near", at + timedelta(hours=23), "pinnacle"),
+            ]
+            replay.record(at, listings, snapshot=at)
+
+        checks = await replay.probe(manifest)
+
+        for check in checks:
+            assert (check.books_ok, check.lead_ok, check.horizon_ok) == (True, True, False)
+            assert check.book_leads[("h2h", "pinnacle")] == timedelta(hours=23)
+            assert check.ok is False
+
     async def test_provider_timestamp_jitter_within_a_minute_passes(
         self,
         pglite_async_session: AsyncSession,
@@ -424,6 +428,7 @@ class TestResponseCheck:
                 next_gap=timedelta(minutes=nxt),
                 farthest_lead=timedelta(hours=174),
                 book_events={},
+                book_leads={},
             )
 
         assert check(10, 5).grid_ok

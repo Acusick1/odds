@@ -331,7 +331,14 @@ async def _probe_backfill_async(manifest: Manifest) -> list[ResponseCheck]:
 
 def _probe_table(manifest: Manifest, checks: list[ResponseCheck]) -> Table:
     table = Table(title=f"Probe, {manifest.probe.units_per_call} units expected per call")
-    for column in ("Snapshot", "Lag", "Units", "Grid gaps", "Farthest fixture", "Books (events)"):
+    for column in (
+        "Snapshot",
+        "Lag",
+        "Units",
+        "Grid gaps",
+        "Farthest fixture",
+        "Books (events, farthest lead)",
+    ):
         table.add_column(column)
 
     def mark(ok: bool, text: str) -> str:
@@ -339,7 +346,13 @@ def _probe_table(manifest: Manifest, checks: list[ResponseCheck]) -> Table:
 
     for check in checks:
         books = ", ".join(
-            f"{book}/{market}: {count}" for (market, book), count in check.book_events.items()
+            f"{book}/{market}: {count}"
+            + (
+                f" at {_gap(check.book_leads[market, book])}"
+                if (market, book) in check.book_leads
+                else ""
+            )
+            for (market, book), count in check.book_events.items()
         )
         table.add_row(
             utc_isoformat(check.snapshot_time),
@@ -350,7 +363,7 @@ def _probe_table(manifest: Manifest, checks: list[ResponseCheck]) -> Table:
                 f"{_precise(check.previous_gap)} before, {_precise(check.next_gap)} after",
             ),
             mark(check.lead_ok, _gap(check.farthest_lead)),
-            mark(check.books_ok, f"{books} of {check.events} events"),
+            mark(check.books_ok and check.horizon_ok, f"{books} of {check.events} events"),
         )
     return table
 

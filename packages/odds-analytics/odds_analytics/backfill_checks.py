@@ -13,6 +13,7 @@ from typing import Any
 
 from odds_core.api_models import HistoricalOddsResponse
 from odds_core.bookmakers import ODDS_API_BOOKMAKER_KEY_MAP
+from odds_core.time import parse_api_datetime
 from odds_core.utils import is_three_way_sport
 from odds_core.vocabulary import Market
 
@@ -21,8 +22,9 @@ from odds_analytics.backfill_plan import Manifest
 # The provider stamps snapshots to the second, so a neighbour is one grid step away to within
 # this, and a returned snapshot is the requested time to within it.
 TIMESTAMP_TOLERANCE = timedelta(seconds=60)
-# A call's required books are judged on fixtures at most this far from kick-off: books such as
-# the exchange's totals are not posted days ahead, which is all a call lists in a break.
+# A call's required books are judged on fixtures at most this far from kick-off, so a call that
+# lists only games days ahead, as across a break, is not judged on books that are not posted
+# that early (inferred). The probe checks that each required book appears this far ahead.
 BOOK_JUDGED_LEAD = timedelta(hours=24)
 
 
@@ -39,7 +41,8 @@ class ResponseCheck:
     """What a response returned, against what the manifest expects of it.
 
     ``book_events`` counts, for each required (market, bookmaker), the events judged that carry
-    it; it is empty when no event was judged. ``served`` fixtures were planned for the call and
+    it; it is empty when no event was judged. ``book_leads`` is the farthest lead, kick-off less
+    snapshot, of an event carrying each. ``served`` fixtures were planned for the call and
     ``served_stored`` of them were stored.
     """
 
@@ -52,15 +55,16 @@ class ResponseCheck:
     next_gap: timedelta | None
     farthest_lead: timedelta | None
     book_events: dict[tuple[Market, str], int]
+    book_leads: dict[tuple[Market, str], timedelta]
     served: int = 0
     served_stored: int = 0
 
     @property
     def units_ok(self) -> bool:
-        """The bill is the manifest's, or nothing for an empty response, which the API does
-        not count against the quota."""
+        """The bill is the manifest's. An empty response may also bill nothing, which the API
+        does not count against the quota."""
         if self.events == 0:
-            return self.units in (None, 0)
+            return self.units in (None, 0, self.manifest.probe.units_per_call)
         return self.units == self.manifest.probe.units_per_call
 
     @property
@@ -97,6 +101,13 @@ class ResponseCheck:
         return not self.missing_books
 
     @property
+    def horizon_ok(self) -> bool:
+        """Each required book is listed at least ``BOOK_JUDGED_LEAD`` ahead of kick-off, so a
+        run's book judging, which stops there, never rests on a book not yet posted. A book with
+        no events at all fails ``books_ok`` instead."""
+        return all(lead >= BOOK_JUDGED_LEAD for lead in self.book_leads.values())
+
+    @property
     def sparse_reason(self) -> str | None:
         """Why the response is too thin to be a run's data, None when it is not."""
         if not self.events:
@@ -111,7 +122,14 @@ class ResponseCheck:
 
     @property
     def ok(self) -> bool:
-        return self.units_ok and self.lag_ok and self.grid_ok and self.lead_ok and self.books_ok
+        return (
+            self.units_ok
+            and self.lag_ok
+            and self.grid_ok
+            and self.lead_ok
+            and self.books_ok
+            and self.horizon_ok
+        )
 
 
 def check_response(
@@ -133,7 +151,9 @@ def check_response(
             for market, books in manifest.probe.required_bookmakers.items()
             for book in books
         }
+    leads: dict[tuple[Market, str], timedelta] = {}
     for raw in judged_events or ():
+        lead = parse_api_datetime(raw["commence_time"]) - snapshot
         carried = {
             (market["key"], bookmaker["key"])
             for bookmaker in raw.get("bookmakers", [])
@@ -141,6 +161,7 @@ def check_response(
         }
         for key in required.keys() & carried:
             required[key] += 1
+            leads[key] = max(lead, leads.get(key, lead))
     return ResponseCheck(
         manifest=manifest,
         lag=requested - snapshot,
@@ -157,6 +178,7 @@ def check_response(
             else None
         ),
         book_events=required,
+        book_leads=leads,
         served=served,
         served_stored=served_stored,
     )

@@ -170,7 +170,7 @@ class BackfillExecutor:
         if not check.units_ok:
             raise BackfillStopped(
                 f"call billed {check.units} units, expected "
-                f"{self.manifest.probe.units_per_call if check.events else 0}",
+                f"{'' if check.events else '0 or '}{self.manifest.probe.units_per_call}",
                 result,
             )
         if sparse_streak >= self.max_consecutive_gaps:

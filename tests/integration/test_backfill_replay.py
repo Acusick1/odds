@@ -32,7 +32,7 @@ from odds_lambda.storage.writers import OddsWriter
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.integration.conftest import (
+from tests.integration.backfill_replay_helpers import (
     ACQUISITION_KEY,
     AFTERNOON,
     BACKFILLS,
