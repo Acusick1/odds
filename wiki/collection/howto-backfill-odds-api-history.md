@@ -4,6 +4,7 @@ title: Backfill Odds API history
 description: Steps to cost an acquisition manifest, execute its calls, and fill scores and check status.
 sources:
   - odds_cli.commands.discover
+  - odds_cli.commands.events.sync_mlb_seasons
   - odds_cli.commands.backfill
   - odds_analytics.backfill_plan.Manifest
   - odds_analytics.backfill_executor.BackfillExecutor
@@ -17,7 +18,7 @@ Costs a historical purchase before it is bought, buys it, and fills scores. Exec
 ## Cost and execute a manifest
 
 1. Write or pick a manifest in `backfills/` ([acquisition manifests](odds-api-backfill.md#acquisition-manifests)).
-2. Make sure the manifest's seasons are stored as FINAL events; the planner reads fixtures from the database, and the executor stores prices only on stored events. `odds discover games --start D --end D --sport S` stores the events the Odds API lists for a window, spending sport S's key, resolving each to an existing event or creating a SCHEDULED one ([commands](odds-api-backfill.md#commands)).
+2. Make sure the manifest's seasons are stored as FINAL events; the planner reads fixtures from the database, and the executor stores prices only on stored events. `odds discover games --start D --end D --sport S` stores the events the Odds API lists for a window, spending sport S's key, resolving each to an existing event or creating a SCHEDULED one ([commands](odds-api-backfill.md#commands)). For MLB, `odds events sync-mlb-seasons --season YEAR` stores every played game as a FINAL event from the free MLB Stats API instead ([MLB season load](mlb-season-load.md)).
 3. Print the cost.
    ```bash
    uv run odds backfill plan --manifest backfills/odds-api-epl-2020-26.yaml --cost

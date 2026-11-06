@@ -411,3 +411,40 @@ def sync_nba_games(
     """
     last = date.fromisoformat(until) if until is not None else datetime.now(UTC).date()
     asyncio.run(_sync_nba_games(date.fromisoformat(since), last, apply))
+
+
+async def _sync_mlb_seasons(seasons: list[int], apply: bool) -> None:
+    from odds_lambda.mlb_season_load import load_seasons
+
+    report = await load_seasons(seasons, apply=apply)
+    per_season = ", ".join(f"{s}: {n}" for s, n in sorted(report.games_by_season.items()))
+    console.print(
+        f"Final MLB games: {report.games} ({per_season}); events created: {report.created}; "
+        f"matched: {report.matched}; set FINAL: {report.finalised}; "
+        f"score conflicts: {len(report.score_conflicts)}; failed: {len(report.errors)}"
+    )
+    for conflict in report.score_conflicts:
+        console.print(f"  [yellow]{conflict}[/yellow]")
+    for error in report.errors:
+        console.print(f"  [red]{error}[/red]")
+    if not apply:
+        console.print("Dry run: nothing written. Re-run with --apply.")
+
+
+@app.command("sync-mlb-seasons")
+def sync_mlb_seasons(
+    seasons: list[int] = typer.Option(  # noqa: B008 — typer option idiom
+        ..., "--season", help="Calendar season; repeatable"
+    ),
+    apply: bool = typer.Option(False, "--apply", help="Write; without it each game is rolled back"),
+) -> None:
+    """Create FINAL events for every played regular-season and postseason MLB game.
+
+    Each game holds its MLB Stats API gamePk; a game an event already exists for is matched, not
+    duplicated, and an event already FINAL with another score is listed, not changed (see
+    `odds events repair-scores`). Safe to re-run.
+
+    Example:
+        odds events sync-mlb-seasons --season 2024 --season 2025 --season 2026 --apply
+    """
+    asyncio.run(_sync_mlb_seasons(seasons, apply))
