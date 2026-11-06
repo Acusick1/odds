@@ -1,9 +1,11 @@
 ---
 type: howto
 title: Add a sport
-description: "Steps to add a sport: SportKey, suffix, overnight window, league spec, Betfair config, team aliases, job sport allowlists, Terraform rules, heartbeat keys."
+description: "Steps to add a sport: SportKey, timezone, kick-off authority, suffix, overnight window, league spec, Betfair config, team aliases, job sport allowlists, Terraform rules, heartbeat keys."
 sources:
   - odds_core.sports.SportKey
+  - odds_core.sports.LEAGUE_TIMEZONES
+  - odds_lambda.storage.event_kickoff.KICKOFF_AUTHORITY
   - odds_core.config.DataCollectionConfig
   - odds_core.config.AlertConfig.heartbeat_expectations
   - odds_lambda.scheduling.jobs._SPORT_SUFFIX_MAP
@@ -20,10 +22,10 @@ status: stable
 
 # Add a sport
 
-The Odds API bookmakers and markets are config (`bookmakers`, a per-sport map, and `markets` on `odds_core.config.DataCollectionConfig`) and need no other code; a sport with no `bookmakers` entry fails its Odds API fetch, and a sport that needs its own Odds API key adds its index to `odds_core.config.APIConfig.key_index_by_sport` ([keys](odds-api-client.md#retry-and-keys)). A new sport needs the steps below; skip a step only when the sport has no feed or job of that kind.
+The Odds API bookmakers and markets are config (`bookmakers`, a per-sport map, and `markets` on `odds_core.config.DataCollectionConfig`) and need no other code; a sport with no `bookmakers` entry fails its Odds API fetch, and a sport that needs its own Odds API key adds its index to `odds_core.config.APIConfig.key_index_by_sport` ([keys](odds-api-client.md#retry-and-keys)). A new sport needs the steps below; skip a step only when the sport has no feed or job of that kind. A sport loaded only for the Odds API historical backfill needs steps 1 and 7 ([historical listings](../storage/event-matching.md#historical-odds-api-listings)).
 
-1. Add the sport to `odds_core.sports.SportKey`.
-   - It becomes the `sport` argument of jobs, MCP tools and CLI commands ([sport-and-market-keys](sport-and-market-keys.md#sport-keys)).
+1. Add the sport to `odds_core.sports.SportKey`, its timezone to `odds_core.sports.LEAGUE_TIMEZONES` and its source order to `odds_lambda.storage.event_kickoff.KICKOFF_AUTHORITY`.
+   - It becomes the `sport` argument of jobs, MCP tools and CLI commands ([sport-and-market-keys](sport-and-market-keys.md#sport-keys)); the timezone sets its game day ([timezones](../foundations/timezones.md)) and the order which source may move its kick-offs ([kick-off authority](../storage/kickoff-authority.md#authority-order)).
 2. Add a suffix in `odds_lambda.scheduling.jobs._SPORT_SUFFIX_MAP`.
    - The suffix names EventBridge rules, heartbeat keys and the sport filter of `odds_mcp.server.get_scheduled_jobs`; without one, compound job names stay bare ([job-registry](../scheduling/job-registry.md#compound-job-names)).
 3. Add an entry to `odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS`.
@@ -33,7 +35,7 @@ The Odds API bookmakers and markets are config (`bookmakers`, a per-sport map, a
 5. If Betfair lists it, add an entry to `odds_lambda.betfair.constants.SPORT_CONFIG`, with its match odds market and any other market types to collect (a totals market carries its line).
    - The Betfair allowlist in `odds_core.job_specs.JOB_SPECS` is derived from that map, so no allowlist edit is needed ([betfair-exchange](betfair-exchange.md)).
 6. If Polymarket lists its match markets, add an entry to `odds_lambda.polymarket_sports.POLYMARKET_SPORTS` (`has_draw` for a three-way sport, and a `team_name` function); the `fetch-polymarket-odds` allowlist follows that dict ([Polymarket odds snapshots](polymarket-odds-snapshots.md#sport-config-and-discovery)).
-7. Add team aliases in `odds_core.team`, the one alias map (`odds_lambda.polymarket_sports.PolymarketSportConfig.team_name` only picks the Polymarket spelling).
+7. Add team aliases in `odds_core.team`, the one alias map (`odds_lambda.polymarket_sports.PolymarketSportConfig.team_name` only picks the Polymarket spelling), for every spelling each source uses. The map ignores the sport, so an alias must not name another club in any league.
    - Event matching compares normalised names; unknown names pass through unchanged and surface as duplicate events or NULL `event_id` ([event-matching](../storage/event-matching.md)).
 8. Add the sport to each allowlist in `odds_core.job_specs.JOB_SPECS` whose job should run for it.
    - A job with an allowlist skips every sport not on it, so a new sport gets none of those jobs until added; `fetch-oddsportal-results` is EPL-only there, so a sport settled from OddsPortal results is added to it; per-sport jobs without an allowlist run for every sport in `data_collection.sports` ([local-scheduler](../scheduling/local-scheduler.md#bootstrap-jobs-and-cron-table)).

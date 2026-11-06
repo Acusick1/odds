@@ -14,6 +14,7 @@ Each external source has a fetcher, a job (or manual script) that runs it, and a
 - [EPL context data (ESPN, FPL, FBref)](epl-context-data.md) — ESPN fixtures (the fetch-espn-fixtures job) and lineups, FPL availability and FBref stats, covering fetchers, scripts, tables and readers, and which of them any feature or tool actually consumes.
 - [Historical ingest scripts](historical-ingest-scripts.md) — scripts/scrape_oddsportal.py, ingest_oddsportal.py, ingest_football_data_uk.py: inputs, matching, ids, snapshot shape, idempotency.
 - [MLB probable pitchers](mlb-probable-pitchers.md) — The MLB Stats API fetcher, the fetch-mlb-probables job, the append-only mlb_probable_pitchers table and its reader, and how the MCP tool reads it.
+- [MLB season load](mlb-season-load.md) — odds events sync-mlb-seasons: which MLB Stats API games become FINAL events, where postponed, resumed and doubleheader games are placed, how existing events are reused, and what the report lists.
 - [NBA schedule, injury reports, game logs and player stats](nba-injuries-and-stats.md) — The ESPN NBA schedule and settlement, the injury-report job and the manual feeds (stats.nba.com game logs, PBPStats player stats): sources, CLIs, writers and event matching.
 - [Odds API historical backfill](odds-api-backfill.md) — Acquisition manifests, the causal call planner, the executor that runs its calls, odds discover and odds backfill.
 - [Odds API ingestion service](odds-ingestion-service.md) — OddsIngestionService steps and callbacks, the fetch_logs table, and odds fetch current / odds discover upcoming.
@@ -34,7 +35,7 @@ Each external source has a fetcher, a job (or manual script) that runs it, and a
 
 ### How-to guides
 
-- [Add a sport](howto-add-sport.md) — Steps to add a sport: SportKey, suffix, overnight window, league spec, Betfair config, team aliases, job sport allowlists, Terraform rules, heartbeat keys.
+- [Add a sport](howto-add-sport.md) — Steps to add a sport: SportKey, timezone, kick-off authority, suffix, overnight window, league spec, Betfair config, team aliases, job sport allowlists, Terraform rules, heartbeat keys.
 - [Backfill Odds API history](howto-backfill-odds-api-history.md) — Steps to cost an acquisition manifest, execute its calls, and fill scores and check status.
 - [Load historical EPL odds](howto-load-historical-epl-odds.md) — Steps to scrape OddsPortal, ingest it, then ingest football-data.co.uk.
 <!-- pages:end -->
