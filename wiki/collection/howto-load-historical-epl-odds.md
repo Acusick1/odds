@@ -3,9 +3,9 @@ type: howto
 title: Load historical EPL odds
 description: Steps to scrape OddsPortal, ingest it, then ingest football-data.co.uk.
 sources:
-  - scripts/scrape_oddsportal.py
-  - scripts/ingest_oddsportal.py
-  - scripts/ingest_football_data_uk.py
+  - scripts.scrape_oddsportal.main
+  - scripts.ingest_oddsportal.main
+  - scripts.ingest_football_data_uk.main
 mentions:
   - odds_core.models.Event
 status: stable

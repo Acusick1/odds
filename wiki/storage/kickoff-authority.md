@@ -18,7 +18,7 @@ Every move of an [event](events.md)'s `commence_time` on behalf of a source goes
 | Sport | Order |
 |---|---|
 | `baseball_mlb` | MLB Stats API (`mlb_stats_api`) |
-| `soccer_epl` | OddsPortal (`oddsportal`), then Odds API (`odds_api`), then football-data.co.uk (`football_data_uk`) |
+| `soccer_epl`, `soccer_efl_champ`, `soccer_spain_la_liga`, `soccer_italy_serie_a`, `soccer_germany_bundesliga`, `soccer_france_ligue_one` | OddsPortal (`oddsportal`), then Odds API (`odds_api`), then football-data.co.uk (`football_data_uk`) |
 | `basketball_nba` | OddsPortal (`oddsportal`), then Odds API (`odds_api`), then ESPN (`espn`) |
 
 A source outside its sport's order never moves an event: Betfair and Polymarket move no EPL or NBA event, and ESPN moves no EPL event (for NBA it ranks last, so an event only ESPN holds an id on follows a reschedule), and football-data.co.uk moves no NBA event. A source in the order moves an event only when no source ranked above it holds an external id on that event ([external ids](events.md#external-ids)), so the Odds API moves an EPL or NBA event only while it holds no OddsPortal id, and football-data.co.uk moves an EPL event only while it holds neither an OddsPortal nor an Odds API id and no other source has a snapshot on it (see [Before and after the stored kick-off](#before-and-after-the-stored-kick-off)).
@@ -32,7 +32,7 @@ Measured read-only on a copy of the local database taken 2026-10-25. The copy ho
 - **NBA, minute of the hour:** the Odds API's first pre-game value falls on :00 or :30 for 148 of 813 events, the rest 10 minutes later; OddsPortal's event rows do for 4972 of 5001 and Polymarket's `end_date` for 891 of 891. That :00 and :30 are the true tip-offs, so the Odds API is the one that is late, is a reading of those three sources (inferred).
 - **Odds API in-play:** once a game is live it reports the actual start: 78 of 623 NBA events differ from the stored kick-off (up to 14 minutes), 7 of 135 EPL events (up to 2).
 
-OddsPortal above the Odds API rests on the NBA grid and the one EPL reversal, and OddsPortal's response to a postponement was not measured (inferred).
+OddsPortal above the Odds API rests on the NBA grid and the one EPL reversal, and OddsPortal's response to a postponement was not measured (inferred). The other football leagues take the EPL's order unmeasured, since no source had collected them when it was set (inferred).
 
 Left out of both orders:
 
@@ -61,8 +61,9 @@ Nothing happens when no start is given or it equals the stored kick-off. Otherwi
 
 ## Callers
 
-- `odds_lambda.storage.event_resolver.resolve_event` ([Event resolver](event-resolver.md)), for the live OddsPortal and Betfair jobs and the historical ingest scripts (it alone offers the start; `odds_lambda.storage.event_resolver.attach_event` offers none; [live MLB events](event-matching.md#live-mlb-events)): the MLB Stats API with the schedule's start for MLB, after recording the `gamePk`, else the listing source with its listed start. An OddsPortal historical listing is always in the past, so it never moves a played event, and an ambiguous historical match raises `odds_lambda.storage.event_resolver.AmbiguousHistoricalMatch` before any start is offered.
+- `odds_lambda.storage.event_resolver.resolve_event` ([Event resolver](event-resolver.md)), for the live OddsPortal and Betfair jobs and the historical ingest scripts (it alone offers the start; `odds_lambda.storage.event_resolver.attach_listing`, which the Odds API backfill uses and `odds_lambda.storage.event_resolver.attach_event` (the Polymarket writers) wraps, offers none; [live MLB events](event-matching.md#live-mlb-events)): the MLB Stats API with the schedule's start for MLB, after recording the `gamePk`, else the listing source with its listed start. An OddsPortal historical listing is always in the past, so it never moves a played event, and an ambiguous historical match raises `odds_lambda.storage.event_resolver.AmbiguousHistoricalMatch` before any start is offered.
 - `odds_lambda.jobs.fetch_mlb_results` ([fetch-mlb-results](../collection/results-jobs.md#fetch-mlb-results)), with the MLB Stats API.
+- `odds_lambda.mlb_season_load.load_games` ([MLB season load](../collection/mlb-season-load.md)), through `odds_lambda.storage.event_resolver.resolve_event`, with the MLB Stats API and the played slot's start (none for a TBD start).
 - `odds_lambda.storage.game_pk_backfill.apply_assignment` ([assigning gamePks](event-merge.md#assigning-gamepks)), with the MLB Stats API, after recording the `gamePk` (`odds_lambda.storage.event_resolver.record_game_pk`).
 - `odds_lambda.odds_api_events.resolve_odds_api_event` ([events](events.md#writing-events)), for Odds API ingestion, event sync, `odds discover games` and the historical backfill (the API's reissued id replaces the recorded `odds_api` external id), through `odds_lambda.storage.event_resolver.resolve_event`: the Odds API with the listed start.
 

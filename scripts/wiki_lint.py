@@ -35,6 +35,8 @@ DEFAULT_MODULE_DIRS = (
 DEFAULT_MCP_DIR = "packages/odds-mcp/odds_mcp"
 DEFAULT_PACKAGES_DIR = "packages"
 DEFAULT_SYMBOL_ROOT = DEFAULT_PACKAGES_DIR
+# Not installed, but importable as `scripts.<module>`: a namespace package at the repo root.
+SCRIPTS_PACKAGE = "scripts"
 ALLOWED_WORDS = frozenset({"main", "master"})
 # Common English words and config keys: a bare mention is prose unless it names a function or class.
 GENERIC_VARIABLE_NAMES = frozenset(
@@ -630,7 +632,11 @@ class Resolved(NamedTuple):
 
 @dataclass
 class Packages:
-    """Installed Python packages, loaded statically with griffe (nothing is imported)."""
+    """Installed Python packages and the `scripts` namespace, loaded statically with griffe.
+
+    Nothing is imported. Scripts resolve like package modules, but are left out of the
+    bare-name symbol index: their names (`main`, `parse_args`) repeat across files.
+    """
 
     root: Path
     search_roots: tuple[Path, ...]
@@ -651,6 +657,14 @@ class Packages:
             for init in sorted(search_root.glob("*/__init__.py")):
                 if not SKIP_DIRS & set(init.parts):
                     packages.names.setdefault(init.parent.name, search_root)
+        scripts = root / SCRIPTS_PACKAGE
+        if (
+            scripts.is_dir()
+            and not (scripts / "__init__.py").exists()
+            and next(scripts.rglob("*.py"), None) is not None
+        ):
+            packages.names.setdefault(SCRIPTS_PACKAGE, root)
+            packages.search_roots = (*search, root)
         return packages
 
     def module_name(self, rel: str) -> str | None:
@@ -719,11 +733,24 @@ class Packages:
             return Resolved(tuple(hops), Target(rel, None))
         return Resolved(tuple(hops), Target(rel, final.path[len(final.module.path) + 1 :]))
 
+    def is_directory(self, dotted: str) -> bool:
+        """Whether `dotted` names a namespace package: a directory, not a citable file."""
+        if dotted.split(".")[0] not in self.names:
+            return False
+        try:
+            module = self._modules()[dotted]
+        except KeyError:
+            return False
+        return isinstance(module, griffe.Module) and (
+            module.is_namespace_package or module.is_namespace_subpackage
+        )
+
     def symbol_index(self) -> SymbolIndex:
         if self._index is None:
             index = SymbolIndex()
             for name in self.names:
-                self._index_module(index, self._modules()[name])
+                if name != SCRIPTS_PACKAGE:
+                    self._index_module(index, self._modules()[name])
             self._index = index
         return self._index
 
@@ -1114,6 +1141,8 @@ class WikiLinter:
             text = text[2:]
         dotted = DOTTED_RE.match(text)
         if dotted and dotted.group(1).split(".")[0] in self.packages.names:
+            if self.packages.is_directory(dotted.group(1)):
+                return
             self._check_dotted(page, dotted.group(1), raw, lines)
             return
         symbol_syntax = PATH_SYMBOL_RE.match(text)

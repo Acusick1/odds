@@ -25,7 +25,7 @@ bookmakers:
   - betvictor
   - sport888
 # A decision at any whole minute in a band finds a snapshot at most its max age old.
-# Provisional until #740 chooses the envelope.
+# Chosen in #740.
 coverage:
   - {min_lead_minutes: 1, max_lead_minutes: 120, max_input_age_minutes: 10}
   - {min_lead_minutes: 121, max_lead_minutes: 1440, max_input_age_minutes: 60}

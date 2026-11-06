@@ -24,6 +24,12 @@ from __future__ import annotations
 #   San Francisco Giants, Seattle Mariners, St.Louis Cardinals, Tampa Bay Rays,
 #   Texas Rangers, Toronto Blue Jays, Washington Nationals.
 #
+# Pipeline canonical names of the other football leagues are The Odds API's spellings
+# ("Atlético Madrid", "Borussia Monchengladbach"), except that a club with an EPL canonical
+# name keeps it in the Championship. Aliases cover the football-data.co.uk and OddsPortal
+# spellings of every club in those leagues' 2024-26 seasons, and the Odds API's own variants
+# ("Girona FC" in its second division).
+#
 # Pipeline canonical NBA names are The Odds API's full names ("Boston Celtics"); the
 # 30 are the values of odds_lambda.polymarket_matching.NBA_ABBREV_MAP. OddsPortal and
 # Betfair already use them, so only the "LA" spellings of the two Los Angeles
@@ -65,6 +71,65 @@ _TEAM_ALIASES: dict[str, str] = {
     "west bromwich albion": "West Brom",
     "west ham united": "West Ham",
     "wolverhampton wanderers": "Wolves",
+    # ---- Championship: clubs without an EPL canonical name above
+    "birmingham": "Birmingham City",
+    "blackburn": "Blackburn Rovers",
+    "charlton": "Charlton Athletic",
+    "derby": "Derby County",
+    "oxford": "Oxford United",
+    "oxford utd": "Oxford United",
+    "plymouth": "Plymouth Argyle",
+    "preston": "Preston North End",
+    "qpr": "Queens Park Rangers",
+    "sheffield weds": "Sheffield Wednesday",
+    "sheffield wed": "Sheffield Wednesday",
+    "wrexham": "Wrexham AFC",
+    # ---- La Liga
+    "alaves": "Alavés",
+    "ath bilbao": "Athletic Bilbao",
+    "ath madrid": "Atlético Madrid",
+    "atl. madrid": "Atlético Madrid",
+    "betis": "Real Betis",
+    "celta": "Celta Vigo",
+    "elche": "Elche CF",
+    "espanol": "Espanyol",
+    "girona fc": "Girona",
+    "leganes": "Leganés",
+    "osasuna": "CA Osasuna",
+    "sociedad": "Real Sociedad",
+    "valladolid": "Real Valladolid",
+    "real valladolid cf": "Real Valladolid",
+    "vallecano": "Rayo Vallecano",
+    # ---- Serie A
+    "atalanta": "Atalanta BC",
+    "inter": "Inter Milan",
+    "milan": "AC Milan",
+    "roma": "AS Roma",
+    "verona": "Hellas Verona",
+    # ---- Bundesliga
+    "bochum": "VfL Bochum",
+    "dortmund": "Borussia Dortmund",
+    "ein frankfurt": "Eintracht Frankfurt",
+    "fc koln": "1. FC Köln",
+    "freiburg": "SC Freiburg",
+    "hamburg": "Hamburger SV",
+    "heidenheim": "1. FC Heidenheim",
+    "hoffenheim": "TSG Hoffenheim",
+    "leverkusen": "Bayer Leverkusen",
+    "m'gladbach": "Borussia Monchengladbach",
+    "b. monchengladbach": "Borussia Monchengladbach",
+    "mainz": "FSV Mainz 05",
+    "st pauli": "FC St. Pauli",
+    "st. pauli": "FC St. Pauli",
+    "stuttgart": "VfB Stuttgart",
+    "wolfsburg": "VfL Wolfsburg",
+    # ---- Ligue 1
+    "lens": "RC Lens",
+    "monaco": "AS Monaco",
+    "paris sg": "Paris Saint Germain",
+    "psg": "Paris Saint Germain",
+    "reims": "Stade de Reims",
+    "st etienne": "Saint Etienne",
     # ---- MLB: Betfair short forms (and a few common variants)
     "arizona d'backs": "Arizona Diamondbacks",
     "la angels": "Los Angeles Angels",
