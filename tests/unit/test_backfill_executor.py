@@ -28,7 +28,7 @@ def manifest(**overrides: Any) -> Manifest:
     data: dict[str, Any] = {
         "sport": "soccer_epl",
         "seasons": {"2025-26": {"start": "2025-07-01T00:00:00Z", "end": "2026-07-01T00:00:00Z"}},
-        "markets": [{"key": "h2h"}, {"key": "totals", "line": 2.5}],
+        "markets": ["h2h", "totals"],
         "bookmakers": ["pinnacle", "williamhill"],
         "coverage": [{"min_lead_minutes": 1, "max_lead_minutes": 120, "max_input_age_minutes": 10}],
         "snapshot_grid": [{"start": "2020-06-06T00:00:00Z", "step_minutes": 10}],
