@@ -21,7 +21,10 @@ sources:
   - odds_core.job_specs.JOB_SPECS
   - odds_lambda.scheduling.jobs.make_compound_job_name
   - odds_mcp.server.MarketKey
-  - scripts/ingest_football_data_uk.py
+  - scripts.ingest_football_data_uk.BOOKMAKER_PREFIXES
+  - scripts.ingest_football_data_uk.MARKET_KEY
+  - scripts.ingest_football_data_uk._ingest_one_match
+  - scripts.ingest_oddsportal.MARKET_CONFIGS
 status: stable
 ---
 
@@ -44,7 +47,7 @@ These filters apply only to Odds API requests ([configuration](../foundations/co
 ## OddsPortal and FDUK coverage
 
 - OddsPortal names map through `odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP` (32 entries; unmapped names fall back to `odds_lambda.oddsportal_common.slugify`). The map holds Pinnacle, BetMGM, DraftKings, FanDuel, Betfair Exchange, William Hill, Ladbrokes and others.
-- FDUK issues no id of its own for an event ([events](../storage/events.md#external-ids)). Its snapshots carry source `football_data_uk` (the envelope's `source` is the same string), and FDUK maps its column prefixes in `BOOKMAKER_PREFIXES` (`scripts/ingest_football_data_uk.py`): pinnacle, bet365, bwin, betfair_exchange (`BFE`), betfair_sportsbook (`BF`), interwetten, williamhill, betvictor (`VC`, `BV`), betfred (`BFD`), paddypower (`PP`), skybet (`SKB`), betmgm (`BMGM`), coral (`CL`), ladbrokes, onexbet, plus pseudo-books `market_max` / `market_avg` (`AGGREGATE_PREFIXES`).
+- FDUK issues no id of its own for an event ([events](../storage/events.md#external-ids)). Its snapshots carry source `football_data_uk` (the envelope's `source` is the same string), and FDUK maps its column prefixes in `scripts.ingest_football_data_uk.BOOKMAKER_PREFIXES`: pinnacle, bet365, bwin, betfair_exchange (`BFE`), betfair_sportsbook (`BF`), interwetten, williamhill, betvictor (`VC`, `BV`), betfred (`BFD`), paddypower (`PP`), skybet (`SKB`), betmgm (`BMGM`), coral (`CL`), ladbrokes, onexbet, plus pseudo-books `market_max` / `market_avg` (`AGGREGATE_PREFIXES`).
 - Betfair Exchange covers EPL, MLB and NBA (`odds_lambda.betfair.constants.SPORT_CONFIG`): match odds for all three, and over/under 2.5 goals for EPL (the line is on `odds_lambda.betfair.constants.BetfairMarketSpec`).
 
 ## Sport keys
@@ -64,12 +67,12 @@ A market key is whatever string sits in an envelope's `bookmakers[].markets[].ke
 | Writer | Football 3-way | Two-way moneyline | Totals |
 |---|---|---|---|
 | The Odds API | `1x2` (relabelled from `h2h` for soccer) | `h2h` | `totals` |
-| FDUK loader (`scripts/ingest_football_data_uk.py`, opening and closing `1x2` only; skips a game whose event match is ambiguous) | `1x2` | none | none |
+| FDUK loader (`scripts.ingest_football_data_uk._ingest_one_match`, opening and closing `1x2` only; skips a game whose event match is ambiguous) | `1x2` | none | none |
 | OddsPortal adapter | `1x2` | `h2h` (scraped as `home_away`) | `totals`, point 2.5 (scraped as `over_under_2_5`), or per-game main-line ladders (NBA, scraped as `totals_ladder`); `spreads` per-game lines (NBA, scraped as `spreads_ladder`) |
 | Betfair (`odds_lambda.betfair.constants.SPORT_CONFIG`) | `1x2` (EPL) | `h2h` (MLB, NBA) | `totals`, point 2.5 (EPL, `OVER_UNDER_25`) |
 | Polymarket (each entry of `odds_lambda.polymarket_sports.POLYMARKET_SPORTS`) | `1x2` (EPL), `h2h` (NBA) | none | none |
 
-- The football three-way key is `1x2` in every source. The Odds API names that market `h2h` and spells teams in full ("Newcastle United"); `odds_core.utils.relabel_three_way_markets` rewrites an `h2h` market with a Draw outcome to `1x2` and its team outcomes to the canonical names of `odds_core.team.normalize_team_name`, for soccer sport keys, as `odds_lambda.data_fetcher.TheOddsAPIClient.get_odds` and `odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_odds` return it. OddsPortal live (`odds_lambda.oddsportal_adapter.convert_market`, which takes the pipeline key from `odds_lambda.oddsportal_client.FEED_MARKETS`), historical OddsPortal ingest (`MARKET_CONFIGS["1x2"]` in `scripts/ingest_oddsportal.py`, which also loads basketball and skips an NBA game with an unknown side) and Betfair EPL write `1x2` directly, and FDUK writes it too (`MARKET_KEY` in `scripts/ingest_football_data_uk.py`, which reads its dates and times as UK local time). MLB and NBA stay `h2h`. The OddsPortal NBA moneyline is the `home_away` feed and Betfair's is `MATCH_ODDS`.
+- The football three-way key is `1x2` in every source. The Odds API names that market `h2h` and spells teams in full ("Newcastle United"); `odds_core.utils.relabel_three_way_markets` rewrites an `h2h` market with a Draw outcome to `1x2` and its team outcomes to the canonical names of `odds_core.team.normalize_team_name`, for soccer sport keys, as `odds_lambda.data_fetcher.TheOddsAPIClient.get_odds` and `odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_odds` return it. OddsPortal live (`odds_lambda.oddsportal_adapter.convert_market`, which takes the pipeline key from `odds_lambda.oddsportal_client.FEED_MARKETS`), historical OddsPortal ingest (the `1x2` entry of `scripts.ingest_oddsportal.MARKET_CONFIGS`, which also loads basketball and skips an NBA game with an unknown side) and Betfair EPL write `1x2` directly, and FDUK writes it too (`scripts.ingest_football_data_uk.MARKET_KEY`; it reads dates and times as UK local time, `scripts.ingest_football_data_uk.parse_kickoff`). MLB and NBA stay `h2h`. The OddsPortal NBA moneyline is the `home_away` feed and Betfair's is `MATCH_ODDS`.
 - `betfair_exchange` has three writers: FDUK `BFE*` columns, the Betfair job, and OddsPortal's "Betfair Exchange" row (`odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP`, with matched volume from the feed).
 - OddsPortal scrape names (`1x2`, `over_under_2_5`, `home_away`, `totals_ladder`, `spreads_ladder`) are the keys of `odds_lambda.oddsportal_client.FEED_MARKETS`, the only ones the live scrape accepts; `odds_mcp.server.refresh_scrape` rejects any other value. They are inputs to `odds_mcp.server.refresh_scrape` and `odds scrape --market`, not stored keys. The totals spelling is `over_under_2_5` (not `over_under_2.5`), and `odds_lambda.oddsportal_adapter.convert_market` raises `ValueError("Unsupported market")` for anything else ([oddsportal-scraper](oddsportal-scraper.md)).
 - MCP read tools accept `odds_mcp.server.MarketKey` (`h2h`, `1x2`, `totals`, `spreads`) and match it exactly, so EPL queries need `1x2`, MLB and NBA queries need `h2h`, and a wrong key returns an empty result rather than an error (#433; [mcp-market-tools](../agent/mcp-market-tools.md)).

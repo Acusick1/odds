@@ -22,9 +22,9 @@ Prerequisites: Python 3.12+, [uv](https://github.com/astral-sh/uv), Docker, and 
 ## Set up
 
 1. **Install.** `uv sync`. This installs the five workspace packages ([Workspace packages](workspace-packages.md)).
-2. **Create `.env`.** Copy `.env.example` (its optional variables, list settings included, stay commented out) and set:
+2. **Create `.env`.** Copy the [example env file](../../.env.example) and set:
    - `ODDS_API_KEY=<your key>`
-   - `DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/odds`, written literally. `${LOCAL_DATABASE_URL}` would expand to an empty string, because the template defines `LOCAL_DATABASE_URL` below `DATABASE_URL`. The template's `DATABASE_URL=${DEV_DATABASE_URL}` points at the shared dev database, so a fresh copy writes to dev.
+   - `DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/odds`, written literally: a fresh copy of the template points at the shared dev database ([Databases and environments](databases-and-environments.md#environments)).
    - Leave `SPORTS`, `MARKETS`, `REGIONS` and `BOOKMAKERS` commented out to keep the defaults (EPL, MLB and NBA). If you set one, write it as JSON, such as `SPORTS=["soccer_epl"]`; a comma-separated list makes `odds_core.config.get_settings` raise ([List fields](configuration.md#list-fields-and-the-template)).
    - Leave `ALERT_ENABLED` false locally; alerts post to Discord only when it is true ([Alerts](../operations/alerts.md#delivery)).
    - `LOCAL_DATABASE_URL`, `PROD_DATABASE_URL` and `AGENT_DATABASE_URL` if you use them; they are read through `odds_core.config.DatabaseConfig` like any other setting ([Sections](configuration.md#sections)).

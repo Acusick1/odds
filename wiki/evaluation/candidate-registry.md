@@ -10,7 +10,7 @@ sources:
   - odds_core.close.close_quotes
   - odds_core.paper_trade_models.PaperTrade
   - odds_mcp.server.get_portfolio
-  - scripts/check_candidate_versions.py
+  - scripts.check_candidate_versions
   - odds_lambda.candidate_rules.validate_candidate_rules
 status: stable
 ---
@@ -63,7 +63,7 @@ What is scored, in `odds_analytics.candidate_report`:
 
 ## Version check
 
-`scripts/check_candidate_versions.py` compares the working tree's `candidates/*.yaml` with the same files at a base commit. It runs as the `candidate-versions` pre-commit hook ([code conventions](../foundations/code-conventions.md#mechanical-gates)), locally and in the `Lint` workflow. The base is `--base`, else the merge-base of `HEAD` with `origin/main`, else with `main`, else `HEAD`.
+`scripts.check_candidate_versions.check` compares the working tree's `candidates/*.yaml` with the same files at a base commit. It runs as the `candidate-versions` pre-commit hook ([code conventions](../foundations/code-conventions.md#mechanical-gates)), locally and in the `Lint` workflow. The base is `--base`, else the merge-base of `HEAD` with `origin/main`, else with `main`, else `HEAD`.
 
 It fails when:
 

@@ -9,7 +9,7 @@ sources:
   - deployment/aws/bootstrap/main.tf
   - deployment/aws/bootstrap/README.md
   - deployment/aws/build_and_push.sh
-  - scripts/lambda_usage.py
+  - scripts.lambda_usage
   - odds_core.database
 status: stable
 ---
@@ -39,7 +39,7 @@ EventBridge rules are named `{rule_prefix}-{job}[-{sport suffix}]` and `eventbri
 
 ## Costs and usage
 
-Spend cannot be verified from the repo; check it with `aws ce get-cost-and-usage` or the Billing console. The managed PostgreSQL provider is Neon (`deployment/aws/terraform/terraform.tfvars.example`); its database is a frozen archive ([databases-and-environments](../foundations/databases-and-environments.md#environments)), and is billed separately; check its console. Log groups keep 14 days (`retention_in_days` in `deployment/aws/terraform/lambda.tf`). `scripts/lambda_usage.py` pulls `REPORT` lines from CloudWatch for the functions and prints GB-seconds against the 400,000 free tier, daily breakdown, retry analysis and an hourly heatmap (`--days`, `--start`, `--end`). Gaps are filled with [backfills](../collection/odds-api-backfill.md); alerts go to Discord ([alerts](alerts.md)). `scripts/lambda_usage.py` hard-codes memory sizes (0.5 and 2.0 GB), so a change in Terraform does not propagate (#463).
+Spend cannot be verified from the repo; check it with `aws ce get-cost-and-usage` or the Billing console. The managed PostgreSQL provider is Neon (`deployment/aws/terraform/terraform.tfvars.example`); its database is a frozen archive ([databases-and-environments](../foundations/databases-and-environments.md#environments)), and is billed separately; check its console. Log groups keep 14 days (`retention_in_days` in `deployment/aws/terraform/lambda.tf`). `scripts.lambda_usage` pulls `REPORT` lines from CloudWatch for the functions and prints GB-seconds against the 400,000 free tier, daily breakdown, retry analysis and an hourly heatmap (`--days`, `--start`, `--end`). Gaps are filled with [backfills](../collection/odds-api-backfill.md); alerts go to Discord ([alerts](alerts.md)). `scripts.lambda_usage.MEMORY_GB` hard-codes memory sizes (0.5 and 2.0 GB), so a change in Terraform does not propagate (#463).
 
 ## Secrets
 

@@ -10,7 +10,7 @@ sources:
   - odds_lambda.oddsportal_common.build_envelope
   - odds_lambda.betfair.adapter.betfair_book_to_bookmaker_entry
   - odds_lambda.oddsportal_adapter.convert_market
-  - scripts/ingest_football_data_uk.py
+  - scripts.ingest_football_data_uk._ingest_one_match
 mentions:
   - odds_lambda.storage.readers.OddsReader
 status: stable
@@ -46,7 +46,7 @@ The docstring examples show rounded values (`1.909`, `0.524`), so a doctest runn
 
 The envelope a source returns (archived in `odds_core.models.SnapshotPayload`, [envelope format](../storage/odds-tables.md#envelope-format)) carries each outcome's price in one of two encodings, named by `odds_core.odds_math.PRICE_DECIMAL_KEY` (`price_decimal`) and `odds_core.odds_math.PRICE_AMERICAN_KEY` (`price`):
 
-- The envelopes built by this pipeline hold the source decimal under `price_decimal` and have no `price` key: Betfair (`odds_lambda.betfair.adapter.betfair_book_to_bookmaker_entry`, every market it collects, each totals runner on its spec's line), OddsPortal live (`odds_lambda.oddsportal_adapter.convert_market`, whose spread points are signed per outcome and whose ladder lines each carry their own volumes, [spreads line sign](../storage/price-tables.md#spreads-line-sign)), OddsPortal historical (`odds_lambda.oddsportal_common.build_envelope`, whose `last_update` and `_snapshot_time` come from UTC-aware times) and `scripts/ingest_football_data_uk.py` (kick-off read as UK local time, stored as UTC), which skips a game whose event match is ambiguous.
+- The envelopes built by this pipeline hold the source decimal under `price_decimal` and have no `price` key: Betfair (`odds_lambda.betfair.adapter.betfair_book_to_bookmaker_entry`, every market it collects, each totals runner on its spec's line), OddsPortal live (`odds_lambda.oddsportal_adapter.convert_market`, whose spread points are signed per outcome and whose ladder lines each carry their own volumes, [spreads line sign](../storage/price-tables.md#spreads-line-sign)), OddsPortal historical (`odds_lambda.oddsportal_common.build_envelope`, whose `last_update` and `_snapshot_time` come from UTC-aware times) and `scripts.ingest_football_data_uk._ingest_one_match` (kick-off read as UK local time, stored as UTC, `scripts.ingest_football_data_uk.parse_kickoff`), which skips a game whose event match is ambiguous.
 - The Odds API's responses keep their integer American `price` unchanged, which `odds_core.odds_math.american_to_decimal` converts exactly.
 
 `odds_core.odds_math.outcome_price_decimal` reads either encoding; `odds_lambda.price_rows.expand_envelope` (which turns an envelope into price rows) and `odds_lambda.storage.validators.OddsValidator`, which checks each price in one event's envelope with `odds_core.odds_math.is_valid_decimal_price`, both go through it.
