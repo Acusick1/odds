@@ -35,6 +35,7 @@ from odds_lambda.event_sync import EventSyncService
 from odds_lambda.ingestion import OddsIngestionService
 from odds_lambda.jobs import fetch_scores
 from odds_lambda.live_events import SkipReason
+from odds_lambda.mlb_game_resolver import mlb_date
 from odds_lambda.mlb_stats_fetcher import MlbGameResult, MlbGameState
 from odds_lambda.odds_api_events import find_event_by_odds_api_id
 from sqlalchemy import select
@@ -150,9 +151,9 @@ def _mlb_game(pk: int, start: datetime, home: str, away: str) -> MlbGameResult:
         away_score=None,
         game_number=1,
         start_time_tbd=False,
-        official_date=start.date(),
+        official_date=mlb_date(start),
         state=MlbGameState.SCHEDULED,
-        schedule_date=start.date(),
+        schedule_date=mlb_date(start),
     )
 
 
