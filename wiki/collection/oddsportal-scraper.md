@@ -28,7 +28,7 @@ status: stable
 
 # OddsPortal scraper
 
-Live pre-match odds from OddsPortal (UK bookmakers [the Odds API](odds-api-client.md) lacks) and finished-match results are read over plain HTTP, with no browser and no OddsHarvester dependency (neither the root nor any package `pyproject.toml` declares it). The HTTP client serves [the fetch-oddsportal job](fetch-oddsportal-job.md) and `odds scrape upcoming`. Historical bulk loads use scripts instead ([historical-ingest-scripts](historical-ingest-scripts.md)). The reasons for reading the feed are in [ADR 0009](../../docs/adr/0009-oddsportal-feed-client.md).
+Live pre-match odds from OddsPortal (UK bookmakers [the Odds API](odds-api-client.md) lacks) and finished-match results are read over plain HTTP, with no browser and no OddsHarvester dependency (no `pyproject.toml` in the workspace declares it, the root and every package's alike). The HTTP client serves [the fetch-oddsportal job](fetch-oddsportal-job.md) and `odds scrape upcoming`. Historical bulk loads use scripts instead ([historical-ingest-scripts](historical-ingest-scripts.md)). The reasons for reading the feed are in [ADR 0009](../../docs/adr/0009-oddsportal-feed-client.md).
 
 ## Modules
 

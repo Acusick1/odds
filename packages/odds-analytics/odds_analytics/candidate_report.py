@@ -8,12 +8,15 @@ reported beside it.
 
 from __future__ import annotations
 
+import asyncio
 from bisect import bisect_right
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import Executor
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+from functools import partial
 
 import numpy as np
 from odds_core.candidates import Candidate, CandidateStatus, MechanicalCandidate
@@ -34,6 +37,8 @@ KILL_AT_BETS = 500
 # The family-wise false-promote rate; each version's promote level is 1 - this / family size.
 PROMOTE_ERROR = 0.01
 KILL_LEVEL = 0.95
+# Fewer events than this cannot give the current estimate an interval worth drawing.
+MIN_CURRENT_EVENTS = 2
 # The family's promote levels put the interval tails at a few resamples when this is 2000.
 DEFAULT_BOOTSTRAP_SAMPLES = 10_000
 BOOTSTRAP_SEED = 0
@@ -87,7 +92,12 @@ class Checkpoint:
 
 @dataclass(frozen=True)
 class CandidateSummary:
-    """``checkpoint`` is the one the verdict fired at, else the last one reached."""
+    """``checkpoint`` is the one the verdict fired at, else the last one reached, and
+    ``checkpoints`` every one evaluated up to it; each is frozen once reached.
+
+    ``current`` is a separate estimate over all ``bets_with_close`` at the family size now. It
+    moves with every bet and carries no verdict.
+    """
 
     name: str
     version: int
@@ -99,6 +109,8 @@ class CandidateSummary:
     total_stake: float
     pnl: float
     checkpoint: Checkpoint | None
+    checkpoints: tuple[Checkpoint, ...]
+    current: Checkpoint | None
     verdict: Verdict
     family_versions: int
 
@@ -189,22 +201,45 @@ def judge(
     family_size: Callable[[datetime], int],
     n_boot: int,
     seed: int,
-) -> tuple[Verdict, Checkpoint | None]:
-    """The first promote or kill at checkpoints 100, 200, ... 500, and the checkpoint it fired at.
+) -> tuple[Verdict, list[Checkpoint]]:
+    """The first promote or kill at checkpoints 100, 200, ... 500, and the checkpoints evaluated
+    up to it, the last being the one it fired at.
 
     A checkpoint's family size is ``family_size`` at the placement of its nth bet, so a version
     that starts later never changes a verdict already reached. A verdict stands once reached,
     so later bets cannot reverse it. Without one, the verdict is continue with the last
     checkpoint reached, or not_yet with none.
     """
-    checkpoint: Checkpoint | None = None
+    checkpoints: list[Checkpoint] = []
     for n in range(CHECKPOINT_SIZE, min(len(scored), KILL_AT_BETS) + 1, CHECKPOINT_SIZE):
         checkpoint = checkpoint_at(scored, n, family_size(scored[n - 1].placed_at), n_boot, seed)
+        checkpoints.append(checkpoint)
         if checkpoint.promote_ci[0] > 0:
-            return Verdict.PROMOTE, checkpoint
+            return Verdict.PROMOTE, checkpoints
         if checkpoint.ci95[1] <= 0 or n >= KILL_AT_BETS:
-            return Verdict.KILL, checkpoint
-    return (Verdict.NOT_YET if checkpoint is None else Verdict.CONTINUE), checkpoint
+            return Verdict.KILL, checkpoints
+    return (Verdict.CONTINUE if checkpoints else Verdict.NOT_YET), checkpoints
+
+
+def current_estimate(
+    with_close: Sequence[ScoredBet],
+    family_versions: int,
+    reached: Sequence[Checkpoint],
+    n_boot: int,
+    seed: int,
+) -> Checkpoint | None:
+    """The score of every bet with a close at ``family_versions``, None below
+    ``MIN_CURRENT_EVENTS`` events, where an interval says nothing.
+
+    The last of ``reached`` is returned when it is the same score, so a version exactly at a
+    checkpoint resamples once.
+    """
+    if len({t.event_id for t in with_close}) < MIN_CURRENT_EVENTS:
+        return None
+    last = reached[-1] if reached else None
+    if last is not None and (last.n, last.family_versions) == (len(with_close), family_versions):
+        return last
+    return checkpoint_at(with_close, len(with_close), family_versions, n_boot, seed)
 
 
 def scoreable_prefix(trades: Sequence[ScoredBet], now: datetime) -> tuple[list[ScoredBet], int]:
@@ -243,7 +278,8 @@ def summarize_candidate(
     the verdict checkpoint's, or the size at ``now`` before any checkpoint.
     """
     with_close, prefix_length = scoreable_prefix(trades, now)
-    verdict, checkpoint = judge(with_close, family_size, n_boot, seed)
+    verdict, checkpoints = judge(with_close, family_size, n_boot, seed)
+    checkpoint = checkpoints[-1] if checkpoints else None
     settled = [t for t in trades if t.pnl is not None]
     return CandidateSummary(
         name=name,
@@ -256,6 +292,8 @@ def summarize_candidate(
         total_stake=sum(t.stake for t in settled),
         pnl=sum(t.pnl for t in settled if t.pnl is not None),
         checkpoint=checkpoint,
+        checkpoints=tuple(checkpoints),
+        current=current_estimate(with_close, family_size(now), checkpoints, n_boot, seed),
         verdict=verdict,
         family_versions=checkpoint.family_versions if checkpoint else family_size(now),
     )
@@ -366,12 +404,24 @@ async def candidate_report(
     n_boot: int = DEFAULT_BOOTSTRAP_SAMPLES,
     seed: int = BOOTSTRAP_SEED,
     now: datetime | None = None,
+    executor: Executor | None = None,
 ) -> list[CandidateSummary]:
-    return summarize_candidates(
-        await load_scored_trades(session),
-        registry,
-        now or datetime.now(UTC),
-        await load_decision_starts(session),
-        n_boot,
-        seed,
+    """Every candidate version's summary, from one read of the trades and decision starts.
+
+    The bootstrap runs on ``executor`` (the loop's default one when None), so a server can hold
+    it to a single thread.
+    """
+    trades = await load_scored_trades(session)
+    decision_starts = await load_decision_starts(session)
+    return await asyncio.get_running_loop().run_in_executor(
+        executor,
+        partial(
+            summarize_candidates,
+            trades,
+            registry,
+            now or datetime.now(UTC),
+            decision_starts,
+            n_boot,
+            seed,
+        ),
     )

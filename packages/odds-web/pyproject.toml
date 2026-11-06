@@ -1,0 +1,36 @@
+[project]
+name = "odds-web"
+version = "0.1.0"
+description = "Read-only web UI over the candidates' forward tests"
+authors = [{name = "Andrew"}]
+requires-python = ">=3.12"
+dependencies = [
+    "odds-core",
+    "odds-analytics",
+    "odds-lambda",
+    "fastapi>=0.115",
+    "jinja2>=3.1",
+    "sqlalchemy>=2.0.44",
+]
+
+[tool.uv.sources]
+odds-core = { workspace = true }
+odds-analytics = { workspace = true }
+odds-lambda = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["odds_web"]
+
+[tool.deptry.per_rule_ignores]
+# jinja2 is loaded by Starlette's template support; odds-lambda is the dependency the status
+# strip of the data-health page reads job and quota state through.
+DEP002 = ["jinja2", "odds-lambda"]

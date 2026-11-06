@@ -25,7 +25,7 @@ status: stable
 
 ## Command groups
 
-`packages/odds-cli/pyproject.toml` declares Typer, Rich, PyYAML, structlog, sqlalchemy, apscheduler and numpy, each because `odds_cli` imports it directly; `optuna` comes only through analytics' `training` extra.
+`packages/odds-cli/pyproject.toml` declares Typer, Rich, PyYAML, structlog, sqlalchemy, apscheduler, numpy and uvicorn, each because `odds_cli` imports it directly (and odds-web, whose app `odds web serve` runs); `optuna` comes only through analytics' `training` extra.
 
 | Group | Page |
 |---|---|
@@ -42,6 +42,7 @@ status: stable
 | `paper` | [Paper trading](../agent/paper-trading.md) |
 | `candidates` | [Candidate registry](../evaluation/candidate-registry.md#odds-candidates-list), [Replay backtest](../evaluation/candidate-backtest.md), [Parity check](../evaluation/candidate-parity.md) |
 | `agent` | [Agent runtime and the agent-run job](../agent/agent-run-job.md) |
+| `odds_cli.commands.web` (`odds web serve`) | [odds-web](../operations/odds-web.md#running-it) |
 
 ## Sport defaults
 
@@ -63,7 +64,7 @@ Pass `--sport` explicitly. [About the system and its pivots](project-overview.md
 
 ## Shared conventions
 
-- **Database override.** `scheduler start` and `agent run` accept `--db NAME`, which calls `odds_cli.db_override.override_database_url`: it swaps the dbname in `DATABASE_URL`, and in `AGENT_DATABASE_URL` when set, writes `os.environ`, and clears the settings cache (`odds_cli.db_override.swap_dbname` rejects names containing `/` or `?`). In-process sessions and subprocesses, the agent included, then use the new database ([The `--db` flag](databases-and-environments.md#the---db-flag), [Database role](../agent/agent-run-job.md#database-role)).
+- **Database override.** `scheduler start` and `agent run` accept `--db NAME`, which calls `odds_cli.db_override.override_database_url`: it swaps the dbname in `DATABASE_URL`, and in `AGENT_DATABASE_URL` and `WEB_DATABASE_URL` when set, writes `os.environ`, and clears the settings cache (`odds_cli.db_override.swap_dbname` rejects names containing `/` or `?`). In-process sessions and subprocesses, the agent included, then use the new database ([The `--db` flag](databases-and-environments.md#the---db-flag), [Database role](../agent/agent-run-job.md#database-role)).
 - **Async.** Commands wrap async code in `asyncio.run()`.
 - **Exit codes.** Most groups exit with `typer.Exit(code=...)`; `odds_cli.commands.validate` (10 sites, among them a date that is not ISO `YYYY-MM-DD`) and `odds_cli.commands.quality` (3, among them a date that is not `YYYY-MM-DD`) call `sys.exit(1)`. `odds_cli.commands.copy_from_prod` exits 1 on a date that the `strptime` format `%Y-%m-%d` does not parse and when `odds_lambda.copy_from_production.CopyStats.events_failed` is non-zero.
 
