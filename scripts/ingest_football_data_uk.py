@@ -33,6 +33,7 @@ import io
 import logging
 import math
 import re
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
@@ -57,7 +58,7 @@ from odds_lambda.storage.event_resolver import (
     resolve_event,
 )
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload, store_shaped_snapshot
-from odds_lambda.storage.snapshot_store import PriceRow, price_row
+from odds_lambda.storage.snapshot_store import PriceRow, SnapshotWriteOutcome, price_row
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from team_names import normalize_team as _normalize_team_central
@@ -604,9 +605,9 @@ async def _ingest_one_match(
         .scalars()
         .all()
     )
-    if [await _stored_content(session, snap) for snap in existing_snaps] == [
-        _new_content(event, snap) for snap in new_snapshots
-    ]:
+    if Counter([await _stored_content(session, snap) for snap in existing_snaps]) == Counter(
+        content for snap in new_snapshots for content in _new_contents(event, snap)
+    ):
         return
     if existing_snaps:
         referenced = await _referenced_by_decisions(session, [snap.id for snap in existing_snaps])
@@ -635,8 +636,11 @@ async def _ingest_one_match(
             snap.snapshot_time,
             SnapshotShape(Source.FOOTBALL_DATA_UK, snap.time_basis, payload_id),
         )
-        if write.inserted:
-            stats.snapshots_inserted += 1
+        stats.snapshots_inserted += sum(
+            1
+            for market_write in (write.first, *write.others)
+            if market_write is None or market_write.outcome is SnapshotWriteOutcome.INSERTED
+        )
 
 
 async def _delete_snapshots(session: AsyncSession, snapshots: list[OddsSnapshot]) -> None:
@@ -663,21 +667,37 @@ class NewSnapshot:
     time_basis: TimeBasis
 
 
-# What a re-ingest compares: a snapshot's time basis, time and price rows.
-SnapshotContent = tuple[TimeBasis | None, datetime, frozenset[PriceRow]]
+# What a re-ingest compares: a stored snapshot's time basis, time, market and price rows.
+SnapshotContent = tuple[TimeBasis | None, datetime, str | None, frozenset[PriceRow]]
 
 
 async def _stored_content(session: AsyncSession, snap: OddsSnapshot) -> SnapshotContent:
     prices = (await session.execute(select(Price).where(Price.snapshot_id == snap.id))).scalars()
-    return (snap.time_basis, snap.snapshot_time, frozenset(price_row(p) for p in prices))
+    return (
+        snap.time_basis,
+        snap.snapshot_time,
+        snap.market,
+        frozenset(price_row(p) for p in prices),
+    )
 
 
-def _new_content(event: Event, snap: NewSnapshot) -> SnapshotContent:
+def _new_contents(event: Event, snap: NewSnapshot) -> list[SnapshotContent]:
+    """The contents of the snapshots ``store_shaped_snapshot`` writes for ``snap``, one per
+    market."""
     expanded = expand_envelope(
         snap.envelope, Source.FOOTBALL_DATA_UK, event.home_team, event.away_team
     )
-    rows = frozenset(_spec_row(spec) for market in expanded.markets for spec in market.prices)
-    return (snap.time_basis, snap.snapshot_time, rows)
+    if not expanded.markets:
+        return [(snap.time_basis, snap.snapshot_time, None, frozenset())]
+    return [
+        (
+            snap.time_basis,
+            snap.snapshot_time,
+            market.market,
+            frozenset(_spec_row(spec) for spec in market.prices),
+        )
+        for market in expanded.markets
+    ]
 
 
 def _spec_row(spec: PriceSpec) -> PriceRow:
