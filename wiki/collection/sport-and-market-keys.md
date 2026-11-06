@@ -39,7 +39,7 @@ The Odds API gives `bookmakers` priority over `regions`, so the region setting h
 
 `odds_lambda.data_fetcher.TheOddsAPIClient.get_odds` and `odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_odds` rewrite response bookmaker keys through `odds_core.bookmakers.ODDS_API_BOOKMAKER_KEY_MAP` (also part of the Odds API alias map, `odds_core.bookmakers.BOOKMAKER_ALIASES_BY_SOURCE`) (`odds_lambda.data_fetcher.canonicalize_bookmaker_keys`) before anything stores them (a historical request sends only the markets and the bookmakers or regions its caller names, not the configured defaults), so the same book carries the same key across sources: `betfair_ex_uk` and `betfair_ex_eu` become `betfair_exchange`, `ladbrokes_uk` becomes `ladbrokes`, `betfred_uk` becomes `betfred` and `sport888` becomes `888sport`. The other EPL keys already match the OddsPortal and FDUK keys below.
 
-These filters apply only to Odds API requests ([configuration](../foundations/configuration.md)). Requests go to `odds_core.config.APIConfig.base_url` ([credentials](odds-api-client.md#retry-and-keys)) under `sports/{sport_key}/odds` and `sports/{sport_key}/scores`, with sport keys from `odds_core.sports.SportKey` (`soccer_epl`, `baseball_mlb`, `basketball_nba`).
+These filters apply only to Odds API requests ([configuration](../foundations/configuration.md)). Requests go to `odds_core.config.APIConfig.base_url` ([credentials](odds-api-client.md#retry-and-keys)) under `sports/{sport_key}/odds` and `sports/{sport_key}/scores`, with sport keys from `odds_core.sports.SportKey`.
 
 ## OddsPortal and FDUK coverage
 
@@ -49,7 +49,7 @@ These filters apply only to Odds API requests ([configuration](../foundations/co
 
 ## Sport keys
 
-`odds_core.sports.SportKey` is `Literal["soccer_epl", "baseball_mlb", "basketball_nba"]`, matching The Odds API's convention. It is the `odds_core.models.Event.sport_key` value and the `sport` argument of jobs, MCP tools and CLI commands.
+`odds_core.sports.SportKey` is a `Literal` of The Odds API's sport keys: `soccer_epl`, `soccer_efl_champ` (the Championship), `soccer_spain_la_liga`, `soccer_italy_serie_a`, `soccer_germany_bundesliga`, `soccer_france_ligue_one`, `baseball_mlb` and `basketball_nba`. It is the `odds_core.models.Event.sport_key` value and the `sport` argument of jobs, MCP tools and CLI commands. The five football leagues after the EPL are registered for historical loading only: they have no job suffix, overnight window, OddsPortal league, Betfair config or job allowlist entry, so no scheduled job collects them ([add a sport](howto-add-sport.md)).
 
 Job names use a short suffix: `odds_lambda.scheduling.jobs._SPORT_SUFFIX_MAP` maps `epl` to `soccer_epl`, `mlb` to `baseball_mlb` and `nba` to `basketball_nba`, and `odds_lambda.scheduling.jobs.make_compound_job_name("fetch-odds", "soccer_epl")` gives `fetch-odds-epl`, and only for jobs in `odds_core.job_specs.JOB_SPECS` (`run-candidates` and `fetch-injuries` among them) ([job-registry](../scheduling/job-registry.md#compound-job-names)). A per-sport job given no sport raises `ValueError`. The suffix names EventBridge rules, heartbeat keys and the sport filter of `odds_mcp.server.get_scheduled_jobs`.
 

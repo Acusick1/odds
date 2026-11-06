@@ -9,12 +9,26 @@ from datetime import date, datetime, time, timedelta
 from typing import Literal, get_args
 from zoneinfo import ZoneInfo
 
-SportKey = Literal["soccer_epl", "baseball_mlb", "basketball_nba"]
+SportKey = Literal[
+    "soccer_epl",
+    "soccer_efl_champ",
+    "soccer_spain_la_liga",
+    "soccer_italy_serie_a",
+    "soccer_germany_bundesliga",
+    "soccer_france_ligue_one",
+    "baseball_mlb",
+    "basketball_nba",
+]
 
 SUPPORTED_SPORTS: tuple[SportKey, ...] = get_args(SportKey)
 
 LEAGUE_TIMEZONES: dict[SportKey, ZoneInfo] = {
     "soccer_epl": ZoneInfo("Europe/London"),
+    "soccer_efl_champ": ZoneInfo("Europe/London"),
+    "soccer_spain_la_liga": ZoneInfo("Europe/Madrid"),
+    "soccer_italy_serie_a": ZoneInfo("Europe/Rome"),
+    "soccer_germany_bundesliga": ZoneInfo("Europe/Berlin"),
+    "soccer_france_ligue_one": ZoneInfo("Europe/Paris"),
     "baseball_mlb": ZoneInfo("America/New_York"),
     "basketball_nba": ZoneInfo("America/New_York"),
 }
