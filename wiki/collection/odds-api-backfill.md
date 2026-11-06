@@ -7,6 +7,13 @@ sources:
   - odds_cli.commands.backfill
   - odds_analytics.backfill_plan
   - backfills/odds-api-epl-2020-26.yaml
+  - backfills/odds-api-la-liga-2024-26.yaml
+  - backfills/odds-api-serie-a-2024-26.yaml
+  - backfills/odds-api-bundesliga-2024-26.yaml
+  - backfills/odds-api-ligue-1-2024-26.yaml
+  - backfills/odds-api-championship-2024-26.yaml
+  - backfills/odds-api-nba-2024-26.yaml
+  - backfills/odds-api-mlb-2024-26.yaml
   - odds_analytics.backfill_executor.BackfillExecutor
   - odds_analytics.backfill_executor.BackfillExecutor.execute
   - odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_odds
@@ -19,14 +26,24 @@ Fills in historical Odds API snapshots (the paid `/historical/odds` endpoint, 10
 
 ## Acquisition manifests
 
-A manifest in `backfills/` fixes what a historical purchase requests, validated by `odds_analytics.backfill_plan.Manifest`. A frozen manifest is never edited; a top-up is a new manifest. `backfills/odds-api-epl-2020-26.yaml` holds:
+A manifest in `backfills/` fixes what a historical purchase requests, validated by `odds_analytics.backfill_plan.Manifest`. A frozen manifest is never edited; a top-up is a new manifest. One manifest covers each league or sport in scope of the purchase ([#774](https://github.com/Acusick1/odds/issues/774)), all with the same ten bookmakers, `h2h` and `totals`, and the bands below:
+
+- `odds-api-epl-2020-26.yaml`: EPL, six seasons from 2020-21.
+- `odds-api-la-liga-2024-26.yaml`, `odds-api-serie-a-2024-26.yaml`, `odds-api-bundesliga-2024-26.yaml`, `odds-api-ligue-1-2024-26.yaml`: each league's 2024-25 and 2025-26.
+- `odds-api-championship-2024-26.yaml`: the Championship's 2024-25 and 2025-26 league seasons, which holds no play-off fixtures.
+- `odds-api-nba-2024-26.yaml`: NBA 2024-25 and 2025-26, each window starting at opening night so preseason is excluded.
+- `odds-api-mlb-2024-26.yaml`: MLB 2024, 2025 and 2026 as calendar years.
+
+The planner prices every stored FINAL event in a window, so the MLB manifest's cost includes the 2026 All-Star Game. `odds backfill plan --manifest M --cost` prints each manifest's cost ([cost and execute a manifest](howto-backfill-odds-api-history.md#cost-and-execute-a-manifest)).
+
+Each manifest holds:
 
 - **Content:** the sport, the seasons as disjoint `[start, end)` kick-off ranges, the markets in the Odds API's keys (`h2h` and `totals`), each once and with no line, since a call stores every line the books return, and either named bookmakers or regions, not both.
 - **Coverage bands:** each band (`odds_analytics.backfill_plan.Band`) is a range of leads before kick-off in whole minutes, from `min_lead_minutes` to `max_lead_minutes` inclusive, with a max input age. It promises that a decision at any whole minute in the range finds a snapshot at most the max age old, so a candidate deciding at any of those leads with at least that max input age has inputs, since it reads the latest snapshot in `[t - max age, t]` at decision time `t`, both ends inclusive (`odds_lambda.candidate_rules.market_state.load_market_state`). Bands do not overlap.
-- **Snapshot grid:** steps by date, each a snapshot interval from its start until the next step's start (10 minutes from 2020-06-06, 5 from 2022-09-01).
+- **Snapshot grid:** steps by date, each a snapshot interval from its start until the next step's start (the EPL manifest: 10 minutes from 2020-06-06, 5 from 2022-09-01; the 2024-26 manifests: 5 from 2022-09-01).
 - **Probe:** the snapshot times to request before the full run and what each must return: fixtures at least `min_fixture_lead_hours` ahead, the `required_bookmakers` on each market, and an `x-requests-last` of `units_per_call`. Validation rejects a lead shorter than the earliest band's farthest lead plus its max age, a units figure that differs from the manifest's, and required books or markets the manifest does not request. The probe also checks that the snapshot interval matches the grid.
 
-The EPL manifest's bands are a 10-minute max age to KO−2h, 1 hour to KO−1d and 6 hours to KO−7d ([#740](https://github.com/Acusick1/odds/issues/740)).
+Every manifest's bands are a 10-minute max age to KO−2h, 1 hour to KO−1d and 6 hours to KO−7d ([#740](https://github.com/Acusick1/odds/issues/740)).
 
 Granularity and billing are the Odds API's documented values until the probe confirms them ([odds-api-client](odds-api-client.md#cost-per-call)).
 
