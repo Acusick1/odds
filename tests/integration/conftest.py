@@ -6,22 +6,33 @@ This module contains shared fixtures for integration testing.
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 import pytest
+from odds_analytics import backfill_executor
+from odds_analytics.backfill_executor import BackfillExecutor, BackfillResult
+from odds_analytics.backfill_plan import Call, Fixture, Manifest, Target
+from odds_core.config import APIConfig, Settings
 from odds_core.models import Event, OddsSnapshot
+from odds_core.time import utc_isoformat
 from odds_core.vocabulary import Market, Source, TimeBasis
 from odds_lambda import collection_calendar
+from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.jobs import fetch_betfair_exchange, fetch_oddsportal
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from scripts import ingest_football_data_uk
 from scripts.ingest_football_data_uk import FdukLeague
 from tests.test_helpers import (
     TWIN_EVENT_ID,
     TWIN_KICKOFF,
+    FakeMlbStatsFetcher,
+    ReplayHttpSession,
     make_epl_event,
     make_tagged_snapshot,
     store_tagged,
@@ -48,6 +59,15 @@ def job_session(
     for module in (fetch_oddsportal, fetch_betfair_exchange, collection_calendar):
         monkeypatch.setattr(module, "async_session_maker", _Maker())
     return pglite_async_session
+
+
+@pytest.fixture
+def mlb_schedule(monkeypatch: pytest.MonkeyPatch) -> type[FakeMlbStatsFetcher]:
+    monkeypatch.setattr(FakeMlbStatsFetcher, "schedule", [])
+    monkeypatch.setattr(FakeMlbStatsFetcher, "down", False)
+    monkeypatch.setattr(FakeMlbStatsFetcher, "requests", 0)
+    monkeypatch.setattr("odds_lambda.live_events.MlbStatsFetcher", FakeMlbStatsFetcher)
+    return FakeMlbStatsFetcher
 
 
 FDUK_FIXTURES = Path(__file__).resolve().parent.parent / "fixtures" / "football_data_uk"
@@ -183,3 +203,100 @@ async def mixed_source_event(pglite_async_session):
     )
     await session.commit()
     return event
+
+
+ACQUISITION_KEY = "purchased"
+
+
+class _ReplayClient(TheOddsAPIClient):
+    """The real client over a recorded HTTP session."""
+
+    def __init__(self, api_key: str, http: ReplayHttpSession) -> None:
+        super().__init__(api_key=api_key, base_url="http://example.invalid")
+        self._http = http
+
+    async def __aenter__(self) -> _ReplayClient:
+        self.session = self._http  # type: ignore[assignment]
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        return None
+
+
+class BackfillReplay:
+    """Replays recorded historical responses, one per call time, through the real client and
+    ``BackfillExecutor``, each call in its own committed session as production runs it."""
+
+    def __init__(self, engine: AsyncEngine, session: AsyncSession) -> None:
+        self._engine = engine
+        self._session = session
+        self._responses: dict[str, dict[str, Any]] = {}
+        self.requests: list[dict[str, Any]] = []
+
+    def record(
+        self, at: datetime, games: list[dict[str, Any]], *, snapshot: datetime | None = None
+    ) -> None:
+        """The response a call at ``at`` gets: the provider's snapshot, by default 5 minutes
+        earlier, with ``games``."""
+        taken = snapshot or at - timedelta(minutes=5)
+        self._responses[utc_isoformat(at)] = {"timestamp": utc_isoformat(taken), "data": games}
+
+    @staticmethod
+    def call(manifest: Manifest, at: datetime, *serves: Event) -> Call:
+        """A planned call at ``at`` serving the first band of ``manifest`` for ``serves``."""
+        band = manifest.coverage[0]
+        return Call(
+            at,
+            tuple(
+                Target(Fixture(event.id, event.commence_time), band, at, at)
+                for event in serves
+                if event.id is not None
+            ),
+        )
+
+    async def run(
+        self, manifest: Manifest, calls: list[Call], *, skip_existing: bool = True
+    ) -> BackfillResult:
+        """Run ``calls``, building the client from the acquisition key as a real run does.
+        Reports each request in ``requests``."""
+        http = ReplayHttpSession(
+            self._responses,
+            {
+                "x-requests-last": str(manifest.units_per_call),
+                "x-requests-remaining": "4900000",
+                "x-requests-used": "100000",
+            },
+        )
+        settings = Settings(
+            api=APIConfig(
+                keys=f"live,nba-live,{ACQUISITION_KEY}", acquisition_key_index=2, _env_file=None
+            ),
+            database={"url": "postgresql+asyncpg://localhost/test"},
+        )
+        try:
+            with (
+                patch.object(backfill_executor, "get_settings", return_value=settings),
+                patch("odds_lambda.data_fetcher.get_settings", return_value=settings),
+                patch.object(
+                    backfill_executor,
+                    "TheOddsAPIClient",
+                    lambda api_key: _ReplayClient(api_key, http),
+                ),
+            ):
+                async with BackfillExecutor(
+                    manifest,
+                    session_factory=lambda: AsyncSession(self._engine, expire_on_commit=False),
+                    skip_existing=skip_existing,
+                    rate_limit_seconds=0,
+                ) as executor:
+                    return await executor.execute(calls)
+        finally:
+            self.requests += http.requests
+            self._session.expunge_all()
+
+
+@pytest.fixture
+async def replay(
+    pglite_async_engine: AsyncEngine, pglite_async_session: AsyncSession
+) -> AsyncGenerator[BackfillReplay, None]:
+    yield BackfillReplay(pglite_async_engine, pglite_async_session)
