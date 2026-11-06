@@ -402,6 +402,10 @@ class TestSeasons:
         with pytest.raises(ValueError):
             seasons_since("2023", date(2026, 1, 1))
 
+    def test_seasons_since_rejects_a_season_not_yet_started(self) -> None:
+        with pytest.raises(ValueError, match="not started"):
+            seasons_since("2026-2027", date(2026, 6, 30))
+
 
 class TestLeagueFiles:
     def test_url_and_path_name_the_league_and_season(self) -> None:

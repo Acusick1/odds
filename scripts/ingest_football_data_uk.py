@@ -38,7 +38,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot, Price, SnapshotPayload
@@ -173,6 +173,8 @@ def seasons_since(first: str, today: date) -> list[str]:
     """Season labels from ``first`` through the season under way on ``today``."""
     season_code(first)
     current = today.year if today.month >= SEASON_START_MONTH else today.year - 1
+    if int(first[:4]) > current:
+        raise ValueError(f"Season {first} has not started yet")
     return [f"{year}-{year + 1}" for year in range(int(first[:4]), current + 1)]
 
 
@@ -701,7 +703,11 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    league = FdukLeague(args.league, args.sport_key, args.sport_title, ZoneInfo(args.timezone))
+    try:
+        tz = ZoneInfo(args.timezone)
+    except (ZoneInfoNotFoundError, ValueError):
+        parser.error(f"Unknown timezone: {args.timezone!r}")
+    league = FdukLeague(args.league, args.sport_key, args.sport_title, tz)
     try:
         if args.since:
             seasons = seasons_since(args.since, datetime.now(UTC).date())
