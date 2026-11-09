@@ -12,6 +12,7 @@ dependencies = [
     "jinja2>=3.1",
     "sqlalchemy>=2.0.44",
     "structlog>=23.3.0",
+    "sqlmodel>=0.0.14",
 ]
 
 [tool.uv.sources]
@@ -32,6 +33,5 @@ dev = [
 packages = ["odds_web"]
 
 [tool.deptry.per_rule_ignores]
-# jinja2 is loaded by Starlette's template support; odds-lambda is the dependency the status
-# strip of the data-health page reads job and quota state through.
-DEP002 = ["jinja2", "odds-lambda"]
+# jinja2 is loaded by Starlette's template support.
+DEP002 = ["jinja2"]

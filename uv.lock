@@ -2995,6 +2995,7 @@ dependencies = [
     { name = "odds-core" },
     { name = "odds-lambda" },
     { name = "sqlalchemy" },
+    { name = "sqlmodel" },
     { name = "structlog" },
 ]
 
@@ -3011,6 +3012,7 @@ requires-dist = [
     { name = "odds-core", editable = "packages/odds-core" },
     { name = "odds-lambda", editable = "packages/odds-lambda" },
     { name = "sqlalchemy", specifier = ">=2.0.44" },
+    { name = "sqlmodel", specifier = ">=0.0.14" },
     { name = "structlog", specifier = ">=23.3.0" },
 ]
 
