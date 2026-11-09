@@ -277,6 +277,9 @@ say "The tailnet is the only authentication: anyone who can reach this host's po
 step "Check the tailnet access policy lets only your own devices reach this host."
 open_url "https://login.tailscale.com/admin/acls"
 pause "Policy checked?"
+step "Check MagicDNS and HTTPS Certificates are enabled for the tailnet."
+open_url "https://login.tailscale.com/admin/dns"
+pause "Both enabled?"
 say "Current serve configuration:"
 tailscale serve status || true
 confirm "Run 'sudo tailscale serve --bg 8765'?" || exit 1
