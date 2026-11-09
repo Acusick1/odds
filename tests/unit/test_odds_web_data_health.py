@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from odds_lambda.storage.readers import BurnProjection
+from odds_core.close import CloseKind
+from odds_core.vocabulary import Source
+from odds_lambda.storage.readers import BurnProjection, KeyQuota
 from odds_web.app import create_app
-from odds_web.closes import LIVE_LABEL, PENDING_LABEL, CloseWeeks
+from odds_web.closes import CloseClass, CloseWeeks
 from odds_web.coverage import CandidateCoverage, CoverageCell, CoverageRow
 from odds_web.db import build_web_database
 from odds_web.status import ChipState, JobChip, QuotaChip, SourceChip, StatusStrip
@@ -32,8 +34,8 @@ def strip(**overrides: object) -> StatusStrip:
             SourceChip("oddsportal epl totals", ChipState.UNKNOWN, None, None),
         ],
         "quotas": [
-            QuotaChip(0, ("soccer_epl",), 18240, 20000, BurnProjection(80, 228, NOW)),
-            QuotaChip(1, ("basketball_nba",), 400, 500, None),
+            QuotaChip(0, KeyQuota(("soccer_epl",), 18240, 1760), BurnProjection(80, 228, NOW)),
+            QuotaChip(1, KeyQuota(("basketball_nba",), 400, 100), None),
         ],
     }
     fields.update(overrides)
@@ -71,8 +73,13 @@ def closes() -> list[CloseWeeks]:
             "1x2",
             weeks,
             {
-                weeks[0]: Counter({LIVE_LABEL: 6, "FDUK fallback": 1}),
-                weeks[1]: Counter({PENDING_LABEL: 3}),
+                weeks[0]: Counter(
+                    {
+                        CloseClass(CloseKind.LIVE): 6,
+                        CloseClass(CloseKind.FALLBACK, Source.FOOTBALL_DATA_UK): 1,
+                    }
+                ),
+                weeks[1]: Counter({CloseClass(CloseKind.PENDING): 3}),
             },
         )
     ]
@@ -83,17 +90,19 @@ def readers(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     """What the app's readers return; an exception makes that reader raise it."""
     state: dict[str, object] = {"status": strip(), "coverage": coverage(), "closes": closes()}
 
-    def fake(key: str):  # noqa: ANN202
+    def fake(key: str) -> Callable[..., Awaitable[object]]:
         async def read(*_: object, **__: object) -> object:
-            if isinstance(state[key], Exception):
-                raise state[key]  # type: ignore[misc]
-            return state[key]
+            value = state[key]
+            if isinstance(value, Exception):
+                raise value
+            return value
 
         return read
 
     async def one_candidate(*args: object, **kwargs: object) -> object:
         value = await fake("coverage")(*args, **kwargs)
-        return value[0]  # type: ignore[index]
+        assert isinstance(value, list)
+        return value[0]
 
     monkeypatch.setattr("odds_web.app.load_status", fake("status"))
     monkeypatch.setattr("odds_web.app.candidate_coverage", one_candidate)

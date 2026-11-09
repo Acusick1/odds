@@ -38,7 +38,12 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_lambda.health_readers import Freshness, last_heartbeats, source_freshness
+from odds_lambda.health_readers import (
+    Freshness,
+    heartbeat_late,
+    last_heartbeats,
+    source_freshness,
+)
 from odds_lambda.mlb_game_resolver import MLB_SPORT_KEY
 from odds_lambda.scheduling.backends.base import ScheduledJob
 from odds_lambda.scheduling.jobs import (
@@ -622,7 +627,6 @@ class HealthMonitor:
 
         beats = await last_heartbeats(self.session, list(expectations))
         for job_name, max_hours in expectations.items():
-            cutoff = now - timedelta(hours=max_hours)
             last_beat = beats.get(job_name)
 
             if last_beat is None:
@@ -631,7 +635,7 @@ class HealthMonitor:
                 logger.info("heartbeat_no_history", job=job_name)
                 continue
 
-            if last_beat < cutoff:
+            if heartbeat_late(last_beat, max_hours, now):
                 hours_ago = f"{(now - last_beat).total_seconds() / 3600:.1f}h ago"
                 issue = (
                     f"Job {job_name} has not completed "

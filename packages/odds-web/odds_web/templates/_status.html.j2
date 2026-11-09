@@ -24,7 +24,7 @@ stale after {{ '%.1f' | format(source.threshold_hours) }} active hours{% endif %
 <div class="strip{{ ' stale' if status.failure }}">
 <span class="strip-label">Odds API</span>
 {% for q in s.quotas %}
-<span class="chip" title="{% if q.projection %}{{ '{:,.0f}'.format(q.projection.per_day) }} a day since {{ q.projection.since | stamp }}{% else %}under a day of readings since the last reset{% endif %}">key {{ q.key_index }} ({{ q.sports | join(', ') }}) <span class="num">{{ '{:,}'.format(q.remaining) }} / {{ '{:,}'.format(q.limit) }}</span> ·
+<span class="chip" title="{% if q.projection %}{{ '{:,.0f}'.format(q.projection.per_day) }} a day since {{ q.projection.since | stamp }}{% else %}under a day of readings since the last reset{% endif %}">key {{ q.key_index }} ({{ q.quota.sports | join(', ') }}) <span class="num">{{ '{:,}'.format(q.quota.remaining) }} / {{ '{:,}'.format(q.quota.limit) }}</span> ·
 {%- if q.projection is none %} unknown{% elif q.projection.days_left is none %} no spend{% else %} <span class="num">~{{ q.projection.days_left | round(0) | int }}d</span> left{% endif %}</span>
 {% else %}
 <span class="chip"><span class="dot unknown"></span>quota unknown</span>

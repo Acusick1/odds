@@ -25,7 +25,7 @@ recorded decision, as known at {{ cell.known_at | stamp }}{% endif %}{% endif %}
 {% endfor %}
 </svg>
 {% else %}
-<p class="sub">No events from 7 days ago to 24 hours ahead.</p>
+<p class="sub">No events from {{ coverage_past_days }} days ago to {{ coverage_upcoming_hours }} hours ahead.</p>
 {% endif %}
 {% else %}
 <p class="sub">No active mechanical candidates.</p>

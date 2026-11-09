@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from typing import NamedTuple
 
 from odds_core.close import CloseKind, CloseStatus, close_quotes, close_status
 from odds_core.models import Event
@@ -15,26 +16,39 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 WEEKS = 8
-LIVE_LABEL = "live Betfair"
-PENDING_LABEL = "pending"
-NO_CLOSE_LABEL = "no close"
-UNSUPPORTED_LABEL = "unsupported"
 _FALLBACK_NAMES: dict[Source, str] = {
     Source.FOOTBALL_DATA_UK: "FDUK",
     Source.POLYMARKET: "Polymarket",
 }
+_KIND_LABELS: dict[CloseKind, str] = {
+    CloseKind.LIVE: "live Betfair",
+    CloseKind.PENDING: "pending",
+    CloseKind.NONE: "no close",
+    CloseKind.UNSUPPORTED: "unsupported",
+}
+_KIND_ORDER: tuple[CloseKind, ...] = tuple(CloseKind)
 
 
-def close_label(status: CloseStatus) -> str:
-    """How a close is shown: a fallback is named by the source its ``FallbackSpec`` reads."""
-    if status.kind is CloseKind.FALLBACK and status.source is not None:
-        return f"{_FALLBACK_NAMES.get(status.source, status.source.value)} fallback"
-    return {
-        CloseKind.LIVE: LIVE_LABEL,
-        CloseKind.PENDING: PENDING_LABEL,
-        CloseKind.NONE: NO_CLOSE_LABEL,
-        CloseKind.UNSUPPORTED: UNSUPPORTED_LABEL,
-    }[status.kind]
+class CloseClass(NamedTuple):
+    """How a line got its close: the kind, and for a fallback the source that supplied it."""
+
+    kind: CloseKind
+    source: Source | None = None
+
+    @classmethod
+    def of(cls, status: CloseStatus) -> CloseClass:
+        return cls(status.kind, status.source if status.kind is CloseKind.FALLBACK else None)
+
+    @property
+    def label(self) -> str:
+        """A fallback is named by the source its ``FallbackSpec`` reads."""
+        if self.kind is CloseKind.FALLBACK and self.source is not None:
+            return f"{_FALLBACK_NAMES.get(self.source, self.source.value)} fallback"
+        return _KIND_LABELS[self.kind]
+
+    @property
+    def rank(self) -> tuple[int, str]:
+        return _KIND_ORDER.index(self.kind), self.source.value if self.source else ""
 
 
 def week_of(moment: datetime) -> date:
@@ -45,20 +59,18 @@ def week_of(moment: datetime) -> date:
 
 @dataclass(frozen=True)
 class CloseWeeks:
-    """One sport and market: per week, the count of bet lines under each close label."""
+    """One sport and market: per week, the count of bet lines in each close class."""
 
     sport: str
     market: str
     weeks: list[date]
-    counts: dict[date, Counter[str]]
+    counts: dict[date, Counter[CloseClass]]
 
     @property
-    def labels(self) -> list[str]:
-        """The labels present, live first and the ones without a close last."""
-        order = [LIVE_LABEL, PENDING_LABEL, NO_CLOSE_LABEL, UNSUPPORTED_LABEL]
-        present = {label for c in self.counts.values() for label in c}
-        fallbacks = sorted(present - set(order))
-        return [label for label in [LIVE_LABEL, *fallbacks, *order[1:]] if label in present]
+    def classes(self) -> list[CloseClass]:
+        """The classes present, live first and the ones without a close last."""
+        present = {cls for c in self.counts.values() for cls in c}
+        return sorted(present, key=lambda cls: cls.rank)
 
     @property
     def most(self) -> int:
@@ -89,7 +101,7 @@ async def close_coverage(session: AsyncSession, now: datetime) -> list[CloseWeek
     lines: dict[str, dict[int, set[float | None]]] = defaultdict(lambda: defaultdict(set))
     for event_id, market, line in keys:
         lines[market][event_id].add(None if line is None else float(line))
-    counts: dict[tuple[str, str], dict[date, Counter[str]]] = defaultdict(
+    counts: dict[tuple[str, str], dict[date, Counter[CloseClass]]] = defaultdict(
         lambda: {week: Counter() for week in weeks}
     )
     for market, by_event in lines.items():
@@ -101,7 +113,7 @@ async def close_coverage(session: AsyncSession, now: datetime) -> list[CloseWeek
                 status = close_status(
                     quoted[event_id], event.commence_time, event.sport_key, market, now, line
                 )
-                counts[(event.sport_key, market)][week][close_label(status)] += 1
+                counts[(event.sport_key, market)][week][CloseClass.of(status)] += 1
     return [
         CloseWeeks(sport, market, weeks, by_week)
         for (sport, market), by_week in sorted(counts.items())

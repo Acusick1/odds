@@ -4,13 +4,14 @@ kick-off, built by the rule's own market-state code."""
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
 from odds_core.candidates import Candidate, CandidateStatus, MechanicalCandidate
 from odds_core.models import Event, EventStatus
 from odds_core.paper_trade_models import CandidateDecision
 from odds_core.quotes import Quote
+from odds_core.vocabulary import Market
 from odds_lambda.candidate_rules import (
     SharpInput,
     build_market_state,
@@ -77,36 +78,32 @@ def bucket_minutes(decision_minutes: Sequence[int]) -> list[int]:
     return sorted(set(range(top, 0, -BUCKET_MINUTES)) | set(decision_minutes), reverse=True)
 
 
-def _cell(
-    event: Event,
-    candidate: MechanicalCandidate,
-    sharp_inputs: frozenset[SharpInput],
-    age: timedelta,
-    quoted: Sequence[Quote],
-    minutes: int,
-    at: datetime,
-    known_at: datetime,
-    recorded: bool,
-    now: datetime,
-) -> CoverageCell:
-    if known_at > now or at > now:
-        return CoverageCell(minutes, at, known_at, evaluated=False, recorded=recorded)
-    visible = [q for q in quoted if q.created_at <= known_at]
+@dataclass(frozen=True)
+class _EventInputs:
+    """One event's rule quotes over every bucket's window, and the rule's input needs."""
 
-    def has_input(needs: frozenset[SharpInput]) -> bool:
-        return build_market_state(event, candidate.market, visible, at, age, needs).has_input
+    event: Event
+    market: Market
+    quoted: Sequence[Quote]
+    age: timedelta
+    sharp_inputs: frozenset[SharpInput]
 
-    fresh = [RETAIL] if has_input(frozenset()) else []
-    fresh += [i.value for i in sorted(sharp_inputs) if has_input(frozenset({i}))]
-    return CoverageCell(
-        minutes,
-        at,
-        known_at,
-        evaluated=True,
-        recorded=recorded,
-        fresh=tuple(fresh),
-        complete=has_input(sharp_inputs),
-    )
+    def evaluate(self, slot: CoverageCell, now: datetime) -> CoverageCell:
+        """``slot`` with its inputs filled in, from the quotes stored by its ``known_at``; a
+        slot still ahead of ``now`` is returned as it is."""
+        if slot.known_at > now or slot.time > now:
+            return slot
+        visible = [q for q in self.quoted if q.created_at <= slot.known_at]
+
+        def has_input(needs: frozenset[SharpInput]) -> bool:
+            state = build_market_state(self.event, self.market, visible, slot.time, self.age, needs)
+            return state.has_input
+
+        fresh = [RETAIL] if has_input(frozenset()) else []
+        fresh += [i.value for i in sorted(self.sharp_inputs) if has_input(frozenset({i}))]
+        return replace(
+            slot, evaluated=True, fresh=tuple(fresh), complete=has_input(self.sharp_inputs)
+        )
 
 
 async def candidate_coverage(
@@ -148,26 +145,25 @@ async def candidate_coverage(
     rows: list[CoverageRow] = []
     for event in events:
         assert event.id is not None
-        times: list[tuple[int, datetime, datetime, bool]] = []
+        slots: list[CoverageCell] = []
         for m in minutes:
             decision = recorded.get((event.id, m))
             if decision is not None:
-                times.append((m, decision.decision_time, decision.known_at, True))
+                slot = CoverageCell(m, decision.decision_time, decision.known_at, False, True)
             else:
                 at = event.commence_time - timedelta(minutes=m)
-                times.append((m, at, at, False))
+                slot = CoverageCell(m, at, at, evaluated=False, recorded=False)
+            slots.append(slot)
         quoted = await rule_quotes(
             session,
             event.id,
             candidate.market,
             spec.sharp_inputs,
-            since=min(at for _, at, _, _ in times) - age,
-            until=max(at for _, at, _, _ in times),
+            since=min(slot.time for slot in slots) - age,
+            until=max(slot.time for slot in slots),
         )
-        cells = [
-            _cell(event, candidate, spec.sharp_inputs, age, quoted, m, at, known, was, now)
-            for m, at, known, was in times
-        ]
+        inputs = _EventInputs(event, candidate.market, quoted, age, spec.sharp_inputs)
+        cells = [inputs.evaluate(slot, now) for slot in slots]
         rows.append(
             CoverageRow(
                 event.id, f"{event.home_team} v {event.away_team}", event.commence_time, cells

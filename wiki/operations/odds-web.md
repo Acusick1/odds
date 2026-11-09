@@ -15,6 +15,7 @@ sources:
   - odds_lambda.health_readers.source_freshness
   - odds_lambda.health_readers.last_heartbeats
   - odds_lambda.health_readers.schedule_heartbeat_name
+  - odds_lambda.health_readers.heartbeat_late
   - odds_lambda.scheduling.schedule_store.read_schedules
   - odds_lambda.storage.readers.OddsReader.get_quota_burn
   - odds_lambda.candidate_rules.inputs.rule_quotes
@@ -52,8 +53,8 @@ The app never uses `odds_core.database.async_session_maker`, which binds to `DAT
 
 `odds_web.cache.SingleFlightCache` holds each section's result for `odds_web.cache.TTL_SECONDS`. Concurrent requests share one load. A failed load keeps the last good value and its time, and is not retried for `odds_web.cache.FAILURE_BACKOFF_SECONDS`, so a down database sees one query per window. The failure is logged with its traceback, which `odds web serve` sends to journald under systemd, and has an `odds_web.cache.FailureKind`:
 
-- **`unavailable`**: the database did not answer (one of `odds_web.cache.DATABASE_ERRORS`: a driver error such as a refused connection or a statement timeout, a pool timeout, or a network error). It is logged as a warning, `web_section_unavailable`.
-- **`fault`**: any other exception, a defect in odds-web or in the code it calls, including a query the database rejects (`odds_web.cache.QUERY_ERRORS`: bad SQL, or a table the `odds_web` role has no grant on). It is logged as an error, `web_section_failed`.
+- **`unavailable`**: the database did not answer (one of `odds_web.cache.DATABASE_ERRORS`: a driver error such as a statement timeout, the pool running dry, or a connection refused, unresolvable or timed out). It is logged as a warning, `web_section_unavailable`.
+- **`fault`**: any other exception, a defect in odds-web or in the code it calls, including a query the database rejects (`odds_web.cache.QUERY_ERRORS`: bad SQL, bad data, or a table the `odds_web` role has no grant on) and a registry file that cannot be read. It is logged as an error, `web_section_failed`.
 
 Each section is rendered on its own, so a fault in one leaves the others and the status strip standing. Above its data a section says when the data was loaded ("as of 14:05 UTC"). After a failure it says instead "Database unavailable" or "odds-web error (KeyError), see the server log", followed by the time of the data it still shows, dimmed, or by "no data loaded yet".
 
@@ -73,7 +74,7 @@ The current estimate and the verdict's checkpoint are separate fields: the estim
 
 Every page loads the strip from `/fragments/status` when it opens and every 60 seconds after. `odds_web.status.load_status` joins three reads, each in one session:
 
-- **Jobs.** One chip per schedule in the scheduler's store, read from the APScheduler tables by `odds_lambda.scheduling.schedule_store.read_schedules` rather than by starting a scheduler, which would write the store's metadata. A chip shows the time since the job's last `heartbeat:<job>` row (`odds_lambda.health_readers.last_heartbeats`, under the name `odds_lambda.health_readers.schedule_heartbeat_name` gives), and its tooltip the next run and whether a worker holds the job. It is late past the job's `odds_core.config.AlertConfig.heartbeat_expectations` hours, and unknown with no heartbeat.
+- **Jobs.** One chip per schedule in the scheduler's store, read from the APScheduler tables by `odds_lambda.scheduling.schedule_store.read_schedules` rather than by starting a scheduler, which would write the store's metadata. A chip shows the time since the job's last `heartbeat:<job>` row (`odds_lambda.health_readers.last_heartbeats`, under the name `odds_lambda.health_readers.schedule_heartbeat_name` gives), and its tooltip the next run and whether a worker holds the job. It is late past the job's `odds_core.config.AlertConfig.heartbeat_expectations` hours (`odds_lambda.health_readers.heartbeat_late`, the monitor's rule), and unknown with no heartbeat.
 - **Sources.** One chip per market of each bootstrapped collection source and sport, with the time since its last snapshot and the state `odds_lambda.health_readers.source_freshness` gives it: late when stale, idle with no fixture inside the source's horizon, unknown with no history ([Stale-data check](health-monitor.md#stale-data-check)).
 - **Odds API quota.** One chip per key with its balance (`odds_lambda.storage.readers.OddsReader.get_latest_quota_by_key`) and the days its burn projection leaves (`odds_lambda.storage.readers.OddsReader.get_quota_burn`); unknown under a day of readings since the key's last reset, and "quota unknown" with no reading.
 

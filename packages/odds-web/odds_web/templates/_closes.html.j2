@@ -1,21 +1,20 @@
 {% from "_macros.html.j2" import section_state %}
 {% set bw = 44 %}{% set gap = 18 %}{% set ch = 110 %}{% set lw = 34 %}{% set top = 14 %}
-{% macro tone(label) %}{{ 'fallback' if label.endswith('fallback') else {'live Betfair': 'live', 'pending': 'pending', 'no close': 'none', 'unsupported': 'unsupported'}[label] }}{% endmacro %}
 <div id="closes" hx-get="{{ url_path('closes_fragment') }}" hx-trigger="every 60s" hx-swap="outerHTML">
 {{ section_state(closes) }}
 {% if closes.value is not none %}
 <div class="{{ 'stale' if closes.failure }}">
 {% for c in closes.value %}
 <h3>{{ c.sport }} · {{ c.market }}</h3>
-<div class="legend">{% for label in c.labels %}<span><span class="sw close {{ tone(label) }}"></span>{{ label }}</span>{% endfor %}</div>
+<div class="legend">{% for cls in c.classes %}<span><span class="sw close {{ cls.kind }}"></span>{{ cls.label }}</span>{% endfor %}</div>
 <svg class="bars" width="{{ lw + (bw + gap) * c.weeks | length }}" height="{{ top + ch + 18 }}" role="img" aria-label="close coverage of {{ c.sport }} {{ c.market }} by week">
 <g transform="translate(0 {{ top }})">
 <line class="axis" x1="{{ lw }}" x2="{{ lw + (bw + gap) * c.weeks | length }}" y1="{{ ch }}" y2="{{ ch }}"/>
 {% for week in c.weeks %}{% set x = lw + loop.index0 * (bw + gap) + gap / 2 %}{% set counts = c.counts[week] %}
 {% set ns = namespace(top=ch) %}
-{% for label in c.labels %}{% set n = counts[label] %}{% if n %}
+{% for cls in c.classes %}{% set n = counts[cls] %}{% if n %}
 {% set h = n / c.most * (ch - 4) %}{% set ns.top = ns.top - h %}
-<rect class="close {{ tone(label) }}" x="{{ x }}" y="{{ ns.top }}" width="{{ bw }}" height="{{ [h - 1, 1] | max }}" rx="2"><title>week of {{ week.strftime('%d %b') }}: {{ n }} {{ label }}</title></rect>
+<rect class="close {{ cls.kind }}" x="{{ x }}" y="{{ ns.top }}" width="{{ bw }}" height="{{ [h - 1, 1] | max }}" rx="2"><title>week of {{ week.strftime('%d %b') }}: {{ n }} {{ cls.label }}</title></rect>
 {% endif %}{% endfor %}
 {% if counts.total() %}<text x="{{ x + bw / 2 }}" y="{{ ns.top - 4 }}" text-anchor="middle">{{ counts.total() }}</text>{% endif %}
 <text x="{{ x + bw / 2 }}" y="{{ ch + 14 }}" text-anchor="middle">{{ week.strftime('%d %b') }}</text>

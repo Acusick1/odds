@@ -14,25 +14,23 @@ from odds_core.candidates import (
     candidates_dir,
     load_candidates,
 )
+from odds_core.close import CloseKind
 from odds_core.config import get_settings
-from odds_core.models import Event
+from odds_core.models import Event, FetchLog
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from odds_lambda.candidate_rules import load_market_state, max_input_age, resolve_rule, rule_sha256
 from odds_web.app import create_app
-from odds_web.closes import LIVE_LABEL, NO_CLOSE_LABEL, PENDING_LABEL, close_coverage, week_of
+from odds_web.closes import CloseClass, close_coverage, week_of
 from odds_web.coverage import RETAIL, candidate_coverage
 from odds_web.db import WebDatabase
 from odds_web.status import ChipState, load_status
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from tests.integration.test_odds_web_database import (
-    apply_odds_web_role,
-    as_odds_web_login,
-    client_of,
-)
 from tests.test_helpers import (
+    as_odds_web_login,
     betfair_exchange_bookmaker,
+    client_of,
     create_scheduler_tables,
     make_epl_event,
     make_tagged_snapshot,
@@ -79,12 +77,6 @@ async def store(
 
 
 @pytest.fixture
-async def role_session(pglite_async_session: AsyncSession) -> AsyncIterator[AsyncSession]:
-    await apply_odds_web_role(pglite_async_session)
-    yield pglite_async_session
-
-
-@pytest.fixture
 async def seeded(pglite_async_session: AsyncSession) -> AsyncIterator[AsyncSession]:
     """One played EPL event: retail with the exchange 115, 65 and 35 minutes before kick-off,
     retail alone at 85, Polymarket at 62, and a snapshot at 25 stored 20 minutes late."""
@@ -123,6 +115,20 @@ class TestDecisionWindowCoverage:
                 known_at=cell.known_at,
             )
             assert cell.complete == state.has_input, cell
+            for name, needs in [
+                ("retail", frozenset()),
+                *((i.value, frozenset({i})) for i in spec.sharp_inputs),
+            ]:
+                alone = await load_market_state(
+                    seeded,
+                    event,
+                    entry.market,
+                    cell.time,
+                    max_input_age(params),
+                    needs,
+                    known_at=cell.known_at,
+                )
+                assert (name in cell.fresh) == alone.has_input, (name, cell)
         assert {c.complete for c in row.cells} == {True, False}
 
     async def test_buckets_name_which_inputs_were_fresh(self, seeded: AsyncSession) -> None:
@@ -238,16 +244,20 @@ class TestCloseCoverage:
         assert (weeks.sport, weeks.market) == ("soccer_epl", "1x2")
         past = week_of(NOW - timedelta(days=10))
         # Event 2 is past FDUK's grace with no close; event 3 has not kicked off.
-        assert weeks.counts[past] == {LIVE_LABEL: 1, NO_CLOSE_LABEL: 1}
-        assert weeks.counts[week_of(NOW + timedelta(hours=1))] == {PENDING_LABEL: 1}
-        assert weeks.labels == [LIVE_LABEL, PENDING_LABEL, NO_CLOSE_LABEL]
+        live, pending, none = (
+            CloseClass(k) for k in (CloseKind.LIVE, CloseKind.PENDING, CloseKind.NONE)
+        )
+        assert weeks.counts[past] == {live: 1, none: 1}
+        assert weeks.counts[week_of(NOW + timedelta(hours=1))] == {pending: 1}
+        assert weeks.classes == [live, pending, none]
+        assert [c.label for c in weeks.classes] == ["live Betfair", "pending", "no close"]
 
 
 class TestUnderTheRole:
     async def test_the_readers_run_on_the_grants_in_read_only_transactions(
-        self, role_session: AsyncSession, tmp_path: Path
+        self, odds_web_session: AsyncSession, tmp_path: Path
     ) -> None:
-        session = role_session
+        session = odds_web_session
         await create_scheduler_tables(session)
         await session.execute(
             text(
@@ -262,6 +272,19 @@ class TestUnderTheRole:
             )
         )
         session.add(make_epl_event(1, NOW + timedelta(hours=3)))
+        # Two quota readings an hour apart: a balance, but too little history for a projection.
+        session.add_all(
+            FetchLog(
+                fetch_time=NOW - timedelta(hours=hours),
+                sport_key="soccer_epl",
+                events_count=1,
+                bookmakers_count=1,
+                success=True,
+                api_quota_remaining=remaining,
+                api_quota_used=500 - remaining,
+            )
+            for hours, remaining in ((2, 420), (1, 416))
+        )
         await session.commit()
         engine = session.bind
         assert isinstance(engine, AsyncEngine)
@@ -283,9 +306,10 @@ class TestUnderTheRole:
                 fragment = (await client.get("/fragments/status")).text
 
         assert [(j.name, j.state) for j in strip.jobs] == [("check-health", ChipState.UNKNOWN)]
-        assert strip.quotas == []
+        [quota] = strip.quotas
+        assert (quota.quota.remaining, quota.projection) == (416, None)
         assert any(s.state is ChipState.UNKNOWN for s in strip.sources)
         assert "unavailable" not in data and "odds-web error" not in data
         assert "exchange-gap-epl" in data
         assert "check-health" in fragment and "unknown" in fragment
-        assert "quota unknown" in fragment
+        assert "416 / 500</span> · unknown" in fragment

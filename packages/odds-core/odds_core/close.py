@@ -212,7 +212,7 @@ def close_status(
         if now < kickoff + close_grace(sport, market):
             return CloseStatus(CloseKind.PENDING)
         return CloseStatus(CloseKind.NONE)
-    if is_live_close(price, kickoff) or spec.fallback is None:
+    if spec.fallback is None or is_live_close(price, kickoff):
         return CloseStatus(CloseKind.LIVE, Source.BETFAIR, price)
     return CloseStatus(CloseKind.FALLBACK, spec.fallback.source, price)
 

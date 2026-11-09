@@ -8,11 +8,11 @@ from __future__ import annotations
 
 from collections.abc import Collection
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 
 from odds_core.config import Settings
-from odds_core.job_specs import JOB_SPECS
+from odds_core.job_specs import JOB_SPECS, heartbeat_name
 from odds_core.models import AlertHistory
 from odds_core.vocabulary import Market
 from sqlalchemy import func, select
@@ -145,6 +145,11 @@ async def last_heartbeats(session: AsyncSession, job_names: Collection[str]) -> 
     return {alert_type.removeprefix(HEARTBEAT_PREFIX): sent for alert_type, sent in rows.all()}
 
 
+def heartbeat_late(last_beat: datetime, max_hours: float, now: datetime) -> bool:
+    """Whether a job's newest heartbeat is older than the hours its expectation allows."""
+    return last_beat < now - timedelta(hours=max_hours)
+
+
 def schedule_heartbeat_name(schedule_id: str) -> str:
     """The name a scheduled job records its heartbeat under.
 
@@ -152,9 +157,9 @@ def schedule_heartbeat_name(schedule_id: str) -> str:
     sport, which for a few jobs is a legacy bare name; any other job records its schedule id.
     """
     base_name, sport = resolve_job_name(schedule_id)
-    spec = JOB_SPECS.get(base_name)
-    if spec is not None:
-        for beat in spec.heartbeats:
-            if beat.sport == sport:
-                return beat.name
+    if base_name in JOB_SPECS:
+        try:
+            return heartbeat_name(base_name, sport)
+        except ValueError:
+            pass
     return schedule_id

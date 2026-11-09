@@ -7,19 +7,20 @@ Every judgement comes from the readers the health monitor shares; this module on
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import StrEnum
 
 from odds_core.config import Settings
 from odds_lambda.health_readers import (
     Freshness,
+    heartbeat_late,
     last_heartbeats,
     schedule_heartbeat_name,
     source_freshness,
 )
 from odds_lambda.scheduling.jobs import sport_key_to_suffix
 from odds_lambda.scheduling.schedule_store import read_schedules
-from odds_lambda.storage.readers import BurnProjection, OddsReader
+from odds_lambda.storage.readers import BurnProjection, KeyQuota, OddsReader
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -54,9 +55,7 @@ class SourceChip:
 @dataclass(frozen=True)
 class QuotaChip:
     key_index: int
-    sports: tuple[str, ...]
-    remaining: int
-    limit: int
+    quota: KeyQuota
     projection: BurnProjection | None
 
 
@@ -79,7 +78,7 @@ _FRESHNESS_STATE: dict[Freshness, ChipState] = {
 def _job_state(last: datetime | None, max_hours: float | None, now: datetime) -> ChipState:
     if last is None:
         return ChipState.UNKNOWN
-    if max_hours is not None and last < now - timedelta(hours=max_hours):
+    if max_hours is not None and heartbeat_late(last, max_hours, now):
         return ChipState.LATE
     return ChipState.OK
 
@@ -114,7 +113,7 @@ async def load_status(session: AsyncSession, settings: Settings, now: datetime) 
     ]
     reader = OddsReader(session)
     quotas = [
-        QuotaChip(index, q.sports, q.remaining, q.limit, await reader.get_quota_burn(q, now))
+        QuotaChip(index, q, await reader.get_quota_burn(q, now))
         for index, q in (await reader.get_latest_quota_by_key(settings.api)).items()
     ]
     return StatusStrip(now, jobs, sources, quotas)

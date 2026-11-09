@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import socket
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -10,7 +11,13 @@ from datetime import UTC, datetime
 from enum import StrEnum
 
 import structlog
-from sqlalchemy.exc import DBAPIError, ProgrammingError
+from sqlalchemy.exc import (
+    DataError,
+    DBAPIError,
+    IntegrityError,
+    NotSupportedError,
+    ProgrammingError,
+)
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
 logger = structlog.get_logger()
@@ -18,15 +25,22 @@ logger = structlog.get_logger()
 TTL_SECONDS = 60.0
 # A failed refresh is not retried for this long, so a down database sees one query per window.
 FAILURE_BACKOFF_SECONDS = 10.0
-# What the database raises when it cannot answer: refused, unreachable, timed out, out of pool.
+# What the database raises when it cannot answer: a driver error (a statement timeout arrives as
+# a bare DBAPIError), the pool running dry, or the connection refused, unresolvable or timed out.
 DATABASE_ERRORS: tuple[type[BaseException], ...] = (
     DBAPIError,
     PoolTimeoutError,
-    OSError,
+    ConnectionError,
+    socket.gaierror,
     TimeoutError,
 )
 # Driver errors the query itself causes, such as bad SQL or a table the role has no grant on.
-QUERY_ERRORS: tuple[type[BaseException], ...] = (ProgrammingError,)
+QUERY_ERRORS: tuple[type[BaseException], ...] = (
+    ProgrammingError,
+    DataError,
+    IntegrityError,
+    NotSupportedError,
+)
 
 
 class FailureKind(StrEnum):

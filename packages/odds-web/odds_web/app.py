@@ -20,7 +20,14 @@ from odds_core.config import Settings, get_settings
 from odds_web.cache import Cached, Failure, SingleFlightCache
 from odds_web.closes import WEEKS as CLOSE_WEEKS
 from odds_web.closes import CloseWeeks, close_coverage
-from odds_web.coverage import CandidateCoverage, candidate_coverage, coverage_candidates
+from odds_web.coverage import (
+    BUCKET_MINUTES,
+    PAST,
+    UPCOMING,
+    CandidateCoverage,
+    candidate_coverage,
+    coverage_candidates,
+)
 from odds_web.db import WebDatabase, web_database_from_settings
 from odds_web.portfolio import AXIS_PERCENT, FOREST_WIDTH, PortfolioRow, portfolio_rows
 from odds_web.status import StatusStrip, load_status
@@ -87,7 +94,13 @@ def create_app(
     templates.env.filters["signed"] = _signed
     templates.env.filters["clock"] = _clock
     templates.env.filters["stamp"] = _stamp
-    templates.env.globals.update(ago=_ago, close_weeks=CLOSE_WEEKS)
+    templates.env.globals.update(
+        ago=_ago,
+        close_weeks=CLOSE_WEEKS,
+        bucket_minutes=BUCKET_MINUTES,
+        coverage_past_days=PAST.days,
+        coverage_upcoming_hours=int(UPCOMING.total_seconds() // 3600),
+    )
     # Paths, not absolute URLs: behind `tailscale serve` the app sees http while the page is https.
     templates.env.globals.update(
         axis_percent=f"{AXIS_PERCENT:g}", forest_width=FOREST_WIDTH, url_path=app.url_path_for

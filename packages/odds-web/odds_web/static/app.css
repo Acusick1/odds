@@ -7,6 +7,9 @@
   --secondary: #1b1f27;
   --pos: #3fb950;
   --neg: #f85149;
+  --chart-1: #6e9ef0;
+  --chart-2: #b48ead;
+  --warning: #d29922;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 body { margin: 0; font: 13px/1.4 system-ui, sans-serif; background: var(--background); color: var(--foreground); }
@@ -36,11 +39,6 @@ svg circle { stroke: var(--background); stroke-width: 2; }
 svg circle.pos { fill: var(--pos); }
 svg circle.neg { fill: var(--neg); }
 svg .clip { fill: var(--foreground); font-size: 12px; }
-:root {
-  --chart-1: #6e9ef0;
-  --chart-2: #b48ead;
-  --warning: #d29922;
-}
 header.top { max-width: 960px; margin: 0 auto; padding: 8px 16px 0; border-bottom: 1px solid var(--border); }
 header.top nav { display: flex; gap: 16px; font-size: 12px; margin-bottom: 6px; }
 header.top nav a { color: var(--foreground); text-decoration: none; }
