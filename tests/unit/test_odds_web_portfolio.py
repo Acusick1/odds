@@ -169,8 +169,8 @@ class TestPortfolioPage:
         response = client.get("/")
 
         assert response.status_code == 200
-        assert "Unavailable" in response.text
-        assert "last good data never" in response.text
+        assert "Database unavailable · no data loaded yet" in response.text
+        assert "as of" not in response.text
 
     def test_after_a_good_load_a_failure_shows_the_last_cached_time(
         self, report: dict[str, object], registry: list
@@ -180,11 +180,32 @@ class TestPortfolioPage:
         database = build_web_database("postgresql+asyncpg://odds_web:pw@localhost:1/odds")
         with TestClient(create_app(database, Path("."), SingleFlightCache(ttl=0.0))) as client:
             client.get("/")
-            report["error"] = RuntimeError("database is down")
+            report["error"] = DBAPIError("select", {}, ConnectionRefusedError("refused"))
             body = client.get("/fragments/portfolio").text
 
-        assert "Unavailable · last good data" in body and "never" not in body
+        assert re.search(r"Database unavailable · showing data as of \d\d:\d\d UTC", body)
         assert "gap" in body
+
+    def test_a_fault_is_named_apart_from_an_outage(
+        self, client: TestClient, report: dict[str, object]
+    ) -> None:
+        report["error"] = KeyError("home")
+
+        body = client.get("/").text
+
+        assert "odds-web error (KeyError), see the server log · no data loaded yet" in body
+        assert "Database unavailable" not in body
+
+    def test_a_healthy_section_says_when_its_data_was_loaded(
+        self, client: TestClient, report: dict[str, object], registry: list
+    ) -> None:
+        registry.append(mechanical())
+        report["summaries"] = summaries([bet(i, 0.5) for i in range(10)], registry)
+
+        body = client.get("/").text
+
+        assert re.search(r'<p class="as-of sub">as of \d\d:\d\d UTC</p>', body)
+        assert "unavailable" not in body
 
     def test_the_fragment_is_the_portfolio_without_the_page(
         self, client: TestClient, report: dict[str, object], registry: list

@@ -1,9 +1,8 @@
+{% from "_macros.html.j2" import section_state %}
 <div id="portfolio" hx-get="{{ url_path('portfolio_fragment') }}" hx-trigger="every 60s" hx-swap="outerHTML">
-{% if portfolio.error %}
-<p class="unavailable">Unavailable · last good data {{ portfolio.as_of | clock }}</p>
-{% endif %}
+{{ section_state(portfolio) }}
 {% if portfolio.value is not none %}
-<table id="pf" class="{{ 'stale' if portfolio.error }}">
+<table id="pf" class="{{ 'stale' if portfolio.failure }}">
 <thead><tr>
 <th>Candidate</th><th>Next checkpoint</th>
 <th>Mean EV, 95% CI <span class="num axis-label">(−{{ axis_percent }}% … +{{ axis_percent }}%)</span></th>
@@ -47,7 +46,5 @@ n={{ f.n }}</title>
 <span>Dashed line = zero EV</span>
 <span>Estimate over all bets with a close; the verdict is read only at checkpoints</span>
 </div>
-{% elif portfolio.error %}
-<p class="sub">No data has loaded yet.</p>
 {% endif %}
 </div>

@@ -274,13 +274,13 @@ class TestHealthMonitor:
     async def test_check_job_heartbeats_healthy(self, mock_session, mock_settings):
         """Should return empty list when all heartbeats are recent."""
         monitor = HealthMonitor(mock_session, mock_settings)
+        recent = datetime.now(UTC) - timedelta(minutes=30)
+        beats = dict.fromkeys(mock_settings.alerts.heartbeat_expectations, recent)
 
-        # Mock query: all jobs have recent heartbeats
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = datetime.now(UTC) - timedelta(minutes=30)
-        mock_session.execute.return_value = mock_result
-
-        with patch.object(monitor, "_send_alert", return_value=False):
+        with (
+            patch("odds_lambda.health_monitor.last_heartbeats", AsyncMock(return_value=beats)),
+            patch.object(monitor, "_send_alert", return_value=False),
+        ):
             issues = await monitor.check_job_heartbeats()
 
         assert issues == []
@@ -290,12 +290,10 @@ class TestHealthMonitor:
         """Should skip alerting when no heartbeat history exists (first deploy)."""
         monitor = HealthMonitor(mock_session, mock_settings)
 
-        # Mock query: no heartbeat found
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = None
-        mock_session.execute.return_value = mock_result
-
-        with patch.object(monitor, "_send_alert", return_value=True) as mock_alert:
+        with (
+            patch("odds_lambda.health_monitor.last_heartbeats", AsyncMock(return_value={})),
+            patch.object(monitor, "_send_alert", return_value=True) as mock_alert,
+        ):
             issues = await monitor.check_job_heartbeats()
 
         assert issues == []
@@ -305,13 +303,14 @@ class TestHealthMonitor:
     async def test_check_job_heartbeats_stale(self, mock_session, mock_settings):
         """Should flag jobs with old heartbeats."""
         monitor = HealthMonitor(mock_session, mock_settings)
+        # 60 hours ago exceeds every expectation.
+        old = datetime.now(UTC) - timedelta(hours=60)
+        beats = dict.fromkeys(mock_settings.alerts.heartbeat_expectations, old)
 
-        # Mock query: heartbeat from 60 hours ago (exceeds every expectation)
-        mock_result = MagicMock()
-        mock_result.scalar_one_or_none.return_value = datetime.now(UTC) - timedelta(hours=60)
-        mock_session.execute.return_value = mock_result
-
-        with patch.object(monitor, "_send_alert", return_value=True):
+        with (
+            patch("odds_lambda.health_monitor.last_heartbeats", AsyncMock(return_value=beats)),
+            patch.object(monitor, "_send_alert", return_value=True),
+        ):
             issues = await monitor.check_job_heartbeats()
 
         assert len(issues) == len(mock_settings.alerts.heartbeat_expectations)

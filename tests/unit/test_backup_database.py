@@ -8,7 +8,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from odds_core.config import AlertConfig, BackupConfig
@@ -266,16 +266,16 @@ class TestRemotePath:
 
 class TestStaleBackup:
     async def test_health_check_reports_no_backup_in_the_last_day(self) -> None:
-        session = AsyncMock()
-        result = MagicMock()
-        result.scalar_one_or_none.return_value = datetime.now(UTC) - timedelta(hours=27)
-        session.execute.return_value = result
+        beats = {"backup-database": datetime.now(UTC) - timedelta(hours=27)}
         settings = SimpleNamespace(
             alerts=AlertConfig(heartbeat_expectations={"backup-database": 26})
         )
-        monitor = HealthMonitor(session, settings)  # type: ignore[arg-type]
+        monitor = HealthMonitor(AsyncMock(), settings)  # type: ignore[arg-type]
 
-        with patch.object(monitor, "_send_alert", new_callable=AsyncMock) as send:
+        with (
+            patch("odds_lambda.health_monitor.last_heartbeats", AsyncMock(return_value=beats)),
+            patch.object(monitor, "_send_alert", new_callable=AsyncMock) as send,
+        ):
             issues = await monitor.check_job_heartbeats()
 
         assert len(issues) == 1

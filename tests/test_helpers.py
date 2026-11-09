@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import httpx
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
 from odds_core.api_models import EventsResponse, OddsResponse
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.quotes import Quote
@@ -18,8 +23,9 @@ from odds_lambda.price_rows import expand_envelope
 from odds_lambda.storage.event_resolver import ListedGame, MatchWindow, resolve_event
 from odds_lambda.storage.game_pks import game_pks_of
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_shaped_snapshot
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import Connection, text
+from sqlalchemy import event as sqlalchemy_event
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 # Hours before kick-off that odds_lambda.tier_utils.calculate_tier puts in each fetch tier;
 # IN_PLAY is after kick-off.
@@ -648,3 +654,75 @@ def odds_api_game(
             for key, markets in books.items()
         ],
     }
+
+
+async def create_scheduler_tables(session: AsyncSession) -> None:
+    """Create the APScheduler data store's tables as the scheduler does on its first start."""
+    from apscheduler.datastores.sqlalchemy import SQLAlchemyDataStore
+
+    assert session.bind is not None
+    metadata = SQLAlchemyDataStore(session.bind).get_table_definitions()
+    connection = await session.connection()
+    await connection.run_sync(metadata.create_all)
+    await session.commit()
+
+
+ODDS_WEB_GRANTS = Path(__file__).parents[1] / "scripts" / "odds_web_grants.sql"
+
+
+async def apply_odds_web_role(session: AsyncSession) -> None:
+    """Create the ``odds_web`` role and apply the grants file, as the host wizard does."""
+    # The APScheduler tables exist only once the scheduler has booted; the grants file names them.
+    await create_scheduler_tables(session)
+    await session.execute(
+        text(
+            "DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'odds_web') "
+            "THEN CREATE ROLE odds_web NOLOGIN; END IF; END $$"
+        )
+    )
+    for statement in ODDS_WEB_GRANTS.read_text().split(";"):
+        if statement.strip():
+            await session.execute(text(statement))
+    await session.commit()
+
+
+def client_of(app: FastAPI) -> AsyncClient:
+    return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
+
+
+@contextmanager
+def as_odds_web(engine: AsyncEngine) -> Iterator[None]:
+    """Every transaction on ``engine`` runs as the ``odds_web`` role."""
+
+    def set_role(connection: Connection) -> None:
+        connection.exec_driver_sql("SET LOCAL ROLE odds_web")
+
+    sqlalchemy_event.listen(engine.sync_engine, "begin", set_role)
+    try:
+        yield
+    finally:
+        sqlalchemy_event.remove(engine.sync_engine, "begin", set_role)
+
+
+@contextmanager
+def as_odds_web_login(engine: AsyncEngine) -> Iterator[None]:
+    """Like ``as_odds_web``, with the role-level ``default_transaction_read_only`` a login applies.
+
+    ``SET ROLE`` does not apply ``ALTER ROLE ... SET``, so the setting is read back from
+    ``pg_db_role_setting`` and applied to each transaction as the server does for a new session.
+    """
+
+    def set_role(connection: Connection) -> None:
+        defaults = connection.exec_driver_sql(
+            "SELECT s.setconfig FROM pg_db_role_setting s JOIN pg_roles r ON r.oid = s.setrole "
+            "WHERE r.rolname = 'odds_web'"
+        ).scalar()
+        connection.exec_driver_sql("SET LOCAL ROLE odds_web")
+        if defaults and "default_transaction_read_only=on" in defaults:
+            connection.exec_driver_sql("SET TRANSACTION READ ONLY")
+
+    sqlalchemy_event.listen(engine.sync_engine, "begin", set_role)
+    try:
+        yield
+    finally:
+        sqlalchemy_event.remove(engine.sync_engine, "begin", set_role)

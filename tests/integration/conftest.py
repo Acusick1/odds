@@ -6,7 +6,7 @@ This module contains shared fixtures for integration testing.
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -25,6 +25,7 @@ from tests.test_helpers import (
     TWIN_EVENT_ID,
     TWIN_KICKOFF,
     FakeMlbStatsFetcher,
+    apply_odds_web_role,
     make_epl_event,
     make_tagged_snapshot,
     store_tagged,
@@ -202,3 +203,10 @@ async def replay(
     pglite_async_engine: AsyncEngine, pglite_async_session: AsyncSession
 ) -> AsyncGenerator[BackfillReplay, None]:
     yield BackfillReplay(pglite_async_engine, pglite_async_session)
+
+
+@pytest.fixture
+async def odds_web_session(pglite_async_session: AsyncSession) -> AsyncIterator[AsyncSession]:
+    """The suite's empty database with the ``odds_web`` role and its grants applied."""
+    await apply_odds_web_role(pglite_async_session)
+    yield pglite_async_session

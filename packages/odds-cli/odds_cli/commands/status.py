@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 import typer
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
-from odds_lambda.storage.readers import KeyQuota, OddsReader
+from odds_lambda.storage.readers import BurnProjection, KeyQuota, OddsReader
 from rich.console import Console
 from rich.table import Table
 
@@ -131,8 +131,22 @@ async def _show_status(verbose: bool):
         raise typer.Exit(code=1) from e
 
 
-def _print_quota(label: str, key_quota: KeyQuota, readings: list[tuple[datetime, int]]) -> None:
-    """Print one key's balance and its recent usage; ``readings`` are newest first."""
+def _projection_text(projection: BurnProjection | None) -> str:
+    if projection is None:
+        return "unknown (under a day of readings since the last reset)"
+    if projection.days_left is None:
+        return "no spend since the last reset"
+    return f"~{projection.days_left:.0f} days left at {projection.per_day:,.0f}/day"
+
+
+def _print_quota(
+    label: str,
+    key_quota: KeyQuota,
+    readings: list[tuple[datetime, int]],
+    projection: BurnProjection | None,
+) -> None:
+    """Print one key's balance, its burn projection and its recent usage; ``readings`` are
+    newest first."""
     quota_remaining = key_quota.remaining
     quota_percent = key_quota.fraction * 100
 
@@ -149,6 +163,7 @@ def _print_quota(label: str, key_quota: KeyQuota, readings: list[tuple[datetime,
         "Remaining",
         f"[{quota_color}]{quota_remaining:,} ({quota_percent:.1f}%)[/{quota_color}]",
     )
+    table.add_row("Projection", _projection_text(projection))
 
     console.print(table)
 
@@ -200,7 +215,12 @@ async def _show_quota():
                     for log in fetch_logs
                     if log.api_quota_remaining is not None
                 ]
-                _print_quota(f"key {index}: {', '.join(key_quota.sports)}", key_quota, readings)
+                _print_quota(
+                    f"key {index}: {', '.join(key_quota.sports)}",
+                    key_quota,
+                    readings,
+                    await reader.get_quota_burn(key_quota),
+                )
 
             console.print()
 

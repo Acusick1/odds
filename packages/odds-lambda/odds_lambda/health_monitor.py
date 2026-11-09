@@ -20,7 +20,7 @@ from typing import NamedTuple, Protocol
 
 import structlog
 from odds_core.alerts import job_outage_alerted_at, send_recorded_alert
-from odds_core.close import LIVE_CLOSE_WINDOW, event_close, live_close_quotes
+from odds_core.close import LIVE_CLOSE_WINDOW, CloseKind, close_status, live_close_quotes
 from odds_core.config import Settings, get_settings
 from odds_core.database import async_session_maker
 from odds_core.market_prices import THREE_WAY_MARKET, TOTALS_MARKET
@@ -38,24 +38,22 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_lambda.collection_calendar import (
-    CollectionSource,
-    active_hours_between,
-    fixture_calendar,
-    latest_snapshot_time,
+from odds_lambda.health_readers import (
+    Freshness,
+    heartbeat_late,
+    last_heartbeats,
+    source_freshness,
 )
 from odds_lambda.mlb_game_resolver import MLB_SPORT_KEY
 from odds_lambda.scheduling.backends.base import ScheduledJob
 from odds_lambda.scheduling.jobs import (
     expected_compound_job_names,
     get_job_cron,
-    make_compound_job_name,
     resolve_job_name,
     resolve_target_sports,
 )
 from odds_lambda.storage.event_merge import EventMerger
 from odds_lambda.storage.unsettled_events import find_unsettled_events
-from odds_lambda.tier_utils import calculate_tier
 
 logger = structlog.get_logger()
 
@@ -146,22 +144,6 @@ class MissingBetfairClose:
             f"({self.commence_time:%Y-%m-%d %H:%M} UTC, {self.event_id}; no close on "
             f"{', '.join(missing)})"
         )
-
-
-def collection_sources() -> tuple[CollectionSource, ...]:
-    from odds_lambda.jobs import (
-        fetch_betfair_exchange,
-        fetch_odds,
-        fetch_oddsportal,
-        fetch_polymarket_odds,
-    )
-
-    return (
-        fetch_oddsportal.SOURCE,
-        fetch_betfair_exchange.SOURCE,
-        fetch_odds.SOURCE,
-        fetch_polymarket_odds.SOURCE,
-    )
 
 
 class QuotaReading(NamedTuple):
@@ -260,85 +242,44 @@ class HealthMonitor:
 
     async def check_stale_sources(self, now: datetime | None = None) -> list[StaleSource]:
         """Find sources that stopped writing a market while fixtures they should price are
-        scheduled.
+        scheduled: the ``Freshness.STALE`` markets of ``odds_lambda.health_readers.source_freshness``.
 
-        Only sources whose job is bootstrapped are checked, per sport and per market the
-        source declares for it, and only when a scheduled fixture lies inside the source's
-        horizon for that sport and the source has written that market before, so
-        international breaks, off-seasons and jobs that were never enabled raise nothing.
-        A source whose job is already failing is left to that job's own alert. The gap is
-        the time since the later of the market's last snapshot and the moment the next
-        fixture entered the horizon, counted without the sport's overnight window. It is
-        compared with the largest of ``stale_data_hours``, ``stale_cadence_multiplier``
-        polling intervals at the tier of the next kickoff, and 1.5 intervals at the tier
-        the next kickoff had when the last snapshot was written (the interval the job then
-        chose to wait).
+        International breaks, off-seasons and jobs that were never enabled raise nothing. A
+        source whose job is already failing is left to that job's own alert.
         """
         moment = now or datetime.now(UTC)
-        alerts = self.settings.alerts
-        bootstrapped = set(self.settings.scheduler.bootstrap_jobs)
         stale: list[StaleSource] = []
-        for source in collection_sources():
-            if source.job_name not in bootstrapped:
-                continue
-            for sport_key in resolve_target_sports(
-                source.job_name, self.settings.data_collection.sports
-            ):
-                if sport_key not in source.fixture_horizons:
-                    continue
-                horizon = source.fixture_horizon(sport_key)
-                calendar = await fixture_calendar(
-                    self.session, sport_key, now=moment, horizon=horizon
+        for found in await source_freshness(self.session, self.settings, moment):
+            if found.status is Freshness.UNKNOWN:
+                logger.info(
+                    "stale_check_no_history",
+                    source=found.source_key,
+                    sport=found.sport_key,
+                    market=found.market,
                 )
-                if calendar.next_kickoff is None or not calendar.kickoffs_in_horizon:
-                    continue
-                hours_to_kickoff = (calendar.next_kickoff - moment).total_seconds() / 3600
-                for market in source.markets[sport_key]:
-                    last = await latest_snapshot_time(
-                        self.session, sport_key, source.source, market
-                    )
-                    if last is None:
-                        logger.info(
-                            "stale_check_no_history",
-                            source=source.key,
-                            sport=sport_key,
-                            market=market,
-                        )
-                        continue
-                    hours_at_last = (calendar.next_kickoff - last).total_seconds() / 3600
-                    threshold = max(
-                        alerts.stale_data_hours,
-                        alerts.stale_cadence_multiplier
-                        * source.cadence.interval_for(calculate_tier(hours_to_kickoff)),
-                        alerts.stale_last_interval_multiplier
-                        * source.cadence.interval_for(calculate_tier(hours_at_last)),
-                    )
-                    reference = max(last, calendar.next_kickoff - horizon)
-                    active = active_hours_between(
-                        reference, moment, source.overnight_window(sport_key)
-                    )
-                    if active <= threshold:
-                        continue
-                    if await self._job_is_failing(
-                        make_compound_job_name(source.job_name, sport_key), moment
-                    ):
-                        logger.info(
-                            "stale_source_job_failing",
-                            source=source.key,
-                            sport=sport_key,
-                            market=market,
-                        )
-                        continue
-                    stale.append(
-                        StaleSource(
-                            source=source.key,
-                            sport_key=sport_key,
-                            market=market,
-                            last_snapshot=last,
-                            active_hours=active,
-                            threshold_hours=threshold,
-                        )
-                    )
+                continue
+            if found.status is not Freshness.STALE:
+                continue
+            assert found.last_snapshot is not None
+            assert found.active_hours is not None and found.threshold_hours is not None
+            if await self._job_is_failing(found.job_name, moment):
+                logger.info(
+                    "stale_source_job_failing",
+                    source=found.source_key,
+                    sport=found.sport_key,
+                    market=found.market,
+                )
+                continue
+            stale.append(
+                StaleSource(
+                    source=found.source_key,
+                    sport_key=found.sport_key,
+                    market=found.market,
+                    last_snapshot=found.last_snapshot,
+                    active_hours=found.active_hours,
+                    threshold_hours=found.threshold_hours,
+                )
+            )
         return stale
 
     async def check_missing_betfair_closes(
@@ -351,9 +292,9 @@ class HealthMonitor:
         before. It is skipped when its status is postponed or cancelled, or when it
         has no live Betfair snapshot in the ``BETFAIR_HISTORY_WINDOW`` before
         kick-off (a ghost, a twin that carries the prices, or an unannounced
-        postponement). It is missing when it has no live close
-        (``odds_core.close.event_close`` over its ``live_close_quotes``), the close
-        the candidate report scores against. Events already named in an alert inside the
+        postponement). It is missing when ``odds_core.close.close_status`` over its
+        ``live_close_quotes`` is not ``CloseKind.LIVE``: it has no live close, the close the
+        candidate report scores against. Events already named in an alert inside the
         lookback are not reported again.
         """
         moment = now or datetime.now(UTC)
@@ -433,16 +374,17 @@ class HealthMonitor:
                 continue
             closes = await live_close_quotes(self.session, [event.id], THREE_WAY_MARKET)
             three_way_missing = (
-                event_close(closes, kickoff, BETFAIR_CLOSE_SPORT, THREE_WAY_MARKET) is None
+                close_status(closes, kickoff, BETFAIR_CLOSE_SPORT, THREE_WAY_MARKET, moment).kind
+                is not CloseKind.LIVE
             )
             totals_closes = await live_close_quotes(self.session, [event.id], TOTALS_MARKET)
             totals_missing = tuple(
                 line
                 for line in totals_lines.get(event.id, [])
-                if event_close(
-                    totals_closes, kickoff, BETFAIR_CLOSE_SPORT, TOTALS_MARKET, line=line
-                )
-                is None
+                if close_status(
+                    totals_closes, kickoff, BETFAIR_CLOSE_SPORT, TOTALS_MARKET, moment, line=line
+                ).kind
+                is not CloseKind.LIVE
             )
             if not three_way_missing and not totals_missing:
                 continue
@@ -683,13 +625,9 @@ class HealthMonitor:
         issues: list[str] = []
         now = datetime.now(UTC)
 
+        beats = await last_heartbeats(self.session, list(expectations))
         for job_name, max_hours in expectations.items():
-            cutoff = now - timedelta(hours=max_hours)
-            query = select(func.max(AlertHistory.sent_at)).where(
-                AlertHistory.alert_type == f"heartbeat:{job_name}"
-            )
-            result = await self.session.execute(query)
-            last_beat = result.scalar_one_or_none()
+            last_beat = beats.get(job_name)
 
             if last_beat is None:
                 # No heartbeat history — job hasn't run since monitoring was
@@ -697,7 +635,7 @@ class HealthMonitor:
                 logger.info("heartbeat_no_history", job=job_name)
                 continue
 
-            if last_beat < cutoff:
+            if heartbeat_late(last_beat, max_hours, now):
                 hours_ago = f"{(now - last_beat).total_seconds() / 3600:.1f}h ago"
                 issue = (
                     f"Job {job_name} has not completed "

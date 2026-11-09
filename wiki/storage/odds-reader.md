@@ -12,7 +12,7 @@ status: stable
 
 # OddsReader
 
-`odds_lambda.storage.readers.OddsReader` is the read side for events, snapshots and the operational logs: one class, 9 async methods, built on an `AsyncSession`. It reads no prices; price rows are read through `odds_core.quotes.quotes` ([Reading quotes](price-tables.md#reading-quotes)). Module map and commit rules are on [Storage layer](storage-layer.md).
+`odds_lambda.storage.readers.OddsReader` is the read side for events, snapshots and the operational logs: one class, 10 async methods, built on an `AsyncSession`. It reads no prices; price rows are read through `odds_core.quotes.quotes` ([Reading quotes](price-tables.md#reading-quotes)). Module map and commit rules are on [Storage layer](storage-layer.md).
 
 ## Methods
 
