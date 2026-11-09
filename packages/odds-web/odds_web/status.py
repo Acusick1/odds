@@ -89,19 +89,20 @@ async def load_status(session: AsyncSession, settings: Settings, now: datetime) 
     names = {s.job_name: schedule_heartbeat_name(s.job_name) for s in schedules}
     beats = await last_heartbeats(session, set(names.values()))
     expectations = settings.alerts.heartbeat_expectations
-    jobs = [
-        JobChip(
-            name=s.job_name,
-            state=_job_state(
-                beats.get(names[s.job_name]), expectations.get(names[s.job_name]), now
-            ),
-            last_success=beats.get(names[s.job_name]),
-            max_hours=expectations.get(names[s.job_name]),
-            next_run=s.next_fire_time,
-            running=s.running > 0,
+    jobs: list[JobChip] = []
+    for schedule in schedules:
+        last = beats.get(names[schedule.job_name])
+        max_hours = expectations.get(names[schedule.job_name])
+        jobs.append(
+            JobChip(
+                name=schedule.job_name,
+                state=_job_state(last, max_hours, now),
+                last_success=last,
+                max_hours=max_hours,
+                next_run=schedule.next_fire_time,
+                running=schedule.running > 0,
+            )
         )
-        for s in schedules
-    ]
     sources = [
         SourceChip(
             label=f"{f.source_key} {sport_key_to_suffix(f.sport_key) or f.sport_key} {f.market}",

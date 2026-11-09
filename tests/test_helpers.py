@@ -648,3 +648,14 @@ def odds_api_game(
             for key, markets in books.items()
         ],
     }
+
+
+async def create_scheduler_tables(session: AsyncSession) -> None:
+    """Create the APScheduler data store's tables as the scheduler does on its first start."""
+    from apscheduler.datastores.sqlalchemy import SQLAlchemyDataStore
+
+    assert session.bind is not None
+    metadata = SQLAlchemyDataStore(session.bind).get_table_definitions()
+    connection = await session.connection()
+    await connection.run_sync(metadata.create_all)
+    await session.commit()

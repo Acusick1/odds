@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 
 import structlog
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, ProgrammingError
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 
 logger = structlog.get_logger()
@@ -25,6 +25,8 @@ DATABASE_ERRORS: tuple[type[BaseException], ...] = (
     OSError,
     TimeoutError,
 )
+# Driver errors the query itself causes, such as bad SQL or a table the role has no grant on.
+QUERY_ERRORS: tuple[type[BaseException], ...] = (ProgrammingError,)
 
 
 class FailureKind(StrEnum):
@@ -79,8 +81,9 @@ class SingleFlightCache:
         """The key's value, loading it when it is older than the TTL.
 
         A failed load is logged with its traceback and keeps the last good value. A database
-        error is ``FailureKind.UNAVAILABLE``; any other exception is ``FailureKind.FAULT``, still
-        caught so one broken section leaves the rest of the page standing.
+        error other than a query error is ``FailureKind.UNAVAILABLE``; any other exception is
+        ``FailureKind.FAULT``, still caught so one broken section leaves the rest of the page
+        standing.
         """
         entry: _Entry[T] = self._entries.setdefault(key, _Entry())
         if self._settled(entry):
@@ -91,7 +94,7 @@ class SingleFlightCache:
             try:
                 value = await loader()
             except Exception as exc:
-                if isinstance(exc, DATABASE_ERRORS):
+                if isinstance(exc, DATABASE_ERRORS) and not isinstance(exc, QUERY_ERRORS):
                     logger.warning("web_section_unavailable", section=key, exc_info=True)
                     kind = FailureKind.UNAVAILABLE
                 else:

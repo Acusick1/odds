@@ -4,7 +4,7 @@ import asyncio
 
 import pytest
 from odds_web.cache import Failure, FailureKind, SingleFlightCache
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, ProgrammingError
 from structlog.testing import capture_logs
 
 
@@ -121,6 +121,13 @@ class TestSingleFlightCache:
                 "log_level": "warning",
             }
         ]
+
+    async def test_a_query_the_database_rejects_is_a_fault(self, cache: SingleFlightCache) -> None:
+        denied = ProgrammingError("select", {}, Exception("permission denied for table x"))
+
+        result = await cache.get("k", Loader(denied))
+
+        assert result.failure is not None and result.failure.kind is FailureKind.FAULT
 
     async def test_any_other_error_is_a_fault_and_logged_as_an_error(
         self, cache: SingleFlightCache

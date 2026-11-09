@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from tests.test_helpers import (
     betfair_exchange_bookmaker,
+    create_scheduler_tables,
     make_epl_event,
     make_tagged_snapshot,
     store_tagged,
@@ -36,16 +37,13 @@ from tests.test_helpers import (
 
 GRANTS = Path(__file__).parents[2] / "scripts" / "odds_web_grants.sql"
 KICKOFF = datetime(2026, 4, 15, 15, 0, tzinfo=UTC)
-# The APScheduler tables exist only once the scheduler has booted; the grants file names them.
-SCHEDULER_TABLES = ("schedules", "jobs", "job_results", "tasks")
 
 
-@pytest.fixture
-async def session(pglite_async_session: AsyncSession) -> AsyncIterator[AsyncSession]:
-    """The suite's empty database with the ``odds_web`` role and its grants applied."""
-    for table in SCHEDULER_TABLES:
-        await pglite_async_session.execute(text(f"CREATE TABLE IF NOT EXISTS {table} (id integer)"))
-    await pglite_async_session.execute(
+async def apply_odds_web_role(session: AsyncSession) -> None:
+    """Create the ``odds_web`` role and apply the grants file, as the host wizard does."""
+    # The APScheduler tables exist only once the scheduler has booted; the grants file names them.
+    await create_scheduler_tables(session)
+    await session.execute(
         text(
             "DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'odds_web') "
             "THEN CREATE ROLE odds_web NOLOGIN; END IF; END $$"
@@ -53,8 +51,14 @@ async def session(pglite_async_session: AsyncSession) -> AsyncIterator[AsyncSess
     )
     for statement in GRANTS.read_text().split(";"):
         if statement.strip():
-            await pglite_async_session.execute(text(statement))
-    await pglite_async_session.commit()
+            await session.execute(text(statement))
+    await session.commit()
+
+
+@pytest.fixture
+async def session(pglite_async_session: AsyncSession) -> AsyncIterator[AsyncSession]:
+    """The suite's empty database with the ``odds_web`` role and its grants applied."""
+    await apply_odds_web_role(pglite_async_session)
     yield pglite_async_session
 
 

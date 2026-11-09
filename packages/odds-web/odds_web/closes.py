@@ -15,10 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 WEEKS = 8
-LIVE = "live Betfair"
-PENDING = "pending"
-NO_CLOSE = "no close"
-UNSUPPORTED = "unsupported"
+LIVE_LABEL = "live Betfair"
+PENDING_LABEL = "pending"
+NO_CLOSE_LABEL = "no close"
+UNSUPPORTED_LABEL = "unsupported"
 _FALLBACK_NAMES: dict[Source, str] = {
     Source.FOOTBALL_DATA_UK: "FDUK",
     Source.POLYMARKET: "Polymarket",
@@ -30,10 +30,10 @@ def close_label(status: CloseStatus) -> str:
     if status.kind is CloseKind.FALLBACK and status.source is not None:
         return f"{_FALLBACK_NAMES.get(status.source, status.source.value)} fallback"
     return {
-        CloseKind.LIVE: LIVE,
-        CloseKind.PENDING: PENDING,
-        CloseKind.NONE: NO_CLOSE,
-        CloseKind.UNSUPPORTED: UNSUPPORTED,
+        CloseKind.LIVE: LIVE_LABEL,
+        CloseKind.PENDING: PENDING_LABEL,
+        CloseKind.NONE: NO_CLOSE_LABEL,
+        CloseKind.UNSUPPORTED: UNSUPPORTED_LABEL,
     }[status.kind]
 
 
@@ -55,10 +55,10 @@ class CloseWeeks:
     @property
     def labels(self) -> list[str]:
         """The labels present, live first and the ones without a close last."""
-        order = [LIVE, PENDING, NO_CLOSE, UNSUPPORTED]
+        order = [LIVE_LABEL, PENDING_LABEL, NO_CLOSE_LABEL, UNSUPPORTED_LABEL]
         present = {label for c in self.counts.values() for label in c}
         fallbacks = sorted(present - set(order))
-        return [label for label in [LIVE, *fallbacks, *order[1:]] if label in present]
+        return [label for label in [LIVE_LABEL, *fallbacks, *order[1:]] if label in present]
 
     @property
     def most(self) -> int:

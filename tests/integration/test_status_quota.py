@@ -189,3 +189,26 @@ class TestShowQuota:
             ["480", "20"],
             ["500", ""],
         ]
+
+    @pytest.mark.asyncio
+    async def test_projects_the_days_left_from_the_burn_since_the_last_reset(
+        self, pglite_async_session: AsyncSession
+    ) -> None:
+        day = 60 * 24
+        pglite_async_session.add_all([_log(3 * day, 450), _log(day, 400)])
+        await pglite_async_session.commit()
+
+        output = await _run_show_quota(pglite_async_session)
+
+        assert "~16 days left at 25/day" in output
+
+    @pytest.mark.asyncio
+    async def test_the_projection_is_unknown_without_a_day_of_readings(
+        self, pglite_async_session: AsyncSession
+    ) -> None:
+        pglite_async_session.add_all([_log(60, 300), _log(30, 290)])
+        await pglite_async_session.commit()
+
+        output = await _run_show_quota(pglite_async_session)
+
+        assert "unknown (under a day of readings since the last reset)" in output
