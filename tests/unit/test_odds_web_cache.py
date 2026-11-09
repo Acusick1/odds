@@ -6,6 +6,7 @@ import errno
 import pytest
 from odds_web.cache import Failure, FailureKind, SingleFlightCache
 from sqlalchemy.exc import DBAPIError, ProgrammingError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from structlog.testing import capture_logs
 
 
@@ -123,6 +124,7 @@ class TestSingleFlightCache:
             pytest.param(ConnectionRefusedError("connect"), id="connection refused"),
             pytest.param(OSError(errno.ENETUNREACH, "unreachable"), id="network unreachable"),
             pytest.param(TimeoutError(), id="connect timeout"),
+            pytest.param(PoolTimeoutError("pool exhausted"), id="pool exhausted"),
         ],
     )
     async def test_a_database_that_cannot_answer_is_unavailable_and_logged_with_its_traceback(
@@ -147,6 +149,8 @@ class TestSingleFlightCache:
             pytest.param(driver_error("22012"), id="division by zero as asyncpg raises it"),
             pytest.param(driver_error("25006"), id="write in a read-only transaction"),
             pytest.param(ProgrammingError("select", {}, DriverError("42501")), id="missing grant"),
+            pytest.param(DriverError("28P01"), id="wrong password, raised while connecting"),
+            pytest.param(DriverError("3D000"), id="no such database, raised while connecting"),
             pytest.param(FileNotFoundError("candidates"), id="registry file missing"),
         ],
     )

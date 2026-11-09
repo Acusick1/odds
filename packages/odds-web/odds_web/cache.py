@@ -18,11 +18,11 @@ logger = structlog.get_logger()
 TTL_SECONDS = 60.0
 # A failed refresh is not retried for this long, so a down database sees one query per window.
 FAILURE_BACKOFF_SECONDS = 10.0
-# SQLSTATE classes of a query the server rejected: feature not supported, data exception,
-# integrity violation, invalid transaction state, syntax error or access rule violation (a
-# missing grant). asyncpg's errors reach SQLAlchemy mostly as a bare DBAPIError, so the class of
+# SQLSTATE classes of a request the server rejected: feature not supported, data exception,
+# integrity violation, invalid transaction state, invalid authorization (a wrong password), no
+# such database, syntax error or access rule violation (a missing grant). asyncpg's errors reach SQLAlchemy mostly as a bare DBAPIError, so the class of
 # the exception cannot tell these apart from a statement timeout (57014); the SQLSTATE can.
-QUERY_SQLSTATE_CLASSES: frozenset[str] = frozenset({"0A", "22", "23", "25", "42"})
+QUERY_SQLSTATE_CLASSES: frozenset[str] = frozenset({"0A", "22", "23", "25", "28", "3D", "42"})
 # OSErrors from reading files, such as the candidate registry, rather than from the network.
 FILE_ERRORS: tuple[type[OSError], ...] = (
     FileNotFoundError,
