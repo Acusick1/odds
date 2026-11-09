@@ -1,0 +1,38 @@
+:root {
+  color-scheme: dark;
+  --background: #0f1115;
+  --foreground: #e6e8eb;
+  --muted-foreground: #8b929d;
+  --border: #252a33;
+  --secondary: #1b1f27;
+  --pos: #3fb950;
+  --neg: #f85149;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+body { margin: 0; font: 13px/1.4 system-ui, sans-serif; background: var(--background); color: var(--foreground); }
+main { max-width: 960px; margin: 0 auto; padding: 8px 16px 48px; }
+h2 { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted-foreground); margin: 28px 0 10px; font-weight: 600; }
+.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.sub { color: var(--muted-foreground); font-size: 12px; }
+.pos { color: var(--pos); }
+.neg { color: var(--neg); }
+table { border-collapse: collapse; width: 100%; }
+table.stale { opacity: .55; }
+th { font-size: 11px; font-weight: 500; color: var(--muted-foreground); text-align: left; padding: 6px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+td { padding: 7px 6px; border-bottom: 1px solid var(--border); vertical-align: middle; white-space: nowrap; }
+td.r, th.r { text-align: right; }
+.axis-label { opacity: .7; }
+.verdict { font-size: 11px; padding: 2px 7px; border-radius: 4px; border: 1px solid var(--border); }
+.bar { width: 64px; height: 5px; background: var(--secondary); border-radius: 3px; display: inline-block; vertical-align: middle; margin-right: 6px; overflow: hidden; }
+.bar i { display: block; height: 100%; background: var(--foreground); opacity: .7; }
+.unavailable { color: var(--foreground); border: 1px solid var(--border); border-radius: 4px; padding: 6px 10px; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 11.5px; color: var(--muted-foreground); margin: 8px 0; }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+svg text { font-family: var(--font-mono); font-size: 10px; fill: var(--muted-foreground); }
+svg .zero { stroke: var(--muted-foreground); stroke-dasharray: 2 3; }
+svg .ci { stroke: var(--foreground); stroke-width: 2; }
+svg .promote { stroke: var(--foreground); stroke-width: 6; opacity: .25; stroke-linecap: round; }
+svg circle { stroke: var(--background); stroke-width: 2; }
+svg circle.pos { fill: var(--pos); }
+svg circle.neg { fill: var(--neg); }
+svg .clip { fill: var(--foreground); font-size: 12px; }

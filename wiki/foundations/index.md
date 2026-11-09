@@ -1,6 +1,6 @@
 ---
 title: Foundations
-description: What the system is, the five packages and the CLI, configuration, databases and migrations, code and doc conventions, odds arithmetic and devigging, local development and the test suite.
+description: What the system is, the six packages and the CLI, configuration, databases and migrations, code and doc conventions, odds arithmetic and devigging, local development and the test suite.
 ---
 
 # Foundations
@@ -18,7 +18,7 @@ Repo-wide material that every other area assumes: what the system is and which s
 - [Test suite](test-suite.md) — The test directories, pytest configuration, fixtures (py-pglite), markers, and which suites CI and the deploy workflows run.
 - [The odds CLI](odds-cli.md) — The Typer app, its command groups and owning pages, shared flags (--sport defaults per command, --db).
 - [Timezones and time helpers](timezones.md) — The UTC rule, the odds_core.time helpers, the ruff DTZ lint gate, and the naive-datetime sites in current code.
-- [Workspace packages and repository layout](workspace-packages.md) — The five uv workspace packages, their modules and declared dependencies, the repo layout and stack.
+- [Workspace packages and repository layout](workspace-packages.md) — The six uv workspace packages, their modules and declared dependencies, the repo layout and stack.
 
 ### Explanation
 

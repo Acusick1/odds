@@ -23,7 +23,7 @@ Workflows live in `.github/workflows/`. Secrets come from the `development` and 
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `test.yml` | push to any branch but main; `workflow_call` | `deptry` per package, then `uv run pytest` (`tests/unit` and `tests/integration` without `live_api`) |
+| `test.yml` | push to any branch but main; `workflow_call` | `deptry` per package under `packages/` (each declares its own imports), then `uv run pytest` (`tests/unit` and `tests/integration` without `live_api`) |
 | `lint.yml` | push to non-main branches | `uvx pre-commit run --all-files` (ruff with all `DTZ` datetime rules, per the root `pyproject.toml`; Vale, lychee, wiki-lint, candidate-versions, which compares against the merge-base with `origin/main`) ([code-conventions](../foundations/code-conventions.md)) |
 | `ci-cd.yml` | push to main touching `packages/**/*.py`, `tests/**`, `migrations/**`, `deployment/aws/**`, workflows or lockfiles | calls `test.yml`, then `deploy-dev.yml` |
 | `deploy-dev.yml` | called by `ci-cd.yml` or manual | ephemeral dev stack |

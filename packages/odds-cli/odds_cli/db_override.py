@@ -22,8 +22,8 @@ def override_database_url(new_db: str) -> str:
     """Point this process and its subprocesses at database ``new_db``.
 
     Swaps the dbname in the resolved ``DATABASE_URL`` (honouring ``.env``),
-    and in ``AGENT_DATABASE_URL`` when set so the agent subprocess keeps its
-    restricted role, writes both to ``os.environ`` so subprocesses inherit
+    and in ``AGENT_DATABASE_URL`` and ``WEB_DATABASE_URL`` when set so each
+    keeps its restricted role, writes both to ``os.environ`` so subprocesses inherit
     them, and clears the cached Settings so later ``get_settings()`` calls and
     ``odds_core.database`` sessions use the new database. Returns the new
     ``DATABASE_URL``.
@@ -35,5 +35,7 @@ def override_database_url(new_db: str) -> str:
     os.environ["DATABASE_URL"] = new_url
     if database.agent_url:
         os.environ["AGENT_DATABASE_URL"] = swap_dbname(database.agent_url, new_db)
+    if database.web_url:
+        os.environ["WEB_DATABASE_URL"] = swap_dbname(database.web_url, new_db)
     reset_settings_cache()
     return new_url

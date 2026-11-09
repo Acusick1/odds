@@ -1,0 +1,23 @@
+[Unit]
+Description=Odds pipeline read-only web UI (odds web serve)
+After=network-online.target docker.service
+Wants=network-online.target
+# No dependency on odds-scheduler.service in either direction: the UI can be down while
+# the scheduler collects, and a scheduler restart must not restart the UI.
+
+[Service]
+Type=simple
+# Replace with the deploying user and the absolute repo path on the host.
+# Settings read .env from WorkingDirectory (WEB_DATABASE_URL among them).
+User=andrew
+WorkingDirectory=/home/andrew/odds
+# systemd requires an absolute path to the executable (`which uv`).
+ExecStart=/home/andrew/.local/bin/uv run odds web serve
+Restart=always
+RestartSec=5
+# The web process must not starve the scheduler: bootstrap work is CPU-bound.
+CPUQuota=50%
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Workspace packages and repository layout
-description: The five uv workspace packages, their modules and declared dependencies, the repo layout and stack.
+description: The six uv workspace packages, their modules and declared dependencies, the repo layout and stack.
 sources:
   - odds_core
   - odds_core.database
@@ -25,6 +25,9 @@ sources:
   - packages/odds-analytics/pyproject.toml
   - packages/odds-cli/pyproject.toml
   - packages/odds-mcp/pyproject.toml
+  - packages/odds-web/pyproject.toml
+  - odds_web
+  - odds_web.app
   - pyproject.toml
   - docker-compose.yml
 mentions:
@@ -35,13 +38,13 @@ status: stable
 
 # Workspace packages and repository layout
 
-The repo is a uv workspace of five packages under `packages/` ([AGENTS.md](../../AGENTS.md)): `odds-core` at the bottom, then `odds-lambda`, `odds-analytics`, and the two front ends `odds-mcp` and `odds-cli`. Dependencies point downward: odds-lambda depends on odds-core, odds-analytics on both, and odds-mcp and odds-cli on all three. The stated rule is that core stays light; the exception is under [Dependency exceptions](#dependency-exceptions).
+The repo is a uv workspace of six packages under `packages/` ([AGENTS.md](../../AGENTS.md)): `odds-core` at the bottom, then `odds-lambda`, `odds-analytics`, and the three front ends `odds-mcp`, `odds-cli` and `odds-web`. Dependencies point downward: odds-lambda depends on odds-core, odds-analytics on both, odds-mcp and odds-web on all three, and odds-cli on those four. The stated rule is that core stays light; the exception is under [Dependency exceptions](#dependency-exceptions).
 
 ## Repository layout
 
 | Path | Contents |
 |---|---|
-| `packages/` | The five uv workspace members |
+| `packages/` | The six uv workspace members |
 | `docs/adr/`, `docs/agents/` | Decision records and agent tooling conventions, see [Documentation and issue tracking](documentation-and-issue-tracking.md) |
 | `experiments/` | `configs/`, `scripts/`, `results/` for modelling runs |
 | `scripts/` | Operational scripts (ingestion, tier checks, `ci/`, `wiki_lint.py`) |
@@ -67,6 +70,7 @@ Python 3.12+ (`pyproject.toml`), a uv workspace linted by one root ruff configur
 | NBA injury-report PDFs | `nbainjuries` (tabula over JPype) and `jdk4py`, which bundles the JRE it needs | `packages/odds-lambda/pyproject.toml` |
 | CLI | Typer, Rich | `packages/odds-cli/pyproject.toml` |
 | MCP server | FastMCP | `packages/odds-mcp/pyproject.toml` |
+| Web UI | FastAPI, Jinja2, uvicorn (declared by odds-cli, which serves it), htmx as a vendored file | `packages/odds-web/pyproject.toml`, `packages/odds-cli/pyproject.toml` |
 | Modelling | XGBoost | `packages/odds-analytics/pyproject.toml` |
 | Tests | pytest, pytest-asyncio, pytest-env, py-pglite ([Test suite](test-suite.md)) | `pyproject.toml` |
 
@@ -133,9 +137,13 @@ Importing `odds_core.alerts` builds `odds_core.config.get_settings()` ([Read at 
 - `odds_analytics.quality_metrics` never touches `odds_core.models.DataQualityLog`; it counts game and odds coverage, with snapshots counted as distinct snapshot times and per-book coverage read from price rows. Data-quality rows are a separate system ([Odds validation](../storage/odds-validator.md), [Coverage checks](../storage/coverage-checks.md)).
 - `odds_analytics.utils.per_book_market_holds` is the hold maths the MCP screener calls, over decimal prices ([retail edges](../agent/mcp-market-tools.md#retail-edges)); MCP also imports `odds_analytics.candidate_report` for candidate summaries and `odds_analytics.standings_features` for EPL table ranking ([odds-mcp server](../agent/mcp-server.md)).
 
+## odds-web
+
+`packages/odds-web/odds_web/` is the read-only web UI: `odds_web.app` (the FastAPI app and its routes), `odds_web.db` (the engine and session factory for `WEB_DATABASE_URL`), `odds_web.cache` (the single-flight TTL cache) and `odds_web.portfolio` (the portfolio rows). It declares odds-core, odds-analytics, odds-lambda, FastAPI, Jinja2 and sqlalchemy (`packages/odds-web/pyproject.toml`) and has no entry point of its own: `odds web serve` in odds-cli runs it ([odds-web](../operations/odds-web.md)).
+
 ## Dependency exceptions
 
-- Every package declares each third-party library its code imports, even when a workspace dependency already brings it in; `deptry` checks this per package in CI ([Code conventions](code-conventions.md#dependency-checks)). The ignores that remain in each package's `[tool.deptry.per_rule_ignores]` are `odds_analytics` (odds-core and odds-lambda, the two undeclared imports above), `botocore` (odds-lambda; installed with boto3), `optuna` (odds-cli; behind analytics' `training` extra), `asyncpg` (odds-core; the driver named in `DATABASE_URL`) and `optuna-integration` (odds-analytics; loaded by Optuna as a plugin).
+- Every package declares each third-party library its code imports, even when a workspace dependency already brings it in; `deptry` checks this per package in CI ([Code conventions](code-conventions.md#dependency-checks)). The ignores that remain in each package's `[tool.deptry.per_rule_ignores]` are `odds_analytics` (odds-core and odds-lambda, the two undeclared imports above), `botocore` (odds-lambda; installed with boto3), `optuna` (odds-cli; behind analytics' `training` extra), `asyncpg` (odds-core; the driver named in `DATABASE_URL`), `jinja2` and `odds-lambda` (odds-web; Starlette loads the first, and the second is declared ahead of the pages that read job and quota state) and `optuna-integration` (odds-analytics; loaded by Optuna as a plugin).
 
 ## Related
 

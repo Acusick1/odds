@@ -359,6 +359,7 @@ class TestEnvExampleTemplate:
         assert settings.data_collection.regions == ["us"]
         assert "fetch-oddsportal" in settings.scheduler.bootstrap_jobs
         assert settings.database.agent_url is not None
+        assert settings.database.web_url is not None
 
 
 class TestDatabaseURLsFromEnvFile:
@@ -368,6 +369,7 @@ class TestDatabaseURLsFromEnvFile:
         (tmp_path / ".env").write_text(
             "DATABASE_URL=postgresql://main/db\n"
             "AGENT_DATABASE_URL=postgresql://agent/db\n"
+            "WEB_DATABASE_URL=postgresql://web/db\n"
             "PROD_DATABASE_URL=postgresql://prod/db\n"
             "LOCAL_DATABASE_URL=postgresql://local/db\n"
         )
@@ -378,6 +380,7 @@ class TestDatabaseURLsFromEnvFile:
 
         assert database.url == "postgresql://main/db"
         assert database.agent_url == "postgresql://agent/db"
+        assert database.web_url == "postgresql://web/db"
         assert database.prod_url == "postgresql://prod/db"
         assert database.local_url == "postgresql://local/db"
 
@@ -386,5 +389,6 @@ class TestDatabaseURLsFromEnvFile:
             database = DatabaseConfig(_env_file=None)
 
         assert database.agent_url is None
+        assert database.web_url is None
         assert database.prod_url is None
         assert database.local_url is None

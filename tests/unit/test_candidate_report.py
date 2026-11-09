@@ -154,43 +154,84 @@ class TestCheckpoint:
         )
 
 
+class TestCurrentEstimate:
+    """The current estimate is separate from the verdict's checkpoints."""
+
+    def test_below_a_checkpoint_there_is_an_estimate_and_no_checkpoint(self) -> None:
+        summary = summary_of(trades(64, 0.5))
+        assert summary.checkpoint is None and summary.checkpoints == ()
+        assert summary.current is not None and summary.current.n == 64
+        assert summary.verdict is Verdict.NOT_YET
+
+    def test_one_event_has_no_estimate(self) -> None:
+        sequence = [trade(i, event_id=1) for i in range(5)]
+        assert summary_of(sequence).current is None
+
+    def test_no_bets_with_a_close_have_no_estimate(self) -> None:
+        assert summary_of([trade(0, None)]).current is None
+
+    def test_the_verdict_checkpoint_is_frozen_while_the_estimate_follows_the_bets(self) -> None:
+        summary = summary_of(trades(100, 0.5) + trades(100, -0.5, start=100))
+        assert summary.verdict is Verdict.PROMOTE
+        assert summary.checkpoint is not None and summary.checkpoint.n == 100
+        assert [c.n for c in summary.checkpoints] == [100]
+        assert summary.current is not None and summary.current.n == 200
+        assert summary.current.mean_ev == pytest.approx(0.0)
+        assert summary.checkpoint.mean_ev == pytest.approx(0.5)
+
+    def test_the_estimate_is_the_checkpoint_when_both_score_the_same_bets(self) -> None:
+        summary = summary_of(trades(100, 0.5))
+        assert summary.current is summary.checkpoint
+
+    def test_the_estimate_uses_the_family_size_now(self) -> None:
+        registry = [mechanical("a"), mechanical("b")]
+        decisions = {("a", 1): LONG_AGO, ("b", 1): NOW - timedelta(days=1)}
+        summaries = summarize_candidates(
+            [trade(i, name="a") for i in range(150)], registry, NOW, decisions, N_BOOT
+        )
+        a = next(s for s in summaries if s.name == "a")
+        assert a.checkpoint is not None and a.checkpoint.family_versions == 1
+        assert a.current is not None and a.current.family_versions == 2
+        assert a.current.promote_level == promote_level(2)
+
+
 class TestVerdict:
     def test_promote_when_99_lower_bound_above_zero(self) -> None:
-        verdict, checkpoint = judge(trades(100, 0.5), one, N_BOOT, 0)
+        verdict, checkpoints = judge(trades(100, 0.5), one, N_BOOT, 0)
         assert verdict is Verdict.PROMOTE
-        assert checkpoint is not None and checkpoint.n == 100
+        assert [c.n for c in checkpoints] == [100]
 
     def test_kill_when_95_upper_bound_at_or_below_zero(self) -> None:
         assert judge(trades(100, -0.5), one, N_BOOT, 0)[0] is Verdict.KILL
 
     def test_continue_when_interval_straddles_zero(self) -> None:
-        verdict, checkpoint = judge(noise(400), one, N_BOOT, 0)
+        verdict, checkpoints = judge(noise(400), one, N_BOOT, 0)
         assert verdict is Verdict.CONTINUE
-        assert checkpoint is not None and checkpoint.n == 400
+        assert [c.n for c in checkpoints] == [100, 200, 300, 400]
 
     def test_kill_at_500_without_promotion(self) -> None:
-        verdict, checkpoint = judge(noise(500), one, N_BOOT, 0)
+        verdict, checkpoints = judge(noise(500), one, N_BOOT, 0)
         assert verdict is Verdict.KILL
-        assert checkpoint is not None and checkpoint.n == 500
+        assert checkpoints[-1].n == 500
 
     def test_promotion_at_500_beats_the_kill_limit(self) -> None:
         assert judge(trades(500, 0.5), one, N_BOOT, 0)[0] is Verdict.PROMOTE
 
     def test_no_checkpoint_is_not_yet(self) -> None:
-        assert judge(trades(99), one, N_BOOT, 0) == (Verdict.NOT_YET, None)
+        assert judge(trades(99), one, N_BOOT, 0) == (Verdict.NOT_YET, [])
 
     def test_first_verdict_stands_when_later_bets_reverse_the_estimate(self) -> None:
         sequence = trades(100, 0.5) + trades(300, -0.5, start=100)
-        verdict, checkpoint = judge(sequence, one, N_BOOT, 0)
+        verdict, checkpoints = judge(sequence, one, N_BOOT, 0)
         assert verdict is Verdict.PROMOTE
-        assert checkpoint is not None and checkpoint.n == 100
+        assert [c.n for c in checkpoints] == [100]
         assert checkpoint_at(sequence, 400, 1, N_BOOT, 0).promote_ci[0] < 0
 
     def test_a_kill_stands_when_later_bets_recover(self) -> None:
         sequence = trades(100, -0.5) + trades(300, 0.5, start=100)
-        verdict, checkpoint = judge(sequence, one, N_BOOT, 0)
+        verdict, checkpoints = judge(sequence, one, N_BOOT, 0)
         assert verdict is Verdict.KILL
-        assert checkpoint is not None and checkpoint.n == 100
+        assert [c.n for c in checkpoints] == [100]
 
     def test_summary_carries_the_checkpoint_of_the_verdict(self) -> None:
         summary = summary_of(trades(100, 0.5) + trades(100, -0.5, start=100))
@@ -398,11 +439,11 @@ class TestKAtEachCheckpoint:
 
     def test_each_checkpoint_uses_the_family_at_its_nth_bet(self) -> None:
         sequence = noise(300)
-        verdict, checkpoint = judge(
+        verdict, checkpoints = judge(
             sequence, lambda when: 1 if when < LONG_AGO + timedelta(minutes=200) else 3, N_BOOT, 0
         )
         assert verdict is Verdict.CONTINUE
-        assert checkpoint is not None and checkpoint.family_versions == 3
+        assert [c.family_versions for c in checkpoints] == [1, 1, 3]
 
     def test_every_version_of_a_name_takes_the_family_of_its_registry_entry(self) -> None:
         registry = [mechanical("a", version=2)]
@@ -674,6 +715,26 @@ class TestLoadScoredBets:
             assert event_close(kept, KICKOFF, "soccer_epl", "1x2") == expected
 
 
+# The first 100 bets reach the k=100 checkpoint at EV +0.5; the 20 after it pull the current
+# estimate down to +0.33, which the command never shows.
+COHORT = (
+    trades(100)
+    + trades(20, ev=-0.5, start=100)
+    + [trade(i, name="ghost", version=2) for i in range(3)]
+)
+
+
+EXPECTED_REPORT = """\
+┏━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━┳━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━┳━━━━━━━━━┓
+┃ Candidate ┃ Version ┃ Status      ┃ Settled ┃ With close ┃ No close ┃ Pending ┃ Staked ┃   P&L ┃   ROI ┃ Checkpoint n ┃ Mean EV ┃           95% CI ┃              Promote CI ┃ k ┃ Verdict ┃
+┡━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━╇━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━╇━━━━━━━━━┩
+│ cand      │       1 │ not current │     120 │        120 │        0 │       0 │ 120.00 │ +0.00 │ +0.0% │          100 │ +0.5000 │ [+0.500, +0.500] │ 99.00% [+0.500, +0.500] │ 1 │ promote │
+│ epl-agent │       3 │ promoted    │       0 │          0 │        0 │       0 │   0.00 │ +0.00 │ +0.0% │            - │       - │                - │                       - │ 1 │ not_yet │
+│ ghost     │       2 │ not current │       3 │          3 │        0 │       0 │   3.00 │ +0.00 │ +0.0% │            - │       - │                - │                       - │ 1 │ not_yet │
+└───────────┴─────────┴─────────────┴─────────┴────────────┴──────────┴─────────┴────────┴───────┴───────┴──────────────┴─────────┴──────────────────┴─────────────────────────┴───┴─────────┘
+"""
+
+
 class TestReportCommand:
     @pytest.fixture
     def registry(self, tmp_path, monkeypatch: pytest.MonkeyPatch):
@@ -683,17 +744,19 @@ class TestReportCommand:
         monkeypatch.setattr("odds_cli.commands.candidates.candidates_dir", lambda: tmp_path)
 
         async def fake_report(registry):
-            sequence = trades(100) + [trade(i, name="ghost", version=2) for i in range(3)]
-            return summarize_candidates(sequence, registry, NOW, n_boot=N_BOOT)
+            return summarize_candidates(COHORT, registry, NOW, n_boot=N_BOOT)
 
         monkeypatch.setattr("odds_cli.commands.candidates._report", fake_report)
         return tmp_path
 
-    def test_lists_registered_and_unregistered_candidates(self, registry) -> None:
+    def test_prints_the_verdict_checkpoint_not_the_current_estimate(self, registry) -> None:
+        summaries = summarize_candidates(COHORT, [], NOW, n_boot=N_BOOT)
+        cand = next(s for s in summaries if s.name == "cand")
+        assert cand.checkpoint is not None and cand.current is not None
+        assert cand.checkpoint.mean_ev == pytest.approx(0.5)
+        assert cand.current.mean_ev == pytest.approx(1 / 3)
+
         result = CliRunner(env={"COLUMNS": "250"}).invoke(app, ["candidates", "report"])
+
         assert result.exit_code == 0, result.stdout
-        assert "Promote CI" in result.stdout and " k " in result.stdout
-        assert "epl-agent" in result.stdout
-        assert "ghost" in result.stdout
-        assert "not current" in result.stdout
-        assert "not_yet" in result.stdout
+        assert result.stdout == EXPECTED_REPORT

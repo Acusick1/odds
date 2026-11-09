@@ -1,22 +1,24 @@
 #!/usr/bin/env bash
 #
-# Deploy-with-confidence for the always-on local scheduler.
+# Deploy-with-confidence for the always-on local scheduler and the web UI.
 #
 # Pulls the latest code, syncs dependencies, applies migrations, smoke-tests
-# the bootstrapped jobs, and only then restarts the systemd-managed scheduler.
-# If migration or smoke fails, the script aborts BEFORE the restart; the running
-# scheduler is untouched on the old code unless a migration was pending, in which
-# case it was stopped first and stays down.
+# the bootstrapped jobs, and only then restarts the systemd-managed scheduler and
+# then odds-web. If migration or smoke fails, the script aborts BEFORE the restarts;
+# the running services are untouched on the old code unless a migration was pending,
+# in which case both were stopped first and stay down.
 #
-# When the database is not at the migration head, the scheduler is stopped before
+# When the database is not at the migration head, both services are stopped before
 # the migration runs, because a migration may drop or rewrite what the running code
 # reads, and the database is dumped (scripts/backup-prod-db.sh) before migrating.
-# Every failure after that stop says the scheduler is down.
+# Every failure after that stop says which services are down.
 #
-# After the restart it checks that the service is active, started after this
-# deploy began, and is not crash-looping, and exits non-zero otherwise.
+# After each restart it checks that the service is active, started after this
+# deploy began, and is not crash-looping, and exits non-zero otherwise. The scheduler
+# is restarted and verified first; a web failure fails the deploy but never stops or
+# restarts the scheduler, and the failure message reports both services' states.
 #
-# Run from the repo root on the host running odds-scheduler.service:
+# Run from the repo root on the host running odds-scheduler.service and odds-web.service:
 #   ./deploy.sh
 #
 set -euo pipefail
@@ -36,41 +38,66 @@ for tool in git uv sudo systemctl; do
 done
 
 SERVICE=odds-scheduler
+WEB_SERVICE=odds-web
 SYSTEMCTL="$(command -v systemctl)"
 
+# The web unit is installed by hand (docs: wiki/operations/howto-set-up-odds-web-host.md).
+if ! "$SYSTEMCTL" cat "$WEB_SERVICE.service" >/dev/null 2>&1; then
+    echo "deploy.sh: $WEB_SERVICE.service is not installed; nothing was changed" >&2
+    exit 1
+fi
+
 # The restart makes new code serve, and the stop precedes a pending migration.
-# Without a terminal sudo cannot prompt, so require both NOPASSWD rules before
+# Without a terminal sudo cannot prompt, so require every NOPASSWD rule before
 # changing anything.
 if [[ ! -t 0 ]]; then
-    sudo_rules="$(sudo -n -l)"
-    for action in restart stop; do
-        if ! grep -q "NOPASSWD:.*$SYSTEMCTL $action $SERVICE" <<<"$sudo_rules"; then
-            echo "deploy.sh: no NOPASSWD sudo rule for '$SYSTEMCTL $action $SERVICE' and no terminal to prompt; nothing was changed" >&2
-            exit 1
-        fi
+    # One allowed command per line, so a rule must equal the whole command: a rule for
+    # 'stop odds-web-other' does not allow 'stop odds-web'.
+    allowed_commands="$(sudo -n -l | grep 'NOPASSWD:' \
+        | tr ',' '\n' \
+        | sed -E 's/^[[:space:]]*(\([^)]*\)[[:space:]]*)?(NOPASSWD:[[:space:]]*)?//; s/[[:space:]]+$//')"
+    for service in "$SERVICE" "$WEB_SERVICE"; do
+        for action in restart stop; do
+            if ! grep -qxF "$SYSTEMCTL $action $service" <<<"$allowed_commands"; then
+                echo "deploy.sh: no NOPASSWD sudo rule for '$SYSTEMCTL $action $service' and no terminal to prompt; nothing was changed" >&2
+                exit 1
+            fi
+        done
     done
 fi
 
 scheduler_down=0
+web_down=0
 migration_committed=0
 previous_head=""
 previous_revision=""
-report_scheduler_down() {
-    local status=$?
-    if (( status != 0 && scheduler_down == 1 )); then
+report_services_down() {
+    local status=$? stopped=()
+    (( scheduler_down == 1 )) && stopped+=("$SERVICE")
+    (( web_down == 1 )) && stopped+=("$WEB_SERVICE")
+    if (( status != 0 && scheduler_down == 0 && web_down == 1 )); then
+        # Only reachable after the scheduler restarted and was verified on the new code
+        # and schema: downgrading or checking out old code would break the running scheduler.
         {
-            echo "deploy.sh: FAILED with $SERVICE STOPPED. The scheduler is down."
-            echo "To bring the OLD code back (do not just start the service: the checkout holds the new code):"
+            echo "deploy.sh: FAILED with $WEB_SERVICE STOPPED."
+            echo "$SERVICE is running on the new code and schema: leave it alone, do not downgrade the database or check out old code."
+            echo "Fix the web service: journalctl -u $WEB_SERVICE, then sudo $SYSTEMCTL restart $WEB_SERVICE"
+            echo "Or rerun ./deploy.sh."
+        } >&2
+    elif (( status != 0 && ${#stopped[@]} > 0 )); then
+        {
+            echo "deploy.sh: FAILED with ${stopped[*]} STOPPED."
+            echo "To bring the OLD code back (do not just start the services: the checkout holds the new code):"
             if (( migration_committed == 1 )); then
                 echo "  uv run alembic downgrade $previous_revision   # run first: the downgrade lives in the new code"
                 echo "  (rows the migration deleted do not come back; restore the pre-deploy dump in \${ODDS_BACKUP_DIR:-~/backups} for those)"
             fi
-            echo "  git checkout $previous_head && uv sync && sudo $SYSTEMCTL start $SERVICE"
+            echo "  git checkout $previous_head && uv sync && sudo $SYSTEMCTL start $SERVICE $WEB_SERVICE"
             echo "Or fix the failure and rerun ./deploy.sh."
         } >&2
     fi
 }
-trap report_scheduler_down EXIT
+trap report_services_down EXIT
 
 previous_head="$(git rev-parse HEAD)"
 deploy_started_at="$(date +%s)"
@@ -90,9 +117,11 @@ if ! current_output="$(uv run alembic current)"; then
 fi
 if ! grep -q "(head)" <<<"$current_output"; then
     previous_revision="$(grep -oE '^[0-9a-z]+' <<<"$current_output" | head -1)"
-    echo "==> migration pending (database at '${previous_revision:-no revision}'): stopping $SERVICE"
+    echo "==> migration pending (database at '${previous_revision:-no revision}'): stopping $SERVICE and $WEB_SERVICE"
     sudo "$SYSTEMCTL" stop "$SERVICE"
     scheduler_down=1
+    sudo "$SYSTEMCTL" stop "$WEB_SERVICE"
+    web_down=1
     # Dump with the scheduler stopped, so the archive is the exact state the
     # migration starts from. A failed dump aborts before the migration.
     echo "==> backing up the database"
@@ -111,28 +140,46 @@ echo "==> scheduler smoke (SCHEDULER_DRY_RUN=true)"
 SCHEDULER_DRY_RUN=true uv run odds scheduler smoke
 
 # Only reached when migrate + smoke both succeed (set -e aborts otherwise).
-echo "==> restarting $SERVICE"
-sudo "$SYSTEMCTL" restart "$SERVICE"
-scheduler_down=0
-
-echo "==> verifying restart"
-restarts_before="$(systemctl show "$SERVICE" -p NRestarts --value)"
-sleep 15
+service_states() {
+    echo "  $SERVICE: $(systemctl is-active "$SERVICE" 2>/dev/null || true)" >&2
+    echo "  $WEB_SERVICE: $(systemctl is-active "$WEB_SERVICE" 2>/dev/null || true)" >&2
+}
 fail() {
     echo "deploy.sh: $1" >&2
-    systemctl status "$SERVICE" --no-pager >&2 || true
+    systemctl status "$2" --no-pager >&2 || true
+    echo "deploy.sh: service states:" >&2
+    service_states
     exit 1
 }
-systemctl is-active --quiet "$SERVICE" || fail "$SERVICE is not active after the restart"
-active_since="$(systemctl show "$SERVICE" --timestamp=unix -p ActiveEnterTimestamp --value)"
-active_since="${active_since#@}"
-[[ "$active_since" =~ ^[0-9]+$ ]] || fail "could not read $SERVICE's ActiveEnterTimestamp ('$active_since')"
-(( active_since >= deploy_started_at )) \
-    || fail "$SERVICE has been active since $active_since (unix), before this deploy began at $deploy_started_at; it is still on the old code"
-restarts_after="$(systemctl show "$SERVICE" -p NRestarts --value)"
-(( restarts_after == restarts_before )) \
-    || fail "$SERVICE restarted $((restarts_after - restarts_before)) time(s) within 15 s of the deploy; it is crash-looping"
-systemctl status "$SERVICE" --no-pager || true
+
+# restart_and_verify <service>: restart, then check it is active, started after this deploy
+# began, and not crash-looping.
+restart_and_verify() {
+    local service="$1" restarts_before restarts_after active_since
+    echo "==> restarting $service"
+    sudo "$SYSTEMCTL" restart "$service" || fail "systemctl restart $service failed" "$service"
+    if [[ "$service" == "$SERVICE" ]]; then scheduler_down=0; else web_down=0; fi
+
+    echo "==> verifying $service restart"
+    restarts_before="$(systemctl show "$service" -p NRestarts --value)"
+    sleep 15
+    systemctl is-active --quiet "$service" || fail "$service is not active after the restart" "$service"
+    active_since="$(systemctl show "$service" --timestamp=unix -p ActiveEnterTimestamp --value)"
+    active_since="${active_since#@}"
+    [[ "$active_since" =~ ^[0-9]+$ ]] || fail "could not read $service's ActiveEnterTimestamp ('$active_since')" "$service"
+    (( active_since >= deploy_started_at )) \
+        || fail "$service has been active since $active_since (unix), before this deploy began at $deploy_started_at; it is still on the old code" "$service"
+    restarts_after="$(systemctl show "$service" -p NRestarts --value)"
+    (( restarts_after == restarts_before )) \
+        || fail "$service restarted $((restarts_after - restarts_before)) time(s) within 15 s of the deploy; it is crash-looping" "$service"
+    systemctl status "$service" --no-pager || true
+}
+
+restart_and_verify "$SERVICE"
+
+# The scheduler is serving the new code; a web failure from here on fails the deploy but
+# leaves the scheduler alone.
+restart_and_verify "$WEB_SERVICE"
 
 echo "==> scheduled jobs"
 uv run odds scheduler list-jobs
