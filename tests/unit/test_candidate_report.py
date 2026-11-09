@@ -14,6 +14,7 @@ from odds_analytics.candidate_report import (
     family_starts,
     judge,
     promote_level,
+    report_candidates,
     summarize_candidates,
 )
 from odds_cli.main import app
@@ -467,6 +468,47 @@ class TestKAtEachCheckpoint:
         assert {s.name: s.family_versions for s in summaries}["cand"] == 1
 
 
+class TestRunningScore:
+    def test_it_is_the_stake_weighted_mean_ev_and_the_running_totals(self) -> None:
+        sequence = [trade(0, 0.3, stake=2.0, pnl=4.0), trade(1, -0.1, pnl=-1.0), trade(2, 0.5)]
+
+        running = report_candidates(sequence, [], NOW, n_boot=N_BOOT).running[("cand", 1)]
+
+        assert running.staked == pytest.approx((2.0, 3.0, 4.0))
+        assert running.expected == pytest.approx((0.6, 0.5, 1.0))
+        assert running.pnl == pytest.approx((4.0, 3.0, 3.0))
+        assert running.mean_ev == pytest.approx((0.3, 0.5 / 3, 0.25))
+
+    def test_it_covers_the_summarys_bets_with_a_close(self) -> None:
+        sequence = [trade(0), trade(1, None), trade(2), trade(3, pnl=None), trade(4)]
+
+        found = report_candidates(sequence, [], NOW, n_boot=N_BOOT)
+
+        [summary] = found.summaries
+        assert len(found.running[("cand", 1)].mean_ev) == summary.bets_with_close == 2
+
+    def test_its_mean_is_the_score_at_every_checkpoint_and_the_current_n(self) -> None:
+        sequence = noise(230)
+
+        found = report_candidates(sequence, [], NOW, n_boot=N_BOOT)
+
+        [summary] = found.summaries
+        mean_ev = found.running[("cand", 1)].mean_ev
+        assert summary.current is not None
+        for point in (*summary.checkpoints, summary.current):
+            assert mean_ev[point.n - 1] == pytest.approx(point.mean_ev)
+
+    def test_every_summarised_version_has_one_and_the_summaries_are_unchanged(self) -> None:
+        sequence = [*trades(3), trade(3, name="ghost", version=2)]
+        registry = [registry_entry("fresh", 4)]
+
+        found = report_candidates(sequence, registry, NOW, n_boot=N_BOOT)
+
+        assert found.summaries == summarize_candidates(sequence, registry, NOW, n_boot=N_BOOT)
+        assert set(found.running) == {(s.name, s.version) for s in found.summaries}
+        assert found.running[("fresh", 4)].mean_ev == ()
+
+
 KICKOFF = datetime(2026, 4, 15, 15, 0, tzinfo=UTC)
 CLOSE_PRICES = (2.0, 4.0, 4.0)
 
@@ -535,9 +577,11 @@ class TestLoadScoredBets:
         )
         await session.flush()
 
-        summaries = await candidate_report(
-            session, [registry_entry()], n_boot=N_BOOT, now=KICKOFF + timedelta(days=30)
-        )
+        summaries = (
+            await candidate_report(
+                session, [registry_entry()], n_boot=N_BOOT, now=KICKOFF + timedelta(days=30)
+            )
+        ).summaries
 
         assert len(summaries) == 1
         summary = summaries[0]
@@ -569,28 +613,6 @@ class TestLoadScoredBets:
         assert home.ev == pytest.approx(0.5 * 2.2 - 1)
         assert draw.p_close == pytest.approx(0.25)
         assert draw.ev == pytest.approx(0.25 * 4.5 - 1)
-
-    @pytest.mark.asyncio
-    async def test_one_candidate_version_can_be_loaded_alone(
-        self, test_session: AsyncSession
-    ) -> None:
-        from odds_analytics.candidate_report import load_scored_trades
-
-        session = test_session
-        session.add(make_epl_event(1, KICKOFF, status=EventStatus.FINAL))
-        await session.flush()
-        session.add_all(
-            [
-                _paper_trade(1, 1),
-                _paper_trade(1, 2, candidate_version=2),
-                _paper_trade(1, 3, candidate_name="other"),
-            ]
-        )
-        await session.flush()
-
-        loaded = await load_scored_trades(session, ("cand", 2))
-
-        assert [(t.candidate_name, t.candidate_version) for t in loaded] == [("cand", 2)]
 
     @pytest.mark.asyncio
     async def test_each_trade_is_scored_against_the_close_on_its_line(
@@ -782,3 +804,98 @@ class TestReportCommand:
 
         assert result.exit_code == 0, result.stdout
         assert result.stdout == EXPECTED_REPORT
+
+
+@pytest.fixture
+def stored_cohort(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``candidate_report`` reads ``COHORT`` with no decisions, through a session nothing uses."""
+
+    async def scored(_session: object, _candidate: object = None) -> list[ScoredBet]:
+        return COHORT
+
+    async def no_starts(_session: object) -> dict[tuple[str, int], datetime]:
+        return {}
+
+    class Session:
+        async def __aenter__(self) -> object:
+            return object()
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+    monkeypatch.setattr("odds_analytics.candidate_report.load_scored_trades", scored)
+    monkeypatch.setattr("odds_analytics.candidate_report.load_decision_starts", no_starts)
+    monkeypatch.setattr("odds_cli.commands.candidates.async_session_maker", Session)
+    monkeypatch.setattr("odds_mcp.server.async_session_maker", Session)
+
+
+class TestReportOutputThroughCandidateReport:
+    def test_the_command_prints_the_same_table(
+        self, stored_cohort: None, tmp_path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from tests.unit.test_candidates import AGENT, write
+
+        write(tmp_path, AGENT)
+        monkeypatch.setattr("odds_cli.commands.candidates.candidates_dir", lambda: tmp_path)
+
+        result = CliRunner(env={"COLUMNS": "250"}).invoke(app, ["candidates", "report"])
+
+        assert result.exit_code == 0, result.stdout
+        assert result.stdout == EXPECTED_REPORT
+
+    @pytest.mark.asyncio
+    async def test_get_portfolio_returns_the_same_candidates(
+        self, stored_cohort: None, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from unittest.mock import AsyncMock
+
+        from odds_lambda.paper_trading import PortfolioSummary
+        from odds_mcp.server import get_portfolio
+
+        portfolio = PortfolioSummary(1000.0, 0, 0, 0, 0.0, 0.0, 0.0, 0, 0, 0)
+        monkeypatch.setattr(
+            "odds_mcp.server.get_portfolio_summary", AsyncMock(return_value=portfolio)
+        )
+        monkeypatch.setattr("odds_mcp.server.get_open_trades", AsyncMock(return_value=[]))
+        monkeypatch.setattr("odds_mcp.server.load_candidates", lambda _directory: [])
+
+        result = await get_portfolio()
+
+        assert result["candidates"] == [
+            {
+                "name": "cand",
+                "version": 1,
+                "status": None,
+                "settled_bets": 120,
+                "bets_with_close": 120,
+                "bets_without_close": 0,
+                "pending_bets": 0,
+                "total_stake": 120.0,
+                "pnl": 0.0,
+                "roi": 0.0,
+                "checkpoint": {
+                    "n": 100,
+                    "mean_ev": pytest.approx(0.5),
+                    "ci95": [pytest.approx(0.5), pytest.approx(0.5)],
+                    "promote_level": 0.99,
+                    "promote_ci": [pytest.approx(0.5), pytest.approx(0.5)],
+                },
+                "family_versions": 1,
+                "verdict": "promote",
+            },
+            {
+                "name": "ghost",
+                "version": 2,
+                "status": None,
+                "settled_bets": 3,
+                "bets_with_close": 3,
+                "bets_without_close": 0,
+                "pending_bets": 0,
+                "total_stake": 3.0,
+                "pnl": 0.0,
+                "roi": 0.0,
+                "checkpoint": None,
+                "family_versions": 1,
+                "verdict": "not_yet",
+            },
+        ]

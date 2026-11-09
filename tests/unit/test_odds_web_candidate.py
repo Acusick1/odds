@@ -2,23 +2,32 @@
 
 from __future__ import annotations
 
+import ast
+import json
 import re
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import odds_web
 import pytest
 from fastapi.testclient import TestClient
-from odds_analytics.candidate_report import CandidateSummary, ScoredBet
+from odds_analytics.candidate_report import (
+    CandidateReport,
+    CandidateSummary,
+    RunningScore,
+    ScoredBet,
+)
 from odds_core.paper_trade_models import TradeResult
 from odds_web.app import create_app
+from odds_web.cache import SingleFlightCache
 from odds_web.candidate_page import AXIS_FROM_BETS, build_series
 from odds_web.db import build_web_database
 from odds_web.decisions import Decision, DecisionDay, DecisionHistory, DecisionKind
 from odds_web.ledger import LedgerPage, LedgerRow
 from sqlalchemy.exc import DBAPIError
 
-from tests.odds_web_helpers import NOW, agent, bet, mechanical, summaries
+from tests.odds_web_helpers import LONG_AGO, NOW, agent, bet, mechanical, report
 
 
 def ledger_row(trade_id: int = 1, **fields: object) -> LedgerRow:
@@ -52,9 +61,9 @@ def history(*kinds: DecisionKind, total: int | None = None, missed: int = 0) -> 
 
 @pytest.fixture
 def data(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
-    """What the app's readers return; ``error`` makes the report raise."""
+    """What the app's readers return; the report is read from ``trades`` and ``registry`` when
+    the app asks for it, and ``error`` makes it raise."""
     state: dict[str, object] = {
-        "summaries": [],
         "trades": [],
         "decisions": None,
         "ledger": LedgerPage([ledger_row()], 1, 1, 1),
@@ -63,13 +72,10 @@ def data(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         "pages": [],
     }
 
-    async def report(*_: object, **__: object) -> list[CandidateSummary]:
+    async def read(*_: object, **__: object) -> CandidateReport:
         if isinstance(state["error"], Exception):
             raise state["error"]
-        return state["summaries"]  # type: ignore[return-value]
-
-    async def trades(_session: object, candidate: tuple[str, int]) -> list[ScoredBet]:
-        return [t for t in state["trades"] if (t.candidate_name, t.candidate_version) == candidate]  # type: ignore[attr-defined,union-attr]
+        return report(state["trades"], state["registry"])  # type: ignore[arg-type]
 
     async def decisions(*_: object, **__: object) -> DecisionHistory:
         return state["decisions"]  # type: ignore[return-value]
@@ -78,8 +84,7 @@ def data(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         state["pages"].append(page)  # type: ignore[attr-defined]
         return state["ledger"]  # type: ignore[return-value]
 
-    monkeypatch.setattr("odds_web.app.candidate_report", report)
-    monkeypatch.setattr("odds_web.app.load_scored_trades", trades)
+    monkeypatch.setattr("odds_web.app.candidate_report", read)
     monkeypatch.setattr("odds_web.app.load_decision_history", decisions)
     monkeypatch.setattr("odds_web.app.load_ledger_page", ledger)
     monkeypatch.setattr("odds_web.app.load_candidates", lambda _directory: state["registry"])
@@ -96,8 +101,18 @@ def client(data: dict[str, object]) -> Iterator[TestClient]:
 def seed(data: dict[str, object], bets: list[ScoredBet], *registry: object) -> CandidateSummary:
     data["registry"] = list(registry)
     data["trades"] = bets
-    data["summaries"] = summaries(bets, list(registry))
-    return data["summaries"][0]  # type: ignore[index]
+    return report(bets, list(registry)).summaries[0]
+
+
+def scored(
+    bets: list[ScoredBet],
+    registry: list[object] | None = None,
+    starts: dict[tuple[str, int], datetime] | None = None,
+) -> tuple[CandidateSummary, RunningScore]:
+    """The report's summary and running score of the version ``gap`` v1."""
+    found = report(bets, registry or [mechanical()], starts)
+    [summary] = [s for s in found.summaries if (s.name, s.version) == ("gap", 1)]
+    return summary, found.running[("gap", 1)]
 
 
 def chart_series(body: str, kind: str) -> str:
@@ -201,7 +216,6 @@ class TestCandidatePage:
     ) -> None:
         mlb = mechanical("mlb-gap", sport="baseball_mlb", market="h2h")
         data["registry"] = [mlb]
-        data["summaries"] = summaries([], [mlb])
 
         body = client.get("/c/mlb-gap/1").text
 
@@ -276,7 +290,7 @@ class TestCandidatePage:
     ) -> None:
         seed(data, [bet(0, 0.5)], mechanical())
         calls: list[int] = []
-        original = data["summaries"]
+        original = report(data["trades"], data["registry"])  # type: ignore[arg-type]
 
         async def counted(*_: object, **__: object) -> object:
             calls.append(1)
@@ -293,9 +307,9 @@ class TestCandidatePage:
 class TestSeries:
     def test_intervals_are_only_at_reached_checkpoints_and_the_current_n(self) -> None:
         bets = [bet(i, 1.0 if i % 2 else -1.0) for i in range(230)]
-        [summary] = summaries(bets, [mechanical()])
+        summary, running = scored(bets)
 
-        series = build_series(summary, bets, NOW)
+        series = build_series(summary, running)
 
         assert [i.n for i in series.intervals] == [100, 200, 230]
         assert [i.at_checkpoint for i in series.intervals] == [True, True, False]
@@ -304,27 +318,27 @@ class TestSeries:
 
     def test_a_version_exactly_at_a_checkpoint_has_one_interval_there(self) -> None:
         bets = [bet(i, 1.0 if i % 2 else -1.0) for i in range(200)]
-        [summary] = summaries(bets, [mechanical()])
+        summary, running = scored(bets)
 
-        series = build_series(summary, bets, NOW)
+        series = build_series(summary, running)
 
         assert [i.n for i in series.intervals] == [100, 200]
         assert series.checkpoints == [100, 200, 300]
 
     def test_below_a_checkpoint_only_the_current_estimate_has_an_interval(self) -> None:
         bets = [bet(i, 0.5) for i in range(40)]
-        [summary] = summaries(bets, [mechanical()])
+        summary, running = scored(bets)
 
-        series = build_series(summary, bets, NOW)
+        series = build_series(summary, running)
 
         assert [i.n for i in series.intervals] == [40]
         assert series.checkpoints == [100]
 
     def test_the_running_mean_is_the_stake_weighted_ev_of_the_bets_so_far(self) -> None:
         bets = [bet(0, 0.3), bet(1, -0.1), bet(2, 0.5)]
-        [summary] = summaries(bets, [mechanical()])
+        summary, running = scored(bets)
 
-        series = build_series(summary, bets, NOW)
+        series = build_series(summary, running)
 
         assert series.running_ev_percent == pytest.approx([30.0, 10.0, 23.3333], rel=1e-3)
         assert series.expected_units == pytest.approx([0.3, 0.2, 0.7])
@@ -339,17 +353,110 @@ class TestSeries:
                 "placed_at": bets[2].placed_at + timedelta(minutes=5),
             }
         )
-        [summary] = summaries([*bets, unsettled, bet(9, 0.5)], [mechanical()])
+        summary, running = scored([*bets, unsettled, bet(9, 0.5)])
 
-        series = build_series(summary, [*bets, unsettled, bet(9, 0.5)], NOW)
+        series = build_series(summary, running)
 
         assert len(series.running_ev_percent) == summary.bets_with_close == 2
 
     def test_early_swings_do_not_set_the_axis(self) -> None:
         bets = [bet(0, 0.9)] + [bet(i, 0.01) for i in range(1, AXIS_FROM_BETS + 20)]
-        [summary] = summaries(bets, [mechanical()])
+        summary, running = scored(bets)
 
-        series = build_series(summary, bets, datetime(2026, 6, 1, tzinfo=UTC))
+        series = build_series(summary, running)
 
         assert series.running_ev_percent[0] == pytest.approx(90.0)
         assert series.axis_percent < 40
+
+
+class TestOneSnapshot:
+    def test_the_charts_describe_the_cohort_of_the_cached_report(
+        self, client: TestClient, data: dict[str, object]
+    ) -> None:
+        seed(data, [bet(i, 0.5) for i in range(99)], mechanical())
+        client.get("/")  # the report is cached at 99 bets with a close
+        data["trades"] = [bet(i, 0.5) for i in range(100)]
+
+        body = client.get("/c/gap/1").text
+
+        ev = json.loads(chart_series(body, "ev"))
+        cumulative = json.loads(chart_series(body, "cumulative"))
+        assert "99<span" in body
+        assert len(ev["running"]) == len(cumulative["pnl"]) == 99
+        assert [i["n"] for i in ev["intervals"]] == [99]
+
+
+class TestCurrentBesideACheckpoint:
+    def test_a_current_estimate_at_a_checkpoints_n_with_a_larger_family_is_kept(self) -> None:
+        registry = [mechanical("gap"), mechanical("sibling")]
+        # The 100th bet is placed 99 minutes after LONG_AGO; the sibling starts a day later.
+        starts = {("gap", 1): LONG_AGO, ("sibling", 1): LONG_AGO + timedelta(days=1)}
+        bets = [bet(i, 1.0 if i % 2 else -1.0) for i in range(100)]
+        summary, running = scored(bets, registry, starts)
+        assert summary.checkpoint is not None and summary.current is not None
+        assert (summary.checkpoint.family_versions, summary.current.family_versions) == (1, 2)
+
+        series = build_series(summary, running)
+
+        assert [(i.n, i.at_checkpoint) for i in series.intervals] == [(100, True), (100, False)]
+        assert series.intervals[1].promote_percent == (
+            summary.current.promote_ci[0] * 100,
+            summary.current.promote_ci[1] * 100,
+        )
+
+
+class TestNoScoringInOddsWeb:
+    def test_the_series_is_the_reports_running_score(self) -> None:
+        summary, running = scored([bet(0, 0.3), bet(1, -0.1), bet(2, 0.5)])
+
+        series = build_series(summary, running)
+
+        assert series.running_ev_percent == [ev * 100 for ev in running.mean_ev]
+        assert series.expected_units == list(running.expected)
+        assert series.pnl_units == list(running.pnl)
+
+    def test_odds_web_takes_only_report_data_and_ledger_closes_from_odds_analytics(self) -> None:
+        allowed = {
+            "CandidateReport",
+            "CandidateSummary",
+            "Checkpoint",
+            "RunningScore",
+            "Verdict",
+            "CHECKPOINT_SIZE",
+            "KILL_AT_BETS",
+            "candidate_report",
+            "close_probabilities",
+            "expected_value",
+        }
+        imported: set[str] = set()
+        for path in Path(odds_web.__file__).parent.rglob("*.py"):
+            for node in ast.walk(ast.parse(path.read_text())):
+                if isinstance(node, ast.Import):
+                    imported |= {a.name for a in node.names if a.name.startswith("odds_analytics")}
+                if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
+                    "odds_analytics"
+                ):
+                    imported |= {a.name for a in node.names}
+        assert imported <= allowed
+
+
+class TestLastGoodData:
+    def test_a_stale_report_dates_the_page_by_the_report_not_the_listings(
+        self, data: dict[str, object], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seed(data, [bet(i, 0.5) for i in range(3)], mechanical())
+        loads = iter(datetime(2026, 6, 1, 12, minute, tzinfo=UTC) for minute in range(0, 60, 5))
+
+        class Clock:
+            @staticmethod
+            def now(_tz: object) -> datetime:
+                return next(loads)
+
+        monkeypatch.setattr("odds_web.cache.datetime", Clock)
+        database = build_web_database("postgresql+asyncpg://odds_web:pw@localhost:1/odds")
+        with TestClient(create_app(database, Path("."), SingleFlightCache(ttl=0.0))) as client:
+            client.get("/c/gap/1")  # the report loads at 12:00 and the listings at 12:05
+            data["error"] = RuntimeError("database is down")
+            body = client.get("/c/gap/1").text  # the listings reload at 12:10
+
+        assert "Unavailable · last good data 12:00:00 UTC" in body

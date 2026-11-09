@@ -31,7 +31,7 @@
 
 {% if c.series %}
 <h3>Mean EV as bets accumulate</h3>
-<div class="sub">Running mean EV over the bets with a close in the settled, final prefix. Intervals are drawn only at the checkpoints reached and at the current n; the verdict is read only at checkpoints.</div>
+<div class="sub">Running mean EV over the bets with a close in the settled, final prefix. Intervals are drawn only at the checkpoints reached and at the current n; a current estimate at a checkpoint's n with a larger family sits just left of it. The verdict is read only at checkpoints.</div>
 <div class="chart" data-chart="ev" data-series='{{ c.series.ev_chart() | tojson }}'></div>
 <div class="legend"><span><svg width="26" height="10"><line class="ci" x1="2" y1="5" x2="24" y2="5"/></svg>95% CI</span><span><svg width="26" height="10"><line class="promote" x1="2" y1="5" x2="24" y2="5"/></svg>promote CI</span><span>Dashed lines: zero EV, checkpoints</span></div>
 

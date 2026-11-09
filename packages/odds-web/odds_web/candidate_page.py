@@ -1,8 +1,8 @@
 """The candidate page's content for one candidate version.
 
-The tiles, verdict and interval figures come from the report data
-(``odds_analytics.candidate_report.CandidateSummary``); the series only lay the version's bets
-with a close out in placement order, over the report's own scoreable prefix.
+Every figure comes from the report data: the tiles, verdict and intervals from
+``odds_analytics.candidate_report.CandidateSummary`` and the series from
+``odds_analytics.candidate_report.RunningScore``. This module only lays them out.
 """
 
 from __future__ import annotations
@@ -10,7 +10,6 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any
 
 from odds_analytics.candidate_report import (
@@ -18,8 +17,7 @@ from odds_analytics.candidate_report import (
     KILL_AT_BETS,
     CandidateSummary,
     Checkpoint,
-    ScoredBet,
-    scoreable_prefix,
+    RunningScore,
 )
 from odds_core.candidates import Candidate, MechanicalCandidate
 
@@ -129,46 +127,31 @@ def _axis_percent(running: Sequence[float], intervals: Sequence[Interval]) -> fl
     return max(MIN_AXIS_PERCENT, math.ceil(widest / MIN_AXIS_PERCENT) * MIN_AXIS_PERCENT)
 
 
-def build_series(summary: CandidateSummary, trades: Sequence[ScoredBet], now: datetime) -> Series:
-    """The series over the bets with a close in the scoreable prefix of ``trades``, in
-    placement order, with an interval only at each checkpoint reached and at the current n
-    (``CandidateSummary.checkpoints`` and ``current``), never per bet."""
-    bets, _ = scoreable_prefix(trades, now)
-    staked = expected = pnl = 0.0
-    running: list[float] = []
-    expected_units: list[float] = []
-    pnl_units: list[float] = []
-    for bet in bets:
-        assert bet.ev is not None and bet.pnl is not None
-        staked += bet.stake
-        expected += bet.stake * bet.ev
-        pnl += bet.pnl
-        running.append(expected / staked * 100)
-        expected_units.append(expected)
-        pnl_units.append(pnl)
+def build_series(summary: CandidateSummary, running: RunningScore) -> Series:
+    """The version's running score, with an interval at each checkpoint reached and at the
+    current estimate (``CandidateSummary.checkpoints`` and ``current``), never per bet. The
+    current estimate is drawn beside a checkpoint at the same n unless it is that checkpoint."""
+    running_percent = [ev * 100 for ev in running.mean_ev]
     intervals = [_interval(c, True) for c in summary.checkpoints]
-    if summary.current is not None and (
-        not summary.checkpoints or summary.current.n != summary.checkpoints[-1].n
-    ):
+    if summary.current is not None and summary.current not in summary.checkpoints:
         intervals.append(_interval(summary.current, False))
-    reach = min(KILL_AT_BETS, (len(bets) // CHECKPOINT_SIZE + 1) * CHECKPOINT_SIZE)
+    reach = min(KILL_AT_BETS, (len(running_percent) // CHECKPOINT_SIZE + 1) * CHECKPOINT_SIZE)
     return Series(
-        running_ev_percent=running,
-        expected_units=expected_units,
-        pnl_units=pnl_units,
+        running_ev_percent=running_percent,
+        expected_units=list(running.expected),
+        pnl_units=list(running.pnl),
         intervals=intervals,
         checkpoints=list(range(CHECKPOINT_SIZE, reach + 1, CHECKPOINT_SIZE)),
-        axis_percent=_axis_percent(running, intervals),
+        axis_percent=_axis_percent(running_percent, intervals),
     )
 
 
 def build_candidate_page(
     summary: CandidateSummary,
     entry: Candidate | None,
-    trades: Sequence[ScoredBet],
+    running: RunningScore,
     decisions: DecisionHistory | None,
     ledger: LedgerPage,
-    now: datetime,
 ) -> CandidatePage:
     agent = is_agent(entry)
     verdict, note = verdict_of(summary)
@@ -188,7 +171,7 @@ def build_candidate_page(
         roi=summary.roi,
         settled_bets=summary.settled_bets,
         pending_bets=summary.pending_bets,
-        series=build_series(summary, trades, now) if summary.bets_with_close else None,
+        series=build_series(summary, running) if summary.bets_with_close else None,
         decisions=decisions,
         ledger=ledger,
     )

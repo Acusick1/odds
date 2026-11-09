@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from odds_analytics.candidate_report import CandidateSummary, ScoredBet, summarize_candidates
+from odds_analytics.candidate_report import (
+    CandidateReport,
+    CandidateSummary,
+    ScoredBet,
+    report_candidates,
+    summarize_candidates,
+)
 from odds_core.candidates import AgentCandidate, CandidateStatus, MechanicalCandidate
 
 NOW = datetime(2026, 6, 1, tzinfo=UTC)
@@ -61,3 +67,11 @@ def agent(name: str = "mlb-agent") -> AgentCandidate:
 
 def summaries(bets: list[ScoredBet], registry: list) -> list[CandidateSummary]:
     return summarize_candidates(bets, registry, NOW, n_boot=N_BOOT)
+
+
+def report(
+    bets: list[ScoredBet],
+    registry: list,
+    starts: dict[tuple[str, int], datetime] | None = None,
+) -> CandidateReport:
+    return report_candidates(bets, registry, NOW, starts, n_boot=N_BOOT)

@@ -576,7 +576,7 @@ class TestPaperBetCandidate:
 class TestGetPortfolioCandidates:
     @pytest.mark.asyncio
     async def test_includes_candidate_summaries(self) -> None:
-        from odds_analytics.candidate_report import summarize_candidates
+        from odds_analytics.candidate_report import report_candidates
         from odds_core.candidates import AgentCandidate
         from odds_lambda.paper_trading import PortfolioSummary
         from odds_mcp.server import get_portfolio
@@ -601,7 +601,7 @@ class TestGetPortfolioCandidates:
             patch(
                 "odds_mcp.server.candidate_report",
                 AsyncMock(
-                    return_value=summarize_candidates([], [entry], datetime(2026, 5, 1, tzinfo=UTC))
+                    return_value=report_candidates([], [entry], datetime(2026, 5, 1, tzinfo=UTC))
                 ),
             ),
         ):

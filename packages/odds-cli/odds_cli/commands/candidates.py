@@ -129,7 +129,7 @@ def report() -> None:
 
 async def _report(registry: list[Candidate]) -> list[CandidateSummary]:
     async with async_session_maker() as session:
-        return await candidate_report(session, registry)
+        return (await candidate_report(session, registry)).summaries
 
 
 def _report_table(summaries: list[CandidateSummary]) -> Table:

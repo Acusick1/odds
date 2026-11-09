@@ -8,9 +8,7 @@ from pathlib import Path
 import odds_web
 import pytest
 from fastapi.testclient import TestClient
-from odds_analytics.candidate_report import (
-    CandidateSummary,
-)
+from odds_analytics.candidate_report import CandidateReport
 from odds_web.app import create_app
 from odds_web.cache import SingleFlightCache
 from odds_web.db import build_web_database
@@ -25,11 +23,11 @@ def report(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     """What the app's ``candidate_report`` returns; ``error`` makes it raise."""
     state: dict[str, object] = {"summaries": [], "error": None, "calls": 0}
 
-    async def fake(*_: object, **__: object) -> list[CandidateSummary]:
+    async def fake(*_: object, **__: object) -> CandidateReport:
         state["calls"] = int(state["calls"]) + 1  # type: ignore[call-overload]
         if isinstance(state["error"], Exception):
             raise state["error"]
-        return state["summaries"]  # type: ignore[return-value]
+        return CandidateReport(state["summaries"], {})  # type: ignore[arg-type]
 
     monkeypatch.setattr("odds_web.app.candidate_report", fake)
     return state

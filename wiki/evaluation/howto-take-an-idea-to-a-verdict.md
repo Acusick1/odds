@@ -44,7 +44,7 @@ What a candidate is and when it is promoted or killed is on [Goal and strategy](
    - `uv run odds candidates list` validates the file, and the `candidate-versions` hook checks that a later change carries a new version once the start date has arrived ([version check](candidate-registry.md#version-check)). A rule's code change reaches the file as a new hash, so it needs a new version.
 4. **Deploy.** The [run-candidates job](run-candidates-job.md) places the candidate's paper trades from its start date and records every decision. Nothing else is needed.
 5. **Read the report on the production host.** `odds copy from-prod` copies no trades or decisions, so a local database cannot show them ([report](candidate-registry.md#odds-candidates-report)).
-   - `ssh` to the production host, `cd ~/odds`, then run `uv run odds candidates report`.
+   - `ssh` to the production host, `cd ~/odds`, then run `uv run odds candidates report`, or open the candidate's page in the [web UI](../operations/odds-web.md#candidate-page), which reads the same report.
    - The verdict is read only at 100, 200, … bets with a close. Below 100 it is `not_yet`; do not act on a running mean.
 6. **Run the parity check on the production host**: `ssh` to it, `cd ~/odds`, then `uv run odds candidates parity <name>` ([parity check](candidate-parity.md)).
    - It replays each decision from the snapshots it recorded. A mismatch means the rule or state code does not reproduce the live bets, which is a bug to fix before trusting either result; it exits 1.
