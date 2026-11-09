@@ -239,6 +239,18 @@ class TestCandidatePage:
         assert client.get("/c/gap/9").status_code == 404
         assert client.get("/c/nope/1").status_code == 404
 
+    def test_loads_the_status_strip_and_dates_its_data(
+        self, client: TestClient, data: dict[str, object]
+    ) -> None:
+        seed(data, [bet(0, 0.5)], mechanical())
+
+        page = client.get("/c/gap/1").text
+        fragment = client.get("/fragments/c/gap/1").text
+
+        assert 'hx-get="/fragments/status" hx-trigger="load, every 60s"' in page
+        assert re.search(r'<p class="as-of sub">as of \d\d:\d\d UTC</p>', page)
+        assert "fragments/status" not in fragment
+
     def test_a_report_that_failed_before_any_load_renders_unavailable(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
@@ -247,7 +259,7 @@ class TestCandidatePage:
         response = client.get("/c/gap/1")
 
         assert response.status_code == 200
-        assert "Unavailable · last good data never" in response.text
+        assert "Database unavailable · no data loaded yet" in response.text
 
     def test_a_ledger_that_times_out_renders_unavailable(
         self, client: TestClient, data: dict[str, object], monkeypatch: pytest.MonkeyPatch
@@ -262,7 +274,7 @@ class TestCandidatePage:
         response = client.get("/c/gap/1")
 
         assert response.status_code == 200
-        assert "Unavailable · last good data never" in response.text
+        assert "Database unavailable · no data loaded yet" in response.text
 
     def test_the_ledger_page_is_requested_and_linked_by_path(
         self, client: TestClient, data: dict[str, object]
@@ -459,4 +471,7 @@ class TestLastGoodData:
             data["error"] = RuntimeError("database is down")
             body = client.get("/c/gap/1").text  # the listings reload at 12:10
 
-        assert "Unavailable · last good data 12:00:00 UTC" in body
+        assert (
+            "odds-web error (RuntimeError), see the server log · showing data as of 12:00 UTC"
+            in body
+        )

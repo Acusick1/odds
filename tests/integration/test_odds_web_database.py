@@ -193,15 +193,15 @@ class TestPortfolioUnderTheRole:
 
         assert "exchange-gap-epl" in body
         assert "+1.2u" in body
-        assert "Unavailable" not in body
+        assert 'class="unavailable"' not in body
 
 
 class TestCandidatePageUnderTheRole:
     async def test_renders_the_ledger_and_trade_from_the_real_tables(
-        self, session: AsyncSession, tmp_path: Path
+        self, odds_web_session: AsyncSession, tmp_path: Path
     ) -> None:
-        await seed_one_bet(session)
-        engine = session.bind
+        await seed_one_bet(odds_web_session)
+        engine = odds_web_session.bind
         assert isinstance(engine, AsyncEngine)
         database = WebDatabase(engine, async_sessionmaker(engine, expire_on_commit=False))
 
@@ -211,11 +211,13 @@ class TestCandidatePageUnderTheRole:
 
         assert response.status_code == 200
         assert "Arsenal v Chelsea" in response.text and "bet365" in response.text
-        assert "+1.2u" in response.text and "Unavailable" not in response.text
+        assert "+1.2u" in response.text and 'class="unavailable"' not in response.text
 
-    async def test_the_readers_need_no_table_beyond_the_grants(self, session: AsyncSession) -> None:
-        await seed_one_bet(session)
-        engine = session.bind
+    async def test_the_readers_need_no_table_beyond_the_grants(
+        self, odds_web_session: AsyncSession
+    ) -> None:
+        await seed_one_bet(odds_web_session)
+        engine = odds_web_session.bind
         assert isinstance(engine, AsyncEngine)
         database = WebDatabase(engine, async_sessionmaker(engine, expire_on_commit=False))
 
