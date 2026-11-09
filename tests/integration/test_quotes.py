@@ -64,6 +64,7 @@ async def stored(pglite_async_session) -> dict[str, int]:
             "betfair_api",
         ),
     )
+    betfair.created_at = T - timedelta(minutes=1)
     other = await store_tagged(
         session,
         make_tagged_snapshot(
