@@ -13,7 +13,6 @@ sources:
   - odds_core.config.DatabaseConfig
   - odds-web.service
   - scripts/odds_web_grants.sql
-  - scripts/setup-odds-web-host.sh
   - deploy.sh
 status: stable
 ---
