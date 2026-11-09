@@ -139,7 +139,7 @@ Importing `odds_core.alerts` builds `odds_core.config.get_settings()` ([Read at 
 
 ## odds-web
 
-`packages/odds-web/odds_web/` is the read-only web UI: `odds_web.app` (the FastAPI app and its routes), `odds_web.db` (the engine and session factory for `WEB_DATABASE_URL`), `odds_web.cache` (the single-flight TTL cache and its failure kinds), `odds_web.portfolio` (the portfolio rows), `odds_web.status` (the status strip), `odds_web.coverage` (decision-window coverage) and `odds_web.closes` (close coverage by week, counted per close kind and fallback source). It declares odds-core, odds-analytics, odds-lambda, FastAPI, Jinja2, sqlalchemy, sqlmodel and structlog (`packages/odds-web/pyproject.toml`) and has no entry point of its own: `odds web serve` in odds-cli runs it ([odds-web](../operations/odds-web.md)).
+`packages/odds-web/odds_web/` is the read-only web UI: `odds_web.app` (the FastAPI app and its routes), `odds_web.db` (the engine and session factory for `WEB_DATABASE_URL`), `odds_web.cache` (the single-flight TTL cache, and which failures mean the database could not answer), `odds_web.portfolio` (the portfolio rows), `odds_web.status` (the status strip), `odds_web.coverage` (decision-window coverage) and `odds_web.closes` (close coverage by week, counted per close kind and fallback source). It declares odds-core, odds-analytics, odds-lambda, FastAPI, Jinja2, sqlalchemy, sqlmodel and structlog (`packages/odds-web/pyproject.toml`) and has no entry point of its own: `odds web serve` in odds-cli runs it ([odds-web](../operations/odds-web.md)).
 
 ## Dependency exceptions
 

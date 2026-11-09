@@ -145,11 +145,11 @@ class TestRestrictedTransactions:
             event.remove(engine.sync_engine, "begin", restrict)
 
 
-async def seed_one_bet(odds_web_session: AsyncSession) -> None:
-    odds_web_session.add(make_epl_event(1, KICKOFF, status=EventStatus.FINAL))
-    await odds_web_session.flush()
+async def seed_one_bet(session: AsyncSession) -> None:
+    session.add(make_epl_event(1, KICKOFF, status=EventStatus.FINAL))
+    await session.flush()
     await store_tagged(
-        odds_web_session,
+        session,
         make_tagged_snapshot(
             1,
             KICKOFF - timedelta(minutes=10),
@@ -157,7 +157,7 @@ async def seed_one_bet(odds_web_session: AsyncSession) -> None:
             "betfair_api",
         ),
     )
-    odds_web_session.add(
+    session.add(
         PaperTrade(
             event_id=1,
             market="1x2",
@@ -173,7 +173,7 @@ async def seed_one_bet(odds_web_session: AsyncSession) -> None:
             pnl=1.2,
         )
     )
-    await odds_web_session.commit()
+    await session.commit()
 
 
 class TestPortfolioUnderTheRole:

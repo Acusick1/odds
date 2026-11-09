@@ -116,7 +116,7 @@ class TestDecisionWindowCoverage:
             )
             assert cell.complete == state.has_input, cell
             for name, needs in [
-                ("retail", frozenset()),
+                (RETAIL, frozenset()),
                 *((i.value, frozenset({i})) for i in spec.sharp_inputs),
             ]:
                 alone = await load_market_state(

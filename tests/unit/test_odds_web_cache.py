@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 
 import pytest
 from odds_web.cache import Failure, FailureKind, SingleFlightCache
@@ -28,6 +29,19 @@ class Loader:
         if isinstance(outcome, Exception):
             raise outcome
         return outcome
+
+
+class DriverError(Exception):
+    """An error carrying a SQLSTATE, as asyncpg's do."""
+
+    def __init__(self, sqlstate: str) -> None:
+        super().__init__(f"sqlstate {sqlstate}")
+        self.sqlstate = sqlstate
+
+
+def driver_error(sqlstate: str) -> DBAPIError:
+    """A bare ``DBAPIError``, the class SQLAlchemy gives most asyncpg errors."""
+    return DBAPIError("select", {}, DriverError(sqlstate))
 
 
 @pytest.fixture
@@ -101,12 +115,17 @@ class TestSingleFlightCache:
     @pytest.mark.parametrize(
         "error",
         [
-            DBAPIError("select", {}, Exception("canceling statement due to statement timeout")),
-            ConnectionRefusedError("connect"),
-            TimeoutError(),
+            pytest.param(driver_error("57014"), id="statement timeout as asyncpg raises it"),
+            pytest.param(DriverError("57P03"), id="server starting up, raised while connecting"),
+            pytest.param(
+                DBAPIError("select", {}, Exception("lost")), id="driver error, no sqlstate"
+            ),
+            pytest.param(ConnectionRefusedError("connect"), id="connection refused"),
+            pytest.param(OSError(errno.ENETUNREACH, "unreachable"), id="network unreachable"),
+            pytest.param(TimeoutError(), id="connect timeout"),
         ],
     )
-    async def test_a_database_error_is_unavailable_and_logged_with_its_traceback(
+    async def test_a_database_that_cannot_answer_is_unavailable_and_logged_with_its_traceback(
         self, cache: SingleFlightCache, error: Exception
     ) -> None:
         with capture_logs() as logs:
@@ -122,10 +141,19 @@ class TestSingleFlightCache:
             }
         ]
 
-    async def test_a_query_the_database_rejects_is_a_fault(self, cache: SingleFlightCache) -> None:
-        denied = ProgrammingError("select", {}, Exception("permission denied for table x"))
-
-        result = await cache.get("k", Loader(denied))
+    @pytest.mark.parametrize(
+        "error",
+        [
+            pytest.param(driver_error("22012"), id="division by zero as asyncpg raises it"),
+            pytest.param(driver_error("25006"), id="write in a read-only transaction"),
+            pytest.param(ProgrammingError("select", {}, DriverError("42501")), id="missing grant"),
+            pytest.param(FileNotFoundError("candidates"), id="registry file missing"),
+        ],
+    )
+    async def test_a_rejected_query_or_a_file_error_is_a_fault(
+        self, cache: SingleFlightCache, error: Exception
+    ) -> None:
+        result = await cache.get("k", Loader(error))
 
         assert result.failure is not None and result.failure.kind is FailureKind.FAULT
 

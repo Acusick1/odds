@@ -53,8 +53,10 @@ The app never uses `odds_core.database.async_session_maker`, which binds to `DAT
 
 `odds_web.cache.SingleFlightCache` holds each section's result for `odds_web.cache.TTL_SECONDS`. Concurrent requests share one load. A failed load keeps the last good value and its time, and is not retried for `odds_web.cache.FAILURE_BACKOFF_SECONDS`, so a down database sees one query per window. The failure is logged with its traceback, which `odds web serve` sends to journald under systemd, and has an `odds_web.cache.FailureKind`:
 
-- **`unavailable`**: the database did not answer (one of `odds_web.cache.DATABASE_ERRORS`: a driver error such as a statement timeout, the pool running dry, or a connection refused, unresolvable or timed out). It is logged as a warning, `web_section_unavailable`.
-- **`fault`**: any other exception, a defect in odds-web or in the code it calls, including a query the database rejects (`odds_web.cache.QUERY_ERRORS`: bad SQL, bad data, or a table the `odds_web` role has no grant on) and a registry file that cannot be read. It is logged as an error, `web_section_failed`.
+- **`unavailable`**: the database could not answer: an error whose SQLSTATE is outside the query classes (a statement timeout, a server starting up or out of resources), a driver error without one, the pool running dry, or a network error such as a refused connection. It is logged as a warning, `web_section_unavailable`.
+- **`fault`**: anything else, a defect in odds-web or in the code it calls: a query the server rejected (SQLSTATE class in `odds_web.cache.QUERY_SQLSTATE_CLASSES`: bad SQL, bad data, a write, or a table the `odds_web` role has no grant on), a registry file that cannot be read (`odds_web.cache.FILE_ERRORS`), or any other exception. It is logged as an error, `web_section_failed`.
+
+`odds_web.cache.failure_kind` decides between them by SQLSTATE because asyncpg's errors reach SQLAlchemy mostly as one class, so a statement timeout and a division by zero differ only in their code.
 
 Each section is rendered on its own, so a fault in one leaves the others and the status strip standing. Above its data a section says when the data was loaded ("as of 14:05 UTC"). After a failure it says instead "Database unavailable" or "odds-web error (KeyError), see the server log", followed by the time of the data it still shows, dimmed, or by "no data loaded yet".
 
