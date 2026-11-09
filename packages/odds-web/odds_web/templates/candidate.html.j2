@@ -1,0 +1,10 @@
+{% extends "base.html.j2" %}
+{% block title %}{{ name }} v{{ version }} · odds{% endblock %}
+{% block head %}
+<script src="{{ url_path('static', path='vendor/plot.bundle.min.js') }}" defer></script>
+<script src="{{ url_path('static', path='charts.js') }}" defer></script>
+{% endblock %}
+{% block content %}
+<h2><a href="{{ url_path('portfolio') }}">Portfolio</a> / Candidate <span class="pagetag">/c/{{ name }}/{{ version }}</span></h2>
+{% include "_candidate.html.j2" %}
+{% endblock %}

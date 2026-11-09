@@ -3,76 +3,19 @@ from __future__ import annotations
 import ast
 import re
 from collections.abc import Iterator
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import odds_web
 import pytest
 from fastapi.testclient import TestClient
-from odds_analytics.candidate_report import (
-    CandidateSummary,
-    ScoredBet,
-    summarize_candidates,
-)
-from odds_core.candidates import AgentCandidate, CandidateStatus, MechanicalCandidate
+from odds_analytics.candidate_report import CandidateReport
 from odds_web.app import create_app
 from odds_web.cache import SingleFlightCache
 from odds_web.db import build_web_database
 from odds_web.portfolio import AXIS_PERCENT, forest_for, portfolio_rows
 from sqlalchemy.exc import DBAPIError
 
-NOW = datetime(2026, 6, 1, tzinfo=UTC)
-LONG_AGO = NOW - timedelta(days=30)
-N_BOOT = 400
-
-
-def bet(index: int, ev: float, *, name: str = "gap", p_close: bool = True) -> ScoredBet:
-    """A settled trade at price 3.0 whose EV is ``ev``; without a close when ``p_close`` is False."""
-    return ScoredBet(
-        candidate_name=name,
-        candidate_version=1,
-        event_id=index + 1,
-        commence_time=LONG_AGO,
-        stake=1.0,
-        pnl=2.0 if index % 3 == 0 else -1.0,
-        price_decimal=3.0,
-        p_close=(1 + ev) / 3 if p_close else None,
-        placed_at=LONG_AGO + timedelta(minutes=index),
-        close_grace=timedelta(0),
-    )
-
-
-def mechanical(name: str = "gap") -> MechanicalCandidate:
-    return MechanicalCandidate(
-        name=name,
-        description="d",
-        sport="soccer_epl",
-        version=1,
-        issue=1,
-        start_date="2026-01-01",
-        status=CandidateStatus.ACTIVE,
-        kind="mechanical",
-        market="1x2",
-        rule="exchange_gap",
-        rule_sha256="0" * 64,
-    )
-
-
-def agent(name: str = "mlb-agent") -> AgentCandidate:
-    return AgentCandidate(
-        name=name,
-        description="d",
-        sport="baseball_mlb",
-        version=1,
-        issue=1,
-        start_date="2026-01-01",
-        status=CandidateStatus.ACTIVE,
-        kind="agent",
-    )
-
-
-def summaries(bets: list[ScoredBet], registry: list) -> list[CandidateSummary]:
-    return summarize_candidates(bets, registry, NOW, n_boot=N_BOOT)
+from tests.odds_web_helpers import agent, bet, mechanical, summaries
 
 
 @pytest.fixture
@@ -80,11 +23,11 @@ def report(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     """What the app's ``candidate_report`` returns; ``error`` makes it raise."""
     state: dict[str, object] = {"summaries": [], "error": None, "calls": 0}
 
-    async def fake(*_: object, **__: object) -> list[CandidateSummary]:
+    async def fake(*_: object, **__: object) -> CandidateReport:
         state["calls"] = int(state["calls"]) + 1  # type: ignore[call-overload]
         if isinstance(state["error"], Exception):
             raise state["error"]
-        return state["summaries"]  # type: ignore[return-value]
+        return CandidateReport(state["summaries"], {})  # type: ignore[arg-type]
 
     monkeypatch.setattr("odds_web.app.candidate_report", fake)
     return state

@@ -51,6 +51,11 @@ class Verdict(StrEnum):
     KILL = "kill"
 
 
+def expected_value(p_close: float, price_decimal: float) -> float:
+    """EV per unit staked of taking ``price_decimal`` against the close probability."""
+    return p_close * price_decimal - 1
+
+
 @dataclass(frozen=True)
 class ScoredBet:
     """A non-void candidate bet, a paper trade or a replayed one, with the devigged close
@@ -74,7 +79,7 @@ class ScoredBet:
 
     @property
     def ev(self) -> float | None:
-        return None if self.p_close is None else self.p_close * self.price_decimal - 1
+        return None if self.p_close is None else expected_value(self.p_close, self.price_decimal)
 
 
 @dataclass(frozen=True)
@@ -117,6 +122,29 @@ class CandidateSummary:
     @property
     def roi(self) -> float:
         return self.pnl / self.total_stake if self.total_stake > 0 else 0.0
+
+
+@dataclass(frozen=True)
+class RunningScore:
+    """Running totals after each bet with a close in the scoreable prefix, in placement order:
+    the stake, Σ stake·EV and realised P&L so far."""
+
+    staked: tuple[float, ...]
+    expected: tuple[float, ...]
+    pnl: tuple[float, ...]
+
+    @property
+    def mean_ev(self) -> tuple[float, ...]:
+        """The stake-weighted mean EV after each bet, the checkpoint score at every n."""
+        return tuple(e / s for e, s in zip(self.expected, self.staked, strict=True))
+
+
+@dataclass(frozen=True)
+class CandidateReport:
+    """Every candidate version's summary and running score, from one read of the trades."""
+
+    summaries: list[CandidateSummary]
+    running: dict[tuple[str, int], RunningScore]
 
 
 def selection_close_probability(
@@ -262,6 +290,23 @@ def scoreable_prefix(trades: Sequence[ScoredBet], now: datetime) -> tuple[list[S
     return with_close, length
 
 
+def running_score(with_close: Sequence[ScoredBet]) -> RunningScore:
+    """The running totals over ``with_close``, bets with a close in placement order."""
+    staked = expected = pnl = 0.0
+    staked_after: list[float] = []
+    expected_after: list[float] = []
+    pnl_after: list[float] = []
+    for bet in with_close:
+        assert bet.ev is not None and bet.pnl is not None
+        staked += bet.stake
+        expected += bet.stake * bet.ev
+        pnl += bet.pnl
+        staked_after.append(staked)
+        expected_after.append(expected)
+        pnl_after.append(pnl)
+    return RunningScore(tuple(staked_after), tuple(expected_after), tuple(pnl_after))
+
+
 def summarize_candidate(
     name: str,
     version: int,
@@ -299,6 +344,18 @@ def summarize_candidate(
     )
 
 
+def _by_version(
+    trades: Sequence[ScoredBet], registry: Sequence[Candidate]
+) -> dict[tuple[str, int], list[ScoredBet]]:
+    """``trades`` per (name, version), with every registered version present."""
+    by_key: dict[tuple[str, int], list[ScoredBet]] = defaultdict(list)
+    for trade in trades:
+        by_key[(trade.candidate_name, trade.candidate_version)].append(trade)
+    for c in registry:
+        by_key.setdefault((c.name, c.version), [])
+    return dict(sorted(by_key.items()))
+
+
 def summarize_candidates(
     trades: Sequence[ScoredBet],
     registry: Sequence[Candidate],
@@ -314,12 +371,7 @@ def summarize_candidates(
     absent from the registry, and an agent, has a family of one. ``decision_starts`` is as in
     ``family_starts``.
     """
-    by_key: dict[tuple[str, int], list[ScoredBet]] = defaultdict(list)
-    for trade in trades:
-        by_key[(trade.candidate_name, trade.candidate_version)].append(trade)
     status = {(c.name, c.version): c.status for c in registry}
-    for key in status:
-        by_key.setdefault(key, [])
     current = {c.name: c for c in registry}
 
     def family_size(name: str) -> Callable[[datetime], int]:
@@ -334,13 +386,56 @@ def summarize_candidates(
             name,
             version,
             status.get((name, version)),
-            by_key[(name, version)],
+            versioned,
             now,
             family_size(name),
             n_boot,
             seed,
         )
-        for name, version in sorted(by_key)
+        for (name, version), versioned in _by_version(trades, registry).items()
+    ]
+
+
+def report_candidates(
+    trades: Sequence[ScoredBet],
+    registry: Sequence[Candidate],
+    now: datetime,
+    decision_starts: Mapping[tuple[str, int], datetime] | None = None,
+    n_boot: int = DEFAULT_BOOTSTRAP_SAMPLES,
+    seed: int = BOOTSTRAP_SEED,
+) -> CandidateReport:
+    """``summarize_candidates`` of ``trades``, with each version's running score over the same
+    scoreable prefix at ``now``."""
+    return CandidateReport(
+        summaries=summarize_candidates(trades, registry, now, decision_starts, n_boot, seed),
+        running={
+            key: running_score(scoreable_prefix(versioned, now)[0])
+            for key, versioned in _by_version(trades, registry).items()
+        },
+    )
+
+
+async def close_probabilities(
+    session: AsyncSession, rows: Sequence[tuple[PaperTrade, Event]]
+) -> list[float | None]:
+    """The close probability of each trade's selection on its line, in ``rows`` order; None
+    where no close is defined or exists (``selection_close_probability``)."""
+    events: dict[str, dict[int, Event]] = defaultdict(dict)
+    for trade, event in rows:
+        events[trade.market][event.id] = event
+    closes = {
+        market: await close_quotes(session, list(by_id.values()), market)
+        for market, by_id in events.items()
+    }
+    return [
+        selection_close_probability(
+            Market(trade.market),
+            trade.selection,
+            trade.line,
+            event,
+            closes.get(trade.market, {}).get(event.id, []),
+        )
+        for trade, event in rows
     ]
 
 
@@ -353,17 +448,11 @@ async def load_scored_trades(session: AsyncSession) -> list[ScoredBet]:
         .where(or_(PaperTrade.result.is_(None), PaperTrade.result != TradeResult.VOID))  # type: ignore[union-attr]
         .order_by(PaperTrade.placed_at, PaperTrade.id)  # type: ignore[arg-type]
     )
-    rows = (await session.execute(stmt)).all()
-    events: dict[str, dict[int, Event]] = defaultdict(dict)
-    for trade, event in rows:
-        events[trade.market][event.id] = event
-    closes = {
-        market: await close_quotes(session, list(by_id.values()), market)
-        for market, by_id in events.items()
-    }
+    rows = [(trade, event) for trade, event in (await session.execute(stmt)).all()]
+    p_closes = await close_probabilities(session, rows)
 
     scored: list[ScoredBet] = []
-    for trade, event in rows:
+    for (trade, event), p_close in zip(rows, p_closes, strict=True):
         assert trade.candidate_name is not None and trade.candidate_version is not None
         scored.append(
             ScoredBet(
@@ -374,13 +463,7 @@ async def load_scored_trades(session: AsyncSession) -> list[ScoredBet]:
                 stake=trade.stake,
                 pnl=trade.pnl,
                 price_decimal=trade.price_decimal,
-                p_close=selection_close_probability(
-                    Market(trade.market),
-                    trade.selection,
-                    trade.line,
-                    event,
-                    closes.get(trade.market, {}).get(event.id, []),
-                ),
+                p_close=p_close,
                 placed_at=trade.placed_at,
                 close_grace=close_grace(event.sport_key, trade.market),
             )
@@ -405,8 +488,9 @@ async def candidate_report(
     seed: int = BOOTSTRAP_SEED,
     now: datetime | None = None,
     executor: Executor | None = None,
-) -> list[CandidateSummary]:
-    """Every candidate version's summary, from one read of the trades and decision starts.
+) -> CandidateReport:
+    """Every candidate version's summary and running score, from one read of the trades and
+    decision starts.
 
     The bootstrap runs on ``executor`` (the loop's default one when None), so a server can hold
     it to a single thread.
@@ -416,7 +500,7 @@ async def candidate_report(
     return await asyncio.get_running_loop().run_in_executor(
         executor,
         partial(
-            summarize_candidates,
+            report_candidates,
             trades,
             registry,
             now or datetime.now(UTC),

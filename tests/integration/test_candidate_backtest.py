@@ -373,7 +373,7 @@ class TestSharedScoring:
         await session.commit()
 
         result = await run(session)
-        [forward] = await candidate_report(session, [], N_BOOT, now=NOW)
+        [forward] = (await candidate_report(session, [], N_BOOT, now=NOW)).summaries
 
         assert result.summary.bets_with_close == 100
         assert result.summary.checkpoint == forward.checkpoint
@@ -411,7 +411,7 @@ class TestFamilySize:
 
         # The registered gap v3 and the sibling have not decided, so only v1 and v2 count.
         registry = [candidate(version=3), candidate(name="sibling")]
-        summaries = await candidate_report(session, registry, N_BOOT, now=NOW)
+        summaries = (await candidate_report(session, registry, N_BOOT, now=NOW)).summaries
         assert {(s.name, s.version): s.family_versions for s in summaries} == {
             ("gap", 3): 2,
             ("sibling", 1): 2,

@@ -18,6 +18,8 @@ from odds_core.models import EventStatus
 from odds_core.paper_trade_models import PaperTrade, TradeResult
 from odds_web.app import create_app
 from odds_web.db import WebDatabase, restrict_transactions
+from odds_web.decisions import load_decision_history
+from odds_web.ledger import load_ledger_page
 from odds_web.role_check import RoleCheckFailed, check_role
 from sqlalchemy import event, text
 from sqlalchemy.exc import DBAPIError, ProgrammingError
@@ -191,4 +193,39 @@ class TestPortfolioUnderTheRole:
 
         assert "exchange-gap-epl" in body
         assert "+1.2u" in body
-        assert "Unavailable" not in body
+        assert 'class="unavailable"' not in body
+
+
+class TestCandidatePageUnderTheRole:
+    async def test_renders_the_ledger_and_trade_from_the_real_tables(
+        self, odds_web_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        await seed_one_bet(odds_web_session)
+        engine = odds_web_session.bind
+        assert isinstance(engine, AsyncEngine)
+        database = WebDatabase(engine, async_sessionmaker(engine, expire_on_commit=False))
+
+        with as_odds_web(engine):
+            async with client_of(create_app(database, tmp_path)) as client:
+                response = await client.get("/c/exchange-gap-epl/1")
+
+        assert response.status_code == 200
+        assert "Arsenal v Chelsea" in response.text and "bet365" in response.text
+        assert "+1.2u" in response.text and 'class="unavailable"' not in response.text
+
+    async def test_the_readers_need_no_table_beyond_the_grants(
+        self, odds_web_session: AsyncSession
+    ) -> None:
+        await seed_one_bet(odds_web_session)
+        engine = odds_web_session.bind
+        assert isinstance(engine, AsyncEngine)
+        database = WebDatabase(engine, async_sessionmaker(engine, expire_on_commit=False))
+
+        with as_odds_web(engine):
+            async with database.session_maker() as reader:
+                ledger = await load_ledger_page(reader, "exchange-gap-epl", 1)
+            async with database.session_maker() as reader:
+                decisions = await load_decision_history(reader, "exchange-gap-epl", 1, KICKOFF)
+
+        assert ledger.total == 1 and ledger.rows[0].p_close == pytest.approx(0.5)
+        assert decisions.total == 0

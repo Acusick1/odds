@@ -30,7 +30,7 @@ status: stable
 
 # Paper trading
 
-Paper trades are the simulated bets the [betting agent](betting-agent.md) places, written through MCP tools ([odds-mcp server](mcp-server.md)), and the flat-stake bets the [run-candidates job](../evaluation/run-candidates-job.md) places for mechanical candidates. The restricted agent role needs `INSERT, UPDATE` on `paper_trades` ([database role](agent-run-job.md#database-role)). Paper trades are the only place results surface: they are read via MCP `odds_mcp.server.get_portfolio` and `odds paper`.
+Paper trades are the simulated bets the [betting agent](betting-agent.md) places, written through MCP tools ([odds-mcp server](mcp-server.md)), and the flat-stake bets the [run-candidates job](../evaluation/run-candidates-job.md) places for mechanical candidates. The restricted agent role needs `INSERT, UPDATE` on `paper_trades` ([database role](agent-run-job.md#database-role)). Paper trades are the only place results surface: they are read via MCP `odds_mcp.server.get_portfolio`, `odds paper`, `odds candidates report` and the [web UI](../operations/odds-web.md).
 
 ## The paper_trades table
 

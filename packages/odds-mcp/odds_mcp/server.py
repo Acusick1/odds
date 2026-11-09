@@ -643,7 +643,9 @@ async def get_portfolio(initial_bankroll: float = 1000.0) -> dict[str, Any]:
         try:
             candidates = [
                 _candidate_summary_to_dict(c)
-                for c in await candidate_report(session, load_candidates(candidates_dir()))
+                for c in (
+                    await candidate_report(session, load_candidates(candidates_dir()))
+                ).summaries
             ]
         except ValueError as exc:
             candidates = {"error": str(exc)}
