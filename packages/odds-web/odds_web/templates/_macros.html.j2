@@ -1,0 +1,10 @@
+{% macro section_state(section) -%}
+{% set f = section.failure %}
+{% if f is none %}
+<p class="as-of sub">as of {{ section.as_of | clock }}</p>
+{% else %}
+<p class="unavailable" title="{{ f.exception }}: {{ f.message }}">
+{%- if f.kind == "unavailable" %}Database unavailable{% else %}odds-web error ({{ f.exception }}), see the server log{% endif -%}
+{%- if section.as_of %} · showing data as of {{ section.as_of | clock }}{% else %} · no data loaded yet{% endif %}</p>
+{% endif %}
+{%- endmacro %}

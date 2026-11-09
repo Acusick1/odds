@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from odds_web.cache import SingleFlightCache
+from odds_web.cache import Failure, FailureKind, SingleFlightCache
+from sqlalchemy.exc import DBAPIError
+from structlog.testing import capture_logs
 
 
 class Clock:
@@ -63,13 +65,13 @@ class TestSingleFlightCache:
         assert (await cache.get("x", Loader(1))).value == 1
         assert (await cache.get("y", Loader(2))).value == 2
 
-    async def test_a_failure_before_any_value_is_an_error_without_a_time(
+    async def test_a_failure_before_any_value_has_no_value_and_no_time(
         self, cache: SingleFlightCache
     ) -> None:
         result = await cache.get("k", Loader(RuntimeError("down")))
 
         assert result.value is None and result.as_of is None
-        assert result.error == "RuntimeError: down"
+        assert result.failure == Failure(FailureKind.FAULT, "RuntimeError", "down")
 
     async def test_a_failed_refresh_keeps_the_last_value_and_its_time(
         self, cache: SingleFlightCache, clock: Clock
@@ -80,7 +82,7 @@ class TestSingleFlightCache:
         result = await cache.get("k", Loader(RuntimeError("down")))
 
         assert result.value == "a" and result.as_of == loaded.as_of
-        assert result.error is not None
+        assert result.failure is not None
 
     async def test_a_failure_is_not_retried_within_the_backoff(
         self, cache: SingleFlightCache, clock: Clock
@@ -89,9 +91,44 @@ class TestSingleFlightCache:
         await cache.get("k", loader)
         clock.now += 9
 
-        assert (await cache.get("k", loader)).error is not None
+        assert (await cache.get("k", loader)).failure is not None
         assert loader.calls == 1
 
         clock.now += 2
         recovered = await cache.get("k", loader)
-        assert recovered.value == "a" and recovered.error is None
+        assert recovered.value == "a" and recovered.failure is None
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            DBAPIError("select", {}, Exception("canceling statement due to statement timeout")),
+            ConnectionRefusedError("connect"),
+            TimeoutError(),
+        ],
+    )
+    async def test_a_database_error_is_unavailable_and_logged_with_its_traceback(
+        self, cache: SingleFlightCache, error: Exception
+    ) -> None:
+        with capture_logs() as logs:
+            result = await cache.get("k", Loader(error))
+
+        assert result.failure is not None and result.failure.kind is FailureKind.UNAVAILABLE
+        assert logs == [
+            {
+                "event": "web_section_unavailable",
+                "section": "k",
+                "exc_info": True,
+                "log_level": "warning",
+            }
+        ]
+
+    async def test_any_other_error_is_a_fault_and_logged_as_an_error(
+        self, cache: SingleFlightCache
+    ) -> None:
+        with capture_logs() as logs:
+            result = await cache.get("k", Loader(KeyError("home")))
+
+        assert result.failure == Failure(FailureKind.FAULT, "KeyError", "'home'")
+        assert [(log["event"], log["log_level"], log["exc_info"]) for log in logs] == [
+            ("web_section_failed", "error", True)
+        ]

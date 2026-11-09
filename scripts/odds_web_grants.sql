@@ -23,3 +23,7 @@ GRANT SELECT ON
     job_results,
     tasks
 TO odds_web;
+
+-- The status strip's freshness check takes the MLB fixture calendar from the MLB Stats API
+-- schedule (odds_lambda.collection_calendar.fixture_calendar).
+GRANT SELECT ON mlb_probable_pitchers TO odds_web;

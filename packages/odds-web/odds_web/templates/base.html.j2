@@ -9,6 +9,10 @@
 {% block head %}{% endblock %}
 </head>
 <body>
+<header class="top">
+<nav><a href="{{ url_path('portfolio') }}">Portfolio</a><a href="{{ url_path('data_health') }}">Data health</a></nav>
+<div id="status-strip" hx-get="{{ url_path('status_fragment') }}" hx-trigger="load, every 60s"></div>
+</header>
 <main>
 {% block content %}{% endblock %}
 </main>

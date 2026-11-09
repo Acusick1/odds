@@ -1,0 +1,43 @@
+{% from "_macros.html.j2" import section_state %}
+{% set cw = 34 %}{% set rh = 20 %}{% set lw = 310 %}
+<div id="coverage" hx-get="{{ url_path('coverage_fragment') }}" hx-trigger="every 60s" hx-swap="outerHTML">
+{{ section_state(coverage) }}
+{% if coverage.value is not none %}
+<div class="{{ 'stale' if coverage.failure }}">
+{% for c in coverage.value %}
+<h3>{{ c.name }} <span class="sub num">v{{ c.version }}</span> <span class="sub">{{ c.sport }} · {{ c.market }} · inputs {{ c.inputs | join(', ') }}</span></h3>
+{% if c.rows %}
+{% set height = rh * c.rows | length %}
+<svg class="heat" width="{{ lw + cw * c.minutes | length }}" height="{{ height + 18 }}" role="img" aria-label="decision-window coverage of {{ c.name }}">
+{% for row in c.rows %}{% set y = loop.index0 * rh %}
+<text class="rowlabel" x="{{ lw - 8 }}" y="{{ y + 14 }}" text-anchor="end">{{ row.label }} <tspan class="sub">{{ row.kickoff.strftime('%a %d %b %H:%M') }}</tspan></text>
+{% for cell in row.cells %}
+{% set level = 'ahead' if not cell.evaluated else ('all' if cell.complete else ('some' if cell.fresh else 'none')) %}
+<rect class="cell {{ level }}{{ ' recorded' if cell.recorded }}" x="{{ lw + loop.index0 * cw + 1 }}" y="{{ y + 1 }}" width="{{ cw - 2 }}" height="{{ rh - 2 }}" rx="2"><title>{{ row.label }}
+{{ cell.minutes_before }} min before kick-off ({{ cell.time | stamp }})
+{% if not cell.evaluated %}not reached yet{% else %}fresh: {{ cell.fresh | join(', ') if cell.fresh else 'none' }}
+rule has its inputs: {{ 'yes' if cell.complete else 'no' }}{% if cell.recorded %}
+recorded decision, as known at {{ cell.known_at | stamp }}{% endif %}{% endif %}</title></rect>
+{% endfor %}{% endfor %}
+{% for m in c.minutes %}{% set x = lw + loop.index0 * cw %}
+{% if m in c.decision_minutes %}<line class="decision" x1="{{ x + cw / 2 }}" x2="{{ x + cw / 2 }}" y1="0" y2="{{ height }}"/>{% endif %}
+<text class="{{ 'decision' if m in c.decision_minutes }}" x="{{ x + cw / 2 }}" y="{{ height + 13 }}" text-anchor="middle">{{ m }}m</text>
+{% endfor %}
+</svg>
+{% else %}
+<p class="sub">No events from 7 days ago to 24 hours ahead.</p>
+{% endif %}
+{% else %}
+<p class="sub">No active mechanical candidates.</p>
+{% endfor %}
+<div class="legend">
+<span><span class="sw cell none"></span>no input fresh</span>
+<span><span class="sw cell some"></span>some inputs fresh</span>
+<span><span class="sw cell all"></span>the rule has its inputs</span>
+<span><span class="sw cell ahead"></span>not reached yet</span>
+<span><span class="sw cell recorded"></span>recorded decision</span>
+<span>Lines mark the decision times</span>
+</div>
+</div>
+{% endif %}
+</div>

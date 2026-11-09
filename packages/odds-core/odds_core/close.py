@@ -7,6 +7,7 @@ from collections import defaultdict
 from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from enum import StrEnum
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -169,6 +170,51 @@ def event_close(
         fallback,
         max_exchange_overround=max_exchange_overround,
     )
+
+
+class CloseKind(StrEnum):
+    LIVE = "live"
+    FALLBACK = "fallback"
+    PENDING = "pending"
+    NONE = "none"
+    UNSUPPORTED = "unsupported"
+
+
+@dataclass(frozen=True)
+class CloseStatus:
+    """Where an event's close on one line stands. ``source`` supplied the close: Betfair for a
+    live one, the sport's ``FallbackSpec.source`` for a fallback; None without a close."""
+
+    kind: CloseKind
+    source: Source | None = None
+    price: ExchangePrice | None = None
+
+
+def close_status(
+    quoted: Iterable[Quote],
+    kickoff: datetime,
+    sport: str,
+    market: str,
+    now: datetime,
+    line: float | None = None,
+) -> CloseStatus:
+    """Classify the close of an event of ``sport`` on ``line`` from its quotes.
+
+    ``UNSUPPORTED`` when the sport has no close for ``market``; else the close ``event_close``
+    picks, ``LIVE`` or ``FALLBACK`` by which rule it met; else ``PENDING`` until ``close_grace``
+    after kick-off and ``NONE`` from then on.
+    """
+    spec = close_spec(sport, market)
+    if spec is None:
+        return CloseStatus(CloseKind.UNSUPPORTED)
+    price = event_close(quoted, kickoff, sport, market, line=line)
+    if price is None:
+        if now < kickoff + close_grace(sport, market):
+            return CloseStatus(CloseKind.PENDING)
+        return CloseStatus(CloseKind.NONE)
+    if is_live_close(price, kickoff) or spec.fallback is None:
+        return CloseStatus(CloseKind.LIVE, Source.BETFAIR, price)
+    return CloseStatus(CloseKind.FALLBACK, spec.fallback.source, price)
 
 
 async def live_close_quotes(

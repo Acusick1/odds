@@ -7,20 +7,48 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from enum import StrEnum
+
+import structlog
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
+
+logger = structlog.get_logger()
 
 TTL_SECONDS = 60.0
 # A failed refresh is not retried for this long, so a down database sees one query per window.
 FAILURE_BACKOFF_SECONDS = 10.0
+# What the database raises when it cannot answer: refused, unreachable, timed out, out of pool.
+DATABASE_ERRORS: tuple[type[BaseException], ...] = (
+    DBAPIError,
+    PoolTimeoutError,
+    OSError,
+    TimeoutError,
+)
+
+
+class FailureKind(StrEnum):
+    # The database could not answer.
+    UNAVAILABLE = "unavailable"
+    # Anything else: a defect in odds-web or the code it calls.
+    FAULT = "fault"
+
+
+@dataclass(frozen=True)
+class Failure:
+    kind: FailureKind
+    exception: str
+    message: str
 
 
 @dataclass(frozen=True)
 class Cached[T]:
-    """``value`` is the last good value, None before one exists; ``error`` is set when the
-    refresh behind this result failed, and ``as_of`` is then when ``value`` was loaded."""
+    """``value`` is the last good value and ``as_of`` when it was loaded, both None before one
+    exists; ``failure`` is set when the refresh behind this result failed."""
 
     value: T | None
     as_of: datetime | None
-    error: str | None
+    failure: Failure | None
 
 
 @dataclass
@@ -28,7 +56,7 @@ class _Entry[T]:
     value: T | None = None
     as_of: datetime | None = None
     loaded_at: float | None = None
-    error: str | None = None
+    failure: Failure | None = None
     failed_at: float | None = None
 
 
@@ -48,6 +76,12 @@ class SingleFlightCache:
         self._locks: dict[str, asyncio.Lock] = {}
 
     async def get[T](self, key: str, loader: Callable[[], Awaitable[T]]) -> Cached[T]:
+        """The key's value, loading it when it is older than the TTL.
+
+        A failed load is logged with its traceback and keeps the last good value. A database
+        error is ``FailureKind.UNAVAILABLE``; any other exception is ``FailureKind.FAULT``, still
+        caught so one broken section leaves the rest of the page standing.
+        """
         entry: _Entry[T] = self._entries.setdefault(key, _Entry())
         if self._settled(entry):
             return self._result(entry)
@@ -57,11 +91,17 @@ class SingleFlightCache:
             try:
                 value = await loader()
             except Exception as exc:
-                entry.error = f"{type(exc).__name__}: {exc}"
+                if isinstance(exc, DATABASE_ERRORS):
+                    logger.warning("web_section_unavailable", section=key, exc_info=True)
+                    kind = FailureKind.UNAVAILABLE
+                else:
+                    logger.error("web_section_failed", section=key, exc_info=True)
+                    kind = FailureKind.FAULT
+                entry.failure = Failure(kind, type(exc).__name__, str(exc))
                 entry.failed_at = self._clock()
             else:
                 entry.value, entry.as_of = value, datetime.now(UTC)
-                entry.loaded_at, entry.error, entry.failed_at = self._clock(), None, None
+                entry.loaded_at, entry.failure, entry.failed_at = self._clock(), None, None
             return self._result(entry)
 
     def _settled(self, entry: _Entry) -> bool:
@@ -74,4 +114,4 @@ class SingleFlightCache:
 
     @staticmethod
     def _result[T](entry: _Entry[T]) -> Cached[T]:
-        return Cached(entry.value, entry.as_of, entry.error)
+        return Cached(entry.value, entry.as_of, entry.failure)

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from typing import NamedTuple
 
@@ -43,6 +44,39 @@ class KeyQuota(NamedTuple):
     def fraction(self) -> float:
         """Remaining credits as a fraction of the plan; 0.0 for a plan of zero."""
         return self.remaining / self.limit if self.limit else 0.0
+
+
+# A burn projection reads the quota readings of this long before now, and needs them to span at
+# least MIN_BURN_SPAN after the key's latest reset.
+BURN_WINDOW = timedelta(days=7)
+MIN_BURN_SPAN = timedelta(hours=24)
+BURN_READINGS_LIMIT = 5000
+
+
+@dataclass(frozen=True)
+class BurnProjection:
+    """A key's spend rate since its latest reset, and the days its balance lasts at that rate
+    (None when nothing is being spent)."""
+
+    per_day: float
+    days_left: float | None
+    since: datetime
+
+
+def burn_projection(readings: Iterable[tuple[datetime, int]]) -> BurnProjection | None:
+    """The burn rate of one key from its ``(time, remaining)`` quota readings, in any order.
+
+    Only the readings after the latest reset count, a reset being any reading whose remaining
+    balance is above the one before it. None when those span less than ``MIN_BURN_SPAN``.
+    """
+    ordered = sorted(readings)
+    start = max((i for i in range(1, len(ordered)) if ordered[i][1] > ordered[i - 1][1]), default=0)
+    run = ordered[start:]
+    if len(run) < 2 or run[-1][0] - run[0][0] < MIN_BURN_SPAN:
+        return None
+    days = (run[-1][0] - run[0][0]).total_seconds() / 86400
+    per_day = (run[0][1] - run[-1][1]) / days
+    return BurnProjection(per_day, run[-1][1] / per_day if per_day > 0 else None, run[0][0])
 
 
 class OddsReader:
@@ -228,6 +262,24 @@ class OddsReader:
             index: KeyQuota(tuple(sports[index]), remaining, used)
             for index, (_, remaining, used) in sorted(readings.items())
         }
+
+    async def get_quota_burn(
+        self, key_quota: KeyQuota, now: datetime | None = None
+    ) -> BurnProjection | None:
+        """``burn_projection`` of the key ``key_quota`` describes, from the quota readings of its
+        sports within ``BURN_WINDOW``."""
+        moment = now or datetime.now(UTC)
+        logs = await self.get_fetch_logs(
+            sport_keys=key_quota.sports,
+            start_time=moment - BURN_WINDOW,
+            limit=BURN_READINGS_LIMIT,
+            with_quota=True,
+        )
+        return burn_projection(
+            (log.fetch_time, log.api_quota_remaining)
+            for log in logs
+            if log.api_quota_remaining is not None
+        )
 
     async def get_data_quality_logs(
         self,
