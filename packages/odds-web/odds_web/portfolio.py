@@ -17,6 +17,7 @@ from odds_analytics.candidate_report import (
     Verdict,
 )
 from odds_core.candidates import Candidate, MechanicalCandidate
+from odds_core.close import close_spec
 
 # The forest plot's EV axis, shared by every row so intervals compare; an interval running past it
 # is clipped and marked.
@@ -85,7 +86,7 @@ def forest_for(current: Checkpoint) -> Forest:
     )
 
 
-def _scope(entry: Candidate | None) -> str:
+def scope_of(entry: Candidate | None) -> str:
     if entry is None:
         return "—"
     if isinstance(entry, MechanicalCandidate):
@@ -93,7 +94,7 @@ def _scope(entry: Candidate | None) -> str:
     return f"{entry.sport} · agent"
 
 
-def _progress(summary: CandidateSummary, is_agent: bool) -> Progress | None:
+def progress_of(summary: CandidateSummary, is_agent: bool) -> Progress | None:
     if is_agent and summary.bets_with_close == 0:
         return None
     reached = summary.verdict in (Verdict.PROMOTE, Verdict.KILL)
@@ -103,7 +104,7 @@ def _progress(summary: CandidateSummary, is_agent: bool) -> Progress | None:
     return Progress(n, min(KILL_AT_BETS, (n // CHECKPOINT_SIZE + 1) * CHECKPOINT_SIZE))
 
 
-def _verdict(summary: CandidateSummary) -> tuple[str, str]:
+def verdict_of(summary: CandidateSummary) -> tuple[str, str]:
     """The verdict's label and the checkpoint it rests on; ``no close`` when no bet has one."""
     if summary.bets_with_close == 0 and summary.bets_without_close > 0:
         return "no close", ""
@@ -112,9 +113,18 @@ def _verdict(summary: CandidateSummary) -> tuple[str, str]:
     return summary.verdict.value.replace("_", " "), note
 
 
-def _no_ev_reason(summary: CandidateSummary) -> str:
+def is_agent(entry: Candidate | None) -> bool:
+    return entry is not None and entry.kind == "agent"
+
+
+def no_ev_reason(summary: CandidateSummary, entry: Candidate | None = None) -> str:
+    """Why there is no current estimate: the market has no close (known from a mechanical
+    candidate's registry entry, else from its bets lacking one), or the events are too few."""
     if summary.bets_with_close == 0:
-        return "EV not scoreable" if summary.bets_without_close else "no bets with a close"
+        no_close = summary.bets_without_close > 0 or (
+            isinstance(entry, MechanicalCandidate) and close_spec(entry.sport, entry.market) is None
+        )
+        return "EV not scoreable" if no_close else "no bets with a close"
     return "too few events"
 
 
@@ -125,18 +135,18 @@ def portfolio_rows(
     rows: list[PortfolioRow] = []
     for s in summaries:
         entry = by_name.get(s.name)
-        is_agent = entry is not None and entry.kind == "agent"
-        verdict, note = _verdict(s)
+        agent = is_agent(entry)
+        verdict, note = verdict_of(s)
         rows.append(
             PortfolioRow(
                 name=s.name,
                 version=s.version,
-                scope=_scope(entry),
-                is_agent=is_agent,
+                scope=scope_of(entry),
+                is_agent=agent,
                 not_current=s.status is None,
-                progress=_progress(s, is_agent),
+                progress=progress_of(s, agent),
                 forest=None if s.current is None else forest_for(s.current),
-                no_ev_reason=_no_ev_reason(s),
+                no_ev_reason=no_ev_reason(s, entry),
                 pnl=s.pnl,
                 roi=s.roi,
                 verdict=verdict,

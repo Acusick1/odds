@@ -51,6 +51,11 @@ class Verdict(StrEnum):
     KILL = "kill"
 
 
+def expected_value(p_close: float, price_decimal: float) -> float:
+    """EV per unit staked of taking ``price_decimal`` against the close probability."""
+    return p_close * price_decimal - 1
+
+
 @dataclass(frozen=True)
 class ScoredBet:
     """A non-void candidate bet, a paper trade or a replayed one, with the devigged close
@@ -74,7 +79,7 @@ class ScoredBet:
 
     @property
     def ev(self) -> float | None:
-        return None if self.p_close is None else self.p_close * self.price_decimal - 1
+        return None if self.p_close is None else expected_value(self.p_close, self.price_decimal)
 
 
 @dataclass(frozen=True)
@@ -344,16 +349,11 @@ def summarize_candidates(
     ]
 
 
-async def load_scored_trades(session: AsyncSession) -> list[ScoredBet]:
-    """Non-void candidate trades in placement order, each with its close probability."""
-    stmt = (
-        select(PaperTrade, Event)
-        .join(Event, PaperTrade.event_id == Event.id)
-        .where(PaperTrade.candidate_name.is_not(None))  # type: ignore[union-attr]
-        .where(or_(PaperTrade.result.is_(None), PaperTrade.result != TradeResult.VOID))  # type: ignore[union-attr]
-        .order_by(PaperTrade.placed_at, PaperTrade.id)  # type: ignore[arg-type]
-    )
-    rows = (await session.execute(stmt)).all()
+async def close_probabilities(
+    session: AsyncSession, rows: Sequence[tuple[PaperTrade, Event]]
+) -> list[float | None]:
+    """The close probability of each trade's selection on its line, in ``rows`` order; None
+    where no close is defined or exists (``selection_close_probability``)."""
     events: dict[str, dict[int, Event]] = defaultdict(dict)
     for trade, event in rows:
         events[trade.market][event.id] = event
@@ -361,9 +361,39 @@ async def load_scored_trades(session: AsyncSession) -> list[ScoredBet]:
         market: await close_quotes(session, list(by_id.values()), market)
         for market, by_id in events.items()
     }
+    return [
+        selection_close_probability(
+            Market(trade.market),
+            trade.selection,
+            trade.line,
+            event,
+            closes.get(trade.market, {}).get(event.id, []),
+        )
+        for trade, event in rows
+    ]
+
+
+async def load_scored_trades(
+    session: AsyncSession, candidate: tuple[str, int] | None = None
+) -> list[ScoredBet]:
+    """Non-void candidate trades in placement order, each with its close probability; those of
+    one (name, version) when ``candidate`` is given."""
+    stmt = (
+        select(PaperTrade, Event)
+        .join(Event, PaperTrade.event_id == Event.id)
+        .where(PaperTrade.candidate_name.is_not(None))  # type: ignore[union-attr]
+        .where(or_(PaperTrade.result.is_(None), PaperTrade.result != TradeResult.VOID))  # type: ignore[union-attr]
+        .order_by(PaperTrade.placed_at, PaperTrade.id)  # type: ignore[arg-type]
+    )
+    if candidate is not None:
+        stmt = stmt.where(
+            PaperTrade.candidate_name == candidate[0], PaperTrade.candidate_version == candidate[1]
+        )
+    rows = [(trade, event) for trade, event in (await session.execute(stmt)).all()]
+    p_closes = await close_probabilities(session, rows)
 
     scored: list[ScoredBet] = []
-    for trade, event in rows:
+    for (trade, event), p_close in zip(rows, p_closes, strict=True):
         assert trade.candidate_name is not None and trade.candidate_version is not None
         scored.append(
             ScoredBet(
@@ -374,13 +404,7 @@ async def load_scored_trades(session: AsyncSession) -> list[ScoredBet]:
                 stake=trade.stake,
                 pnl=trade.pnl,
                 price_decimal=trade.price_decimal,
-                p_close=selection_close_probability(
-                    Market(trade.market),
-                    trade.selection,
-                    trade.line,
-                    event,
-                    closes.get(trade.market, {}).get(event.id, []),
-                ),
+                p_close=p_close,
                 placed_at=trade.placed_at,
                 close_grace=close_grace(event.sport_key, trade.market),
             )

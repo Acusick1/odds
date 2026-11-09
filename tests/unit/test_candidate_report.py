@@ -571,6 +571,28 @@ class TestLoadScoredBets:
         assert draw.ev == pytest.approx(0.25 * 4.5 - 1)
 
     @pytest.mark.asyncio
+    async def test_one_candidate_version_can_be_loaded_alone(
+        self, test_session: AsyncSession
+    ) -> None:
+        from odds_analytics.candidate_report import load_scored_trades
+
+        session = test_session
+        session.add(make_epl_event(1, KICKOFF, status=EventStatus.FINAL))
+        await session.flush()
+        session.add_all(
+            [
+                _paper_trade(1, 1),
+                _paper_trade(1, 2, candidate_version=2),
+                _paper_trade(1, 3, candidate_name="other"),
+            ]
+        )
+        await session.flush()
+
+        loaded = await load_scored_trades(session, ("cand", 2))
+
+        assert [(t.candidate_name, t.candidate_version) for t in loaded] == [("cand", 2)]
+
+    @pytest.mark.asyncio
     async def test_each_trade_is_scored_against_the_close_on_its_line(
         self, test_session: AsyncSession
     ) -> None:

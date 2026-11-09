@@ -1,0 +1,91 @@
+{% from "_macros.html.j2" import section_state %}
+<div id="candidate" hx-get="{{ url_path('candidate_fragment', name=name, version=version) }}?page={{ page }}" hx-trigger="every 60s" hx-swap="outerHTML">
+{{ section_state(candidate) }}
+{% if candidate.value is not none %}
+{% set c = candidate.value %}
+<div class="{{ 'stale' if candidate.failure }}">
+<h3 class="title"><b>{{ c.name }}</b> <span class="sub num">v{{ c.version }}</span>
+{% if c.not_current %}<span class="sub">not current</span>{% endif %}
+<span class="sub">{{ c.scope }}</span>
+<span class="verdict">{{ c.verdict }}</span>{% if c.verdict_note %} <span class="sub">{{ c.verdict_note }}</span>{% endif %}</h3>
+
+<div class="tiles">
+  <div class="tile"><div class="k">Bets with a close</div>
+    <div class="v num">{{ c.bets_with_close }}{% if c.progress %}<span class="sub"> / {{ c.progress.next_checkpoint }}</span>{% endif %}</div>
+    <div class="sub num">{{ c.settled_bets }} settled{% if c.pending_bets %} · {{ c.pending_bets }} not yet final{% endif %}</div></div>
+  <div class="tile"><div class="k">Mean EV vs close</div>
+    {% if c.current %}
+    <div class="v num {{ 'pos' if c.current.mean_ev >= 0 else 'neg' }}">{{ c.current.mean_ev | percent }}</div>
+    <div class="sub num">95% CI {{ c.current.ci95[0] | percent }} … {{ c.current.ci95[1] | percent }}</div>
+    {% else %}<div class="v sub">{{ c.no_ev_reason }}</div>{% endif %}</div>
+  <div class="tile"><div class="k">P&amp;L (stake units)</div>
+    <div class="v num">{{ c.pnl | signed }}u</div><div class="sub num">ROI {{ c.roi | percent }}</div></div>
+  {% if c.decisions %}
+  <div class="tile"><div class="k">Decisions missed</div>
+    {% if c.decisions.total %}
+    <div class="v num">{{ (c.decisions.missed_share * 100) | round | int }}%</div>
+    <div class="sub num">{{ c.decisions.missed }} of {{ c.decisions.total }}</div>
+    {% else %}<div class="v sub">no decisions</div>{% endif %}</div>
+  {% endif %}
+</div>
+
+{% if c.series %}
+<h3>Mean EV as bets accumulate</h3>
+<div class="sub">Running mean EV over the bets with a close in the settled, final prefix. Intervals are drawn only at the checkpoints reached and at the current n; the verdict is read only at checkpoints.</div>
+<div class="chart" data-chart="ev" data-series='{{ c.series.ev_chart() | tojson }}'></div>
+<div class="legend"><span><svg width="26" height="10"><line class="ci" x1="2" y1="5" x2="24" y2="5"/></svg>95% CI</span><span><svg width="26" height="10"><line class="promote" x1="2" y1="5" x2="24" y2="5"/></svg>promote CI</span><span>Dashed lines: zero EV, checkpoints</span></div>
+
+<h3>Expected profit vs realised P&amp;L</h3>
+<div class="sub">Cohort: settled bets with a close in the scoreable prefix ({{ c.bets_with_close }}); other bets are not in either line.</div>
+<div class="chart" data-chart="cumulative" data-series='{{ c.series.cumulative_chart() | tojson }}'></div>
+<div class="legend"><span><span class="sw sw-expected"></span>Σ stake·EV (signal)</span><span><span class="sw sw-pnl"></span>P&amp;L (signal + luck)</span></div>
+{% else %}
+<h3>Mean EV as bets accumulate</h3>
+<p class="sub">{{ c.no_ev_reason }}</p>
+{% endif %}
+
+{% if c.decisions %}
+<h3>Decisions, last {{ c.decisions.days | length }} days</h3>
+<div class="legend"><span><span class="sw sw-bet"></span>bet</span><span><span class="sw sw-no-bet"></span>no bet</span><span><span class="sw sw-missed"></span>missed (no input)</span></div>
+<div class="scroll"><div class="timeline">
+{% for day in c.decisions.days %}
+<div class="day"><div class="marks">{% for d in day.decisions %}<i class="mark mark-{{ d.kind.name | lower | replace('_', '-') }}" title="{{ d.kind.value }}: {{ d.event }} at {{ d.decision_time.strftime('%H:%M') }}"></i>{% endfor %}</div><span class="sub num">{{ day.day.strftime('%b %d') }}</span></div>
+{% endfor %}
+</div></div>
+{% endif %}
+
+<h3>Bet ledger <span class="sub">{{ c.ledger.total }} trades</span></h3>
+<div class="scroll">
+<table id="ledger">
+<thead><tr><th>Placed</th><th>Event</th><th>Sel.</th><th>Book</th><th class="r">Stake</th><th class="r">Price</th><th class="r">p_close</th><th class="r">EV</th><th>Result</th><th class="r">P&amp;L</th></tr></thead>
+<tbody class="num">
+{% for r in c.ledger.rows %}
+<tr class="{{ 'void' if r.is_void }}">
+<td>{{ r.placed_at.strftime('%b %d %H:%M') }}</td>
+<td class="text">{{ r.event }}</td>
+<td class="text">{{ r.selection }}{% if r.line is not none %} {{ r.line }}{% endif %}</td>
+<td class="text">{{ r.bookmaker }}</td>
+<td class="r">{{ '%g' | format(r.stake) }}</td>
+<td class="r">{{ '%.2f' | format(r.price) }}</td>
+<td class="r">{{ '%.3f' | format(r.p_close) if r.p_close is not none else '—' }}</td>
+<td class="r {{ ('pos' if r.ev >= 0 else 'neg') if r.ev is not none }}">{{ r.ev | percent }}</td>
+<td class="text">{{ r.result.value if r.result else 'pending' }}</td>
+<td class="r">{{ (r.pnl | signed(2)) if r.pnl is not none else '—' }}</td>
+</tr>
+{% else %}
+<tr><td colspan="10" class="sub">No trades.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% if c.ledger.pages > 1 %}
+{% set here = url_path('candidate', name=name, version=version) %}
+<p class="pager sub">
+{% if c.ledger.page > 1 %}<a href="{{ here }}?page={{ c.ledger.page - 1 }}">‹ newer</a>{% endif %}
+page {{ c.ledger.page }} of {{ c.ledger.pages }}
+{% if c.ledger.page < c.ledger.pages %}<a href="{{ here }}?page={{ c.ledger.page + 1 }}">older ›</a>{% endif %}
+</p>
+{% endif %}
+</div>
+{% endif %}
+</div>

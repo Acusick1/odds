@@ -70,7 +70,7 @@ Python 3.12+ (`pyproject.toml`), a uv workspace linted by one root ruff configur
 | NBA injury-report PDFs | `nbainjuries` (tabula over JPype) and `jdk4py`, which bundles the JRE it needs | `packages/odds-lambda/pyproject.toml` |
 | CLI | Typer, Rich | `packages/odds-cli/pyproject.toml` |
 | MCP server | FastMCP | `packages/odds-mcp/pyproject.toml` |
-| Web UI | FastAPI, Jinja2, uvicorn (declared by odds-cli, which serves it), htmx as a vendored file, charts drawn as server-rendered SVG | `packages/odds-web/pyproject.toml`, `packages/odds-cli/pyproject.toml` |
+| Web UI | FastAPI, Jinja2, uvicorn (declared by odds-cli, which serves it), htmx and Observable Plot as vendored files, server-rendered SVG for the portfolio and data-health charts | `packages/odds-web/pyproject.toml`, `packages/odds-web/odds_web/static/charts.js`, `packages/odds-cli/pyproject.toml` |
 | Modelling | XGBoost | `packages/odds-analytics/pyproject.toml` |
 | Tests | pytest, pytest-asyncio, pytest-env, py-pglite ([Test suite](test-suite.md)) | `pyproject.toml` |
 
@@ -139,7 +139,7 @@ Importing `odds_core.alerts` builds `odds_core.config.get_settings()` ([Read at 
 
 ## odds-web
 
-`packages/odds-web/odds_web/` is the read-only web UI: `odds_web.app` (the FastAPI app and its routes), `odds_web.db` (the engine and session factory for `WEB_DATABASE_URL`), `odds_web.cache` (the single-flight TTL cache, and which failed loads mean the database could not answer rather than a fault), `odds_web.portfolio` (the portfolio rows), `odds_web.status` (the status strip), `odds_web.coverage` (decision-window coverage) and `odds_web.closes` (close coverage by week, counted per close kind and fallback source). It declares odds-core, odds-analytics, odds-lambda, FastAPI, Jinja2, sqlalchemy, sqlmodel and structlog (`packages/odds-web/pyproject.toml`) and has no entry point of its own: `odds web serve` in odds-cli runs it ([odds-web](../operations/odds-web.md)).
+`packages/odds-web/odds_web/` is the read-only web UI: `odds_web.app` (the FastAPI app and its routes), `odds_web.db` (the engine and session factory for `WEB_DATABASE_URL`), `odds_web.cache` (the single-flight TTL cache, and which failed loads mean the database could not answer rather than a fault), `odds_web.portfolio` (the portfolio rows), `odds_web.candidate_page` (the candidate page's figures and series), `odds_web.ledger` (the bet ledger), `odds_web.decisions` (the decision timeline), `odds_web.status` (the status strip), `odds_web.coverage` (decision-window coverage) and `odds_web.closes` (close coverage by week, counted per close kind and fallback source). It declares odds-core, odds-analytics, odds-lambda, FastAPI, Jinja2, sqlalchemy, sqlmodel and structlog (`packages/odds-web/pyproject.toml`) and has no entry point of its own: `odds web serve` in odds-cli runs it ([odds-web](../operations/odds-web.md)).
 
 ## Dependency exceptions
 

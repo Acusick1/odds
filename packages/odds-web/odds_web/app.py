@@ -2,22 +2,28 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from odds_analytics.candidate_report import candidate_report
-from odds_core.candidates import candidates_dir, load_candidates
+from odds_analytics.candidate_report import (
+    CandidateSummary,
+    candidate_report,
+    load_scored_trades,
+)
+from odds_core.candidates import Candidate, candidates_dir, load_candidates
 from odds_core.config import Settings, get_settings
 
 from odds_web.cache import Cached, Failure, SingleFlightCache
+from odds_web.candidate_page import CandidatePage, build_candidate_page, has_decisions
 from odds_web.closes import WEEKS as CLOSE_WEEKS
 from odds_web.closes import CloseWeeks, close_coverage
 from odds_web.coverage import (
@@ -29,10 +35,14 @@ from odds_web.coverage import (
     coverage_candidates,
 )
 from odds_web.db import WebDatabase, web_database_from_settings
+from odds_web.decisions import load_decision_history
+from odds_web.ledger import load_ledger_page
 from odds_web.portfolio import AXIS_PERCENT, FOREST_WIDTH, PortfolioRow, portfolio_rows
 from odds_web.status import StatusStrip, load_status
 
 PACKAGE_DIR = Path(__file__).parent
+
+PageQuery = Annotated[int, Query(ge=1, le=100_000)]
 
 
 @dataclass(frozen=True)
@@ -47,9 +57,25 @@ class Section[T]:
     def of(cls, cached: Cached[T]) -> Section[T]:
         return cls(cached.value, cached.as_of, cached.failure)
 
+    def map[U](self, convert: Callable[[T], U]) -> Section[U]:
+        return Section(None if self.value is None else convert(self.value), self.as_of, self.failure)
+
+
+@dataclass(frozen=True)
+class Report:
+    """The report data and the registry it was computed against."""
+
+    summaries: list[CandidateSummary]
+    registry: list[Candidate]
+
 
 def _signed(value: float, digits: int = 1) -> str:
     return f"{value:+.{digits}f}".replace("-", "−")
+
+
+def _percent(value: float | None, digits: int = 1) -> str:
+    """A fraction as a signed percentage; a dash where there is none."""
+    return "—" if value is None else _signed(value * 100, digits) + "%"
 
 
 def _clock(value: datetime | None) -> str:
@@ -94,6 +120,7 @@ def create_app(
     templates.env.filters["signed"] = _signed
     templates.env.filters["clock"] = _clock
     templates.env.filters["stamp"] = _stamp
+    templates.env.filters["percent"] = _percent
     templates.env.globals.update(
         ago=_ago,
         close_weeks=CLOSE_WEEKS,
@@ -106,14 +133,42 @@ def create_app(
         axis_percent=f"{AXIS_PERCENT:g}", forest_width=FOREST_WIDTH, url_path=app.url_path_for
     )
 
-    async def load_portfolio() -> list[PortfolioRow]:
+    async def load_report() -> Report:
         registry = load_candidates(registry_dir or candidates_dir())
         async with database.session_maker() as session:
             summaries = await candidate_report(session, registry, executor=executor)
-        return portfolio_rows(summaries, registry)
+        return Report(summaries, registry)
+
+    async def report_section() -> Cached[Report]:
+        return await cache.get("report", load_report)
 
     async def portfolio_section() -> Section[list[PortfolioRow]]:
-        return Section.of(await cache.get("portfolio", load_portfolio))
+        report = Section.of(await report_section())
+        return report.map(lambda r: portfolio_rows(r.summaries, r.registry))
+
+    async def candidate_section(name: str, version: int, page: int) -> Section[CandidatePage]:
+        report = await report_section()
+        if report.value is None:
+            return Section(None, report.as_of, report.failure)
+        summary = next(
+            (s for s in report.value.summaries if (s.name, s.version) == (name, version)), None
+        )
+        if summary is None:
+            raise HTTPException(status_code=404, detail=f"No candidate {name} v{version}")
+        entry = next((c for c in report.value.registry if c.name == name), None)
+
+        async def load_candidate() -> CandidatePage:
+            now = datetime.now(UTC)
+            async with database.session_maker() as session:
+                trades = await load_scored_trades(session, (name, version))
+                decisions = None
+                if has_decisions(entry):
+                    decisions = await load_decision_history(session, name, version, now)
+                ledger = await load_ledger_page(session, name, version, page)
+            return build_candidate_page(summary, entry, trades, decisions, ledger, now)
+
+        loaded = await cache.get(f"candidate:{name}:{version}:{page}", load_candidate)
+        return Section(loaded.value, loaded.as_of, loaded.failure or report.failure)
 
     async def load_status_strip() -> StatusStrip:
         async with database.session_maker() as session:
@@ -177,6 +232,28 @@ def create_app(
     async def portfolio_fragment(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
             request, "_portfolio.html.j2", {"portfolio": await portfolio_section()}
+        )
+
+    @app.get("/c/{name}/{version}", response_class=HTMLResponse)
+    async def candidate(
+        request: Request, name: str, version: int, page: PageQuery = 1
+    ) -> HTMLResponse:
+        section = await candidate_section(name, version, page)
+        return templates.TemplateResponse(
+            request,
+            "candidate.html.j2",
+            {"candidate": section, "name": name, "version": version, "page": page},
+        )
+
+    @app.get("/fragments/c/{name}/{version}", response_class=HTMLResponse)
+    async def candidate_fragment(
+        request: Request, name: str, version: int, page: PageQuery = 1
+    ) -> HTMLResponse:
+        section = await candidate_section(name, version, page)
+        return templates.TemplateResponse(
+            request,
+            "_candidate.html.j2",
+            {"candidate": section, "name": name, "version": version, "page": page},
         )
 
     return app

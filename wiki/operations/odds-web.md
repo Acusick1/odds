@@ -1,7 +1,7 @@
 ---
 type: reference
 title: odds-web, the read-only web UI
-description: What odds web serve runs, the database role and session it reads through, the report data behind the portfolio page, the status strip and the data-health page, its cache and failure bounds, the vendored scripts, and how deploy.sh and systemd run it.
+description: What odds web serve runs, the database role and session it reads through, the report data behind the portfolio and candidate pages, the status strip and the data-health page, its cache and failure bounds, the vendored scripts, and how deploy.sh and systemd run it.
 sources:
   - odds_cli.commands.web
   - odds_web.app
@@ -11,6 +11,9 @@ sources:
   - odds_web.status
   - odds_web.coverage
   - odds_web.closes
+  - odds_web.candidate_page
+  - odds_web.ledger
+  - odds_web.decisions
   - odds_web.role_check
   - odds_lambda.health_readers.source_freshness
   - odds_lambda.health_readers.last_heartbeats
@@ -22,6 +25,7 @@ sources:
   - odds_lambda.candidate_rules.build_market_state
   - odds_core.close.close_status
   - odds_analytics.candidate_report.candidate_report
+  - odds_analytics.candidate_report.close_probabilities
   - odds_core.config.DatabaseConfig
   - odds-web.service
   - scripts/odds_web_grants.sql
@@ -49,9 +53,9 @@ The app never uses `odds_core.database.async_session_maker`, which binds to `DAT
 
 ## Report data and the cache
 
-`odds_analytics.candidate_report.candidate_report` is the one read of the candidates' results: it loads the paper trades and the first decision of every version once, and returns a `odds_analytics.candidate_report.CandidateSummary` per candidate version ([what it holds](../evaluation/candidate-registry.md#odds-candidates-report)). `odds candidates report`, `odds_mcp.server.get_portfolio` and the portfolio page all call it. The page runs the bootstrap on a one-thread executor, so at most one runs at a time (`odds_web.app.create_app`).
+`odds_analytics.candidate_report.candidate_report` is the one read of the candidates' results: it loads the paper trades and the first decision of every version once, and returns a `odds_analytics.candidate_report.CandidateSummary` per candidate version ([what it holds](../evaluation/candidate-registry.md#odds-candidates-report)). `odds candidates report`, `odds_mcp.server.get_portfolio` and the web pages all call it. The app reads it once per cache window under one key, with the registry it was computed against (`odds_web.app.Report`), and the portfolio and every candidate page take their figures from that entry. The bootstrap runs on a one-thread executor, so at most one runs at a time (`odds_web.app.create_app`).
 
-`odds_web.cache.SingleFlightCache` holds each section's result for `odds_web.cache.TTL_SECONDS`. Concurrent requests share one load. A failed load keeps the last good value and its time, and is not retried for `odds_web.cache.FAILURE_BACKOFF_SECONDS`, so a down database sees one query per window. The failure is logged with its traceback, which `odds web serve` sends to journald under systemd, and has an `odds_web.cache.FailureKind`:
+`odds_web.cache.SingleFlightCache` holds each section's result for `odds_web.cache.TTL_SECONDS`. Concurrent requests share one load. A failed load keeps the last good value and its time, and is not retried for `odds_web.cache.FAILURE_BACKOFF_SECONDS`, so a down database sees one query per window. The candidate page caches its own reads (the version's bets, decisions and one ledger page) under a key per version and page. The failure is logged with its traceback, which `odds web serve` sends to journald under systemd, and has an `odds_web.cache.FailureKind`:
 
 - **`unavailable`**: the database could not answer: an error whose SQLSTATE is outside the query classes (a statement timeout, a server starting up or out of resources), a driver error without one, the pool running dry, or a network error such as a refused connection. It is logged as a warning, `web_section_unavailable`.
 - **`fault`**: anything else, a defect in odds-web or in the code it calls: a request the server rejected (SQLSTATE class in `odds_web.cache.QUERY_SQLSTATE_CLASSES`: bad SQL, bad data, a write, a table the `odds_web` role has no grant on, a wrong password or a missing database), a registry file that cannot be read (`odds_web.cache.FILE_ERRORS`), or any other exception. It is logged as an error, `web_section_failed`.
@@ -72,6 +76,19 @@ Each section is rendered on its own, so a fault in one leaves the others and the
 
 The current estimate and the verdict's checkpoint are separate fields: the estimate moves with every bet, and the checkpoint is the one the verdict is read at ([Verdict](../evaluation/candidate-registry.md#odds-candidates-report)).
 
+## Candidate page
+
+`odds_web.app.create_app` serves `/c/{name}/{version}` and `/fragments/c/{name}/{version}`, the same section, which htmx re-fetches every 60 seconds with the ledger page in view; the ledger's `?page=` links are plain page loads. A name and version the report does not hold answer 404, and the section reports a failed read as the other pages do. The portfolio links each row here. The figures are the report's, read from `odds_analytics.candidate_report.CandidateSummary` as on the portfolio page; `odds_web.candidate_page.build_candidate_page` only lays them out:
+
+- **Tiles.** The bets with a close against the next checkpoint (`odds_web.portfolio.progress_of`), the current mean EV with its 95% interval (`odds_analytics.candidate_report.CandidateSummary.current`, green or red by sign and nowhere else), the P&L and ROI of the settled bets with no colour, and, for a mechanical candidate, the share of its decisions that were missed. The verdict and the checkpoint it rests on sit in the heading, so `promote` and `kill` never appear below `odds_analytics.candidate_report.CHECKPOINT_SIZE` bets with a close.
+- **Mean EV chart.** `odds_web.candidate_page.build_series` takes the version's bets (`odds_analytics.candidate_report.load_scored_trades` for that name and version), keeps the bets with a close in the scoreable prefix (`odds_analytics.candidate_report.scoreable_prefix`), and plots the running stake-weighted mean EV over them. A 95% and a promote interval are drawn only at the checkpoints the verdict reached and at the current n, taken from `odds_analytics.candidate_report.CandidateSummary.checkpoints` and `current`; no interval is bootstrapped per bet. Dashed lines mark zero and every checkpoint up to the next one, capped at `odds_analytics.candidate_report.KILL_AT_BETS`. The axis ignores the first `odds_web.candidate_page.AXIS_FROM_BETS` running means, which swing too wildly to scale it.
+- **Expected profit against realised P&L.** The cumulative Σ stake·EV and the cumulative P&L over the same bets, as two lines in the stake's own units. The cohort is stated above the chart: settled bets with a close in the scoreable prefix, so it is neither the verdict's cohort nor the headline P&L.
+- **No close.** A mechanical candidate whose sport and market have no close in `odds_core.close.CLOSES` (MLB `h2h`), and any version whose settled bets all lack one, shows "EV not scoreable" in place of both charts, and keeps the P&L and the ledger. A version with no bet yet, or none settled, says "no bets with a close".
+- **Decision timeline.** `odds_web.decisions.load_decision_history` reads `odds_core.paper_trade_models.CandidateDecision` rows of the version: the last `odds_web.decisions.WINDOW` days up to today as one mark per decision (bet, no bet or missed), and the count of every decision and of the missed ones for the tile. Only a mechanical candidate has one; an agent's trades have no decision rows, so its page shows none.
+- **Bet ledger.** `odds_web.ledger.load_ledger_page` pages the version's paper trades newest first, with their stakes, `odds_web.ledger.PAGE_SIZE` to a page, and looks up the close of only that page's events with `odds_analytics.candidate_report.close_probabilities`, on each trade's own line. Unlike the series it keeps void trades, shown dimmed with their result, and unsettled ones, shown as pending.
+
+The readers need no table beyond those in the grants file.
+
 ## Status strip
 
 Every page loads the strip from `/fragments/status` when it opens and every 60 seconds after. `odds_web.status.load_status` joins three reads, each in one session:
@@ -90,12 +107,17 @@ The judgements are the health monitor's own, so the strip and the alerts never d
 
 **Close coverage by week** (`odds_web.closes.close_coverage`) counts, for each sport and market, every (event, market, line) a paper trade is on, for events kicking off in the last `odds_web.closes.WEEKS` (8) weeks, by kick-off week and by `odds_core.close.close_status`: live Betfair close, the sport's fallback named by its source (FDUK or Polymarket), pending within `odds_core.close.close_grace`, no close, or unsupported for a market the sport has no close for, such as MLB `h2h`.
 
+## Layout
+
+A table wider than the viewport scrolls inside its own `.scroll` box in `odds_web/static/app.css`, so the page body never scrolls sideways.
+
 ## Static files
 
-`odds_web/static/vendor/htmx.min.js` is htmx 2.0.11 as published on npm, byte for byte, under the Zero-Clause BSD licence (`0BSD`, which asks for no notice). It is committed, so the page loads nothing from a CDN and the repo has no Node build.
+`odds_web/static/vendor/htmx.min.js` is htmx 2.0.11 as published on npm, byte for byte, under the Zero-Clause BSD licence (`0BSD`, which asks for no notice). `odds_web/static/vendor/plot.bundle.min.js` is Observable Plot 0.6.19 with the d3 modules it uses and its other bundled dependencies, built once with esbuild (`--bundle --minify --format=iife --global-name=Plot`) from the npm packages, because the published browser build expects d3 to be loaded separately. `odds_web/static/vendor/plot.LICENSES.txt` holds the licence text and copyright notice of Plot and of every package bundled with it (ISC, BSD-3-Clause, MIT and the Unlicense). `odds_web/static/charts.js` draws the candidate page's charts from the series each `.chart` element carries. They are committed, so the page loads nothing from a CDN and the repo has no Node build.
 
 ## Related
 
+- [Candidate registry](../evaluation/candidate-registry.md#odds-candidates-report)
 - [Reporting surfaces](reporting-surfaces.md)
 - [Databases and environments](../foundations/databases-and-environments.md#the-web-database-role)
 - [Set up the odds-web host](howto-set-up-odds-web-host.md)
