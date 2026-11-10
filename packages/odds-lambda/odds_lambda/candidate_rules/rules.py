@@ -26,7 +26,12 @@ from pydantic import (
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.candidate_rules.inputs import SharpInput
-from odds_lambda.candidate_rules.market_state import Line, MarketState, load_market_state
+from odds_lambda.candidate_rules.market_state import (
+    Line,
+    Lookback,
+    MarketState,
+    load_market_state,
+)
 
 # What a bet is on: an outcome on a line, the line None in a market without lines.
 Selection = tuple[Outcome, Line]
@@ -57,17 +62,40 @@ class BetIntent:
         return (self.outcome, self.line)
 
 
+class LookbackParams(BaseModel):
+    """A lookback point: ``minutes_before_decision`` before each decision time, whose state may
+    be at most ``max_input_age_minutes`` old at that point."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    minutes_before_decision: PositiveInt
+    max_input_age_minutes: PositiveInt
+
+
 class RuleParams(BaseModel):
     """Params every rule takes.
 
     ``minutes_before_kickoff`` lists the decision times, held earliest first, and a decision
     whose latest snapshot is older than ``max_input_age_minutes`` at it has no inputs.
+    ``lookbacks`` lists the lookback points, held nearest first, each with its own max input
+    age; a decision with no input at any of them has no inputs.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     minutes_before_kickoff: tuple[PositiveInt, ...] = Field(min_length=1)
     max_input_age_minutes: PositiveInt
+    lookbacks: tuple[LookbackParams, ...] = ()
+
+    @field_validator("lookbacks")
+    @classmethod
+    def _distinct_nearest_first(
+        cls, points: tuple[LookbackParams, ...]
+    ) -> tuple[LookbackParams, ...]:
+        minutes = [p.minutes_before_decision for p in points]
+        if len(set(minutes)) != len(minutes):
+            raise ValueError(f"lookback points must be distinct, got {minutes}")
+        return tuple(sorted(points, key=lambda p: p.minutes_before_decision))
 
     @field_validator("minutes_before_kickoff")
     @classmethod
@@ -86,6 +114,13 @@ def decision_times(kickoff: datetime, params: RuleParams) -> list[tuple[int, dat
 
 def max_input_age(params: RuleParams) -> timedelta:
     return timedelta(minutes=params.max_input_age_minutes)
+
+
+def lookback_points(params: RuleParams) -> tuple[Lookback, ...]:
+    return tuple(
+        Lookback(p.minutes_before_decision, timedelta(minutes=p.max_input_age_minutes))
+        for p in params.lookbacks
+    )
 
 
 class GapParams(RuleParams):
@@ -267,6 +302,7 @@ async def run_rule(
         spec.sharp_inputs,
         known_at,
         also_markets=spec.also_markets,
+        lookbacks=lookback_points(params),
     )
     return apply_rule(spec, params, state, kickoff, bet_selections)
 

@@ -13,9 +13,12 @@ from odds_core.paper_trade_models import CandidateDecision
 from odds_core.quotes import Quote
 from odds_core.vocabulary import Market
 from odds_lambda.candidate_rules import (
+    Lookback,
     SharpInput,
     build_market_state,
     decision_times,
+    input_window,
+    lookback_points,
     max_input_age,
     resolve_rule,
 )
@@ -89,6 +92,7 @@ class _EventInputs:
     age: timedelta
     sharp_inputs: frozenset[SharpInput]
     also_markets: frozenset[Market]
+    lookbacks: Sequence[Lookback]
 
     def evaluate(self, slot: CoverageCell, now: datetime) -> CoverageCell:
         """``slot`` with its inputs filled in, from the quotes stored by its ``known_at``; a
@@ -99,7 +103,14 @@ class _EventInputs:
 
         def has_input(needs: frozenset[SharpInput]) -> bool:
             state = build_market_state(
-                self.event, self.market, visible, slot.time, self.age, needs, self.also_markets
+                self.event,
+                self.market,
+                visible,
+                slot.time,
+                self.age,
+                needs,
+                self.also_markets,
+                self.lookbacks,
             )
             return state.has_input
 
@@ -122,6 +133,7 @@ async def candidate_coverage(
     """
     spec, params = resolve_rule(candidate)
     age = max_input_age(params)
+    points = lookback_points(params)
     decision_minutes = params.minutes_before_kickoff
     minutes = bucket_minutes(decision_minutes)
     events = (
@@ -164,12 +176,12 @@ async def candidate_coverage(
             event.id,
             candidate.market,
             spec.sharp_inputs,
-            since=min(slot.time for slot in slots) - age,
+            since=min(slot.time for slot in slots) - input_window(age, points),
             until=max(slot.time for slot in slots),
             also_markets=spec.also_markets,
         )
         inputs = _EventInputs(
-            event, candidate.market, quoted, age, spec.sharp_inputs, spec.also_markets
+            event, candidate.market, quoted, age, spec.sharp_inputs, spec.also_markets, points
         )
         cells = [inputs.evaluate(slot, now) for slot in slots]
         rows.append(

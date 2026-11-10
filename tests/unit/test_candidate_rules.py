@@ -851,7 +851,8 @@ class TestDecisionLeads:
         candidates = [
             _candidate(),
             _candidate(
-                name="later", params={**PARAMS.model_dump(), "minutes_before_kickoff": [30, 15]}
+                name="later",
+                params={**PARAMS.model_dump(mode="json"), "minutes_before_kickoff": [30, 15]},
             ),
             _candidate(name="mlb", sport="baseball_mlb", market="h2h"),
             _candidate(name="killed", status="killed"),
