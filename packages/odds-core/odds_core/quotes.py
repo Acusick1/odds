@@ -17,8 +17,9 @@ from odds_core.vocabulary import Market, MarketStatus, PriceOutcome, Side, Sourc
 
 @dataclass(frozen=True)
 class Quote:
-    """One price row with its snapshot's id, time, storage time, source, time basis and market
-    metadata. Numeric columns are read as floats."""
+    """One price row with its snapshot's id, time, storage time, source, time basis, market
+    metadata and payload (the source run, when the writer stored one). Numeric columns are
+    read as floats."""
 
     snapshot_id: int
     event_id: int
@@ -39,6 +40,7 @@ class Quote:
     size: float | None
     matched: float | None
     changed_at: datetime | None
+    payload_id: int | None = None
 
 
 # One labelled column per Quote field.
@@ -62,6 +64,7 @@ QUOTE_COLUMNS: tuple[Any, ...] = (
     cast(Price.size, Float).label("size"),
     cast(Price.matched, Float).label("matched"),
     col(Price.changed_at).label("changed_at"),
+    col(OddsSnapshot.payload_id).label("payload_id"),
 )
 
 

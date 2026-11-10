@@ -51,6 +51,7 @@ _COLUMNS: tuple[Any, ...] = (
     cast(Price.size, Float).label("size"),
     cast(Price.matched, Float).label("matched"),
     col(Price.changed_at).label("changed_at"),
+    col(OddsSnapshot.payload_id).label("payload_id"),
 )
 
 
@@ -64,28 +65,32 @@ async def rule_quotes(
     until: datetime | None = None,
     known_at: datetime | None = None,
     snapshot_ids: Collection[int] | None = None,
+    also_markets: Collection[Market] = (),
 ) -> list[Quote]:
     """The back prices of UK retail books and the Betfair Exchange in ``event_id``'s retail
-    snapshots of ``market``, and with ``SharpInput.POLYMARKET`` in ``sharp_inputs`` the mids of
+    snapshots of ``market`` and of each of ``also_markets``, and with ``SharpInput.POLYMARKET`` in ``sharp_inputs`` the mids of
     its Polymarket snapshots, in snapshot time, snapshot id and price id order.
 
     Narrowed when given to snapshots stamped from ``since`` to ``until`` inclusive, or stored
     (``created_at``) by ``known_at``. With ``snapshot_ids``, those snapshots in place of the
-    event's, whatever event they now belong to.
+    event's, whatever event they now belong to. Polymarket mids are read for ``market`` only.
     """
     retail = and_(
         col(OddsSnapshot.source).in_(RETAIL_SOURCES),
         col(Price.side) == Side.BACK,
         col(Price.bookmaker).in_(sorted(RULE_BOOKMAKERS)),
     )
+    retail = and_(
+        retail, col(OddsSnapshot.market).in_([Market(market), *map(Market, also_markets)])
+    )
     polymarket = and_(
+        col(OddsSnapshot.market) == Market(market),
         col(OddsSnapshot.source) == Source.POLYMARKET,
         col(Price.side) == Side.MID,
         col(Price.bookmaker) == POLYMARKET_BOOKMAKER,
     )
     conditions: list[Any] = [
-        col(OddsSnapshot.market) == Market(market),
-        or_(retail, polymarket) if SharpInput.POLYMARKET in sharp_inputs else retail,
+        or_(retail, polymarket) if SharpInput.POLYMARKET in sharp_inputs else retail
     ]
     if since is not None:
         conditions.append(col(OddsSnapshot.snapshot_time) >= since)

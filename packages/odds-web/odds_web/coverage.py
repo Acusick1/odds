@@ -88,6 +88,7 @@ class _EventInputs:
     quoted: Sequence[Quote]
     age: timedelta
     sharp_inputs: frozenset[SharpInput]
+    also_markets: frozenset[Market]
 
     def evaluate(self, slot: CoverageCell, now: datetime) -> CoverageCell:
         """``slot`` with its inputs filled in, from the quotes stored by its ``known_at``; a
@@ -97,7 +98,9 @@ class _EventInputs:
         visible = [q for q in self.quoted if q.created_at <= slot.known_at]
 
         def has_input(needs: frozenset[SharpInput]) -> bool:
-            state = build_market_state(self.event, self.market, visible, slot.time, self.age, needs)
+            state = build_market_state(
+                self.event, self.market, visible, slot.time, self.age, needs, self.also_markets
+            )
             return state.has_input
 
         fresh = [RETAIL] if has_input(frozenset()) else []
@@ -163,8 +166,11 @@ async def candidate_coverage(
             spec.sharp_inputs,
             since=min(slot.time for slot in slots) - age,
             until=max(slot.time for slot in slots),
+            also_markets=spec.also_markets,
         )
-        inputs = _EventInputs(event, candidate.market, quoted, age, spec.sharp_inputs)
+        inputs = _EventInputs(
+            event, candidate.market, quoted, age, spec.sharp_inputs, spec.also_markets
+        )
         cells = [inputs.evaluate(slot, now) for slot in slots]
         rows.append(
             CoverageRow(
