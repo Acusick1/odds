@@ -30,7 +30,7 @@ Event-driven alerts fire only if the job runs far enough to raise. A job that ne
 
 ## Heartbeats
 
-On clean exit a job inside `job_alert_context(name)` inserts `heartbeat:<name>`. The check-health job compares the newest row per expectation key to its allowed hours and purges old heartbeat rows; defaults come from the `heartbeats` of each `odds_core.job_specs.JobSpec` in `odds_core.job_specs.JOB_SPECS`, and operators can replace them through `odds_core.config.AlertConfig.heartbeat_expectations` ([health-monitor](health-monitor.md#heartbeats)). Nothing checks that a job's `odds_core.alerts.job_alert_context` name matches a `heartbeat_expectations` key, and a key with no history is not alerted, so a rename leaves a stale key and the check passes silently (#384).
+On clean exit a job inside `job_alert_context(name)` inserts `heartbeat:<name>`. The check-health job compares the newest row per expectation key to its allowed hours and purges old heartbeat rows; defaults come from the `heartbeats` of each `odds_core.job_specs.JobSpec` in `odds_core.job_specs.JOB_SPECS` (one key per sport suffix, such as `fetch-espn-fixtures-laliga`; [ESPN football schedule](../collection/espn-football-schedule.md)), and operators can replace them through `odds_core.config.AlertConfig.heartbeat_expectations` ([health-monitor](health-monitor.md#heartbeats)). Nothing checks that a job's `odds_core.alerts.job_alert_context` name matches a `heartbeat_expectations` key, and a key with no history is not alerted, so a rename leaves a stale key and the check passes silently (#384).
 
 Which jobs write a heartbeat (the EPL Polymarket job included), and their default expectations, are in [health-monitor](health-monitor.md#heartbeats).
 

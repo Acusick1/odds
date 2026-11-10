@@ -12,6 +12,7 @@ Each external source has a fetcher, a job (or manual script) that runs it, and a
 
 - [Betfair Exchange client and job](betfair-exchange.md) — The Betfair client, cert loading and adapter, the fetch-betfair-exchange job's cadence and where it runs, and what price is actually stored as betfair_exchange.
 - [EPL context data (ESPN, FPL, FBref)](epl-context-data.md) — ESPN fixtures (the fetch-espn-fixtures job) and lineups, FPL availability and FBref stats, covering fetchers, scripts, tables and readers, and which of them any feature or tool actually consumes.
+- [ESPN football schedule](espn-football-schedule.md) — How the fetch-espn-fixtures job creates the upcoming events of the Championship, La Liga, Serie A, Bundesliga and Ligue 1 from ESPN's scoreboards, which ESPN team names it drops, and the dry-run command.
 - [Historical ingest scripts](historical-ingest-scripts.md) — scripts/scrape_oddsportal.py, ingest_oddsportal.py, ingest_football_data_uk.py: inputs, matching, ids, snapshot shape, idempotency.
 - [MLB probable pitchers](mlb-probable-pitchers.md) — The MLB Stats API fetcher, the fetch-mlb-probables job, the append-only mlb_probable_pitchers table and its reader, and how the MCP tool reads it.
 - [MLB season load](mlb-season-load.md) — odds events sync-mlb-seasons: which MLB Stats API games become FINAL events, where postponed, resumed and doubleheader games are placed, how existing events are reused, and what the report lists.

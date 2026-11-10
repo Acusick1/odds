@@ -128,11 +128,24 @@ JOB_SPECS: Mapping[str, JobSpec] = MappingProxyType(
         "fetch-espn-fixtures": JobSpec(
             module="odds_lambda.jobs.fetch_espn_fixtures",
             per_sport=True,
-            sports=("soccer_epl", "basketball_nba"),
+            sports=(
+                "soccer_epl",
+                "basketball_nba",
+                "soccer_efl_champ",
+                "soccer_spain_la_liga",
+                "soccer_italy_serie_a",
+                "soccer_germany_bundesliga",
+                "soccer_france_ligue_one",
+            ),
             cron="0 6 * * *",
             heartbeats=(
                 Heartbeat("fetch-espn-fixtures", 26, "soccer_epl"),
                 Heartbeat("fetch-espn-fixtures-nba", 26, "basketball_nba"),
+                Heartbeat("fetch-espn-fixtures-championship", 26, "soccer_efl_champ"),
+                Heartbeat("fetch-espn-fixtures-laliga", 26, "soccer_spain_la_liga"),
+                Heartbeat("fetch-espn-fixtures-seriea", 26, "soccer_italy_serie_a"),
+                Heartbeat("fetch-espn-fixtures-bundesliga", 26, "soccer_germany_bundesliga"),
+                Heartbeat("fetch-espn-fixtures-ligue1", 26, "soccer_france_ligue_one"),
             ),
         ),
         "fetch-betfair-exchange": JobSpec(

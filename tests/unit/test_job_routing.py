@@ -217,9 +217,14 @@ class TestJobCronRegistry:
         assert get_job_cron("totally-made-up") is None
 
     def test_get_job_sports_returns_allowlist_when_restricted(self) -> None:
-        # fetch-espn-fixtures covers EPL and NBA — the sport allowlist is load-bearing
-        # (its main() raises for the other configured sports, MLB included).
-        assert get_job_sports("fetch-espn-fixtures") == ("soccer_epl", "basketball_nba")
+        # fetch-espn-fixtures covers EPL, NBA and the leagues ESPN schedules — the sport
+        # allowlist is load-bearing (its main() raises for the other configured sports, MLB
+        # included).
+        from odds_lambda.espn_football_schedule import LEAGUES
+
+        sports = get_job_sports("fetch-espn-fixtures")
+        assert sports is not None
+        assert set(sports) == {"soccer_epl", "basketball_nba", *LEAGUES}
 
     @pytest.mark.parametrize(
         ("job", "sports"),

@@ -21,7 +21,7 @@ The wiki is the documentation ([SCHEMA](../SCHEMA.md)); [README.md](../../README
 
 | Topic | Authoritative source |
 |---|---|
-| Settings and operator overrides | `odds_core.config.Settings`; job defaults come from `odds_core.job_specs.JOB_SPECS`; [Configuration](configuration.md#sections) owns the field map and template rules. |
+| Settings and operator overrides | `odds_core.config.Settings`; job defaults (cron, per-sport allowlist, heartbeats) come from `odds_core.job_specs.JOB_SPECS`; [Configuration](configuration.md#sections) owns the field map and template rules. |
 | CLI flags and defaults | Each command's `--help`; [CLI reference](odds-cli.md#shared-conventions). |
 | Jobs and deployment | [Deployment matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs) owns the source map and operational status. |
 | Alerting and reporting | [Alerts](../operations/alerts.md#delivery) and [reporting surfaces](../operations/reporting-surfaces.md#reporting-surfaces) cite their implementations. |

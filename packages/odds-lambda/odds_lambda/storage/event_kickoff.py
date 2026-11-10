@@ -17,6 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = structlog.get_logger()
 
 _FOOTBALL_ORDER = (Source.ODDSPORTAL, Source.ODDS_API, Source.FOOTBALL_DATA_UK)
+# The leagues whose events ESPN's scoreboard creates (``odds_lambda.espn_football_schedule``).
+# ESPN ranks last: its kick-offs equalled OddsPortal's and Betfair's when probed, so it adds a
+# source for a postponement only it reports (accepted after kick-off from any source in the order).
+_ESPN_SCHEDULED_FOOTBALL_ORDER = (*_FOOTBALL_ORDER, Source.ESPN)
 
 # Per sport, the sources whose kick-off times an event follows, best first. A source moves an
 # event only when no source ranked above it holds an id on the event. An empty order means no
@@ -25,11 +29,11 @@ KICKOFF_AUTHORITY: Mapping[SportKey, tuple[Source, ...]] = MappingProxyType(
     {
         "baseball_mlb": (Source.MLB_STATS_API,),
         "soccer_epl": _FOOTBALL_ORDER,
-        "soccer_efl_champ": _FOOTBALL_ORDER,
-        "soccer_spain_la_liga": _FOOTBALL_ORDER,
-        "soccer_italy_serie_a": _FOOTBALL_ORDER,
-        "soccer_germany_bundesliga": _FOOTBALL_ORDER,
-        "soccer_france_ligue_one": _FOOTBALL_ORDER,
+        "soccer_efl_champ": _ESPN_SCHEDULED_FOOTBALL_ORDER,
+        "soccer_spain_la_liga": _ESPN_SCHEDULED_FOOTBALL_ORDER,
+        "soccer_italy_serie_a": _ESPN_SCHEDULED_FOOTBALL_ORDER,
+        "soccer_germany_bundesliga": _ESPN_SCHEDULED_FOOTBALL_ORDER,
+        "soccer_france_ligue_one": _ESPN_SCHEDULED_FOOTBALL_ORDER,
         "basketball_nba": (Source.ESPN, Source.ODDSPORTAL, Source.ODDS_API),
     }
 )

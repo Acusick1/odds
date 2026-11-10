@@ -24,7 +24,7 @@ Job records and operator overrides decide what the production scheduler runs:
 
 - `odds_core.config.SchedulerConfig.bootstrap_jobs` names the jobs `odds scheduler start` bootstraps. `agent-run` has `bootstrap=False` in `odds_core.job_specs.JOB_SPECS`, so it runs only when added to `SCHEDULER_BOOTSTRAP_JOBS`.
 - `odds_core.job_specs.JOB_SPECS` gives the jobs installed as a fixed cron: `fetch-espn-fixtures`, `fetch-mlb-probables` and `backup-database`. Every other bootstrapped job self-schedules ([Self-scheduling](self-scheduling.md)); a restart keeps its pending run, and only a job without one runs its bootstrap function ([bootstrap](local-scheduler.md#bootstrap-jobs-and-cron-table)).
-- `odds_core.job_specs.JOB_SPECS` limits a per-sport job, cron or self-scheduling, to the configured sports in its allowlist. A per-sport job with no sport allowlist runs for every sport in `data_collection.sports` (`odds_lambda.scheduling.jobs.resolve_target_sports`).
+- `odds_core.job_specs.JOB_SPECS` limits a per-sport job, cron or self-scheduling, to the configured sports in its allowlist (`fetch-espn-fixtures` lists EPL, NBA, the Championship, La Liga, Serie A, the Bundesliga and Ligue 1, one cron run per sport). A per-sport job with no sport allowlist runs for every sport in `data_collection.sports` (`odds_lambda.scheduling.jobs.resolve_target_sports`).
 
 | Job | Bootstrapped by default | Sports | Schedule |
 |---|---|---|---|

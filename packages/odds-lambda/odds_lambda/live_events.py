@@ -68,6 +68,8 @@ class SkipReason(StrEnum):
     ID_REFUSED = "id_refused"
     # Listed already under way, at its actual start, and matching no event.
     UNDER_WAY = "under_way"
+    # A schedule lists a team the sport's roster does not name, so its event could not be matched.
+    UNKNOWN_TEAM = "unknown_team"
 
 
 @dataclass(frozen=True)
@@ -326,9 +328,12 @@ def describe_refusal(refused: RefusedId) -> str:
     return f"event {refused.event.id} holds {source} id {refused.check.other}"
 
 
-async def alert_dropped_games(job_name: str, dropped: Sequence[DroppedGame]) -> bool:
+async def alert_dropped_games(
+    job_name: str, dropped: Sequence[DroppedGame], *, stored: str = "odds"
+) -> bool:
     """Warn that a run dropped listed games, at most every ``stale_reminder_minutes`` per job.
-    A game dropped as under way is expected and not alerted."""
+    A game dropped as under way is expected and not alerted. ``stored`` names what the run
+    stores for a game ("odds", or "an event" for a schedule job)."""
     dropped = [d for d in dropped if d.reason is not SkipReason.UNDER_WAY]
     if not dropped:
         return False
@@ -341,7 +346,7 @@ async def alert_dropped_games(job_name: str, dropped: Sequence[DroppedGame]) -> 
     return await send_recorded_alert(
         f"games_dropped:{job_name}",
         "warning",
-        f"⚠️ {job_name} stored no odds for {len(dropped)} listed games: {shown}{more}",
+        f"⚠️ {job_name} stored no {stored} for {len(dropped)} listed games: {shown}{more}",
         every=timedelta(minutes=get_settings().alerts.stale_reminder_minutes),
         context={"job_name": job_name, "games": [d.describe() for d in dropped]},
     )

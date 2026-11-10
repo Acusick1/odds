@@ -1,6 +1,8 @@
 """Fetch ESPN fixtures job — refresh current-season all-competition schedules.
 
-For NBA the job instead syncs ESPN's scoreboard into events (``odds_lambda.espn_nba_schedule``).
+For NBA the job instead syncs ESPN's scoreboard into events (``odds_lambda.espn_nba_schedule``),
+and for each league of ``odds_lambda.espn_football_schedule.LEAGUES`` (every football league
+but the EPL) it does the same with that league's football scoreboard.
 
 Flow:
 1. Fetch current-season fixtures across EPL + FA Cup + League Cup + European
@@ -30,6 +32,7 @@ from odds_core.database import async_session_maker
 from odds_core.epl_data_models import EspnFixtureRecord
 from odds_core.job_specs import heartbeat_name
 from odds_core.models import Event, EventStatus
+from odds_core.sports import SportKey
 
 from odds_lambda.collection_calendar import EmptyCollectionError, event_calendar
 from odds_lambda.espn_fixture_fetcher import (
@@ -40,6 +43,8 @@ from odds_lambda.espn_fixture_fetcher import (
     EspnUpcomingFetchError,
     current_season,
 )
+from odds_lambda.espn_football_schedule import LEAGUES, FootballLeague
+from odds_lambda.live_events import alert_dropped_games
 from odds_lambda.scheduling.jobs import JobContext, require_sport
 from odds_lambda.storage.espn_fixture_reader import EspnFixtureReader
 from odds_lambda.storage.espn_fixture_writer import EspnFixtureWriter
@@ -50,7 +55,7 @@ logger = structlog.get_logger()
 
 # EPL keeps its fixtures in ``espn_fixtures``; NBA's schedule is written as events directly.
 SPORT_KEY = "soccer_epl"
-NBA_SPORT_KEY = "basketball_nba"
+NBA_SPORT_KEY: SportKey = "basketball_nba"
 
 
 async def main(ctx: JobContext) -> None:
@@ -66,9 +71,13 @@ async def main(ctx: JobContext) -> None:
     if sport == NBA_SPORT_KEY:
         await _sync_nba_schedule()
         return
+    if sport in LEAGUES:
+        await _sync_football_schedule(LEAGUES[sport])
+        return
     if sport != SPORT_KEY:
         raise ValueError(
-            f"fetch-espn-fixtures supports {SPORT_KEY} and {NBA_SPORT_KEY}, got sport={sport!r}"
+            f"fetch-espn-fixtures supports {SPORT_KEY}, {NBA_SPORT_KEY} and "
+            f"{', '.join(LEAGUES)}, got sport={sport!r}"
         )
 
     app_settings = get_settings()
@@ -94,20 +103,19 @@ async def main(ctx: JobContext) -> None:
         logger.info("fetch_espn_fixtures_postponed_marked", events=postponed)
 
 
-async def _warn_if_nba_listing_unexpectedly_empty() -> None:
-    """Warn when ESPN lists no NBA game although events are scheduled in the window; the
-    off-season is silent."""
-    from odds_lambda.espn_nba_schedule import UPCOMING_DAYS
-
+async def _warn_if_listing_unexpectedly_empty(sport_key: SportKey, days: int) -> None:
+    """Warn when ESPN lists no game of the sport although events are scheduled in the next
+    ``days``; the off-season is silent."""
     async with async_session_maker() as session:
         calendar = await event_calendar(
-            session, NBA_SPORT_KEY, now=datetime.now(UTC), horizon=timedelta(days=UPCOMING_DAYS)
+            session, sport_key, now=datetime.now(UTC), horizon=timedelta(days=days)
         )
     if calendar.kickoffs_in_horizon:
+        job = heartbeat_name("fetch-espn-fixtures", sport_key)
         await send_job_warning(
-            "espn_nba_empty:fetch-espn-fixtures",
-            f"fetch-espn-fixtures-nba: ESPN listed no NBA game with "
-            f"{calendar.kickoffs_in_horizon} event(s) scheduled in the next {UPCOMING_DAYS} days",
+            f"espn_empty:{job}",
+            f"{job}: ESPN listed no {sport_key} game with "
+            f"{calendar.kickoffs_in_horizon} event(s) scheduled in the next {days} days",
         )
 
 
@@ -116,7 +124,7 @@ async def _sync_nba_schedule() -> None:
     game failed, after the others are stored."""
     from odds_core.alerts import job_alert_context
 
-    from odds_lambda.espn_nba_schedule import sync_upcoming
+    from odds_lambda.espn_nba_schedule import UPCOMING_DAYS, sync_upcoming
     from odds_lambda.scheduling.jobs import make_compound_job_name
 
     async with job_alert_context(make_compound_job_name("fetch-espn-fixtures", NBA_SPORT_KEY)):
@@ -135,7 +143,39 @@ async def _sync_nba_schedule() -> None:
                 f"{len(report.errors)} NBA games failed to sync: " + "; ".join(report.errors[:3])
             )
         if report.games == 0:
-            await _warn_if_nba_listing_unexpectedly_empty()
+            await _warn_if_listing_unexpectedly_empty(NBA_SPORT_KEY, UPCOMING_DAYS)
+
+
+async def _sync_football_schedule(league: FootballLeague) -> None:
+    """Create the events of the league's next matches; raises when any match failed, after the
+    others are stored, and alerts on matches dropped for a team outside the league's clubs."""
+    from odds_core.alerts import job_alert_context
+
+    from odds_lambda.espn_football_schedule import UPCOMING_DAYS, sync_upcoming
+    from odds_lambda.scheduling.jobs import make_compound_job_name
+
+    job_name = make_compound_job_name("fetch-espn-fixtures", league.sport_key)
+    async with job_alert_context(job_name):
+        report = await sync_upcoming(league, datetime.now(UTC))
+        logger.info(
+            "fetch_espn_football_schedule_completed",
+            sport=league.sport_key,
+            games=report.games,
+            created=report.created,
+            matched=report.matched,
+            skipped=report.skipped,
+            rescheduled=report.rescheduled,
+            dropped=len(report.dropped),
+            errors=len(report.errors),
+        )
+        await alert_dropped_games(job_name, report.dropped, stored="event")
+        if report.errors:
+            raise RuntimeError(
+                f"{len(report.errors)} {league.sport_title} matches failed to sync: "
+                + "; ".join(report.errors[:3])
+            )
+        if report.games == 0 and not report.dropped:
+            await _warn_if_listing_unexpectedly_empty(league.sport_key, UPCOMING_DAYS)
 
 
 # How many days ahead the upcoming fetch reaches. 30 days covers the agent's

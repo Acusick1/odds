@@ -36,7 +36,7 @@ The runtime of the [betting agent](betting-agent.md) lives in `odds_lambda.jobs.
 - runs under `AGENT_DATABASE_URL` when set, otherwise inherits the parent DSN with a logged warning (`odds_lambda.jobs.agent_run._build_agent_subprocess_env`), see [database role](#database-role);
 - writes a JSONL trace per run ([run traces](agent-run-traces.md)).
 
-Two entry paths: the scheduled `agent-run` job, and `odds agent run --sport S` for one wake-up with no scheduling side effects. `agent-run` has `agent_trades=True` in `odds_core.job_specs.JOB_SPECS` because it places paper bets (as does [`run-candidates`](../evaluation/run-candidates-job.md), which has its own `--include-candidates`), so `odds scheduler smoke` skips it unless `--include-agent` ([local scheduler](../scheduling/local-scheduler.md#cli)).
+Two entry paths: the scheduled `agent-run` job, and `odds agent run --sport S` for one wake-up with no scheduling side effects. the `agent-run` record in `odds_core.job_specs.JOB_SPECS` has `agent_trades=True` because it places paper bets (as does [`run-candidates`](../evaluation/run-candidates-job.md), which has its own `--include-candidates`), so `odds scheduler smoke` skips it unless `--include-agent` ([local scheduler](../scheduling/local-scheduler.md#cli)).
 
 ## The agent-run job
 

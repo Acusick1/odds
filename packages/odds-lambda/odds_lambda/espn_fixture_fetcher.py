@@ -261,6 +261,15 @@ class EspnFixtureFetcher:
 
         return records
 
+    async def fetch_month_scoreboard_json(
+        self, league_slug: str, year: int, month: int
+    ) -> dict[str, Any]:
+        """One calendar month's scoreboard response for one competition, unparsed."""
+        return await self._fetch_json(
+            f"{BASE_URL}/{league_slug}/scoreboard"
+            f"?dates={year:04d}{month:02d}&limit={_SCOREBOARD_LIMIT}"
+        )
+
     async def fetch_month_scoreboard(
         self,
         league_slug: str,
@@ -279,11 +288,7 @@ class EspnFixtureFetcher:
         ``httpx.HTTPError`` when the request fails.
         """
         competition = LEAGUE_SLUGS[league_slug]
-        url = (
-            f"{BASE_URL}/{league_slug}/scoreboard"
-            f"?dates={year:04d}{month:02d}&limit={_SCOREBOARD_LIMIT}"
-        )
-        data = await self._fetch_json(url)
+        data = await self.fetch_month_scoreboard_json(league_slug, year, month)
 
         events = data.get("events", [])
         records: list[EspnFixtureRecord] = []
