@@ -7,7 +7,6 @@ timezone, kick-off authority, candidate markets and closes) are already taken.
 
 from __future__ import annotations
 
-import dataclasses
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -53,20 +52,14 @@ BETFAIR = SportBetfairConfig(
 @pytest.fixture
 def la_liga(monkeypatch: pytest.MonkeyPatch) -> None:
     """The guide's registrations for La Liga, which its SportKey, timezone, kick-off authority,
-    candidate markets and closes already have."""
+    candidate markets and closes already have, with each source rebuilt by the function its
+    module runs at import."""
     monkeypatch.setitem(jobs._SPORT_SUFFIX_MAP, "laliga", SPORT)
     monkeypatch.setitem(decision.OVERNIGHT_WINDOWS, SPORT, (22, 6))
     monkeypatch.setitem(betfair_constants.SPORT_CONFIG, SPORT, BETFAIR)
-    for module, collection in (
-        (fetch_oddsportal, league_collection(LEAGUE)),
-        (fetch_betfair_exchange, betfair_collection(BETFAIR)),
-    ):
-        source = module.SOURCE
-        monkeypatch.setattr(
-            module,
-            "SOURCE",
-            dataclasses.replace(source, sports={**source.sports, SPORT: collection}),
-        )
+    monkeypatch.setattr(fetch_oddsportal, "LEAGUE_SPECS", [*fetch_oddsportal.LEAGUE_SPECS, LEAGUE])
+    for module in (fetch_oddsportal, fetch_betfair_exchange):
+        monkeypatch.setattr(module, "SOURCE", module.collection_source())
 
 
 def collecting(*jobs: str) -> Settings:
@@ -94,6 +87,10 @@ class TestSourcesFollowTheirConfig:
 
 @pytest.mark.usefixtures("la_liga")
 class TestAddedSport:
+    def test_each_source_collects_the_registered_sport(self) -> None:
+        assert fetch_oddsportal.SOURCE.sports[SPORT] == league_collection(LEAGUE)
+        assert fetch_betfair_exchange.SOURCE.sports[SPORT] == betfair_collection(BETFAIR)
+
     async def test_the_status_strip_shows_each_collected_market(
         self, pglite_async_session: AsyncSession
     ) -> None:

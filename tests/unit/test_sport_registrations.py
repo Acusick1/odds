@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import pytest
 from odds_core.close import CLOSES
+from odds_core.job_specs import JOB_SPECS
 from odds_core.sports import LEAGUE_TIMEZONES, SUPPORTED_SPORTS
 from odds_lambda.candidate_rules.rules import SPORT_MARKETS
 from odds_lambda.collection_calendar import CollectionSource
 from odds_lambda.health_readers import collection_sources
+from odds_lambda.jobs.fetch_odds import PLANS
 from odds_lambda.scheduling.decision import OVERNIGHT_WINDOWS
 from odds_lambda.scheduling.jobs import _SPORT_SUFFIX_MAP
 from odds_lambda.storage.event_kickoff import KICKOFF_AUTHORITY
@@ -50,3 +52,7 @@ class TestSportRegistrations:
         )
         if source.skips_overnight:
             assert sport_key in OVERNIGHT_WINDOWS, f"{sport_key} has no OVERNIGHT_WINDOWS entry"
+
+    @pytest.mark.parametrize("sport_key", JOB_SPECS["fetch-odds"].sports or ())
+    def test_every_fetch_odds_sport_has_a_plan(self, sport_key: str) -> None:
+        assert sport_key in PLANS, f"fetch-odds has no plan for {sport_key}; add one to PLANS"

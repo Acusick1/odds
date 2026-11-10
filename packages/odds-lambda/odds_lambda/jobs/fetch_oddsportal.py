@@ -132,14 +132,18 @@ def league_collection(spec: LeagueSpec) -> SportCollection:
     )
 
 
-SOURCE = CollectionSource(
-    key="oddsportal",
-    job_name="fetch-oddsportal",
-    source=Source.ODDSPORTAL,
-    cadence=CADENCE,
-    sports={spec.sport_key: league_collection(spec) for spec in LEAGUE_SPECS},
-    skips_overnight=True,
-)
+def collection_source() -> CollectionSource:
+    return CollectionSource(
+        key="oddsportal",
+        job_name="fetch-oddsportal",
+        source=Source.ODDSPORTAL,
+        cadence=CADENCE,
+        sports={spec.sport_key: league_collection(spec) for spec in LEAGUE_SPECS},
+        skips_overnight=True,
+    )
+
+
+SOURCE = collection_source()
 
 
 @dataclass

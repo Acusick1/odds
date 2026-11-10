@@ -1,7 +1,7 @@
 ---
 type: howto
 title: Add a sport
-description: "Steps to add a sport: SportKey, timezone, kick-off authority, suffix, overnight window, league spec and Betfair config with their fixture horizons, candidate markets, close and fallback, team aliases, job sport allowlists, Terraform rules, heartbeat keys, the configured sports, and what odds-web then shows."
+description: "Steps to add a sport: SportKey, timezone, kick-off authority, suffix, overnight window, league spec and Betfair config with their fixture horizons, Odds API fetch plan, candidate markets, close and fallback, team aliases, job sport allowlists, Terraform rules, heartbeat keys, the configured sports, and what odds-web then shows."
 sources:
   - odds_core.sports.SportKey
   - odds_core.sports.LEAGUE_TIMEZONES
@@ -12,6 +12,8 @@ sources:
   - odds_core.job_specs.JOB_SPECS
   - odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS
   - odds_lambda.jobs.fetch_oddsportal.LEAGUE_SPECS
+  - odds_lambda.jobs.fetch_odds.PLANS
+  - odds_lambda.jobs.fetch_odds.FetchPlan
   - odds_lambda.betfair.constants.SPORT_CONFIG
   - odds_lambda.betfair.constants.SportBetfairConfig
   - odds_lambda.jobs.fetch_oddsportal.LeagueSpec
@@ -29,7 +31,7 @@ status: stable
 
 # Add a sport
 
-The Odds API bookmakers and markets are config (`bookmakers`, a per-sport map, and `markets` on `odds_core.config.DataCollectionConfig`) and need no other code; a sport with no `bookmakers` entry fails its Odds API fetch, and a sport that needs its own Odds API key adds its index to `odds_core.config.APIConfig.key_index_by_sport` ([keys](odds-api-client.md#retry-and-keys)). A new sport needs the steps below; skip a step only when the sport has no feed or job of that kind. A sport loaded only for the Odds API historical backfill needs steps 1, 7, 8 and 9 ([historical listings](../storage/event-matching.md#historical-odds-api-listings)).
+The Odds API bookmakers and markets are config (`bookmakers`, a per-sport map, and `markets` on `odds_core.config.DataCollectionConfig`), and its fetch needs a plan (step 10); a sport with no `bookmakers` entry fails its Odds API fetch, and a sport that needs its own Odds API key adds its index to `odds_core.config.APIConfig.key_index_by_sport` ([keys](odds-api-client.md#retry-and-keys)). A new sport needs the steps below; skip a step only when the sport has no feed or job of that kind. A sport loaded only for the Odds API historical backfill needs steps 1, 7, 8 and 9 ([historical listings](../storage/event-matching.md#historical-odds-api-listings)).
 
 1. Add the sport to `odds_core.sports.SportKey`, its timezone to `odds_core.sports.LEAGUE_TIMEZONES` and its kick-off sources, best first, to `odds_lambda.storage.event_kickoff.KICKOFF_AUTHORITY`.
    - It becomes the `sport` argument of jobs, MCP tools and CLI commands ([sport-and-market-keys](sport-and-market-keys.md#sport-keys)); the timezone sets its game day ([timezones](../foundations/timezones.md)) and the order which source may move its kick-offs ([kick-off authority](../storage/kickoff-authority.md#authority-order)).
@@ -52,17 +54,20 @@ The Odds API bookmakers and markets are config (`bookmakers`, a per-sport map, a
    - A pair whose entry is `None` is reported without EV: odds-web shows its candidate as "EV not scoreable" and its trades' close as unsupported ([candidate page](../operations/odds-web.md#candidate-page)).
 9. Add team aliases in `odds_core.team`, the one alias map (`odds_lambda.polymarket_sports.PolymarketSportConfig.team_name` only picks the Polymarket spelling), for every spelling each source uses. The map ignores the sport, so an alias must not name another club in any league.
    - Event matching compares normalised names; unknown names pass through unchanged and surface as duplicate events or NULL `event_id` ([event-matching](../storage/event-matching.md)).
-10. Add the sport to each allowlist in `odds_core.job_specs.JOB_SPECS` whose job should run for it.
+10. If the Odds API prices it, add an `odds_lambda.jobs.fetch_odds.FetchPlan` to `odds_lambda.jobs.fetch_odds.PLANS`, and the sport to the `fetch-odds` allowlist in step 11.
+    - Without a plan, the sport's `fetch-odds` run raises `ValueError: fetch-odds has no plan for <sport>` before any work ([fetch-odds job](fetch-odds-job.md)); the plan's `source` is a `odds_lambda.collection_calendar.CollectionSource` whose `odds_lambda.collection_calendar.SportCollection` holds the horizon and markets its empty-run check uses, and its cadence is `odds_core.job_specs.job_cadence` (a sport with its own cadence adds it to `sport_cadences` in the job record).
+    - The stale-source check reads only `odds_lambda.jobs.fetch_odds.SOURCE`, so a sport that polls at its cadence (as EPL does) is added to that source's `sports`; a sport with sparse runs gets a source of its own, as NBA does, and is left out of the check ([fetch-odds job](fetch-odds-job.md)).
+11. Add the sport to each allowlist in `odds_core.job_specs.JOB_SPECS` whose job should run for it.
     - A job with an allowlist skips every sport not on it, so a new sport gets none of those jobs until added; `fetch-oddsportal-results` is EPL-only there, so a sport settled from OddsPortal results is added to it; per-sport jobs without an allowlist run for every sport in `data_collection.sports` ([local-scheduler](../scheduling/local-scheduler.md#bootstrap-jobs-and-cron-table)).
-11. Skip the `sport_configs` local entry in `deployment/aws/terraform/eventbridge.tf` while AWS is dormant.
+12. Skip the `sport_configs` local entry in `deployment/aws/terraform/eventbridge.tf` while AWS is dormant.
     - Rules are created per `sport_configs` entry, and production runs on a single local host ([job-deployment-matrix](../scheduling/job-deployment-matrix.md#dormant-aws-rules)).
-12. Add heartbeat expectations (allowed hours between runs, longer for jobs with an overnight pause) to the job record's `heartbeats` in `odds_core.job_specs.JOB_SPECS` for each job that records a heartbeat through [`odds_core.alerts.job_alert_context`](../operations/alerts.md#delivery) (on clean exit), keyed by compound name (a daily job needs 26 to 30 h, as `fetch-espn-fixtures` and `fetch-mlb-probables` have, and as the global `backup-database` has without a sport; `fetch-betfair-exchange`, `fetch-polymarket-odds` and `fetch-espn-fixtures` (an NBA key beside the EPL one) have an entry per sport; `fetch-injuries` has an NBA entry only; `fetch-odds` has an EPL and an NBA entry and `fetch-scores` an EPL entry only, since their allowlists name those sports). The local scheduler cancels any run that exceeds `odds_lambda.scheduling.runner.JOB_TIMEOUT`, so a sport's job must finish within it.
+13. Add heartbeat expectations (allowed hours between runs, longer for jobs with an overnight pause) to the job record's `heartbeats` in `odds_core.job_specs.JOB_SPECS` for each job that records a heartbeat through [`odds_core.alerts.job_alert_context`](../operations/alerts.md#delivery) (on clean exit), keyed by compound name (a daily job needs 26 to 30 h, as `fetch-espn-fixtures` and `fetch-mlb-probables` have, and as the global `backup-database` has without a sport; `fetch-betfair-exchange`, `fetch-polymarket-odds` and `fetch-espn-fixtures` (an NBA key beside the EPL one) have an entry per sport; `fetch-injuries` has an NBA entry only; `fetch-odds` has an EPL and an NBA entry and `fetch-scores` an EPL entry only, since their allowlists name those sports). The local scheduler cancels any run that exceeds `odds_lambda.scheduling.runner.JOB_TIMEOUT`, so a sport's job must finish within it.
     - Keys are compound names (`fetch-oddsportal-<suffix>`), and a key with no history is never alerted ([alerting-and-heartbeats](../operations/alerting-and-heartbeats.md#heartbeats)).
-13. Run `uv run pytest tests/unit/test_sport_registrations.py`.
-    - It fails naming the missing entry when a `SportKey` lacks a timezone, kick-off authority or candidate markets, a candidate market lacks its `odds_core.close.CLOSES` entry, or a sport a collector covers (`odds_lambda.health_readers.collection_sources`) lacks a suffix or, for a collector with an overnight pause, an overnight window.
-14. Add the sport to `SPORTS` (a JSON array, `odds_core.config.DataCollectionConfig`) in the production host's `.env`, and deploy ([configuration](../foundations/configuration.md#list-fields-and-the-template)).
+14. Run `uv run pytest tests/unit/test_sport_registrations.py`.
+    - It fails naming the missing entry when a `SportKey` lacks a timezone, kick-off authority or candidate markets, a `fetch-odds` sport lacks a plan, a candidate market lacks its `odds_core.close.CLOSES` entry, or a sport a collector covers (`odds_lambda.health_readers.collection_sources`) lacks a suffix or, for a collector with an overnight pause, an overnight window.
+15. Add the sport to `SPORTS` (a JSON array, `odds_core.config.DataCollectionConfig`) in the production host's `.env`, and deploy ([configuration](../foundations/configuration.md#list-fields-and-the-template)).
     - The scheduler bootstraps each per-sport job for it. The odds-web [status strip](../operations/odds-web.md#status-strip) then shows its job chips and a source chip per collected market, unknown until the first snapshot of that market is stored.
-15. Pass `--sport` and the sport's market key (`1x2` or `h2h`) in every manual command and check the first fetch.
+16. Pass `--sport` and the sport's market key (`1x2` or `h2h`) in every manual command and check the first fetch.
     - Several CLI defaults are NBA ([odds-cli](../foundations/odds-cli.md#sport-defaults)).
 
 ## Related

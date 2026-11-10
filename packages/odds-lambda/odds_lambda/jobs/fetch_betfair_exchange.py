@@ -83,14 +83,20 @@ def betfair_collection(config: SportBetfairConfig) -> SportCollection:
     return SportCollection(config.fixture_horizon, tuple(spec.market for spec in config.markets))
 
 
-SOURCE = CollectionSource(
-    key="betfair_exchange",
-    job_name="fetch-betfair-exchange",
-    source=Source.BETFAIR,
-    cadence=CADENCE,
-    sports={sport_key: betfair_collection(config) for sport_key, config in SPORT_CONFIG.items()},
-    skips_overnight=True,
-)
+def collection_source() -> CollectionSource:
+    return CollectionSource(
+        key="betfair_exchange",
+        job_name="fetch-betfair-exchange",
+        source=Source.BETFAIR,
+        cadence=CADENCE,
+        sports={
+            sport_key: betfair_collection(config) for sport_key, config in SPORT_CONFIG.items()
+        },
+        skips_overnight=True,
+    )
+
+
+SOURCE = collection_source()
 
 
 @dataclass
