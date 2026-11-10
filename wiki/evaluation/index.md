@@ -27,5 +27,5 @@ Backtests replay a strategy over stored events. The experiment pages record what
 ### How-to guides
 
 - [Run and record a modelling experiment](howto-run-experiment.md) — Run an experiment script, check its verification artifacts, and record the result in the wiki.
-- [Take an idea to a verdict](howto-take-an-idea-to-a-verdict.md) — The steps from a candidate idea issue through a development backtest, registration, the forward test and its checkpoints and the parity check, to promoting or killing the candidate.
+- [Take an idea to a verdict](howto-take-an-idea-to-a-verdict.md) — The steps from a candidate idea issue through a development backtest, the one-shot holdout run, registration, the forward test and its checkpoints and the parity check, to promoting or killing the candidate.
 <!-- pages:end -->

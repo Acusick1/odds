@@ -7,6 +7,7 @@ sources:
   - odds_analytics.candidate_model.ModelReplay
   - odds_analytics.candidate_model.refit_blocks
   - odds_cli.commands.candidates.backtest
+  - odds_analytics.holdout
   - odds_lambda.candidate_rules.rules.run_rule
   - odds_core.close.close_quotes
 mentions:
@@ -23,6 +24,20 @@ status: stable
 `odds_cli.commands.candidates.backtest` resolves its argument with `odds_cli.commands.candidates._resolve`: a path to an existing file loads that file, and any other argument is a registered candidate name. `--from` and `--to` are UTC days, both inclusive. `--json <path>` also writes the result as JSON. `--compare <name-or-path>` also replays a second candidate, resolved the same way, on the events the first decided ([comparison](#comparison)). An unknown candidate, an agent candidate, a bad date, `--to` before `--from` or an invalid rule or params prints the error and exits 1.
 
 A file loaded by path may be an unregistered draft. `odds_core.candidates.load_candidate_file` parses it with the registry's model, but does not require the file name to match `name` and does not require `odds_core.candidates.MechanicalCandidate.rule_sha256`. `odds_analytics.candidate_backtest.hash_status` reports whether the recorded hash is `match`, `mismatch` or `absent` against the rule's current hash, `odds_lambda.candidate_rules.pinning.rule_sha256`, or `unhashable` when the rule's closure fails closed ([rule pinning](candidate-rules.md#rule-pinning)), and the command prints a warning unless it matches. The registry rejects a mechanical file without the hash.
+
+## Sealed holdout
+
+`odds_analytics.holdout.admit` runs before any replay. A range whose days touch `odds_analytics.holdout.holdout_windows` for the draft's sport is a holdout range: the 2025-26 season (1 August to 31 July) of the Championship, La Liga, Serie A, the Bundesliga and Ligue 1, and EPL 2022-23 and 2023-24 while `odds_analytics.holdout.EPL_2022_24_SEALED` is true (the substitute close of [#730](https://github.com/Acusick1/odds/issues/730) is not accepted; set it false only if that is rejected). The choice is recorded in [ADR-0021](../../docs/adr/0021-sealed-holdout-and-one-shot-gate.md).
+
+The command refuses a holdout range, replaying and writing nothing, and exits 1, unless all of these hold:
+
+1. `candidates/preregistrations/<issue>.yaml` for the draft's `issue` exists, is committed and equals its committed version. It is an `odds_analytics.holdout.Preregistration`: the issue, the selected cell's `cell` params and the `grid_sha` at which the grid was frozen, a commit in HEAD's history.
+2. The draft's params equal `cell`.
+3. No tracked file has an uncommitted change, except the ledger, so HEAD is the code that runs.
+4. The ledger `candidates/holdout.jsonl` has no row for the draft's issue and version.
+5. The command has no `--compare`.
+
+A run then appends an `odds_analytics.holdout.HoldoutRun` to the ledger before printing: issue, version, name, sport, cell, range, run date, `git_sha` (HEAD), `grid_sha` and the gate result. Commit the row. The command prints `odds_analytics.holdout.gate`'s verdict over every bet with a close: pass when mean EV is above 0 and the 95% interval's upper bound is above 0; under `odds_analytics.holdout.MIN_GATE_BETS` (30) bets, the interval condition alone passes and the result is flagged; no bets fails, flagged. The holdout run never promotes, and the verdict label says so.
 
 ## Replay
 

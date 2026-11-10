@@ -19,6 +19,7 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
+import yaml
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from odds_lambda.candidate_rules import code_hash
@@ -410,3 +411,32 @@ def cross_market_run() -> RunQuotes:
         return quotes
 
     return run
+
+
+HOLDOUT_CELL: dict[str, object] = {
+    "threshold": 0.02,
+    "minutes_before_kickoff": [60],
+    "max_input_age_minutes": 10,
+}
+
+
+@pytest.fixture
+def holdout_repo(candidates_repo: Path) -> Path:
+    """A committed ``candidates/`` with a pre-registration for issue 610 and an empty ledger,
+    with its grid frozen at the first commit; returns the ``candidates/`` directory."""
+    directory = candidates_repo / "candidates"
+    (directory / "holdout.jsonl").write_text("")
+    git_commit(candidates_repo)
+    grid_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=candidates_repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    (directory / "preregistrations").mkdir()
+    (directory / "preregistrations" / "610.yaml").write_text(
+        yaml.safe_dump({"issue": 610, "grid_sha": grid_sha, "cell": HOLDOUT_CELL})
+    )
+    git_commit(candidates_repo)
+    return directory

@@ -65,6 +65,8 @@ What is scored, in `odds_analytics.candidate_report`:
 
 `odds_cli.commands.candidates.backtest` replays a rule over completed events, tuning a model rule's model on its training matches and refitting it as it goes, and recording the library versions that fit it, and scores it with the functions above, optionally beside a second candidate, never a model rule, on the same matches ([replay backtest](candidate-backtest.md)). It is the only command that runs a [model rule](candidate-rules.md#model-rules). `odds_cli.commands.candidates.parity` replays each recorded decision from its recorded input snapshots and compares the bets ([parity check](candidate-parity.md)). The steps that use them are on [From idea to verdict](howto-take-an-idea-to-a-verdict.md).
 
+The `candidates/preregistrations/` directory and the ledger `candidates/holdout.jsonl` (`odds_analytics.holdout.HOLDOUT_LEDGER`) belong to the [sealed holdout](candidate-backtest.md#sealed-holdout); neither is a `*.yaml` candidate file, so `odds_core.candidates.load_candidates` ignores them.
+
 ## Version check
 
 `scripts.check_candidate_versions.check` compares the working tree's `candidates/*.yaml` with the same files at a base commit. It runs as the `candidate-versions` pre-commit hook ([code conventions](../foundations/code-conventions.md#mechanical-gates)), locally and in the `Lint` workflow. The base is `--base`, else the merge-base of `HEAD` with `origin/main`, else with `main`, else `HEAD`.
