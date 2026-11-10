@@ -226,10 +226,16 @@ class TestEveryReaderUnderTheRole:
         for candidate in CANDIDATES:
             assert "bet365" in pages[f"/c/{candidate.name}/{candidate.version}"]
 
-    def test_every_table_a_reader_uses_is_in_the_grants_file(self) -> None:
-        grants = ODDS_WEB_GRANTS.read_text()
+    def test_the_grants_file_lists_exactly_the_tables_the_readers_use(self) -> None:
+        granted = {
+            table.strip()
+            for listed in re.findall(
+                r"GRANT SELECT ON(.*?)TO odds_web", ODDS_WEB_GRANTS.read_text(), re.S
+            )
+            for table in listed.split(",")
+        }
 
-        assert [table for table in READ_TABLES if not re.search(rf"\b{table}\b", grants)] == []
+        assert granted == set(READ_TABLES)
 
     @pytest.mark.parametrize("table", READ_TABLES)
     async def test_a_table_the_role_cannot_read_fails_a_page(

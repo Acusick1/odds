@@ -97,8 +97,11 @@ def status_of(summary: CandidateSummary) -> str:
 
 
 def progress_of(summary: CandidateSummary) -> CheckpointProgress | None:
-    """Progress to the next checkpoint, none for a version that will not reach one: an agent
-    with no bet that has a close, a killed candidate, or a version whose verdict has fired."""
+    """Progress to the next checkpoint, none for a version that will not reach one: one the
+    registry no longer holds, an agent with no bet that has a close, a killed candidate, or a
+    version whose verdict has fired."""
+    if summary.registered is None:
+        return None
     if is_agent(summary.registered) and summary.bets_with_close == 0:
         return None
     if summary.status is CandidateStatus.KILLED:

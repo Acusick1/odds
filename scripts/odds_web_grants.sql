@@ -19,10 +19,11 @@ GRANT SELECT ON
     fetch_logs,
     alert_history,
     schedules,
-    jobs,
-    job_results,
-    tasks
+    jobs
 TO odds_web;
+
+-- Earlier versions of this file granted these two, and no reader uses them.
+REVOKE SELECT ON tasks, job_results FROM odds_web;
 
 -- The status strip's freshness check takes the MLB fixture calendar from the MLB Stats API
 -- schedule (odds_lambda.collection_calendar.fixture_calendar).

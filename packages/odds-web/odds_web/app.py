@@ -19,7 +19,7 @@ from odds_core.candidates import candidates_dir, load_candidates
 from odds_core.config import Settings, get_settings
 
 from odds_web.cache import Cached, Failure, SingleFlightCache
-from odds_web.candidate_page import CandidatePage, build_candidate_page, has_decisions
+from odds_web.candidate_page import CandidatePage, build_candidate_page, reads_decisions
 from odds_web.closes import WEEKS as CLOSE_WEEKS
 from odds_web.closes import CloseWeeks, close_coverage
 from odds_web.coverage import (
@@ -157,7 +157,7 @@ def create_app(
         async def load_listings() -> tuple[DecisionHistory | None, LedgerPage]:
             async with database.session_maker() as session:
                 decisions = None
-                if has_decisions(summary.registered):
+                if reads_decisions(summary.registered):
                     decisions = await load_decision_history(
                         session, name, version, datetime.now(UTC)
                     )

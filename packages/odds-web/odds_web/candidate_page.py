@@ -19,7 +19,7 @@ from odds_analytics.candidate_report import (
     RunningScore,
     checkpoints_through_next,
 )
-from odds_core.candidates import Candidate, MechanicalCandidate
+from odds_core.candidates import AgentCandidate, Candidate
 
 from odds_web.decisions import DecisionHistory
 from odds_web.ledger import LedgerPage
@@ -170,11 +170,21 @@ def build_candidate_page(
         settled_bets=summary.settled_bets,
         pending_bets=summary.pending_bets,
         series=build_series(summary, running) if summary.bets_with_close else None,
-        decisions=decisions,
+        decisions=shown_decisions(entry, decisions),
         ledger=ledger,
     )
 
 
-def has_decisions(entry: Candidate | None) -> bool:
-    """Only a mechanical candidate records decisions; an agent's trades have none."""
-    return isinstance(entry, MechanicalCandidate)
+def reads_decisions(entry: Candidate | None) -> bool:
+    """Whether to read the version's decision rows: every version but an agent's, which records
+    none. A version the registry no longer holds has no known kind, so its rows decide."""
+    return not isinstance(entry, AgentCandidate)
+
+
+def shown_decisions(
+    entry: Candidate | None, history: DecisionHistory | None
+) -> DecisionHistory | None:
+    """The timeline of a mechanical version, or of an earlier one that recorded decisions."""
+    if history is None or (entry is None and history.total == 0):
+        return None
+    return history

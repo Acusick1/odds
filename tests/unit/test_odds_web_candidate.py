@@ -210,17 +210,30 @@ class TestCandidatePage:
         assert re.findall(r'<span class="verdict">(.*?)</span>', body) == ["not yet"]
         assert "/ 100" not in body
 
-    def test_a_historical_version_takes_neither_the_current_versions_metadata_nor_its_timeline(
+    def test_a_historical_version_takes_not_the_current_versions_scope_or_progress(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
-        v2 = agent("gap").model_copy(update={"version": 2})
+        v2 = mechanical(sport="basketball_nba", market="h2h").model_copy(update={"version": 2})
         seed(data, [bet(i, 0.5) for i in range(3)], v2)
-        data["decisions"] = history(DecisionKind.BET)  # must not be read for an unknown kind
 
         body = client.get("/c/gap/1").text
 
         assert re.findall(r'<span class="status">(.*?)</span>', body) == ["not current"]
-        assert "baseball_mlb" not in body and "Decisions" not in body
+        assert "basketball_nba" not in body and "/ 100" not in body
+
+    def test_a_historical_version_shows_its_timeline_only_if_it_recorded_decisions(
+        self, client: TestClient, data: dict[str, object]
+    ) -> None:
+        v2 = mechanical().model_copy(update={"version": 2})
+        seed(data, [bet(i, 0.5) for i in range(3)], v2)
+        data["decisions"] = history(DecisionKind.BET, DecisionKind.MISSED, missed=1)
+
+        recorded = client.get("/c/gap/1").text
+        data["decisions"] = history(total=0)
+        none_recorded = client.get("/c/gap/1?page=2").text  # the cache is per page
+
+        assert "mark-bet" in recorded and "1 of 2" in recorded
+        assert "mark-" not in none_recorded and "Decisions" not in none_recorded
 
     def test_a_candidate_with_no_close_shows_pnl_and_the_ledger_but_no_ev_charts(
         self, client: TestClient, data: dict[str, object]
