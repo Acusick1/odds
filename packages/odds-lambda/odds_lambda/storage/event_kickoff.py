@@ -88,7 +88,7 @@ async def move_kickoff(
     ``POSTPONEMENT_MIN_DELAY`` after the stored kick-off is refused, and a later start still ahead
     is accepted from any source in the order, so a postponement the top source stopped listing is
     still followed. A source in ``IN_PLAY_START_SOURCES`` never moves an event to a
-    start at or before ``now``, before the stored kick-off too. A source in ``PLAYED_START_SOURCES`` skips the
+    start at or before ``now``, before the stored kick-off too. Any other source also refuses a start at or before ``now`` that is ``POSTPONEMENT_MIN_DELAY`` or more before the stored kick-off, the reverse of the postponement rule: a stale listing of the original time must not undo a postponement (a start only minutes early, a corrected kick-off, still moves). A source in ``PLAYED_START_SOURCES`` skips the
     after-kick-off rule: it dates a postponed game by when it was played, which is in the past.
     Such a source that the order ranks below another moves only an event no other source has
     observed (``_observed_by_another``), since ids alone do not show which sources saw the event.
@@ -99,6 +99,12 @@ async def move_kickoff(
     if ensure_utc(event.commence_time) == ensure_utc(start):
         return False
     if source in IN_PLAY_START_SOURCES and ensure_utc(start) <= ensure_utc(now):
+        return False
+    if (
+        source not in PLAYED_START_SOURCES
+        and ensure_utc(start) <= ensure_utc(now)
+        and ensure_utc(event.commence_time) - ensure_utc(start) >= POSTPONEMENT_MIN_DELAY
+    ):
         return False
     if source not in PLAYED_START_SOURCES and ensure_utc(now) >= ensure_utc(event.commence_time):
         if (

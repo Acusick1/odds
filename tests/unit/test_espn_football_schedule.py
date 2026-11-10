@@ -128,6 +128,37 @@ class TestParseScoreboard:
         assert len(parsed.games) == len(data["events"]) - 1
 
 
+class TestInvalidStart:
+    def _data(self, scoreboard: Scoreboard, status: str) -> dict[str, Any]:
+        data = copy.deepcopy(scoreboard("esp.1"))
+        data["events"] = data["events"][:1]
+        competition = data["events"][0]["competitions"][0]
+        competition["status"]["type"] = {"name": status, "state": "post"}
+        competition["timeValid"] = False
+        return data
+
+    def test_a_cancellation_with_an_invalid_start_is_kept_for_its_status(
+        self, espn_football_scoreboard: Scoreboard
+    ) -> None:
+        parsed = parse_scoreboard(
+            self._data(espn_football_scoreboard, "STATUS_CANCELED"),
+            LEAGUES["soccer_spain_la_liga"],
+        )
+
+        [game] = parsed.games
+        assert (game.status, game.upcoming) == (EventStatus.CANCELLED, False)
+
+    def test_a_scheduled_match_with_an_invalid_start_is_still_skipped(
+        self, espn_football_scoreboard: Scoreboard
+    ) -> None:
+        parsed = parse_scoreboard(
+            self._data(espn_football_scoreboard, "STATUS_SCHEDULED"),
+            LEAGUES["soccer_spain_la_liga"],
+        )
+
+        assert parsed.games == [] and parsed.dropped == []
+
+
 class TestFetchGames:
     async def test_reads_each_month_once_and_keeps_the_days_asked_for(
         self, espn_football_scoreboard: Scoreboard

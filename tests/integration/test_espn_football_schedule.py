@@ -14,6 +14,7 @@ from odds_lambda.espn_football_schedule import (
     SyncReport,
     sync_games,
 )
+from odds_lambda.storage.event_resolver import ListedGame, resolve_event
 from sqlalchemy import select
 
 from tests.integration.test_polymarket_odds import SessionMaker
@@ -31,12 +32,13 @@ def game(
     commence_time: datetime | None = None,
     status: EventStatus | None = None,
     upcoming: bool = True,
+    away: str = "Deportivo La Coruña",
 ) -> EspnFootballGame:
     return EspnFootballGame(
         espn_id=espn_id,
         commence_time=commence_time or kickoff(),
         home_team="Alavés",
-        away_team="Deportivo La Coruña",
+        away_team=away,
         status=status,
         upcoming=upcoming,
     )
@@ -178,3 +180,90 @@ class TestSyncGames:
         assert (report.created, report.matched) == (1, 1)
         assert len((await pglite_async_session.execute(select(Event))).scalars().all()) == 1
         assert await pglite_async_session.get(EventExternalId, (Source.ESPN, "2")) is None
+
+
+class TestPostponementFirstSeen:
+    async def test_a_postponement_seen_first_attaches_the_espn_id_so_a_later_reschedule_moves_the_event(
+        self, pglite_async_session: Any, patch_session: None
+    ) -> None:
+        start = kickoff()
+        pglite_async_session.add(event(start))
+        await pglite_async_session.flush()
+
+        await sync_games(
+            LEAGUE,
+            [game(commence_time=start, status=EventStatus.POSTPONED, upcoming=False)],
+            SyncReport(),
+            apply=True,
+        )
+        held = await pglite_async_session.get(EventExternalId, (Source.ESPN, "401882806"))
+        assert held is not None and held.event_id == 7
+
+        later = start + timedelta(days=1)
+        report = SyncReport()
+        await sync_games(LEAGUE, [game(commence_time=later)], report, apply=True)
+
+        stored = (await pglite_async_session.execute(select(Event))).scalars().all()
+        assert report.created == 0
+        assert [(e.commence_time, e.status) for e in stored] == [(later, EventStatus.SCHEDULED)]
+
+    async def test_a_status_only_update_for_no_matching_event_creates_none_and_moves_none(
+        self, pglite_async_session: Any, patch_session: None
+    ) -> None:
+        start = kickoff()
+        pglite_async_session.add(event(start))
+        await pglite_async_session.flush()
+
+        await sync_games(
+            LEAGUE,
+            [
+                game(
+                    commence_time=start + timedelta(days=9),
+                    status=EventStatus.POSTPONED,
+                    upcoming=False,
+                )
+            ],
+            SyncReport(),
+            apply=True,
+        )
+        await sync_games(
+            LEAGUE,
+            [game(espn_id="2", status=EventStatus.CANCELLED, upcoming=False, away="Levante")],
+            SyncReport(),
+            apply=True,
+        )
+
+        stored = (await pglite_async_session.execute(select(Event))).scalars().all()
+        assert [(e.commence_time, e.status) for e in stored] == [(start, EventStatus.SCHEDULED)]
+
+
+class TestStaleListingAfterPostponement:
+    async def test_a_stale_oddsportal_listing_does_not_move_a_postponed_event_back_to_the_past(
+        self, pglite_async_session: Any, patch_session: None
+    ) -> None:
+        now = datetime.now(UTC)
+        old = now - timedelta(hours=2)
+        later = now + timedelta(days=1)
+        await sync_games(LEAGUE, [game(commence_time=old)], SyncReport(), apply=True)
+        stored = (await pglite_async_session.execute(select(Event))).scalar_one()
+        pglite_async_session.add(
+            EventExternalId(source=Source.ODDSPORTAL, external_id="op1", event_id=stored.id)
+        )
+        await pglite_async_session.flush()
+        await sync_games(LEAGUE, [game(commence_time=later)], SyncReport(), apply=True)
+        assert stored.commence_time == later
+
+        await resolve_event(
+            pglite_async_session,
+            ListedGame(
+                source=Source.ODDSPORTAL,
+                sport_key=LEAGUE.sport_key,
+                sport_title=LEAGUE.sport_title,
+                home_team=stored.home_team,
+                away_team=stored.away_team,
+                commence_time=old,
+                external_id="op1",
+            ),
+        )
+
+        assert stored.commence_time == later

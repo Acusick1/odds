@@ -201,6 +201,25 @@ class TestMoveKickoffAfterTheStoredKickoff:
         assert stored_epl_event.commence_time == TWIN_KICKOFF
 
     @pytest.mark.asyncio
+    async def test_a_stale_listing_does_not_undo_a_postponement_another_source_set(
+        self, pglite_async_session, stored_epl_event
+    ) -> None:
+        # Football's ESPN ranks below OddsPortal, which holds an id and still lists the old time.
+        stored_epl_event.sport_key = "soccer_efl_champ"
+        await _hold_oddsportal_id(pglite_async_session, stored_epl_event)
+        now = TWIN_KICKOFF + timedelta(hours=2)
+        tomorrow = now + timedelta(days=1)
+
+        assert await move_kickoff(
+            pglite_async_session, stored_epl_event, Source.ESPN, tomorrow, now=now
+        )
+        assert not await move_kickoff(
+            pglite_async_session, stored_epl_event, Source.ODDSPORTAL, TWIN_KICKOFF, now=now
+        )
+
+        assert stored_epl_event.commence_time == tomorrow
+
+    @pytest.mark.asyncio
     async def test_an_in_play_start_is_refused(
         self, pglite_async_session, stored_epl_event
     ) -> None:

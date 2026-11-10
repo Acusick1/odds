@@ -26,7 +26,13 @@ from odds_core.vocabulary import Source
 from odds_lambda.espn_fixture_fetcher import EspnFixtureFetcher
 from odds_lambda.live_events import DroppedGame, SkipReason
 from odds_lambda.mlb_game_resolver import GameRow
-from odds_lambda.storage.event_resolver import ListedGame, Resolution, find_event, resolve_event
+from odds_lambda.storage.event_resolver import (
+    ListedGame,
+    Resolution,
+    attach_event,
+    find_event,
+    resolve_event,
+)
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
@@ -217,7 +223,8 @@ class EspnFootballGame:
     away_team: str
     # POSTPONED or CANCELLED when ESPN says so, else None.
     status: EventStatus | None
-    # Whether the match has not started: only such a match is created or moved.
+    # Whether the match has not started and ESPN gives it a valid start: only such a match is
+    # created or moved. Any other match only has its status applied to the event it has.
     upcoming: bool
 
     def listed(self, league: FootballLeague) -> ListedGame:
@@ -263,7 +270,8 @@ class SyncReport:
 def parse_scoreboard(data: dict[str, Any], league: FootballLeague) -> ParsedScoreboard:
     """The matches of one scoreboard response between two of the league's clubs.
 
-    Skipped: events without two competitors and matches whose start ESPN marks invalid. A match
+    Skipped: events without two competitors and, unless ESPN postpones or cancels them, matches
+    whose start ESPN marks invalid (those only have their status applied). A match
     with a side whose normalised name is not in ``league.clubs`` is dropped, and reported in
     ``dropped``: stored under a spelling OddsPortal and Betfair do not use, it would split the
     fixture into two events.
@@ -274,7 +282,11 @@ def parse_scoreboard(data: dict[str, Any], league: FootballLeague) -> ParsedScor
         sides = {c.get("homeAway"): c for c in competition.get("competitors", [])}
         if "home" not in sides or "away" not in sides or not event.get("date"):
             continue
-        if competition.get("timeValid") is False or event.get("timeValid") is False:
+        start_valid = (
+            competition.get("timeValid") is not False and event.get("timeValid") is not False
+        )
+        status = _ESPN_STATUSES.get(competition.get("status", {}).get("type", {}).get("name", ""))
+        if not start_valid and status is None:
             continue
         start = datetime.fromisoformat(event["date"].replace("Z", "+00:00")).astimezone(UTC)
         raw = (
@@ -303,8 +315,8 @@ def parse_scoreboard(data: dict[str, Any], league: FootballLeague) -> ParsedScor
                 commence_time=start,
                 home_team=home,
                 away_team=away,
-                status=_ESPN_STATUSES.get(status_type.get("name", "")),
-                upcoming=status_type.get("state") == _PRE,
+                status=status,
+                upcoming=start_valid and status_type.get("state") == _PRE,
             )
         )
     return parsed
@@ -359,6 +371,10 @@ async def sync_games(
                 listed = game.listed(league)
                 if apply and game.upcoming:
                     resolved = await resolve_event(session, listed)
+                elif apply and game.status is not None:
+                    # Records ESPN's id on the event, so a later reschedule finds it, without
+                    # creating or moving one.
+                    resolved = await attach_event(session, listed)
                 else:
                     resolved = await find_event(session, listed)
                     if resolved is None and game.upcoming:
