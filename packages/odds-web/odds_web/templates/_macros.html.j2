@@ -8,3 +8,7 @@
 {%- if section.as_of %} · showing data as of {{ section.as_of | clock }}{% else %} · no data loaded yet{% endif %}</p>
 {% endif %}
 {%- endmacro %}
+
+{% macro quota_days(projection) -%}
+{%- if projection is none %}unknown{% elif projection.days_left is none %}no spend{% else %}~{{ projection.days_left | round(0) | int }}d left{% endif -%}
+{%- endmacro %}

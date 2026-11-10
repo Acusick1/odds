@@ -91,21 +91,33 @@ The readers need no table beyond those in the grants file.
 
 ## Status strip
 
-Every page loads the strip from `/fragments/status` when it opens and every 60 seconds after. `odds_web.status.load_status` joins three reads, each in one session:
+Every page loads the strip from `/fragments/status` when it opens and every 60 seconds after. It is one row: a summary, then a chip for each job or source that is late, stale or unknown, then a link to the full lists on [the data-health page](#data-health-page). `odds_web.status.load_status` joins three reads, each in one session, into `odds_web.status.StatusStrip`, whose methods make the split:
 
-- **Jobs.** One chip per schedule in the scheduler's store, read from the APScheduler tables by `odds_lambda.scheduling.schedule_store.read_schedules` rather than by starting a scheduler, which would write the store's metadata. A chip shows the time since the job's last `heartbeat:<job>` row (`odds_lambda.health_readers.last_heartbeats`, under the name `odds_lambda.health_readers.schedule_heartbeat_name` gives), and its tooltip the next run and whether a worker holds the job. It is late past the job's `odds_core.config.AlertConfig.heartbeat_expectations` hours (`odds_lambda.health_readers.heartbeat_late`, the monitor's rule), and unknown with no heartbeat.
-- **Sources.** One chip per market of each bootstrapped collection source and sport, with the time since its last snapshot and the state `odds_lambda.health_readers.source_freshness` gives it: late when stale, idle with no fixture inside the source's horizon, unknown with no history ([Stale-data check](health-monitor.md#stale-data-check)).
-- **Odds API quota.** One chip per key with its balance (`odds_lambda.storage.readers.OddsReader.get_latest_quota_by_key`) and the days its burn projection leaves (`odds_lambda.storage.readers.OddsReader.get_quota_burn`); unknown under a day of readings since the key's last reset, and "quota unknown" with no reading.
+- **Jobs.** One entry per schedule in the scheduler's store, read from the APScheduler tables by `odds_lambda.scheduling.schedule_store.read_schedules` rather than by starting a scheduler, which would write the store's metadata. Its state comes from the time since the job's last `heartbeat:<job>` row (`odds_lambda.health_readers.last_heartbeats`, under the name `odds_lambda.health_readers.schedule_heartbeat_name` gives): late past the job's `odds_core.config.AlertConfig.heartbeat_expectations` hours (`odds_lambda.health_readers.heartbeat_late`, the monitor's rule), stale past `odds_web.status.STALE_FACTOR` times those hours, and unknown with no heartbeat.
+- **Sources.** One entry per market of each bootstrapped collection source and sport, with the time since its last snapshot and the state `odds_lambda.health_readers.source_freshness` gives it: late when stale there, stale here when the active hours since its last snapshot pass `odds_web.status.STALE_FACTOR` times its threshold, idle with no fixture inside the source's horizon, unknown with no history ([Stale-data check](health-monitor.md#stale-data-check)).
+- **Odds API quota.** One entry per key with its balance (`odds_lambda.storage.readers.OddsReader.get_latest_quota_by_key`) and the days its burn projection leaves (`odds_lambda.storage.readers.OddsReader.get_quota_burn`); unknown under a day of readings since the key's last reset, and "quota unknown" with no reading.
 
-The judgements are the health monitor's own, so the strip and the alerts never disagree on a threshold. The strip uses no green or red: a late chip is amber and an unknown one a hollow dot.
+The judgements are the health monitor's own, so the strip and the alerts never disagree on a threshold; `odds_web.status.STALE_FACTOR` only splits the monitor's late into amber and red.
+
+**Summary row.**
+
+- `odds_web.status.StatusStrip.collections`: one chip per sport with a live (non-idle) source, in the state and with the age of that sport's worst source. A sport whose sources are all idle, such as MLB out of season, has no chip.
+- `odds_web.status.StatusStrip.next_candidate_run`: the soonest next fire time across the `run-candidates` jobs, as `next HH:MM` in UTC, in that job's own state.
+- `odds_web.status.StatusStrip.quota`: remaining and limit summed over the keys, and the days left on the worst key.
+
+**Problem chips.** `odds_web.status.StatusStrip.problem_jobs` and `odds_web.status.StatusStrip.problem_sources` are the jobs and sources that are stale, late or unknown, stale first. Healthy and idle ones are not on the strip.
+
+**Dots** use a status palette apart from the EV sign colours (`--status-late`, `--status-stale` in `odds_web/static/app.css`): grey for ok, amber for late, red for stale, a hollow dot for unknown, and a faint ring for idle, which shows on the data-health page only. Green and red on the portfolio and candidate pages still mean EV sign only.
 
 ## Data-health page
 
-`/data` holds two sections, each also served alone at `/fragments/coverage` and `/fragments/closes` for htmx to refresh every 60 seconds.
+`/data` holds three sections, each also served alone at `/fragments/coverage`, `/fragments/closes` and `/fragments/status-detail` for htmx to refresh every 60 seconds.
 
 **Decision-window coverage** (`odds_web.coverage.candidate_coverage`) draws a heatmap for each active mechanical candidate at the version the registry holds: one row per event of its sport kicking off from `odds_web.coverage.PAST` (7 days) ago to `odds_web.coverage.UPCOMING` (24 hours) ahead, one column per `odds_web.coverage.BUCKET_MINUTES` (10) minutes before kick-off from `odds_web.coverage.LEAD_IN_MINUTES` (60) before the earliest decision time, with the decision times marked. Per event and market it reads the rule's quotes once over every bucket's window (`odds_lambda.candidate_rules.inputs.rule_quotes`), then builds the market state per bucket with `odds_lambda.candidate_rules.build_market_state`, the rule's `sharp_inputs` and its maximum input age, from only the snapshots stored by the bucket's time. A bucket at a decision the version recorded takes the decision's time and its recorded `known_at` instead, so it shows what the run saw. A cell shows whether the rule's state has its inputs, and its tooltip which inputs were fresh: retail, from a state needing no sharp input, and each sharp input, from a state needing only that one. A bucket still ahead is left empty. The page changes nothing the rule hash covers.
 
 **Close coverage by week** (`odds_web.closes.close_coverage`) counts, for each sport and market, every (event, market, line) a paper trade is on, for events kicking off in the last `odds_web.closes.WEEKS` (8) weeks, by kick-off week and by `odds_core.close.close_status`: live Betfair close, the sport's fallback named by its source (FDUK or Polymarket), pending within `odds_core.close.close_grace`, no close, or unsupported for a market the sport has no close for, such as MLB `h2h`.
+
+**Jobs, sources and quota** (`odds_web.status.StatusStrip`, the strip's own read) lists every job, every collection source and every Odds API key in three tables, each row with its state, last success or snapshot, and its threshold, next run or burn. It is where the idle sources and the healthy entries the strip leaves off are shown; the strip's "all" chip links to it (`/data#status`).
 
 ## Layout
 
