@@ -3,11 +3,14 @@ name: Test
 on:
   push:
     branches-ignore: [main]
-    # The wiki and docs are checked by Lint; they can't change a test result.
-    paths-ignore:
-      - 'wiki/**'
-      - 'docs/**'
-      - '**/*.md'
+    # Lint checks the wiki and docs. The how-to page is re-included because
+    # tests/unit/test_candidates.py validates its example draft.
+    paths:
+      - '**'
+      - '!wiki/**'
+      - '!docs/**'
+      - '!**/*.md'
+      - 'wiki/evaluation/howto-take-an-idea-to-a-verdict.md'
   workflow_call:
   workflow_dispatch:
 

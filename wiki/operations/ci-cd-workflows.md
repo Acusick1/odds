@@ -23,7 +23,7 @@ Workflows live in `.github/workflows/`. Secrets come from the `development` and 
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `test.yml` | push to any branch but main, except a push that changes only wiki pages, ADRs or other Markdown files; `workflow_call` | `deptry` per package under `packages/` (each declares its own imports), then `uv run pytest` (`tests/unit` and `tests/integration` without `live_api`) |
+| `test.yml` | push to any branch but main, except a push that changes only wiki pages, ADRs or other Markdown files (the how-to page whose example draft a unit test validates still runs it); `workflow_call` | `deptry` per package under `packages/` (each declares its own imports), then `uv run pytest` (`tests/unit` and `tests/integration` without `live_api`) |
 | `lint.yml` | push to non-main branches, every push | `uvx pre-commit run --all-files` (ruff with all `DTZ` datetime rules, per the root `pyproject.toml`; shellcheck, Vale, lychee, wiki-lint, candidate-versions, which compares against the merge-base with `origin/main` and validates the rehash ledger) ([code-conventions](../foundations/code-conventions.md)) |
 | `ci-cd.yml` | manual only | calls `test.yml`, then `deploy-dev.yml` |
 | `deploy-dev.yml` | called by `ci-cd.yml`, or manual | ephemeral dev stack |
@@ -31,7 +31,7 @@ Workflows live in `.github/workflows/`. Secrets come from the `development` and 
 | `live-api.yml` | Monday 06:00 UTC | `pytest -m live_api` against third-party APIs |
 | `schedule-health-check.yml` | 10:00 UTC cron, `production` environment; disabled | `scripts/verify-schedules.sh --rule-prefix odds` |
 
-A new push to a branch cancels that branch's `test.yml` and `lint.yml` runs still in progress, so only the latest commit is tested. Pull requests pass `test.yml` before they merge, so main runs no tests on merge.
+A new push to a branch cancels that branch's `test.yml` and `lint.yml` runs still in progress, so only the latest commit is tested. Nothing runs on a merge to main: pull requests are merged after `test.yml` passes on their branch, by practice rather than a required status check, and a docs-only pull request merges with Lint alone.
 
 `schedule-health-check` fails every disabled rule ([Schedule verification](#schedule-verification)), so it would fail while AWS is dormant. It and `deploy-prod.yml` are disabled in GitHub; that state is not in the repo, so check it with `gh workflow list --all` and restore one with `gh workflow enable`.
 
