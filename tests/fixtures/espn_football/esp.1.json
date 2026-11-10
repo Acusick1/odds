@@ -1,0 +1,1124 @@
+{
+ "events": [
+  {
+   "id": "401882821",
+   "date": "2026-11-01T13:00Z",
+   "name": "Sevilla at Getafe",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "3",
+       "team": {
+        "displayName": "Getafe"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "displayName": "Sevilla"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882819",
+   "date": "2026-11-01T15:15Z",
+   "name": "Real Madrid at Racing Santander",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Racing Santander"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "3",
+       "team": {
+        "displayName": "Real Madrid"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882823",
+   "date": "2026-11-01T17:30Z",
+   "name": "Valencia at Elche",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Elche"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "displayName": "Valencia"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882826",
+   "date": "2026-11-01T20:00Z",
+   "name": "Real Sociedad at Athletic Club",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "2",
+       "team": {
+        "displayName": "Athletic Club"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "displayName": "Real Sociedad"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882824",
+   "date": "2026-11-02T20:00Z",
+   "name": "Osasuna at Deportivo",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "2",
+       "team": {
+        "displayName": "Deportivo"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "displayName": "Osasuna"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882809",
+   "date": "2026-11-06T20:00Z",
+   "name": "Alavés at Sevilla",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Sevilla"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Alavés"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882812",
+   "date": "2026-11-07T13:00Z",
+   "name": "Racing Santander at Málaga",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "1",
+       "team": {
+        "displayName": "Málaga"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "2",
+       "team": {
+        "displayName": "Racing Santander"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882813",
+   "date": "2026-11-07T15:15Z",
+   "name": "Deportivo at Espanyol",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Espanyol"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Deportivo"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882811",
+   "date": "2026-11-07T17:30Z",
+   "name": "Athletic Club at Osasuna",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "1",
+       "team": {
+        "displayName": "Osasuna"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "displayName": "Athletic Club"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882808",
+   "date": "2026-11-07T20:00Z",
+   "name": "Real Madrid at Valencia",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Valencia"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "3",
+       "team": {
+        "displayName": "Real Madrid"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882814",
+   "date": "2026-11-08T13:00Z",
+   "name": "Real Betis at Elche",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Elche"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "2",
+       "team": {
+        "displayName": "Real Betis"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882810",
+   "date": "2026-11-08T15:15Z",
+   "name": "Rayo Vallecano at Real Sociedad",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "1",
+       "team": {
+        "displayName": "Real Sociedad"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Rayo Vallecano"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882815",
+   "date": "2026-11-08T17:30Z",
+   "name": "Levante at Celta Vigo",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Celta Vigo"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Levante"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882807",
+   "date": "2026-11-08T17:30Z",
+   "name": "Getafe at Villarreal",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "2",
+       "team": {
+        "displayName": "Villarreal"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Getafe"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882816",
+   "date": "2026-11-08T20:00Z",
+   "name": "Barcelona at Atlético Madrid",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "1",
+       "team": {
+        "displayName": "Atlético Madrid"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "2",
+       "team": {
+        "displayName": "Barcelona"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882805",
+   "date": "2026-11-20T20:00Z",
+   "name": "Espanyol at Athletic Club",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Athletic Club"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Espanyol"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882806",
+   "date": "2026-11-21T13:00Z",
+   "name": "Deportivo at Alavés",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Alavés"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Deportivo"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882799",
+   "date": "2026-11-21T15:15Z",
+   "name": "Valencia at Rayo Vallecano",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Rayo Vallecano"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Valencia"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882797",
+   "date": "2026-11-21T17:30Z",
+   "name": "Real Betis at Sevilla",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Sevilla"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Real Betis"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882798",
+   "date": "2026-11-21T20:00Z",
+   "name": "Celta Vigo at Real Madrid",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Real Madrid"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Celta Vigo"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882804",
+   "date": "2026-11-22T13:00Z",
+   "name": "Villarreal at Barcelona",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Barcelona"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Villarreal"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882800",
+   "date": "2026-11-22T15:15Z",
+   "name": "Real Sociedad at Racing Santander",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Racing Santander"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Real Sociedad"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882801",
+   "date": "2026-11-22T17:30Z",
+   "name": "Málaga at Osasuna",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Osasuna"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Málaga"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882803",
+   "date": "2026-11-22T20:00Z",
+   "name": "Atlético Madrid at Getafe",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Getafe"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Atlético Madrid"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882802",
+   "date": "2026-11-23T20:00Z",
+   "name": "Elche at Levante",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Levante"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Elche"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882791",
+   "date": "2026-11-27T20:00Z",
+   "name": "Racing Santander at Levante",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Levante"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Racing Santander"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882796",
+   "date": "2026-11-28T13:00Z",
+   "name": "Rayo Vallecano at Real Betis",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Real Betis"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Rayo Vallecano"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882790",
+   "date": "2026-11-28T15:15Z",
+   "name": "Athletic Club at Málaga",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Málaga"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Athletic Club"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882793",
+   "date": "2026-11-28T17:30Z",
+   "name": "Atlético Madrid at Elche",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Elche"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Atlético Madrid"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882789",
+   "date": "2026-11-28T20:00Z",
+   "name": "Alavés at Real Madrid",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Real Madrid"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Alavés"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882787",
+   "date": "2026-11-29T13:00Z",
+   "name": "Osasuna at Valencia",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Valencia"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Osasuna"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882794",
+   "date": "2026-11-29T15:15Z",
+   "name": "Barcelona at Deportivo",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Deportivo"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Barcelona"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882795",
+   "date": "2026-11-29T17:30Z",
+   "name": "Villarreal at Celta Vigo",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Celta Vigo"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Villarreal"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882788",
+   "date": "2026-11-29T20:00Z",
+   "name": "Sevilla at Real Sociedad",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Real Sociedad"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Sevilla"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401882792",
+   "date": "2026-11-30T20:00Z",
+   "name": "Getafe at Espanyol",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Espanyol"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Getafe"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,1924 @@
+{
+ "events": [
+  {
+   "id": "401880183",
+   "date": "2026-11-03T19:45Z",
+   "name": "Stoke City at Blackburn Rovers",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "1",
+       "team": {
+        "displayName": "Blackburn Rovers"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "2",
+       "team": {
+        "displayName": "Stoke City"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880174",
+   "date": "2026-11-03T19:45Z",
+   "name": "Bolton Wanderers at Charlton Athletic",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Charlton Athletic"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "displayName": "Bolton Wanderers"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880182",
+   "date": "2026-11-03T19:45Z",
+   "name": "Norwich City at Derby County",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Derby County"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "4",
+       "team": {
+        "displayName": "Norwich City"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880181",
+   "date": "2026-11-03T19:45Z",
+   "name": "Swansea City at Portsmouth",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "3",
+       "team": {
+        "displayName": "Portsmouth"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "displayName": "Swansea City"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880180",
+   "date": "2026-11-03T19:45Z",
+   "name": "Sheffield United at Preston North End",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "2",
+       "team": {
+        "displayName": "Preston North End"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "3",
+       "team": {
+        "displayName": "Sheffield United"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880179",
+   "date": "2026-11-03T19:45Z",
+   "name": "Burnley at Queens Park Rangers",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "1",
+       "team": {
+        "displayName": "Queens Park Rangers"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "displayName": "Burnley"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880178",
+   "date": "2026-11-03T19:45Z",
+   "name": "Lincoln City at Watford",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "1",
+       "team": {
+        "displayName": "Watford"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Lincoln City"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880184",
+   "date": "2026-11-03T20:00Z",
+   "name": "Millwall at Birmingham City",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "3",
+       "team": {
+        "displayName": "Birmingham City"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Millwall"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880177",
+   "date": "2026-11-03T20:00Z",
+   "name": "Southampton at West Bromwich Albion",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "1",
+       "team": {
+        "displayName": "West Bromwich Albion"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "displayName": "Southampton"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880175",
+   "date": "2026-11-04T19:45Z",
+   "name": "West Ham United at Cardiff City",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "3",
+       "team": {
+        "displayName": "Cardiff City"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "3",
+       "team": {
+        "displayName": "West Ham United"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880173",
+   "date": "2026-11-04T19:45Z",
+   "name": "Middlesbrough at Wrexham",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "2",
+       "team": {
+        "displayName": "Wrexham"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Middlesbrough"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880176",
+   "date": "2026-11-04T20:00Z",
+   "name": "Wolverhampton Wanderers at Bristol City",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "1",
+       "team": {
+        "displayName": "Bristol City"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "2",
+       "team": {
+        "displayName": "Wolverhampton Wanderers"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880167",
+   "date": "2026-11-06T20:00Z",
+   "name": "Bolton Wanderers at Derby County",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "3",
+       "team": {
+        "displayName": "Derby County"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "displayName": "Bolton Wanderers"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880170",
+   "date": "2026-11-07T12:30Z",
+   "name": "Norwich City at Bristol City",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Bristol City"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "5",
+       "team": {
+        "displayName": "Norwich City"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880166",
+   "date": "2026-11-07T12:30Z",
+   "name": "Stoke City at Portsmouth",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "1",
+       "team": {
+        "displayName": "Portsmouth"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "2",
+       "team": {
+        "displayName": "Stoke City"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880161",
+   "date": "2026-11-07T12:30Z",
+   "name": "Wolverhampton Wanderers at Wrexham",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "1",
+       "team": {
+        "displayName": "Wrexham"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "displayName": "Wolverhampton Wanderers"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880172",
+   "date": "2026-11-07T15:00Z",
+   "name": "Swansea City at Birmingham City",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "2",
+       "team": {
+        "displayName": "Birmingham City"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "displayName": "Swansea City"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880171",
+   "date": "2026-11-07T15:00Z",
+   "name": "West Ham United at Blackburn Rovers",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "2",
+       "team": {
+        "displayName": "Blackburn Rovers"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "displayName": "West Ham United"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880169",
+   "date": "2026-11-07T15:00Z",
+   "name": "Burnley at Cardiff City",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "5",
+       "team": {
+        "displayName": "Cardiff City"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "4",
+       "team": {
+        "displayName": "Burnley"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880168",
+   "date": "2026-11-07T15:00Z",
+   "name": "Sheffield United at Charlton Athletic",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "2",
+       "team": {
+        "displayName": "Charlton Athletic"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "displayName": "Sheffield United"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880165",
+   "date": "2026-11-07T15:00Z",
+   "name": "Southampton at Preston North End",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "1",
+       "team": {
+        "displayName": "Preston North End"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Southampton"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880164",
+   "date": "2026-11-07T15:00Z",
+   "name": "Lincoln City at Queens Park Rangers",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "2",
+       "team": {
+        "displayName": "Queens Park Rangers"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "displayName": "Lincoln City"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880163",
+   "date": "2026-11-07T15:00Z",
+   "name": "Middlesbrough at Watford",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Watford"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Middlesbrough"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880162",
+   "date": "2026-11-07T15:00Z",
+   "name": "Millwall at West Bromwich Albion",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "3",
+       "team": {
+        "displayName": "West Bromwich Albion"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Millwall"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880156",
+   "date": "2026-11-21T12:30Z",
+   "name": "Queens Park Rangers at Millwall",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Millwall"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Queens Park Rangers"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880155",
+   "date": "2026-11-21T12:30Z",
+   "name": "Cardiff City at Norwich City",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Norwich City"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Cardiff City"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880153",
+   "date": "2026-11-21T12:30Z",
+   "name": "Derby County at Southampton",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Southampton"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Derby County"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880160",
+   "date": "2026-11-21T15:00Z",
+   "name": "Portsmouth at Bolton Wanderers",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Bolton Wanderers"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Portsmouth"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880158",
+   "date": "2026-11-21T15:00Z",
+   "name": "Wrexham at Lincoln City",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Lincoln City"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Wrexham"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880157",
+   "date": "2026-11-21T15:00Z",
+   "name": "Bristol City at Middlesbrough",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Middlesbrough"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Bristol City"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880154",
+   "date": "2026-11-21T15:00Z",
+   "name": "Watford at Sheffield United",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Sheffield United"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Watford"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880152",
+   "date": "2026-11-21T15:00Z",
+   "name": "Birmingham City at Stoke City",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Stoke City"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Birmingham City"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880151",
+   "date": "2026-11-21T15:00Z",
+   "name": "West Bromwich Albion at Swansea City",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Swansea City"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "West Bromwich Albion"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880150",
+   "date": "2026-11-21T15:00Z",
+   "name": "Preston North End at West Ham United",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "West Ham United"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Preston North End"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880149",
+   "date": "2026-11-21T15:00Z",
+   "name": "Charlton Athletic at Wolverhampton Wanderers",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Wolverhampton Wanderers"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Charlton Athletic"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880159",
+   "date": "2026-11-22T12:00Z",
+   "name": "Blackburn Rovers at Burnley",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Burnley"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Blackburn Rovers"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880148",
+   "date": "2026-11-24T19:45Z",
+   "name": "Wrexham at Bristol City",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Bristol City"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Wrexham"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880147",
+   "date": "2026-11-24T19:45Z",
+   "name": "Preston North End at Cardiff City",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Cardiff City"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Preston North End"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880146",
+   "date": "2026-11-24T19:45Z",
+   "name": "Lincoln City at Charlton Athletic",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Charlton Athletic"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Lincoln City"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880145",
+   "date": "2026-11-24T19:45Z",
+   "name": "Swansea City at Middlesbrough",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Middlesbrough"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Swansea City"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880144",
+   "date": "2026-11-24T19:45Z",
+   "name": "Queens Park Rangers at Norwich City",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Norwich City"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Queens Park Rangers"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880143",
+   "date": "2026-11-24T19:45Z",
+   "name": "West Ham United at Portsmouth",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Portsmouth"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "West Ham United"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880142",
+   "date": "2026-11-24T19:45Z",
+   "name": "Southampton at Sheffield United",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Sheffield United"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Southampton"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880141",
+   "date": "2026-11-24T20:00Z",
+   "name": "Derby County at Wolverhampton Wanderers",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Wolverhampton Wanderers"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Derby County"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880140",
+   "date": "2026-11-25T19:45Z",
+   "name": "West Bromwich Albion at Bolton Wanderers",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Bolton Wanderers"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "West Bromwich Albion"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880139",
+   "date": "2026-11-25T19:45Z",
+   "name": "Birmingham City at Burnley",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Burnley"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Birmingham City"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880137",
+   "date": "2026-11-25T19:45Z",
+   "name": "Blackburn Rovers at Watford",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Watford"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Blackburn Rovers"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880138",
+   "date": "2026-11-25T20:00Z",
+   "name": "Millwall at Stoke City",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Stoke City"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Millwall"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880129",
+   "date": "2026-11-27T20:00Z",
+   "name": "Middlesbrough at Southampton",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Southampton"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Middlesbrough"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880135",
+   "date": "2026-11-28T12:30Z",
+   "name": "Charlton Athletic at Blackburn Rovers",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Blackburn Rovers"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Charlton Athletic"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880133",
+   "date": "2026-11-28T12:30Z",
+   "name": "Wolverhampton Wanderers at Lincoln City",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Lincoln City"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Wolverhampton Wanderers"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880131",
+   "date": "2026-11-28T12:30Z",
+   "name": "Norwich City at Preston North End",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Preston North End"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Norwich City"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880136",
+   "date": "2026-11-28T15:00Z",
+   "name": "Bolton Wanderers at Birmingham City",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Birmingham City"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Bolton Wanderers"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880134",
+   "date": "2026-11-28T15:00Z",
+   "name": "Watford at Derby County",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Derby County"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Watford"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880132",
+   "date": "2026-11-28T15:00Z",
+   "name": "Burnley at Millwall",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Millwall"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Burnley"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880130",
+   "date": "2026-11-28T15:00Z",
+   "name": "Sheffield United at Queens Park Rangers",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Queens Park Rangers"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Sheffield United"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880127",
+   "date": "2026-11-28T15:00Z",
+   "name": "Bristol City at West Bromwich Albion",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "West Bromwich Albion"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Bristol City"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880126",
+   "date": "2026-11-28T15:00Z",
+   "name": "Stoke City at West Ham United",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "West Ham United"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Stoke City"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880125",
+   "date": "2026-11-28T15:00Z",
+   "name": "Portsmouth at Wrexham",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Wrexham"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Portsmouth"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401880128",
+   "date": "2026-11-29T12:00Z",
+   "name": "Cardiff City at Swansea City",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Swansea City"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Cardiff City"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

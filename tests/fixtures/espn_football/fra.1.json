@@ -1,0 +1,1028 @@
+{
+ "events": [
+  {
+   "id": "401876414",
+   "date": "2026-11-01T14:00Z",
+   "name": "AJ Auxerre at Strasbourg",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "5",
+       "team": {
+        "displayName": "Strasbourg"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "displayName": "AJ Auxerre"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876418",
+   "date": "2026-11-01T16:15Z",
+   "name": "Angers at Lyon",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "2",
+       "team": {
+        "displayName": "Lyon"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Angers"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876415",
+   "date": "2026-11-01T16:15Z",
+   "name": "AS Monaco at Paris FC",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "3",
+       "team": {
+        "displayName": "Paris FC"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "displayName": "AS Monaco"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876417",
+   "date": "2026-11-01T19:45Z",
+   "name": "Toulouse at Marseille",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "2",
+       "team": {
+        "displayName": "Marseille"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Toulouse"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876419",
+   "date": "2026-11-02T19:45Z",
+   "name": "Brest at Lorient",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Lorient"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "2",
+       "team": {
+        "displayName": "Brest"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876405",
+   "date": "2026-11-06T19:45Z",
+   "name": "Strasbourg at Toulouse",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "3",
+       "team": {
+        "displayName": "Toulouse"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "displayName": "Strasbourg"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876411",
+   "date": "2026-11-07T18:00Z",
+   "name": "Paris FC at AJ Auxerre",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "AJ Auxerre"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "displayName": "Paris FC"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876407",
+   "date": "2026-11-07T20:05Z",
+   "name": "Troyes at Paris Saint-Germain",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "1",
+       "team": {
+        "displayName": "Paris Saint-Germain"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Troyes"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876406",
+   "date": "2026-11-08T14:00Z",
+   "name": "Lille at Stade Rennais",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "1",
+       "team": {
+        "displayName": "Stade Rennais"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "2",
+       "team": {
+        "displayName": "Lille"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876412",
+   "date": "2026-11-08T16:15Z",
+   "name": "Nice at Angers",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Angers"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "2",
+       "team": {
+        "displayName": "Nice"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876410",
+   "date": "2026-11-08T16:15Z",
+   "name": "Lyon at Brest",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "2",
+       "team": {
+        "displayName": "Brest"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Lyon"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876409",
+   "date": "2026-11-08T16:15Z",
+   "name": "Lorient at Le Havre AC",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Le Havre AC"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "2",
+       "team": {
+        "displayName": "Lorient"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876408",
+   "date": "2026-11-08T16:15Z",
+   "name": "AS Monaco at Le Mans",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "1",
+       "team": {
+        "displayName": "Le Mans"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "displayName": "AS Monaco"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876404",
+   "date": "2026-11-08T19:45Z",
+   "name": "Marseille at Lens",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "1",
+       "team": {
+        "displayName": "Lens"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "2",
+       "team": {
+        "displayName": "Marseille"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876395",
+   "date": "2026-11-20T19:45Z",
+   "name": "Le Havre AC at Troyes",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Troyes"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Le Havre AC"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876398",
+   "date": "2026-11-21T16:15Z",
+   "name": "Paris Saint-Germain at Nice",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Nice"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Paris Saint-Germain"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876399",
+   "date": "2026-11-21T19:45Z",
+   "name": "AJ Auxerre at AS Monaco",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "AS Monaco"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "AJ Auxerre"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876403",
+   "date": "2026-11-21T19:45Z",
+   "name": "Toulouse at Lens",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Lens"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Toulouse"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876402",
+   "date": "2026-11-21T19:45Z",
+   "name": "Lyon at Lille",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Lille"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Lyon"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876396",
+   "date": "2026-11-21T19:45Z",
+   "name": "Brest at Strasbourg",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Strasbourg"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Brest"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876397",
+   "date": "2026-11-22T14:00Z",
+   "name": "Angers at Paris FC",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Paris FC"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Angers"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876401",
+   "date": "2026-11-22T16:15Z",
+   "name": "Stade Rennais at Lorient",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Lorient"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Stade Rennais"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876400",
+   "date": "2026-11-22T19:45Z",
+   "name": "Le Mans at Marseille",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Marseille"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Le Mans"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876392",
+   "date": "2026-11-27T19:45Z",
+   "name": "Paris FC at Brest",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Brest"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Paris FC"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876394",
+   "date": "2026-11-28T16:15Z",
+   "name": "Lens at Angers",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Angers"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Lens"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876391",
+   "date": "2026-11-28T19:45Z",
+   "name": "Strasbourg at Le Havre AC",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Le Havre AC"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Strasbourg"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876390",
+   "date": "2026-11-28T19:45Z",
+   "name": "Lille at Le Mans",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Le Mans"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Lille"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876388",
+   "date": "2026-11-28T19:45Z",
+   "name": "Troyes at Nice",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Nice"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Troyes"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876387",
+   "date": "2026-11-28T19:45Z",
+   "name": "Lorient at Paris Saint-Germain",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Paris Saint-Germain"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Lorient"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876393",
+   "date": "2026-11-29T14:00Z",
+   "name": "Marseille at AJ Auxerre",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "AJ Auxerre"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Marseille"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876386",
+   "date": "2026-11-29T16:15Z",
+   "name": "Stade Rennais at Toulouse",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Toulouse"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Stade Rennais"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401876389",
+   "date": "2026-11-29T19:45Z",
+   "name": "AS Monaco at Lyon",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Lyon"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "AS Monaco"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

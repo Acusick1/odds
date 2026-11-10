@@ -18,22 +18,25 @@ class TestKickoffAuthorityOrder:
         [
             ("baseball_mlb", (Source.MLB_STATS_API,)),
             ("soccer_epl", (Source.ODDSPORTAL, Source.ODDS_API, Source.FOOTBALL_DATA_UK)),
-            ("soccer_efl_champ", (Source.ODDSPORTAL, Source.ODDS_API, Source.FOOTBALL_DATA_UK)),
+            (
+                "soccer_efl_champ",
+                (Source.ODDSPORTAL, Source.ODDS_API, Source.FOOTBALL_DATA_UK, Source.ESPN),
+            ),
             (
                 "soccer_spain_la_liga",
-                (Source.ODDSPORTAL, Source.ODDS_API, Source.FOOTBALL_DATA_UK),
+                (Source.ODDSPORTAL, Source.ODDS_API, Source.FOOTBALL_DATA_UK, Source.ESPN),
             ),
             (
                 "soccer_italy_serie_a",
-                (Source.ODDSPORTAL, Source.ODDS_API, Source.FOOTBALL_DATA_UK),
+                (Source.ODDSPORTAL, Source.ODDS_API, Source.FOOTBALL_DATA_UK, Source.ESPN),
             ),
             (
                 "soccer_germany_bundesliga",
-                (Source.ODDSPORTAL, Source.ODDS_API, Source.FOOTBALL_DATA_UK),
+                (Source.ODDSPORTAL, Source.ODDS_API, Source.FOOTBALL_DATA_UK, Source.ESPN),
             ),
             (
                 "soccer_france_ligue_one",
-                (Source.ODDSPORTAL, Source.ODDS_API, Source.FOOTBALL_DATA_UK),
+                (Source.ODDSPORTAL, Source.ODDS_API, Source.FOOTBALL_DATA_UK, Source.ESPN),
             ),
             ("basketball_nba", (Source.ESPN, Source.ODDSPORTAL, Source.ODDS_API)),
         ],
