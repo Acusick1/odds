@@ -3,8 +3,21 @@ name: Test
 on:
   push:
     branches-ignore: [main]
+    # Lint checks the wiki and docs. The how-to page is re-included because
+    # tests/unit/test_candidates.py validates its example draft.
+    paths:
+      - '**'
+      - '!wiki/**'
+      - '!docs/**'
+      - '!**/*.md'
+      - 'wiki/evaluation/howto-take-an-idea-to-a-verdict.md'
   workflow_call:
   workflow_dispatch:
+
+# A newer push to the same branch supersedes a run still in progress.
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:

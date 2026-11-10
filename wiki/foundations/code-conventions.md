@@ -24,7 +24,7 @@ Mechanical gates come first; the rest is convention checked in review.
 
 ## Mechanical gates
 
-Pre-commit (`.pre-commit-config.yaml`) runs on every commit; the `Lint` workflow (`.github/workflows/lint.yml`) runs all hooks on every pushed branch except main. The Python version CI sets up is on [CI/CD workflows](../operations/ci-cd-workflows.md).
+Pre-commit (`.pre-commit-config.yaml`) runs on every commit; the `Lint` workflow (`.github/workflows/lint.yml`) runs all hooks on every pushed branch except main, and a newer push to a branch cancels its run still in progress. The Python version CI sets up is on [CI/CD workflows](../operations/ci-cd-workflows.md).
 
 | Hook | Scope | Enforces |
 |---|---|---|
@@ -41,7 +41,7 @@ Ruff selects the whole `DTZ` family for timezone checks ([Timezones](timezones.m
 
 ### Dependency checks
 
-`deptry` runs in the "Check declared dependencies" step of `.github/workflows/test.yml`, before the tests, once per package (`cd "$pkg" && uv run --project ../.. --with deptry deptry .`, for each `packages/*/`) and fails on a module that a package imports without declaring in its own `pyproject.toml`. Deliberate exceptions sit in that package's `[tool.deptry.per_rule_ignores]` ([Workspace packages](workspace-packages.md#dependency-exceptions)).
+`deptry` runs in the "Check declared dependencies" step of `.github/workflows/test.yml`, before the tests on every push that runs them, once per package (`cd "$pkg" && uv run --project ../.. --with deptry deptry .`, for each `packages/*/`) and fails on a module that a package imports without declaring in its own `pyproject.toml`. Deliberate exceptions sit in that package's `[tool.deptry.per_rule_ignores]` ([Workspace packages](workspace-packages.md#dependency-exceptions)).
 
 ## Conventions without tooling
 
