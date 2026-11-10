@@ -35,7 +35,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from tests.candidate_rule_fixtures import (
-    TestRuleParams,
+    FixtureRuleParams,
     bet_home,
     bet_longest,
     no_bet,
@@ -63,7 +63,7 @@ def rules(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setitem(
             RULES,
             function.__name__,
-            RuleSpec(function, TestRuleParams, frozenset({SharpInput.EXCHANGE})),
+            RuleSpec(function, FixtureRuleParams, frozenset({SharpInput.EXCHANGE})),
         )
 
 
@@ -87,7 +87,7 @@ def write_candidate(directory: Path, name: str = "cand", **fields: Any) -> None:
         "start_date": (NOW - timedelta(days=1)).date().isoformat(),
         "status": "active",
         "rule": rule,
-        "rule_sha256": rule_sha256(rule) if rule in RULES else "0" * 64,
+        "rule_sha256": rule_sha256(rule) if isinstance(RULES.get(rule), RuleSpec) else "0" * 64,
         "params": {"minutes_before_kickoff": [60], "max_input_age_minutes": 120},
         **fields,
     }
@@ -664,7 +664,7 @@ def _event(kickoff: datetime) -> Any:
 
 def _runnable(*minutes: int) -> Any:
     return SimpleNamespace(
-        params=TestRuleParams(minutes_before_kickoff=minutes, max_input_age_minutes=10)
+        params=FixtureRuleParams(minutes_before_kickoff=minutes, max_input_age_minutes=10)
     )
 
 
