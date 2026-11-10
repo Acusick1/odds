@@ -32,6 +32,15 @@ LINE_MARKETS: frozenset[Market] = frozenset({Market.SPREADS, Market.TOTALS})
 
 
 @dataclass(frozen=True)
+class Lookback:
+    """A point ``minutes_before_decision`` before the decision time, whose state may be at most
+    ``max_input_age`` old at that point."""
+
+    minutes_before_decision: int
+    max_input_age: timedelta
+
+
+@dataclass(frozen=True)
 class PolymarketPrice:
     """Polymarket's mids on one line of one snapshot, as implied probabilities normalised to
     sum to 1."""
@@ -52,8 +61,10 @@ class MarketState:
     ``input_ids`` is fixed when the state is built, so nothing a rule does changes what the
     decision records. ``also`` holds the state of each extra market
     the rule declared, read-only, from the same source run as the retail snapshot where the
-    source stored one. A state without a snapshot has no inputs: no retail prices, no sharp
-    prices and no extra markets.
+    source stored one. ``lookbacks`` holds the state at each lookback point the rule declared,
+    keyed by its minutes before the decision time, each built as of that point with the same
+    extra markets and no lookbacks of its own. A state without a snapshot has no inputs: no
+    retail prices, no sharp prices, no extra markets and no lookbacks.
     """
 
     event_id: int
@@ -69,6 +80,7 @@ class MarketState:
     exchange: Mapping[Line, ExchangePrice] = field(default_factory=lambda: MappingProxyType({}))
     polymarket: Mapping[Line, PolymarketPrice] = field(default_factory=lambda: MappingProxyType({}))
     also: Mapping[Market, MarketState] = field(default_factory=lambda: MappingProxyType({}))
+    lookbacks: Mapping[int, MarketState] = field(default_factory=lambda: MappingProxyType({}))
     input_ids: tuple[int, ...] = ()
 
     @property
@@ -78,7 +90,8 @@ class MarketState:
     @property
     def input_snapshot_ids(self) -> list[int]:
         """The retail snapshot, then each Polymarket snapshot, then each extra market's inputs
-        in market order; empty for a state without inputs."""
+        in market order, then each lookback's inputs from the nearest point to the furthest;
+        empty for a state without inputs."""
         return list(self.input_ids)
 
 
@@ -154,6 +167,16 @@ def _in_run(quoted: Iterable[Quote], market: Market, run: Sequence[Quote]) -> li
     ]
 
 
+def _no_input(event: Event, market: Market, decision_time: datetime) -> MarketState:
+    return MarketState(
+        event_id=event.id,
+        sport_key=event.sport_key,
+        market=market,
+        kickoff=event.commence_time,
+        decision_time=decision_time,
+    )
+
+
 def _own_state(
     event: Event,
     market: Market,
@@ -163,13 +186,7 @@ def _own_state(
     sharp_inputs: frozenset[SharpInput],
     also_markets: frozenset[Market],
 ) -> MarketState:
-    state = MarketState(
-        event_id=event.id,
-        sport_key=event.sport_key,
-        market=market,
-        kickoff=event.commence_time,
-        decision_time=decision_time,
-    )
+    state = _no_input(event, market, decision_time)
     retail_quotes = [
         q
         for q in quoted
@@ -244,6 +261,7 @@ def build_market_state(
     max_input_age: timedelta,
     sharp_inputs: frozenset[SharpInput],
     also_markets: frozenset[Market] = frozenset(),
+    lookbacks: Sequence[Lookback] = (),
 ) -> MarketState:
     """The event's state in ``market`` at ``decision_time`` from the quotes stamped at or before
     it; later ones are ignored. ``sharp_inputs`` are the sharp prices the rule needs and
@@ -267,8 +285,13 @@ def build_market_state(
     the writer stored one, else the same source. The market's retail snapshot is the latest one
     for which every extra market has such an input, and the state has no inputs when that
     snapshot or any extra input is older than ``max_input_age``.
+
+    Each of ``lookbacks`` is read as a state of the same market, in ``MarketState.lookbacks``,
+    built by this same procedure as of its point, ``decision_time`` less its minutes, from the
+    quotes stamped at or before that point, with the lookback's own max input age and the same
+    sharp inputs and extra markets. The state has no inputs when any lookback has none.
     """
-    return _own_state(
+    state = _own_state(
         event,
         market,
         quoted,
@@ -277,6 +300,34 @@ def build_market_state(
         sharp_inputs,
         frozenset(also_markets),
     )
+    if not state.has_input or not lookbacks:
+        return state
+    points = {
+        point.minutes_before_decision: _own_state(
+            event,
+            market,
+            quoted,
+            decision_time - timedelta(minutes=point.minutes_before_decision),
+            point.max_input_age,
+            sharp_inputs,
+            frozenset(also_markets),
+        )
+        for point in sorted(lookbacks, key=lambda p: p.minutes_before_decision)
+    }
+    if not all(p.has_input for p in points.values()):
+        return _no_input(event, market, decision_time)
+    return replace(
+        state,
+        lookbacks=MappingProxyType(points),
+        input_ids=(*state.input_ids, *(i for p in points.values() for i in p.input_ids)),
+    )
+
+
+def input_window(max_input_age: timedelta, lookbacks: Sequence[Lookback] = ()) -> timedelta:
+    """How far before a decision time its inputs can lie: the decision's max input age, or a
+    lookback's point and max input age if further."""
+    reaches = [timedelta(minutes=p.minutes_before_decision) + p.max_input_age for p in lookbacks]
+    return max([max_input_age, *reaches])
 
 
 async def load_market_state(
@@ -289,27 +340,29 @@ async def load_market_state(
     known_at: datetime | None = None,
     snapshot_ids: Collection[int] | None = None,
     also_markets: frozenset[Market] = frozenset(),
+    lookbacks: Sequence[Lookback] = (),
 ) -> MarketState:
-    """Build the state from the quotes ``rule_quotes`` loads within ``max_input_age`` before t.
+    """Build the state from the quotes ``rule_quotes`` loads within ``input_window`` before t.
 
     With ``known_at``, only snapshots stored (``created_at``) by then count: the data the
     system had when it acted. The live runner passes its run time and the parity check
     passes the decision's recorded ``known_at``. A historical backtest passes ``None``, because
     backfilled rows were created long after their snapshot time. With ``snapshot_ids``, only
     those snapshots count, whatever event they now belong to: the parity check passes a
-    decision's recorded inputs, those of ``also_markets`` included.
+    decision's recorded inputs, those of ``also_markets`` and ``lookbacks`` included. Every
+    lookback reads the quotes ``known_at`` allows, and none read past its own point.
     """
     quoted = await rule_quotes(
         session,
         event.id,
         market,
         sharp_inputs,
-        since=decision_time - max_input_age,
+        since=decision_time - input_window(max_input_age, lookbacks),
         until=decision_time,
         known_at=known_at,
         snapshot_ids=snapshot_ids,
         also_markets=also_markets,
     )
     return build_market_state(
-        event, market, quoted, decision_time, max_input_age, sharp_inputs, also_markets
+        event, market, quoted, decision_time, max_input_age, sharp_inputs, also_markets, lookbacks
     )

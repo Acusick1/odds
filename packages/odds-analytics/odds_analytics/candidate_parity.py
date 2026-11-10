@@ -31,6 +31,7 @@ from odds_lambda.candidate_rules import (
     Selection,
     apply_rule,
     load_market_state,
+    lookback_points,
     max_input_age,
     resolve_rule,
     run_rule,
@@ -127,6 +128,7 @@ async def _recorded_inputs(
         spec.sharp_inputs,
         snapshot_ids=ids,
         also_markets=spec.also_markets,
+        lookbacks=lookback_points(params),
     )
     _, intents = apply_rule(spec, params, state, decision.kickoff_at_decision, bet_selections)
     return intents, missing
