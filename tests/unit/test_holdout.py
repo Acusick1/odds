@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import stat
 import subprocess
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
@@ -475,6 +476,20 @@ class TestLedger:
         )
         with pytest.raises(holdout.HoldoutRefused, match="already reserved"):
             self.reserve(holdout_repo)
+
+    def test_the_spent_file_directory_is_synced_before_access(
+        self, holdout_repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        synced_directories: list[bool] = []
+        real_fsync = holdout.os.fsync
+
+        def track(fd: int) -> None:
+            synced_directories.append(stat.S_ISDIR(holdout.os.fstat(fd).st_mode))
+            real_fsync(fd)
+
+        monkeypatch.setattr(holdout.os, "fsync", track)
+        self.reserve(holdout_repo)
+        assert any(synced_directories)
 
     def test_a_reservation_cannot_be_constructed_directly(self) -> None:
         with pytest.raises(holdout.HoldoutRefused, match="issued by reserve"):

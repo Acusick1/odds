@@ -45,7 +45,7 @@ What a candidate is and when it is promoted or killed is on [Goal and strategy](
    - Before the Odds API backfill reaches the database, commit `candidates/preregistrations/<issue>-<market>-v<version>.yaml` in one commit: the issue, name, version, rule, market, league set, the full grid and the selection rule's link, with no cell.
    - After screening, commit `candidates/selections/<issue>-<market>-v<version>.yaml` in one commit: the grid file's sha256 and the selected cell, a member of the grid.
    - Run `uv run odds candidates holdout candidates/selections/<issue>-<market>-v<version>.yaml` from a clean checkout. It reserves the version in `candidates/holdout.jsonl`, replays each league's sealed window, pools the bets and prints the gate; commit the ledger.
-   - The gate passes at mean EV above 0 and not killed. Under 30 bets, not killed alone passes: flag it on the idea issue. A second run of the idea and version is refused, a failure after the reservation spends the run, and a holdout result never promotes.
+   - The gate passes at mean EV above 0 and not killed. Under 30 bets, not killed alone passes: flag it on the idea issue. A second run of the idea and version is refused, a failure after the reservation, a crash or power loss included, spends the run, and a holdout result never promotes.
    - An idea that fails the gate is not registered. An idea with no holdout data (EPL-only while [#730](https://github.com/Acusick1/odds/issues/730) is open) goes straight to the forward test.
 4. **Register it** with a pull request that adds `candidates/<name>.yaml`.
    - Take the hash from `uv run odds candidates rule-hash <rule>`, and set `version: 1`, the issue, a `start_date` and `status: active` ([file format](candidate-registry.md#file-format)).

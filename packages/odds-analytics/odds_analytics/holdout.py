@@ -462,6 +462,12 @@ def _spend(root: Path, key: str, sha: str, started_at: datetime) -> None:
         )
         handle.flush()
         os.fsync(handle.fileno())
+    # A newly created file's name survives a power loss only once its directory is synced.
+    directory = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
 
 
 @dataclass(frozen=True)
