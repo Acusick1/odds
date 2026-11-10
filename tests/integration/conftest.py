@@ -266,3 +266,44 @@ def add_cross_market_run(pglite_async_session: AsyncSession) -> CrossMarketRun:
         return by_market[Market.ONE_X_TWO], by_market.get(Market.TOTALS)
 
     return add
+
+
+AddMatch = Callable[..., Awaitable[Event]]
+# When a test match was stored, before every decision and run time the tests use.
+MATCH_STORED_AT = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+@pytest.fixture
+def add_match(pglite_async_session: AsyncSession) -> AddMatch:
+    """Store an EPL match with the given kick-off. ``score=(home, away)`` makes it FINAL with
+    that result, completed at ``completed_at`` (the kick-off plus 2 hours by default);
+    ``stored_at`` is its ``created_at`` and ``sport_key`` its league. Other fields go to ``make_epl_event``."""
+
+    async def add(
+        event_id: int,
+        kickoff: datetime,
+        home_team: str = "Arsenal",
+        away_team: str = "Chelsea",
+        *,
+        score: tuple[int, int] | None = None,
+        completed_at: datetime | None = None,
+        stored_at: datetime = MATCH_STORED_AT,
+        sport_key: str = "soccer_epl",
+        **fields: object,
+    ) -> Event:
+        if score is not None:
+            fields.update(
+                status="final",
+                home_score=score[0],
+                away_score=score[1],
+                completed_at=completed_at or kickoff + timedelta(hours=2),
+            )
+        event = make_epl_event(
+            event_id, kickoff, home_team, away_team, created_at=stored_at, **fields
+        )
+        event.sport_key = sport_key
+        pglite_async_session.add(event)
+        await pglite_async_session.flush()
+        return event
+
+    return add

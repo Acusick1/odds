@@ -38,6 +38,7 @@ from odds_lambda.candidate_rules import (
     RuleParams,
     RuleSpec,
     Selection,
+    candidate_leagues,
     decision_times,
     run_rule,
 )
@@ -68,6 +69,8 @@ class RunnableCandidate:
 class MissReason(StrEnum):
     LATE = "late"
     NO_INPUT = "no_input"
+    FIXTURE_CONTEXT = "fixture_context"
+    FIXTURE_PENDING = "fixture_pending"
 
 
 @dataclass
@@ -190,6 +193,18 @@ async def _alert_no_input(decision: CandidateDecision) -> None:
     )
 
 
+async def _alert_no_fixture_context(decision: CandidateDecision) -> None:
+    lead = decision.minutes_before_kickoff
+    await send_recorded_alert(
+        f"candidate_no_fixture_context:{decision.candidate_name}:{lead}",
+        "warning",
+        f"⚠️ Candidate {decision.candidate_name} missed the decision on {decision.event_id} at "
+        f"{decision.decision_time:%Y-%m-%d %H:%M} UTC ({lead} minutes before kick-off): a "
+        f"team's previous match has no stored result long after it was played",
+        every=stale_reminder_interval(),
+    )
+
+
 async def _bet_selections(
     session: AsyncSession, candidate: MechanicalCandidate, event_id: int
 ) -> frozenset[Selection]:
@@ -235,7 +250,13 @@ async def _decide(
         t,
         known_at=now,
         bet_selections=await _bet_selections(session, candidate, event.id),
+        fixture_leagues=candidate_leagues(candidate),
     )
+    if state.missing_fixture:
+        decision.missed = True
+        reason = MissReason.FIXTURE_CONTEXT if state.fixture_overdue else MissReason.FIXTURE_PENDING
+        _log_missed(decision, reason, now)
+        return decision, reason
     if not state.has_input:
         decision.missed = True
         _log_missed(decision, MissReason.NO_INPUT, now)
@@ -257,6 +278,8 @@ async def _decide(
         )
     decision.bets_placed = len(intents)
     decision.input_snapshot_ids = state.input_snapshot_ids
+    decision.input_event_ids = state.input_event_ids
+    decision.input_fixture = state.fixture.to_record()
     return decision, None
 
 
@@ -364,6 +387,8 @@ async def run_decisions(
                 continue
             if miss is MissReason.NO_INPUT:
                 await _alert_no_input(decision)
+            elif miss is MissReason.FIXTURE_CONTEXT:
+                await _alert_no_fixture_context(decision)
             if decision.missed:
                 summary.missed += 1
             elif decision.bets_placed:

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import TYPE_CHECKING
 
+from odds_core.as_of import RESULT_LAG
 from odds_core.models import Event
 
 from odds_analytics.epl_schedule_features import (
@@ -24,8 +25,6 @@ if TYPE_CHECKING:
     import pandas as pd
     from sqlalchemy.ext.asyncio import AsyncSession
 
-# A match counts at t only once its result is known; kick-off plus this covers full time (inferred).
-RESULT_LAG = timedelta(hours=3)
 # ESPN statuses of a match that was played; rows left behind by a rescheduled match carry others.
 FINISHED_FIXTURE_STATUSES: frozenset[str] = frozenset(
     {

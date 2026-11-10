@@ -5,7 +5,9 @@ exactly the snapshots the decision recorded (``input_snapshot_ids``), with its d
 and kick-off, runs the rule and compares the bets with the decision's trades; any difference
 is a mismatch. Decisions are replayed in the order the live runs took them, and each outcome
 of a match is bet once: the parity comparison drops the outcomes the match's earlier
-decisions placed trades on, as the live run did. The data comparison replays from the database as it is now, with
+decisions placed trades on, as the live run did. A rule that reads fixture inputs gets them
+from the events the decision recorded (``input_event_ids``), as known at its ``known_at``. The
+data comparison replays from the database as it is now, with
 ``known_at`` the decision's, dropping the outcomes its own replays of the earlier decisions
 bet, as the backtest does, and reports where that differs from the recorded-input replay (a
 later twin merge, commit lag): informational, never a failure.
@@ -14,9 +16,10 @@ later twin merge, commit lag): informational, never a failure.
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 from odds_core.candidates import MechanicalCandidate
 from odds_core.market_prices import Outcome
@@ -25,11 +28,13 @@ from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from odds_core.vocabulary import Market
 from odds_lambda.candidate_rules import (
     BetIntent,
+    FixtureContext,
     ModelRuleSpec,
     RuleParams,
     RuleSpec,
     Selection,
     apply_rule,
+    candidate_leagues,
     load_market_state,
     lookback_points,
     max_input_age,
@@ -38,6 +43,7 @@ from odds_lambda.candidate_rules import (
 )
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import defer
 from sqlmodel import col
 
 BetKey = tuple[str, float | None, str, float, float]
@@ -61,6 +67,7 @@ class DecisionParity:
     db_replayed: tuple[BetKey, ...]
     # Recorded input ids absent from the database; the recorded-input replay cannot be exact.
     missing_snapshot_ids: tuple[int, ...] = ()
+    missing_event_ids: tuple[int, ...] = ()
 
     @property
     def data_difference(self) -> bool:
@@ -101,16 +108,29 @@ def intent_keys(intents: list[BetIntent]) -> tuple[BetKey, ...]:
     )
 
 
+async def _absent_events(session: AsyncSession, ids: list[int]) -> tuple[int, ...]:
+    """The recorded event ids absent from the database."""
+    if not ids:
+        return ()
+    rows = await session.execute(select(col(Event.id)).where(col(Event.id).in_(ids)))
+    return tuple(sorted(set(ids) - set(rows.scalars())))
+
+
 async def _recorded_inputs(
     session: AsyncSession,
+    candidate: MechanicalCandidate,
     spec: RuleSpec,
     params: RuleParams,
     event: Event,
     market: Market,
     decision: CandidateDecision,
+    fixture: tuple[list[int], dict[str, Any] | None],
     bet_selections: set[Selection],
-) -> tuple[list[BetIntent], tuple[int, ...]]:
-    """The bets from the decision's recorded snapshots, and the recorded ids not found."""
+) -> tuple[list[BetIntent], tuple[int, ...], tuple[int, ...]]:
+    """The bets from the decision's recorded snapshots and fixture values, and the recorded
+    snapshot ids and event ids not found. A rule's fixture context is the recorded one, not
+    read again: events' scores and kick-offs change, and a merge changes their ids."""
+    event_ids, values = fixture
     ids = list(decision.input_snapshot_ids)
     found: set[int] = set()
     if ids:
@@ -130,12 +150,15 @@ async def _recorded_inputs(
         also_markets=spec.also_markets,
         lookbacks=lookback_points(params),
     )
+    if spec.fixture_inputs and state.has_input:
+        state = replace(state, fixture=FixtureContext.from_record(values, event_ids))
     _, intents = apply_rule(spec, params, state, decision.kickoff_at_decision, bet_selections)
-    return intents, missing
+    return intents, missing, await _absent_events(session, event_ids)
 
 
 async def _db_replayed(
     session: AsyncSession,
+    candidate: MechanicalCandidate,
     spec: RuleSpec,
     params: RuleParams,
     event: Event,
@@ -153,6 +176,7 @@ async def _db_replayed(
         decision.known_at,
         kickoff=decision.kickoff_at_decision,
         bet_selections=bet_selections,
+        fixture_leagues=candidate_leagues(candidate),
     )
     return intents
 
@@ -183,7 +207,13 @@ async def check_parity(
     decisions = (
         (
             await session.execute(
+                # The recorded fixture is read only for a rule with fixture inputs, below, so a
+                # database not yet migrated to hold it can still be checked for other rules.
                 select(CandidateDecision)
+                .options(
+                    defer(CandidateDecision.input_event_ids),  # type: ignore[arg-type]
+                    defer(CandidateDecision.input_fixture),  # type: ignore[arg-type]
+                )
                 .where(
                     CandidateDecision.candidate_name == candidate.name,
                     CandidateDecision.candidate_version == version,
@@ -197,6 +227,18 @@ async def check_parity(
         .scalars()
         .all()
     )
+    recorded_fixture: dict[int, tuple[list[int], dict[str, Any] | None]] = {}
+    if decisions and spec.fixture_inputs:
+        rows = await session.execute(
+            select(
+                CandidateDecision.id,
+                CandidateDecision.input_event_ids,
+                CandidateDecision.input_fixture,
+            ).where(
+                CandidateDecision.id.in_([d.id for d in decisions])  # type: ignore[union-attr]
+            )
+        )
+        recorded_fixture = {i: (list(ids), values) for i, ids, values in rows.tuples()}
     trades: dict[int, list[PaperTrade]] = defaultdict(list)
     if decisions:
         rows = await session.execute(
@@ -223,17 +265,20 @@ async def check_parity(
                 for t in trades[decision.id]
             )
         )
-        replayed_bets, missing = await _recorded_inputs(
+        replayed_bets, missing, missing_events = await _recorded_inputs(
             session,
+            candidate,
             spec,
             params,
             event,
             candidate.market,
             decision,
+            recorded_fixture.get(decision.id, ([], None)),
             live_selections[decision.event_id],
         )
         db_replayed_bets = await _db_replayed(
             session,
+            candidate,
             spec,
             params,
             event,
@@ -253,13 +298,14 @@ async def check_parity(
                 decision_time=decision.decision_time,
                 status=(
                     ParityStatus.MATCH
-                    if replayed == live and not missing
+                    if replayed == live and not missing and not missing_events
                     else ParityStatus.MISMATCH
                 ),
                 live=live,
                 replayed=replayed,
                 db_replayed=db_replayed,
                 missing_snapshot_ids=missing,
+                missing_event_ids=missing_events,
             )
         )
     return ParityReport(candidate.name, version, results)

@@ -1,21 +1,11 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 from odds_core.models import Event, EventStatus
+from odds_core.time import season_start
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from odds_lambda.storage.event_merge import SEASON_START_MONTH, season_start_year
-
-CALENDAR_YEAR_SPORTS = frozenset({"baseball_mlb"})
-
-
-def season_start(now: datetime, sport_key: str) -> datetime:
-    """The start of ``now``'s season: 1 January for a calendar-year sport, else 1 August."""
-    if sport_key in CALENDAR_YEAR_SPORTS:
-        return datetime(now.year, 1, 1, tzinfo=UTC)
-    return datetime(season_start_year(now), SEASON_START_MONTH, 1, tzinfo=UTC)
 
 
 async def find_unsettled_events(

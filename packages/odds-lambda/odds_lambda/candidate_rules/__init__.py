@@ -1,5 +1,12 @@
 """Mechanical candidate rules, shared by the live runner and the replay backtest."""
 
+from odds_lambda.candidate_rules.fixture_context import (
+    FixtureContext,
+    FixtureInput,
+    PreviousResult,
+    TeamResult,
+    load_fixture_context,
+)
 from odds_lambda.candidate_rules.inputs import SharpInput
 from odds_lambda.candidate_rules.market_state import (
     Line,
@@ -22,7 +29,9 @@ from odds_lambda.candidate_rules.rules import (
     RuleParams,
     RuleSpec,
     Selection,
+    add_fixture_context,
     apply_rule,
+    candidate_leagues,
     decision_leads,
     decision_times,
     exchange_gap,
@@ -39,6 +48,8 @@ __all__ = [
     "RULES",
     "BetIntent",
     "EvPredictor",
+    "FixtureContext",
+    "FixtureInput",
     "GapParams",
     "LookbackParams",
     "Line",
@@ -46,12 +57,16 @@ __all__ = [
     "MarketState",
     "ModelRuleSpec",
     "PolymarketPrice",
+    "PreviousResult",
     "RetailEvModelParams",
     "RuleParams",
     "RuleSpec",
     "Selection",
     "SharpInput",
+    "TeamResult",
+    "add_fixture_context",
     "apply_rule",
+    "candidate_leagues",
     "build_market_state",
     "decision_leads",
     "decision_times",
@@ -59,6 +74,7 @@ __all__ = [
     "gap_bets",
     "input_window",
     "is_bettable_line",
+    "load_fixture_context",
     "load_market_state",
     "lookback_points",
     "max_input_age",

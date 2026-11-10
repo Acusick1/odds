@@ -25,6 +25,7 @@ from pydantic import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from odds_lambda.candidate_rules.fixture_context import FixtureInput, load_fixture_context
 from odds_lambda.candidate_rules.inputs import SharpInput
 from odds_lambda.candidate_rules.market_state import (
     Line,
@@ -174,13 +175,16 @@ class RuleSpec:
     """``sharp_inputs`` are the sharp prices the rule needs: a decision without each of them
     has no inputs, and the exchange makes the retail snapshot one that also quotes it.
     ``also_markets`` are extra markets the rule reads, read-only, in ``MarketState.also``: a
-    decision without an input for each of them has no inputs."""
+    decision without an input for each of them has no inputs. ``fixture_inputs`` are the
+    fixture inputs the rule reads, in ``MarketState.fixture``: a decision with a team whose
+    previous result is not known has no inputs."""
 
     # Each rule takes its own params model, which a shared Callable cannot express.
     function: Callable[[MarketState, Any], list[BetIntent]]
     params_model: type[RuleParams]
     sharp_inputs: frozenset[SharpInput]
     also_markets: frozenset[Market] = frozenset()
+    fixture_inputs: frozenset[FixtureInput] = frozenset()
 
 
 # Predicted EV of each (outcome, UK retail book) quote in a state of a market without lines.
@@ -203,6 +207,7 @@ class ModelRuleSpec:
     model_roots: tuple[str, ...]
     markets: frozenset[Market]
     also_markets: frozenset[Market] = frozenset()
+    fixture_inputs: frozenset[FixtureInput] = frozenset()
 
     def bind(self, predict: EvPredictor) -> RuleSpec:
         return RuleSpec(
@@ -210,6 +215,7 @@ class ModelRuleSpec:
             self.params_model,
             self.sharp_inputs,
             self.also_markets,
+            self.fixture_inputs,
         )
 
 
@@ -285,13 +291,16 @@ async def run_rule(
     known_at: datetime | None,
     kickoff: datetime | None = None,
     bet_selections: Collection[Selection] = frozenset(),
+    fixture_leagues: Collection[str] | None = None,
 ) -> tuple[MarketState, list[BetIntent]]:
     """The state of ``event``'s ``market`` at ``at`` as known at ``known_at``, and the bets the
     rule takes.
 
     The live runner, the replay backtest and the parity check all decide through this.
     ``kickoff`` overrides the event's current kick-off with the one a recorded decision saw.
-    The returned state's ``snapshot_id`` is the decision's input.
+    ``fixture_leagues`` are the leagues a rule's concurrent kick-offs count, the event's own
+    by default (``candidate_leagues``). The returned state's ``snapshot_id`` and
+    ``input_event_ids`` are the decision's inputs.
     """
     state = await load_market_state(
         session,
@@ -304,7 +313,54 @@ async def run_rule(
         also_markets=spec.also_markets,
         lookbacks=lookback_points(params),
     )
+    state = await add_fixture_context(
+        session, spec, state, event, at, known_at, kickoff, fixture_leagues
+    )
     return apply_rule(spec, params, state, kickoff, bet_selections)
+
+
+def candidate_leagues(candidate: MechanicalCandidate) -> tuple[str, ...]:
+    """The leagues whose kick-offs a candidate's rule counts as concurrent: its own sport's."""
+    return (candidate.sport,)
+
+
+async def add_fixture_context(
+    session: AsyncSession,
+    spec: RuleSpec,
+    state: MarketState,
+    event: Event,
+    at: datetime,
+    known_at: datetime | None,
+    kickoff: datetime | None = None,
+    fixture_leagues: Collection[str] | None = None,
+) -> MarketState:
+    """``state`` with the fixture inputs ``spec`` declares, as known at ``known_at``; ``state``
+    itself for a rule that declares none or when it has no inputs.
+
+    A team whose previous match has no result known at ``at`` leaves the state without inputs,
+    with the context kept so the run records why (``MarketState.missing_fixture``).
+    """
+    if not spec.fixture_inputs or not state.has_input:
+        return state
+    fixture = await load_fixture_context(
+        session,
+        event,
+        kickoff or event.commence_time,
+        at,
+        spec.fixture_inputs,
+        fixture_leagues or (event.sport_key,),
+        known_at,
+    )
+    if fixture.unknown_results:
+        return MarketState(
+            event_id=state.event_id,
+            sport_key=state.sport_key,
+            market=state.market,
+            kickoff=state.kickoff,
+            decision_time=state.decision_time,
+            fixture=fixture,
+        )
+    return replace(state, fixture=fixture)
 
 
 def apply_rule(

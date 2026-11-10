@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 import structlog
 from odds_core.models import Event, EventExternalId, HealthCheckAcknowledgement
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
-from odds_core.time import ensure_utc
+from odds_core.time import ensure_utc, season_start_year
 from odds_core.vocabulary import HealthCheck, Source
 from sqlalchemy import and_, delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,7 +22,6 @@ logger = structlog.get_logger()
 
 EVENT_MATCH_WINDOW = timedelta(hours=2)
 HISTORICAL_MATCH_WINDOW = timedelta(hours=24)
-SEASON_START_MONTH = 8
 
 
 class ConflictingGamePks(ValueError):
@@ -35,12 +34,6 @@ class MergeReport:
     merged_ids: tuple[int, ...]
     rows_moved: dict[str, int] = field(default_factory=dict)
     rows_deleted: dict[str, int] = field(default_factory=dict)
-
-
-def season_start_year(commence_time: datetime) -> int:
-    return (
-        commence_time.year if commence_time.month >= SEASON_START_MONTH else commence_time.year - 1
-    )
 
 
 async def _candidates(
@@ -228,6 +221,9 @@ class EventMerger:
                 rows_deleted[table] = rows_deleted.get(table, 0) + count
             for table, count in (await self._repoint_event_references(duplicate, keep)).items():
                 rows_moved[table] = rows_moved.get(table, 0) + count
+            if moved := await self._repoint_recorded_events(duplicate, keep):
+                key = "candidate_decisions.input_event_ids"
+                rows_moved[key] = rows_moved.get(key, 0) + moved
             self._carry_result(keep, duplicate)
             await self.session.delete(duplicate)
         if await holds_game_pk(self.session, keep):
@@ -305,6 +301,21 @@ class EventMerger:
             )
         )
         return set(rows.scalars())
+
+    async def _repoint_recorded_events(self, duplicate: Event, keep: Event) -> int:
+        """Replace the duplicate's id with the kept event's in the ``input_event_ids`` that
+        candidate decisions recorded: plain integers the foreign-key re-pointing does not
+        reach, and which the parity check loads. Returns the decisions changed."""
+        result = await self.session.execute(
+            text(
+                "UPDATE candidate_decisions"
+                " SET input_event_ids = ARRAY(SELECT DISTINCT i FROM unnest("
+                "array_replace(input_event_ids, :duplicate, :keep)) AS i ORDER BY i)"
+                " WHERE :duplicate = ANY(input_event_ids)"
+            ),
+            {"duplicate": duplicate.id, "keep": keep.id},
+        )
+        return int(result.rowcount)  # type: ignore[attr-defined]
 
     async def _drop_clashing_decisions(self, duplicate: Event, keep: Event) -> dict[str, int]:
         """Delete the duplicate's decisions, and their trades, that the kept event has too.

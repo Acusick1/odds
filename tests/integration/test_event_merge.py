@@ -125,6 +125,30 @@ class TestMergeDecidedTwins:
         assert await session.get(Event, TWIN_EVENT_ID) is None
 
 
+class TestMergeRecordedEvents:
+    async def test_a_recorded_fixture_event_follows_the_merge(self, pglite_async_session) -> None:
+        session = pglite_async_session
+        keep = make_epl_event(API_EVENT_ID)
+        twin = make_epl_event(TWIN_EVENT_ID)
+        other = make_epl_event(50, TWIN_KICKOFF + timedelta(days=7))
+        decided = make_epl_event(51, TWIN_KICKOFF + timedelta(days=14))
+        session.add_all([keep, twin, other, decided])
+        await session.flush()
+        decision = _decision(decided.id, "recorded")
+        decision.input_event_ids = [other.id, twin.id]
+        session.add(decision)
+        await session.commit()
+        kept_id, other_id = keep.id, other.id
+
+        report = await EventMerger(session).merge(keep, [twin])
+        await session.commit()
+        session.expire_all()
+
+        stored = (await session.execute(select(CandidateDecision))).scalar_one()
+        assert stored.input_event_ids == sorted([other_id, kept_id])
+        assert report.rows_moved["candidate_decisions.input_event_ids"] == 1
+
+
 class TestMerge:
     @pytest.mark.asyncio
     async def test_moves_every_row_and_deletes_twin(self, live_twin_with_rows) -> None:
