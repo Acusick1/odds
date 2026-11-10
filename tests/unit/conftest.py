@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import gzip
+import hashlib
 import importlib
 import json
 import os
@@ -19,6 +20,7 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
+import yaml
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from odds_lambda.candidate_rules import code_hash
@@ -410,3 +412,63 @@ def cross_market_run() -> RunQuotes:
         return quotes
 
     return run
+
+
+HOLDOUT_CELL: dict[str, object] = {
+    "threshold": 0.02,
+    "minutes_before_kickoff": [60],
+    "max_input_age_minutes": 10,
+}
+HOLDOUT_GRID: dict[str, list[object]] = {
+    "threshold": [0.02, 0.05],
+    "minutes_before_kickoff": [[60], [60, 30]],
+    "max_input_age_minutes": [10],
+}
+
+
+def preregistration(**changes: object) -> dict[str, object]:
+    """The grid file of issue 610's `1x2` version 1, for two sealed leagues."""
+    return {
+        "issue": 610,
+        "name": "back-longest",
+        "version": 1,
+        "rule": "exchange_gap",
+        "market": "1x2",
+        "leagues": ["soccer_spain_la_liga", "soccer_germany_bundesliga"],
+        "grid": HOLDOUT_GRID,
+        "selection_rule": "https://github.com/Acusick1/odds/issues/821#issuecomment-6769611091",
+        **changes,
+    }
+
+
+def selection(grid_file: Path, **changes: object) -> dict[str, object]:
+    """The selection of ``HOLDOUT_CELL`` from the grid file at ``grid_file``."""
+    return {
+        "issue": 610,
+        "market": "1x2",
+        "version": 1,
+        "grid_sha256": hashlib.sha256(grid_file.read_bytes()).hexdigest(),
+        "cell": HOLDOUT_CELL,
+        **changes,
+    }
+
+
+STEM = "610-1x2-v1"
+
+
+@pytest.fixture
+def holdout_repo(candidates_repo: Path) -> Path:
+    """A committed ``candidates/`` with an empty holdout ledger, the grid file
+    ``preregistrations/610-1x2-v1.yaml`` in one commit and its selection
+    ``selections/610-1x2-v1.yaml`` in the next; returns the ``candidates/`` directory."""
+    directory = candidates_repo / "candidates"
+    (directory / "holdout.jsonl").write_text("")
+    git_commit(candidates_repo)
+    (directory / "preregistrations").mkdir()
+    grid = directory / "preregistrations" / f"{STEM}.yaml"
+    grid.write_text(yaml.safe_dump(preregistration()))
+    git_commit(candidates_repo)
+    (directory / "selections").mkdir()
+    (directory / "selections" / f"{STEM}.yaml").write_text(yaml.safe_dump(selection(grid)))
+    git_commit(candidates_repo)
+    return directory

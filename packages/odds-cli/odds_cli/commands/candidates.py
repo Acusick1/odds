@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Annotated, Any, cast
 
 import typer
+from odds_analytics import holdout, holdout_run
 from odds_analytics.candidate_backtest import BacktestResult, HashStatus, replay
 from odds_analytics.candidate_parity import ParityReport, ParityStatus, check_parity
 from odds_analytics.candidate_rehash import rehash as record_rehash
@@ -443,6 +444,76 @@ def backtest(
     if json_path is not None:
         payload = _backtest_json(result)
         json_path.write_text(json.dumps(payload, indent=2, default=str) + "\n")
+
+
+@app.command("holdout")
+def holdout_command(
+    selection: Annotated[
+        Path,
+        typer.Argument(help="candidates/selections/<issue>-<market>-v<version>.yaml, committed"),
+    ],
+) -> None:
+    """Run a pre-registered idea's selected cell once on the sealed holdout and print the gate.
+
+    The argument is the selection file; its grid file, `candidates/preregistrations/` of the
+    same name, is read with it.
+
+    The only command that replays the holdout. It reserves the idea's version in
+    candidates/holdout.jsonl before reading any holdout data: a failure after that leaves the
+    reservation, and the run is spent. A holdout result never promotes.
+    """
+
+    async def run() -> holdout_run.HoldoutRun:
+        async with async_session_maker() as session:
+            return await holdout_run.run_holdout(session, selection, candidates_dir())
+
+    try:
+        done = asyncio.run(run())
+    except holdout.HoldoutRefused as exc:
+        raise _fail(str(exc)) from exc
+    except Exception as exc:
+        raise _fail(
+            f"the run failed after reserving its version, which is spent: {exc!r}. "
+            "Commit the reservation in candidates/holdout.jsonl."
+        ) from exc
+    table = Table(title=f"Holdout of #{done.row.issue} {done.row.name} v{done.row.version}")
+    for column in ("Window", "Events", "Decisions", "Bets", "With close"):
+        table.add_column(column, justify="left" if column == "Window" else "right")
+    for league in done.leagues:
+        cov = league.coverage
+        table.add_row(
+            str(league.window),
+            str(cov.events),
+            str(cov.decisions),
+            str(cov.bets),
+            str(cov.bets_with_close),
+        )
+    console.print(table)
+    _print_gate(done.row)
+
+
+def _print_gate(row: holdout.HoldoutResult) -> None:
+    g = row.result
+    style = "green" if g.verdict is holdout.GateVerdict.PASS else "red"
+    if g.mean_ev is None:
+        scored = "no bets with a close"
+    else:
+        scored = (
+            f"pooled n={g.bets} mean EV {g.mean_ev:+.4f} "
+            f"95% CI [{g.ci_lower:+.4f}, {g.ci_upper:+.4f}]{' (killed)' if g.killed else ''}"
+        )
+    console.print(f"[{style}]Holdout gate: {g.verdict.value}[/{style}]  {scored}", soft_wrap=True)
+    if g.low_bets:
+        console.print(
+            f"[yellow]Under {holdout.MIN_GATE_BETS} holdout bets: not killed alone passes. "
+            f"Flag this on issue {row.issue}.[/yellow]",
+            soft_wrap=True,
+        )
+    console.print(
+        f"Recorded in candidates/{holdout.HOLDOUT_LEDGER}: commit it. A holdout result never "
+        "promotes; the forward test decides.",
+        soft_wrap=True,
+    )
 
 
 @app.command("parity")

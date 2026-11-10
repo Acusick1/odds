@@ -45,6 +45,7 @@ from odds_analytics.candidate_report import (
     selection_close_probability,
     summarize_candidate,
 )
+from odds_analytics.holdout import HoldoutAccess, require_clear
 
 # Events decided per batch; bounds the snapshots held in memory.
 EVENT_BATCH_SIZE = 50
@@ -119,8 +120,20 @@ def hash_status(candidate: MechanicalCandidate) -> HashStatus:
     return HashStatus.MISMATCH
 
 
-async def final_events(session: AsyncSession, sport: str, start: date, end: date) -> list[Event]:
-    """FINAL events of ``sport`` with scores, kicked off on ``start`` to ``end`` (UTC days)."""
+async def final_events(
+    session: AsyncSession,
+    sport: str,
+    start: date,
+    end: date,
+    access: HoldoutAccess | None = None,
+) -> list[Event]:
+    """FINAL events of ``sport`` with scores, kicked off on ``start`` to ``end`` (UTC days).
+
+    Every replay selects its events here, so this is where the sealed holdout is enforced: a
+    range that intersects it raises ``HoldoutRefused`` without ``access``
+    (``odds_analytics.holdout``).
+    """
+    require_clear(sport, start, end, access)
     result = await session.execute(
         select(Event)
         .where(
@@ -212,33 +225,32 @@ async def _decide(
     return bets
 
 
-async def replay(
+@dataclass(frozen=True)
+class Replayed:
+    """What a replay decided, before scoring: the bets and the counts behind the coverage."""
+
+    bets: list[ScoredBet]
+    counts: _Counts
+    scored_events: int
+    range_events: int
+    tuning: Tuning | None
+    refits: tuple[Refit, ...]
+    model: bool
+
+
+async def collect(
     session: AsyncSession,
     candidate: MechanicalCandidate,
     start: date,
     end: date,
-    family_versions: int,
-    now: datetime | None = None,
-    n_boot: int = DEFAULT_BOOTSTRAP_SAMPLES,
-    seed: int = BOOTSTRAP_SEED,
     only_events: Collection[int] | None = None,
-) -> BacktestResult:
-    """Replay ``candidate`` over the events kicked off from ``start`` to ``end`` inclusive.
-
-    The decision times are the rule's leads before the event's final kick-off, which is the
-    only kick-off a completed event has; a live run saw the kick-off as it was then. An
-    event's times are decided earliest first, and an outcome bet at one is not bet again.
-    State is built with ``known_at=None`` because backfilled rows were created long after
-    their snapshot time. Bets are scored in decision-time order, as the live report orders
-    trades by placement, all settled.
-
-    A model rule decides only the matches after its training prefix, on which its
-    hyperparameters are tuned, each block with the model refitted before it
-    (``odds_analytics.candidate_model``). ``only_events`` restricts a
-    rule without a model to those event ids, to replay it on another replay's scored matches.
-    """
+    access: HoldoutAccess | None = None,
+) -> Replayed:
+    """Decide ``candidate`` over the events kicked off from ``start`` to ``end`` inclusive and
+    settle its bets, in decision-time order. ``access`` is needed for a sealed range."""
+    require_clear(candidate.sport, start, end, access)
     spec, params = resolve_rule(candidate)
-    events = await final_events(session, candidate.sport, start, end)
+    events = await final_events(session, candidate.sport, start, end, access)
     range_events = len(events)
     counts = _Counts()
     refits: list[Refit] = []
@@ -265,24 +277,68 @@ async def replay(
         scored_events = len(events)
     # Stable, so bets placed at one time keep kick-off and rule order.
     bets.sort(key=lambda bet: bet.placed_at)
+    return Replayed(
+        bets,
+        counts,
+        scored_events,
+        range_events,
+        tuning,
+        tuple(refits),
+        isinstance(spec, ModelRuleSpec),
+    )
 
-    coverage = Coverage(
-        events=scored_events,
+
+def coverage_of(replayed: Replayed) -> Coverage:
+    counts = replayed.counts
+    return Coverage(
+        events=replayed.scored_events,
         decisions=counts.decisions,
         with_input=counts.with_input,
         with_exchange=counts.with_exchange,
         with_polymarket=counts.with_polymarket,
         with_retail=counts.with_retail,
         with_bet=counts.with_bet,
-        bets=len(bets),
-        bets_with_close=sum(b.p_close is not None for b in bets),
+        bets=len(replayed.bets),
+        bets_with_close=sum(b.p_close is not None for b in replayed.bets),
     )
+
+
+async def replay(
+    session: AsyncSession,
+    candidate: MechanicalCandidate,
+    start: date,
+    end: date,
+    family_versions: int,
+    now: datetime | None = None,
+    n_boot: int = DEFAULT_BOOTSTRAP_SAMPLES,
+    seed: int = BOOTSTRAP_SEED,
+    only_events: Collection[int] | None = None,
+    holdout_access: HoldoutAccess | None = None,
+) -> BacktestResult:
+    """Replay ``candidate`` over the events kicked off from ``start`` to ``end`` inclusive.
+
+    The decision times are the rule's leads before the event's final kick-off, which is the
+    only kick-off a completed event has; a live run saw the kick-off as it was then. An
+    event's times are decided earliest first, and an outcome bet at one is not bet again.
+    State is built with ``known_at=None`` because backfilled rows were created long after
+    their snapshot time. Bets are scored in decision-time order, as the live report orders
+    trades by placement, all settled.
+
+    A model rule decides only the matches after its training prefix, on which its
+    hyperparameters are tuned, each block with the model refitted before it
+    (``odds_analytics.candidate_model``). ``only_events`` restricts a
+    rule without a model to those event ids, to replay it on another replay's scored matches.
+
+    A range that intersects the sealed holdout raises ``HoldoutRefused`` unless
+    ``holdout_access``, issued only by ``odds_analytics.holdout.Reservation``, covers it.
+    """
+    replayed = await collect(session, candidate, start, end, only_events, holdout_access)
     result = score(
         candidate,
         start,
         end,
-        bets,
-        coverage,
+        replayed.bets,
+        coverage_of(replayed),
         family_versions,
         now or datetime.now(UTC),
         n_boot,
@@ -290,10 +346,10 @@ async def replay(
     )
     return replace(
         result,
-        range_events=range_events,
-        tuning=tuning,
-        refits=tuple(refits),
-        library_versions=library_versions() if isinstance(spec, ModelRuleSpec) else None,
+        range_events=replayed.range_events,
+        tuning=replayed.tuning,
+        refits=replayed.refits,
+        library_versions=library_versions() if replayed.model else None,
     )
 
 

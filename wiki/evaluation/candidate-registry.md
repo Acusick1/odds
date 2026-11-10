@@ -65,6 +65,17 @@ What is scored, in `odds_analytics.candidate_report`:
 
 `odds_cli.commands.candidates.backtest` replays a rule over completed events, tuning a model rule's model on its training matches and refitting it as it goes, and recording the library versions that fit it, and scores it with the functions above, optionally beside a second candidate, never a model rule, on the same matches ([replay backtest](candidate-backtest.md)). It is the only command that runs a [model rule](candidate-rules.md#model-rules). `odds_cli.commands.candidates.parity` replays each recorded decision from its recorded input snapshots and compares the bets ([parity check](candidate-parity.md)). The steps that use them are on [From idea to verdict](howto-take-an-idea-to-a-verdict.md).
 
+## Sealed holdout files
+
+Neither of these is a `*.yaml` candidate, so `odds_core.candidates.load_candidates` ignores them. The [holdout command](candidate-backtest.md#sealed-holdout) reads both.
+
+- `candidates/preregistrations/<issue>-<market>-v<version>.yaml` is an `odds_analytics.holdout.Preregistration`: issue, name, version, rule, market, leagues, the grid (each parameter's values, decision times included) and `selection_rule`, a link to the text of the rule that selects a cell ([#821's](https://github.com/Acusick1/odds/issues/821#issuecomment-6769611091) for the current round). It has no cell. It is added in one commit, before the Odds API backfill reaches the database, and never changed.
+- `candidates/selections/<issue>-<market>-v<version>.yaml` is an `odds_analytics.holdout.Selection`: issue, market, version, the grid file's `grid_sha256` and the selected `cell`, which has the grid's parameters and a value from each. It is added in one commit after the grid file's and never changed; the backfill deadline does not apply to it.
+- The file name is the identity (`odds_analytics.holdout.stem`), so one issue has a pair per market and per version.
+- `candidates/holdout.jsonl` (`odds_analytics.holdout.HOLDOUT_LEDGER`) holds, per idea version, a `reserved` row (`odds_analytics.holdout.Reserved`: issue, market, version, git SHA, start time) and, on success, a `result` row (`odds_analytics.holdout.HoldoutResult`: the strategy, the cell, the windows, the run date, the git SHA, both files' commits and the pooled `odds_analytics.holdout.Gate`). `odds_analytics.holdout.load_ledger` reads it, rejecting a result without its reservation.
+
+The [version check](#version-check) fails a change that modifies or removes a committed ledger row, a version reserved twice, and any edit, rename or deletion of a pre-registration or selection file present at the base.
+
 ## Version check
 
 `scripts.check_candidate_versions.check` compares the working tree's `candidates/*.yaml` with the same files at a base commit. It runs as the `candidate-versions` pre-commit hook ([code conventions](../foundations/code-conventions.md#mechanical-gates)), locally and in the `Lint` workflow. The base is `--base`, else the merge-base of `HEAD` with `origin/main`, else with `main`, else `HEAD`.
@@ -85,7 +96,7 @@ A `odds_core.candidates.MechanicalCandidate.rule_sha256` may also change at the 
 The ledger file in `candidates/`, named by `odds_core.rehash_ledger.REHASH_LEDGER`, records the hash changes that leave every bet the same, one JSON object per line, an `odds_core.rehash_ledger.Rehash`:
 
 - the rule, its old hash (at the base commit) and its new hash (at the head commit), and both commit SHAs;
-- the replay's kick-off days, the database it read (role, host, port and name, no password) and the sha256 of the replay output;
+- the replay's kick-off days (the sport's days outside the [sealed holdout](candidate-backtest.md#sealed-holdout)), the database it read (role, host, port and name, no password) and the sha256 of the replay output;
 - the GitHub PR or issue of the change;
 - per candidate of the rule (`odds_core.rehash_ledger.RehashCandidate`), its version, its decisions with inputs and its bets in the replay, and the recorded decisions the parity check matched, of all of them.
 

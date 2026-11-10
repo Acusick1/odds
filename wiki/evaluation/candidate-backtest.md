@@ -7,6 +7,7 @@ sources:
   - odds_analytics.candidate_model.ModelReplay
   - odds_analytics.candidate_model.refit_blocks
   - odds_cli.commands.candidates.backtest
+  - odds_analytics.holdout
   - odds_lambda.candidate_rules.rules.run_rule
   - odds_core.close.close_quotes
 mentions:
@@ -23,6 +24,22 @@ status: stable
 `odds_cli.commands.candidates.backtest` resolves its argument with `odds_cli.commands.candidates._resolve`: a path to an existing file loads that file, and any other argument is a registered candidate name. `--from` and `--to` are UTC days, both inclusive. `--json <path>` also writes the result as JSON. `--compare <name-or-path>` also replays a second candidate, resolved the same way, on the events the first decided ([comparison](#comparison)). An unknown candidate, an agent candidate, a bad date, `--to` before `--from` or an invalid rule or params prints the error and exits 1.
 
 A file loaded by path may be an unregistered draft. `odds_core.candidates.load_candidate_file` parses it with the registry's model, but does not require the file name to match `name` and does not require `odds_core.candidates.MechanicalCandidate.rule_sha256`. `odds_analytics.candidate_backtest.hash_status` reports whether the recorded hash is `match`, `mismatch` or `absent` against the rule's current hash, `odds_lambda.candidate_rules.pinning.rule_sha256`, or `unhashable` when the rule's closure fails closed ([rule pinning](candidate-rules.md#rule-pinning)), and the command prints a warning unless it matches. The registry rejects a mechanical file without the hash.
+
+## Sealed holdout
+
+The 2025-26 season (1 August to 31 July) of the Championship, La Liga, Serie A, the Bundesliga and Ligue 1, and EPL 2022-23 and 2023-24 while `odds_analytics.holdout.EPL_2022_24_SEALED` is true, are sealed ([ADR-0021](../../docs/adr/0021-sealed-holdout-and-one-shot-gate.md)). The switch defaults to sealed; the substitute close of [#730](https://github.com/Acusick1/odds/issues/730) is what would let those EPL seasons be scored, and the switch goes false only if it is rejected.
+
+**The seal.** `odds_analytics.candidate_backtest.final_events` and `odds_analytics.candidate_backtest.collect`, which `odds_analytics.candidate_backtest.replay` and every other replay reach, call `odds_analytics.holdout.require_clear`. A range that touches a sealed window of the candidate's sport raises `odds_analytics.holdout.HoldoutRefused` before any query, so the development backtest (with `--compare`: each candidate is checked) exits 1 on such a range, mixed ranges included, and `scripts.replay_candidates.dump` replays only the days outside the windows (`odds_analytics.holdout.development_segments`, passed by the rehash command as `--segments`). Only an `odds_analytics.holdout.HoldoutAccess` for the sport's window opens it, and only `odds_analytics.holdout.Reservation.access` issues one.
+
+**The command.** `odds candidates holdout <selection file>` (`odds_cli.commands.candidates.holdout_command`, `odds_analytics.holdout_run.run_holdout`) runs a [selection and its grid](candidate-registry.md#sealed-holdout-files) once:
+
+1. `odds_analytics.holdout.load_plan` checks both files: names are the identity, the selection's `grid_sha256` is the grid file's content, the cell belongs to the grid and each league has a sealed window. The rule is resolved with the cell as params for each league, so a mistake costs no run.
+2. Under an exclusive lock shared by every worktree (`odds_analytics.holdout.exclusive_lock`), `odds_analytics.holdout.reserve` requires each file committed, unchanged and touched by one commit (`odds_analytics.holdout.committed_once`), the grid file's older than the earliest Odds API `source_stamped` snapshot in the database read (`odds_analytics.holdout_run.earliest_backfill`) when there is one; a clean tree; and a committed ledger that extends `origin/main`'s and holds no row for the issue, market and version. It then spends the identity in the spent file of the git common directory (`odds_analytics.holdout.SPENT_FILE`, shared by every worktree), syncing the file and its directory so the spend survives a power loss, and appends and syncs a `reserved` row.
+3. `odds_analytics.candidate_backtest.collect` replays the cell on each league's window as a single-sport draft, with that league's access.
+4. The bets of every league are pooled and scored once with `odds_analytics.candidate_backtest.score` at family size 1; `odds_analytics.holdout.gate` judges the overall estimate: pass when mean EV is above 0 and the event-clustered 95% interval's upper bound is above 0; under `odds_analytics.holdout.MIN_GATE_BETS` (30) bets, the interval condition alone passes and the result is flagged; no bets fails, flagged.
+5. A `result` row is appended. An error after step 2 leaves the `reserved` row and the run is spent.
+
+The command prints each window's coverage and the gate, and a holdout result never promotes.
 
 ## Replay
 
