@@ -7,9 +7,12 @@ from datetime import timedelta
 
 import pytest
 from odds_core.candidates import MechanicalCandidate
+from odds_core.market_prices import Outcome
+from odds_core.quotes import Quote
 from odds_core.vocabulary import Market
 from odds_lambda.candidate_rules import (
     RULES,
+    MarketState,
     RuleSpec,
     SharpInput,
     apply_rule,
@@ -28,7 +31,11 @@ EXCHANGE = frozenset({SharpInput.EXCHANGE})
 TOTALS = frozenset({Market.TOTALS})
 
 
-def _state(quotes: list, also: frozenset = TOTALS, sharp: frozenset = EXCHANGE):
+def _state(
+    quotes: list[Quote],
+    also: frozenset[Market] = TOTALS,
+    sharp: frozenset[SharpInput] = EXCHANGE,
+) -> MarketState:
     return build_market_state(EVENT, "1x2", quotes, CROSS_T, MAX_AGE, sharp, also)
 
 
@@ -53,6 +60,42 @@ class TestDeclaredMarketIsRead:
     ) -> None:
         quotes = cross_market_run(7, 100, one_x_two=2.0, totals=None)
         assert _state(quotes, also=frozenset()).has_input
+
+
+class TestStateIsReadOnly:
+    def test_a_rule_cannot_erase_the_recorded_inputs(self, cross_market_run: RunQuotes) -> None:
+        state = _state(cross_market_run(7, 100))
+        with pytest.raises(AttributeError):
+            state.also.clear()  # type: ignore[attr-defined]
+        with pytest.raises(TypeError):
+            state.also[Market.H2H] = state  # type: ignore[index]
+        assert state.input_snapshot_ids == [100, 101]
+
+    def test_the_recorded_inputs_are_fixed_when_the_state_is_built(
+        self, cross_market_run: RunQuotes
+    ) -> None:
+        state = _state(cross_market_run(7, 100))
+        with pytest.raises(AttributeError):
+            state.input_ids = ()  # type: ignore[misc]
+        assert state.input_snapshot_ids == [100, 101]
+
+    @pytest.mark.parametrize("extra", [False, True])
+    def test_nested_prices_cannot_be_mutated(
+        self, cross_market_run: RunQuotes, extra: bool
+    ) -> None:
+        primary = _state(cross_market_run(7, 100))
+        state = primary.also[Market.TOTALS] if extra else primary
+        line = next(iter(state.retail))
+        with pytest.raises(TypeError):
+            state.retail[line] = {}  # type: ignore[index]
+        with pytest.raises(TypeError):
+            state.retail[line]["bet365"] = {}  # type: ignore[index]
+        with pytest.raises(TypeError):
+            state.retail[line]["bet365"][Outcome.HOME] = 9.0  # type: ignore[index]
+        with pytest.raises(TypeError):
+            state.exchange[line] = state.exchange[line]  # type: ignore[index]
+        with pytest.raises(TypeError):
+            state.exchange[line].fair[Outcome.HOME] = 0.9  # type: ignore[index]
 
 
 class TestMissingOrStaleExtraMarket:

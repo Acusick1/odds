@@ -6,7 +6,7 @@ This module contains shared fixtures for integration testing.
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -213,8 +213,11 @@ async def odds_web_session(pglite_async_session: AsyncSession) -> AsyncIterator[
     yield pglite_async_session
 
 
+CrossMarketRun = Callable[..., Awaitable[tuple[int, int | None]]]
+
+
 @pytest.fixture
-def add_cross_market_run(pglite_async_session: AsyncSession):
+def add_cross_market_run(pglite_async_session: AsyncSession) -> CrossMarketRun:
     """Store one OddsPortal run of event 1's 1x2 and totals 2.5 as one payload and return the
     ids of its 1x2 and totals snapshots; ``totals=False`` leaves the totals market out. The
     retail home price is 2.2 against an exchange fair of 0.5, so ``exchange_gap`` bets it."""

@@ -3,9 +3,10 @@ the sharp prices its rule needs."""
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
+from types import MappingProxyType
 
 from odds_core.as_of import latest_snapshot
 from odds_core.book_price import polymarket_price
@@ -37,7 +38,7 @@ class PolymarketPrice:
 
     snapshot_id: int
     time: datetime
-    fair: dict[Outcome, float]
+    fair: Mapping[Outcome, float]
 
 
 @dataclass(frozen=True)
@@ -47,7 +48,9 @@ class MarketState:
 
     ``retail`` holds each line's UK retail back prices per book, ``exchange`` each line's
     devigged exchange price in that snapshot, and ``polymarket`` each line's Polymarket price;
-    a market without lines has the one line None. ``also`` holds the state of each extra market
+    a market without lines has the one line None. Every mapping is read-only, and
+    ``input_ids`` is fixed when the state is built, so nothing a rule does changes what the
+    decision records. ``also`` holds the state of each extra market
     the rule declared, read-only, from the same source run as the retail snapshot where the
     source stored one. A state without a snapshot has no inputs: no retail prices, no sharp
     prices and no extra markets.
@@ -60,10 +63,13 @@ class MarketState:
     decision_time: datetime
     snapshot_id: int | None = None
     snapshot_time: datetime | None = None
-    retail: dict[Line, dict[str, dict[Outcome, float]]] = field(default_factory=dict)
-    exchange: dict[Line, ExchangePrice] = field(default_factory=dict)
-    polymarket: dict[Line, PolymarketPrice] = field(default_factory=dict)
-    also: dict[Market, MarketState] = field(default_factory=dict)
+    retail: Mapping[Line, Mapping[str, Mapping[Outcome, float]]] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
+    exchange: Mapping[Line, ExchangePrice] = field(default_factory=lambda: MappingProxyType({}))
+    polymarket: Mapping[Line, PolymarketPrice] = field(default_factory=lambda: MappingProxyType({}))
+    also: Mapping[Market, MarketState] = field(default_factory=lambda: MappingProxyType({}))
+    input_ids: tuple[int, ...] = ()
 
     @property
     def has_input(self) -> bool:
@@ -72,12 +78,8 @@ class MarketState:
     @property
     def input_snapshot_ids(self) -> list[int]:
         """The retail snapshot, then each Polymarket snapshot, then each extra market's inputs
-        in market order."""
-        if self.snapshot_id is None:
-            return []
-        polymarket = sorted({p.snapshot_id for p in self.polymarket.values()})
-        extra = [i for market in sorted(self.also) for i in self.also[market].input_snapshot_ids]
-        return [self.snapshot_id, *polymarket, *extra]
+        in market order; empty for a state without inputs."""
+        return list(self.input_ids)
 
 
 def is_bettable_line(market: Market, line: Line) -> bool:
@@ -90,15 +92,22 @@ def is_bettable_line(market: Market, line: Line) -> bool:
 
 def _retail(
     snapshot: Sequence[Quote], market: Market
-) -> dict[Line, dict[str, dict[Outcome, float]]]:
+) -> Mapping[Line, Mapping[str, Mapping[Outcome, float]]]:
     retail: dict[Line, dict[str, dict[Outcome, float]]] = {}
     for q in snapshot:
         if q.bookmaker in UK_RETAIL_BOOKMAKERS and is_bettable_line(market, q.line):
             retail.setdefault(q.line, {}).setdefault(q.bookmaker, {})[q.outcome] = q.price
-    return retail
+    return MappingProxyType(
+        {
+            line: MappingProxyType(
+                {book: MappingProxyType(prices) for book, prices in books.items()}
+            )
+            for line, books in retail.items()
+        }
+    )
 
 
-def _exchange(snapshot: Sequence[Quote], market: Market) -> dict[Line, ExchangePrice]:
+def _exchange(snapshot: Sequence[Quote], market: Market) -> Mapping[Line, ExchangePrice]:
     exchange_quotes = [q for q in snapshot if q.bookmaker == EXCHANGE_BOOKMAKER]
     lines = {q.line for q in exchange_quotes if is_bettable_line(market, q.line)}
     prices: dict[Line, ExchangePrice] = {}
@@ -106,19 +115,21 @@ def _exchange(snapshot: Sequence[Quote], market: Market) -> dict[Line, ExchangeP
     for line in sorted(lines):  # type: ignore[type-var]
         price = exchange_price(exchange_quotes, market, line)
         if price is not None and price.overround <= MAX_EXCHANGE_OVERROUND:
-            prices[line] = price
-    return prices
+            prices[line] = replace(price, fair=MappingProxyType(dict(price.fair)))
+    return MappingProxyType(prices)
 
 
-def _polymarket(snapshot: Sequence[Quote], market: Market) -> dict[Line, PolymarketPrice]:
+def _polymarket(snapshot: Sequence[Quote], market: Market) -> Mapping[Line, PolymarketPrice]:
     lines = {q.line for q in snapshot if is_bettable_line(market, q.line)}
     prices: dict[Line, PolymarketPrice] = {}
     # A market's bettable lines are all None or all numbers, so they sort.
     for line in sorted(lines):  # type: ignore[type-var]
         price = polymarket_price(snapshot, market, line)
         if price is not None:
-            prices[line] = PolymarketPrice(snapshot[0].snapshot_id, price.time, price.fair)
-    return prices
+            prices[line] = PolymarketPrice(
+                snapshot[0].snapshot_id, price.time, MappingProxyType(dict(price.fair))
+            )
+    return MappingProxyType(prices)
 
 
 def _co_timed(snapshot: Sequence[Quote]) -> bool:
@@ -187,7 +198,7 @@ def _own_state(
     snapshot = latest_snapshot(retail_quotes, decision_time, accepted)
     if snapshot is None or decision_time - snapshot[0].snapshot_time > max_input_age:
         return state
-    polymarket: dict[Line, PolymarketPrice] = {}
+    polymarket: Mapping[Line, PolymarketPrice] = MappingProxyType({})
     if SharpInput.POLYMARKET in sharp_inputs:
         polymarket_snapshot = latest_snapshot(
             (
@@ -207,14 +218,21 @@ def _own_state(
         ):
             return state
         polymarket = _polymarket(polymarket_snapshot, market)
+    also = extras(snapshot)
+    snapshot_id = snapshot[0].snapshot_id
     return replace(
         state,
-        snapshot_id=snapshot[0].snapshot_id,
+        snapshot_id=snapshot_id,
         snapshot_time=snapshot[0].snapshot_time,
         retail=_retail(snapshot, market),
         exchange=_exchange(snapshot, market),
         polymarket=polymarket,
-        also=extras(snapshot),
+        also=MappingProxyType(also),
+        input_ids=(
+            snapshot_id,
+            *sorted({p.snapshot_id for p in polymarket.values()}),
+            *(i for m in sorted(also) for i in also[m].input_ids),
+        ),
     )
 
 

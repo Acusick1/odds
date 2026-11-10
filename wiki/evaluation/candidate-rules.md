@@ -37,6 +37,8 @@ A mechanical candidate records the hash of its rule's code, so the YAML version 
 | `also` | Per extra market the rule declares, that market's own `odds_lambda.candidate_rules.MarketState`; empty for a rule that declares none ([extra markets](#extra-markets)) |
 | `polymarket` | Per line, Polymarket's price (`odds_lambda.candidate_rules.PolymarketPrice`: its snapshot id, its time and the mids' implied probabilities normalised to sum to 1); empty unless the rule's sharp inputs include Polymarket, and a line whose mids do not price every outcome is absent |
 
+Every mapping of a state is read-only, down to the price of each outcome and the extra markets' states, and the snapshot ids it records are fixed when it is built, so a rule can neither change its inputs nor the provenance a decision records.
+
 A line (`odds_lambda.candidate_rules.Line`) is the goal line of a `totals` price, or `None` in a market without lines (`1x2`, `h2h`), whose state has at most the one line `None`. A selection (`odds_lambda.candidate_rules.Selection`) is an outcome on a line.
 
 As-of-t rules:
