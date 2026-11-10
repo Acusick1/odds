@@ -14,12 +14,16 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from odds_analytics.candidate_report import CandidateReport, candidate_report
-from odds_core.candidates import Candidate, candidates_dir, load_candidates
+from odds_analytics.candidate_report import (
+    CandidateReport,
+    candidate_report,
+    unscored_version,
+)
+from odds_core.candidates import candidates_dir, load_candidates
 from odds_core.config import Settings, get_settings
 
 from odds_web.cache import Cached, Failure, SingleFlightCache
-from odds_web.candidate_page import CandidatePage, build_candidate_page, has_decisions
+from odds_web.candidate_page import CandidatePage, build_candidate_page, reads_decisions
 from odds_web.closes import WEEKS as CLOSE_WEEKS
 from odds_web.closes import CloseWeeks, close_coverage
 from odds_web.coverage import (
@@ -57,14 +61,6 @@ class Section[T]:
         return Section(
             None if self.value is None else convert(self.value), self.as_of, self.failure
         )
-
-
-@dataclass(frozen=True)
-class Report:
-    """The report data and the registry it was computed against."""
-
-    candidates: CandidateReport
-    registry: list[Candidate]
 
 
 def _signed(value: float, digits: int = 1) -> str:
@@ -139,36 +135,32 @@ def create_app(
         axis_percent=f"{AXIS_PERCENT:g}", forest_width=FOREST_WIDTH, url_path=app.url_path_for
     )
 
-    async def load_report() -> Report:
+    async def load_report() -> CandidateReport:
         registry = load_candidates(registry_dir or candidates_dir())
         async with database.session_maker() as session:
-            candidates = await candidate_report(session, registry, executor=executor)
-        return Report(candidates, registry)
+            return await candidate_report(session, registry, executor=executor)
 
-    async def report_section() -> Cached[Report]:
+    async def report_section() -> Cached[CandidateReport]:
         return await cache.get("report", load_report)
 
     async def portfolio_section() -> Section[list[PortfolioRow]]:
         report = Section.of(await report_section())
-        return report.map(lambda r: portfolio_rows(r.candidates.summaries, r.registry))
+        return report.map(lambda r: portfolio_rows(r.summaries))
 
     async def candidate_section(name: str, version: int, page: int) -> Section[CandidatePage]:
         report = await report_section()
         if report.value is None:
             return Section(None, report.as_of, report.failure)
-        candidates = report.value.candidates
-        summary = next(
-            (s for s in candidates.summaries if (s.name, s.version) == (name, version)), None
+        known = next(
+            (s for s in report.value.summaries if (s.name, s.version) == (name, version)), None
         )
-        if summary is None:
+        if known is None and not any(s.name == name for s in report.value.summaries):
             raise HTTPException(status_code=404, detail=f"No candidate {name} v{version}")
-        entry = next((c for c in report.value.registry if c.name == name), None)
-        running = candidates.running[(name, version)]
 
         async def load_listings() -> tuple[DecisionHistory | None, LedgerPage]:
             async with database.session_maker() as session:
                 decisions = None
-                if has_decisions(entry):
+                if known is None or reads_decisions(known.registered):
                     decisions = await load_decision_history(
                         session, name, version, datetime.now(UTC)
                     )
@@ -178,7 +170,13 @@ def create_app(
         # The figures and charts are built from the report entry on every request, so they
         # always describe one snapshot; only the listings are cached per page.
         listings = Section.of(await cache.get(f"candidate:{name}:{version}:{page}", load_listings))
-        built = listings.map(lambda found: build_candidate_page(summary, entry, running, *found))
+        summary, running = known, report.value.running.get((name, version))
+        if summary is None or running is None:
+            # An earlier version the report holds no trades for exists only if it recorded decisions.
+            if listings.value is not None and not (listings.value[0] and listings.value[0].total):
+                raise HTTPException(status_code=404, detail=f"No candidate {name} v{version}")
+            summary, running = unscored_version(name, version, datetime.now(UTC))
+        built = listings.map(lambda found: build_candidate_page(summary, running, *found))
         # The page is as old as the older of its two reads.
         as_of = (
             None if built.as_of is None or report.as_of is None else min(built.as_of, report.as_of)

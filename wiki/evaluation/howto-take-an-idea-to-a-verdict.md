@@ -36,7 +36,7 @@ What a candidate is and when it is promoted or killed is on [Goal and strategy](
        max_input_age_minutes: 10
      ```
 
-   - Run `uv run odds candidates backtest <path> --from 2024-08-01 --to 2026-07-31`, with `--json <file>` to keep the result ([replay backtest](candidate-backtest.md)).
+   - Run `uv run odds candidates backtest <path> --from 2024-08-01 --to 2026-07-31`, with `--json <file>` to keep the result, its summary carrying the draft's registry status ([replay backtest](candidate-backtest.md)).
    - Read the coverage first: decisions (one per event and decision time) with every input the rule needs (a UK retail snapshot, with Betfair Exchange prices together for an exchange rule, and a Polymarket snapshot for a Polymarket rule) within the maximum input age, with an exchange price, a Polymarket price and a retail quote at the decision time, and bets with a close. Such snapshots start with live OddsPortal collection in March 2026. Then read k, the family's versions with a recorded decision plus this draft, and the checkpoint and overall estimates, whose promote interval widens as k grows.
    - Development data can kill an idea and never promotes one: the output says `meets_promote_bar`, not `promote`, and the range has been examined many times.
 3. **Register it** with a pull request that adds `candidates/<name>.yaml`.

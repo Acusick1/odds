@@ -5,7 +5,7 @@ import dataclasses
 import json
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Annotated, cast
+from typing import Annotated, Any, cast
 
 import typer
 from odds_analytics.candidate_backtest import BacktestResult, HashStatus, replay
@@ -106,6 +106,18 @@ _VERDICT_STYLE = {
 def _backtest_verdict(verdict: Verdict) -> str:
     """Development data never promotes, so the promote bar is reported as met, not as a verdict."""
     return "meets_promote_bar" if verdict is Verdict.PROMOTE else verdict.value
+
+
+def _backtest_json(result: BacktestResult) -> dict[str, Any]:
+    """The ``--json`` payload: each summary carries its registry ``status`` and a backtest
+    verdict, not the ``registered`` entry the status comes from."""
+    payload = dataclasses.asdict(dataclasses.replace(result, comparison=None))
+    summary = payload["summary"]
+    del summary["registered"]
+    summary["status"] = result.summary.status
+    summary["verdict"] = _backtest_verdict(result.summary.verdict)
+    payload["comparison"] = None if result.comparison is None else _backtest_json(result.comparison)
+    return payload
 
 
 def _interval(low_high: tuple[float, float]) -> str:
@@ -426,12 +438,7 @@ def backtest(
         _print_backtest(result.comparison)
         console.print(_comparison_table(result, result.comparison))
     if json_path is not None:
-        payload = dataclasses.asdict(result)
-        payload["summary"]["verdict"] = _backtest_verdict(result.summary.verdict)
-        if payload["comparison"] is not None:
-            payload["comparison"]["summary"]["verdict"] = _backtest_verdict(
-                result.comparison.summary.verdict  # type: ignore[union-attr]
-            )
+        payload = _backtest_json(result)
         json_path.write_text(json.dumps(payload, indent=2, default=str) + "\n")
 
 

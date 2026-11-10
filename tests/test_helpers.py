@@ -667,6 +667,24 @@ async def create_scheduler_tables(session: AsyncSession) -> None:
     await session.commit()
 
 
+async def book(session: AsyncSession, job: str, next_run: datetime | None) -> None:
+    """Schedule ``job`` in the APScheduler tables, due at ``next_run`` (None: no next run)."""
+    await session.execute(
+        text(
+            "INSERT INTO tasks (id, func, job_executor, metadata) "
+            "VALUES (:id, 'f', 'async', '{}') ON CONFLICT DO NOTHING"
+        ),
+        {"id": job},
+    )
+    await session.execute(
+        text(
+            "INSERT INTO schedules (id, task_id, coalesce, job_executor, metadata, "
+            "next_fire_time) VALUES (:id, :id, 'latest', 'async', '{}', :next)"
+        ),
+        {"id": job, "next": next_run},
+    )
+
+
 ODDS_WEB_GRANTS = Path(__file__).parents[1] / "scripts" / "odds_web_grants.sql"
 
 

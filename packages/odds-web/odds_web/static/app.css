@@ -34,6 +34,7 @@ th { font-size: 11px; font-weight: 500; color: var(--muted-foreground); text-ali
 td { padding: 7px 6px; border-bottom: 1px solid var(--border); vertical-align: middle; white-space: nowrap; }
 td.r, th.r { text-align: right; }
 .axis-label { opacity: .7; }
+.status { font-size: 11px; padding: 1px 6px; border-radius: 4px; border: 1px dashed var(--border); color: var(--muted-foreground); }
 .verdict { font-size: 11px; padding: 2px 7px; border-radius: 4px; border: 1px solid var(--border); }
 .bar { width: 64px; height: 5px; background: var(--secondary); border-radius: 3px; display: inline-block; vertical-align: middle; margin-right: 6px; overflow: hidden; }
 .bar i { display: block; height: 100%; background: var(--foreground); opacity: .7; }

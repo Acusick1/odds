@@ -18,7 +18,21 @@ INSUFFICIENT_PRIVILEGE = "42501"
 # ``default_transaction_read_only`` the rejection is the first of these, not the second.
 WRITE_REJECTIONS = (READ_ONLY_SQL_TRANSACTION, INSUFFICIENT_PRIVILEGE)
 WRITE_PRIVILEGES = ("INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER")
-PROBE_TABLE = "paper_trades"
+# The tables the readers use, as ``scripts/odds_web_grants.sql`` grants them; the first is the
+# one the write probe targets.
+READ_TABLES = (
+    "paper_trades",
+    "candidate_decisions",
+    "events",
+    "odds_snapshots",
+    "prices",
+    "fetch_logs",
+    "alert_history",
+    "mlb_probable_pitchers",
+    "schedules",
+    "jobs",
+)
+PROBE_TABLE = READ_TABLES[0]
 
 
 class RoleCheckFailed(RuntimeError):
@@ -26,7 +40,8 @@ class RoleCheckFailed(RuntimeError):
 
 
 async def check_role(connection: AsyncConnection) -> list[str]:
-    """Raise ``RoleCheckFailed`` unless the role reads ``PROBE_TABLE`` and holds no write right.
+    """Raise ``RoleCheckFailed`` unless the role reads every one of ``READ_TABLES`` and holds no
+    write right.
 
     The privilege catalogue is the authority; the attempted write confirms the server rejects it.
     """
@@ -43,11 +58,12 @@ async def check_role(connection: AsyncConnection) -> list[str]:
     user = await connection.scalar(text("SELECT current_user"))
     await connection.rollback()
 
-    if not await connection.scalar(
-        text("SELECT has_table_privilege(current_user, :table, 'SELECT')"), {"table": PROBE_TABLE}
-    ):
-        raise RoleCheckFailed(f"{user} cannot SELECT from {PROBE_TABLE}")
-    report.append(f"{user} can SELECT from {PROBE_TABLE}")
+    for table in READ_TABLES:
+        if not await connection.scalar(
+            text("SELECT has_table_privilege(current_user, :table, 'SELECT')"), {"table": table}
+        ):
+            raise RoleCheckFailed(f"{user} cannot SELECT from {table}")
+    report.append(f"{user} can SELECT from {len(READ_TABLES)} tables: {', '.join(READ_TABLES)}")
 
     # ``information_schema.tables`` lists the tables the role holds any privilege on, so a table
     # with a write privilege is among them.

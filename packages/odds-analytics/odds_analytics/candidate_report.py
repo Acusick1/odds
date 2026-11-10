@@ -97,7 +97,11 @@ class Checkpoint:
 
 @dataclass(frozen=True)
 class CandidateSummary:
-    """``checkpoint`` is the one the verdict fired at, else the last one reached, and
+    """``registered`` is the registry's entry at exactly this version, None for a version the
+    registry no longer holds: a version bump overwrites the file, so an old version's kind,
+    sport and market are unknown and the current entry's are not its own.
+
+    ``checkpoint`` is the one the verdict fired at, else the last one reached, and
     ``checkpoints`` every one evaluated up to it; each is frozen once reached.
 
     ``current`` is a separate estimate over all ``bets_with_close`` at the family size now. It
@@ -106,7 +110,7 @@ class CandidateSummary:
 
     name: str
     version: int
-    status: CandidateStatus | None
+    registered: Candidate | None
     settled_bets: int
     bets_with_close: int
     bets_without_close: int
@@ -118,6 +122,11 @@ class CandidateSummary:
     current: Checkpoint | None
     verdict: Verdict
     family_versions: int
+
+    @property
+    def status(self) -> CandidateStatus | None:
+        """The registry status of this version, apart from the statistical ``verdict``."""
+        return None if self.registered is None else self.registered.status
 
     @property
     def roi(self) -> float:
@@ -158,6 +167,33 @@ def selection_close_probability(
     if close is None:
         return None
     return close.fair[Outcome(selection)]
+
+
+@dataclass(frozen=True)
+class CheckpointProgress:
+    """``bets_with_close`` against the next checkpoint, and how far it is from the one before:
+    0 just after a checkpoint, 1 at the next."""
+
+    bets_with_close: int
+    next_checkpoint: int
+    fraction: float
+
+
+def next_checkpoint(bets_with_close: int) -> int:
+    """The first checkpoint with more bets with a close than ``bets_with_close``, capped at
+    ``KILL_AT_BETS``."""
+    return min(KILL_AT_BETS, (bets_with_close // CHECKPOINT_SIZE + 1) * CHECKPOINT_SIZE)
+
+
+def checkpoint_progress(bets_with_close: int) -> CheckpointProgress:
+    target = next_checkpoint(bets_with_close)
+    since = (bets_with_close - (target - CHECKPOINT_SIZE)) / CHECKPOINT_SIZE
+    return CheckpointProgress(bets_with_close, target, max(0.0, min(1.0, since)))
+
+
+def checkpoints_through_next(bets_with_close: int) -> list[int]:
+    """Every checkpoint up to the next one."""
+    return list(range(CHECKPOINT_SIZE, next_checkpoint(bets_with_close) + 1, CHECKPOINT_SIZE))
 
 
 def promote_level(family_versions: int) -> float:
@@ -310,7 +346,7 @@ def running_score(with_close: Sequence[ScoredBet]) -> RunningScore:
 def summarize_candidate(
     name: str,
     version: int,
-    status: CandidateStatus | None,
+    registered: Candidate | None,
     trades: Sequence[ScoredBet],
     now: datetime,
     family_size: Callable[[datetime], int],
@@ -329,7 +365,7 @@ def summarize_candidate(
     return CandidateSummary(
         name=name,
         version=version,
-        status=status,
+        registered=registered,
         settled_bets=len(settled),
         bets_with_close=len(with_close),
         bets_without_close=sum(t.p_close is None for t in trades[:prefix_length]),
@@ -342,6 +378,14 @@ def summarize_candidate(
         verdict=verdict,
         family_versions=checkpoint.family_versions if checkpoint else family_size(now),
     )
+
+
+def unscored_version(
+    name: str, version: int, now: datetime
+) -> tuple[CandidateSummary, RunningScore]:
+    """The summary and running score of a version with no trades and no registry entry, one the
+    report omits: its figures are all empty and its family one."""
+    return summarize_candidate(name, version, None, [], now, lambda _: 1), running_score([])
 
 
 def _by_version(
@@ -366,12 +410,12 @@ def summarize_candidates(
 ) -> list[CandidateSummary]:
     """One summary per (candidate, version) with trades, plus each registered candidate's version.
 
-    ``trades`` must be in placement order. A version other than the registry's has no status.
+    ``trades`` must be in placement order. A version other than the registry's has no registry entry.
     Every version of a name takes the family of the registry's entry for that name; a name
     absent from the registry, and an agent, has a family of one. ``decision_starts`` is as in
     ``family_starts``.
     """
-    status = {(c.name, c.version): c.status for c in registry}
+    registered = {(c.name, c.version): c for c in registry}
     current = {c.name: c for c in registry}
 
     def family_size(name: str) -> Callable[[datetime], int]:
@@ -385,7 +429,7 @@ def summarize_candidates(
         summarize_candidate(
             name,
             version,
-            status.get((name, version)),
+            registered.get((name, version)),
             versioned,
             now,
             family_size(name),

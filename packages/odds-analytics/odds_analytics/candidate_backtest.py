@@ -307,7 +307,7 @@ def score(
     summary = summarize_candidate(
         candidate.name,
         candidate.version,
-        candidate.status,
+        candidate,
         bets,
         now,
         lambda _: family_versions,

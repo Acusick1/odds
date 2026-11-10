@@ -15,6 +15,7 @@ from odds_core.vocabulary import Market
 from odds_lambda.candidate_rules import (
     SharpInput,
     build_market_state,
+    decision_times,
     max_input_age,
     resolve_rule,
 )
@@ -145,13 +146,14 @@ async def candidate_coverage(
     rows: list[CoverageRow] = []
     for event in events:
         assert event.id is not None
+        decided = dict(decision_times(event.commence_time, params))
         slots: list[CoverageCell] = []
         for m in minutes:
             decision = recorded.get((event.id, m))
             if decision is not None:
                 slot = CoverageCell(m, decision.decision_time, decision.known_at, False, True)
             else:
-                at = event.commence_time - timedelta(minutes=m)
+                at = decided.get(m) or event.commence_time - timedelta(minutes=m)
                 slot = CoverageCell(m, at, at, evaluated=False, recorded=False)
             slots.append(slot)
         quoted = await rule_quotes(
