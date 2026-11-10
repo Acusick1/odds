@@ -2,17 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
-import importlib
-import inspect
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from functools import partial
-from types import ModuleType
 from typing import Any, Literal
 
-from odds_core import as_of, bookmakers, exchange_price
 from odds_core.candidates import Candidate, CandidateStatus, MechanicalCandidate
 from odds_core.market_prices import Outcome, market_outcomes
 from odds_core.models import Event
@@ -30,7 +25,6 @@ from pydantic import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_lambda.candidate_rules import inputs, market_state
 from odds_lambda.candidate_rules.inputs import SharpInput
 from odds_lambda.candidate_rules.market_state import Line, MarketState, load_market_state
 
@@ -48,10 +42,6 @@ SPORT_MARKETS: dict[SportKey, frozenset[Market]] = {
     "baseball_mlb": frozenset({Market.H2H, Market.TOTALS}),
     "basketball_nba": frozenset({Market.H2H}),
 }
-# The markets a candidate's rule can decide, in a fixed order.
-RULE_MARKETS: tuple[Market, ...] = tuple(
-    sorted({market for markets in SPORT_MARKETS.values() for market in markets})
-)
 
 
 @dataclass(frozen=True)
@@ -144,31 +134,6 @@ def polymarket_gap(state: MarketState, params: GapParams) -> list[BetIntent]:
     return gap_bets(state, {line: p.fair for line, p in state.polymarket.items()}, params)
 
 
-# The modules that load a market state's quotes, pick them as of t and price the exchange.
-RULE_INPUT_MODULES: tuple[ModuleType, ...] = (inputs, market_state, as_of, exchange_price)
-
-
-def rule_input_constants() -> list[tuple[str, str]]:
-    """The values outside ``RULE_INPUT_MODULES``, in a fixed order and a stable text form, that
-    pick a market state's prices: the UK retail roster, the alias maps the writers give each
-    retail source's price rows their book keys by, and the outcomes of each market a rule
-    can decide."""
-    return [
-        ("UK_RETAIL_BOOKMAKERS", repr(sorted(bookmakers.UK_RETAIL_BOOKMAKERS))),
-        *(
-            (
-                f"BOOKMAKER_ALIASES_BY_SOURCE[{source.value}]",
-                repr(sorted(bookmakers.BOOKMAKER_ALIASES_BY_SOURCE[source].items())),
-            )
-            for source in inputs.RETAIL_SOURCES
-        ),
-        *(
-            (f"market_outcomes({market})", repr([o.value for o in market_outcomes(market)]))
-            for market in RULE_MARKETS
-        ),
-    ]
-
-
 @dataclass(frozen=True)
 class RuleSpec:
     """``sharp_inputs`` are the sharp prices the rule needs: a decision without each of them
@@ -189,15 +154,15 @@ class ModelRuleSpec:
     """A rule whose bets need a fitted model: ``function(state, params, predict)``.
 
     Only the replay backtest fits one (``odds_analytics.candidate_model``) and binds it; the
-    live runner and the parity check refuse a model rule. ``model_modules`` name the modules
-    that build, fit and query the model. They are hashed by name because this package does not
-    depend on them. ``markets`` are the markets the model is defined for.
+    live runner and the parity check refuse a model rule. ``model_roots`` name, as dotted
+    paths because this package does not depend on them, the code that builds, tunes, fits and
+    queries the model. ``markets`` are the markets the model is defined for.
     """
 
     function: Callable[[MarketState, Any, EvPredictor], list[BetIntent]]
     params_model: type[RuleParams]
     sharp_inputs: frozenset[SharpInput]
-    model_modules: tuple[str, ...]
+    model_roots: tuple[str, ...]
     markets: frozenset[Market]
 
     def bind(self, predict: EvPredictor) -> RuleSpec:
@@ -262,17 +227,7 @@ RULES: dict[str, RuleSpec | ModelRuleSpec] = {
         retail_ev_model,
         RetailEvModelParams,
         frozenset({SharpInput.EXCHANGE}),
-        (
-            "odds_analytics.candidate_model",
-            "odds_analytics.retail_ev",
-            "odds_analytics.xgboost_line_movement",
-            # The close every training target is measured against.
-            "odds_core.close",
-            # The tuning objective, the search-space draws and the search-space model.
-            "odds_analytics.retail_ev_metrics",
-            "odds_analytics.training.tuner",
-            "odds_analytics.training.config",
-        ),
+        ("odds_analytics.candidate_model.ModelReplay",),
         frozenset({Market.ONE_X_TWO, Market.H2H}),
     ),
 }
@@ -322,39 +277,6 @@ def apply_rule(
     return state, [b for b in spec.function(state, params) if b.selection not in bet_selections]
 
 
-def rule_sha256(rule_name: str) -> str:
-    """Hash of the code and values a rule's bets depend on, in a fixed order.
-
-    The source of the rule function, its params model, the params every rule takes,
-    ``longest_retail``, ``gap_bets``, ``BetIntent``, ``apply_rule`` (which drops selections
-    already bet) and the ``RULE_INPUT_MODULES``, then the rule's sharp inputs and the values of
-    ``rule_input_constants``. A model rule adds the source of its ``model_modules``.
-    ``odds_core.quotes``, which other readers share, is not hashed.
-    """
-    spec = RULES[rule_name]
-    digest = hashlib.sha256()
-    sources = [
-        inspect.getsource(spec.function),
-        inspect.getsource(spec.params_model),
-        inspect.getsource(RuleParams),
-        inspect.getsource(longest_retail),
-        inspect.getsource(gap_bets),
-        inspect.getsource(BetIntent),
-        inspect.getsource(apply_rule),
-        *(inspect.getsource(module) for module in RULE_INPUT_MODULES),
-        f"sharp_inputs={sorted(i.value for i in spec.sharp_inputs)}",
-        *(f"{name}={value}" for name, value in rule_input_constants()),
-    ]
-    if isinstance(spec, ModelRuleSpec):
-        sources += [
-            inspect.getsource(importlib.import_module(module)) for module in spec.model_modules
-        ]
-    for source in sources:
-        digest.update(source.encode())
-        digest.update(b"\0")
-    return digest.hexdigest()
-
-
 def resolve_rule(candidate: MechanicalCandidate) -> tuple[RuleSpec | ModelRuleSpec, RuleParams]:
     """The candidate's rule and validated params; ``ValueError`` names what is invalid.
 
@@ -384,21 +306,6 @@ def resolve_rule(candidate: MechanicalCandidate) -> tuple[RuleSpec | ModelRuleSp
             f"candidate {candidate.name!r}: invalid params for rule {candidate.rule!r}: {exc}"
         ) from exc
     return spec, params
-
-
-def validate_candidate_rules(candidates: Sequence[Candidate]) -> None:
-    """Raise ``ValueError`` naming a mechanical candidate that is invalid or whose rule code changed."""
-    for candidate in candidates:
-        if not isinstance(candidate, MechanicalCandidate):
-            continue
-        resolve_rule(candidate)
-        if candidate.rule_sha256 != (current := rule_sha256(candidate.rule)):
-            raise ValueError(
-                f"candidate {candidate.name!r}: the code of rule {candidate.rule!r} changed "
-                f"(recorded rule_sha256 {candidate.rule_sha256}, current {current}); "
-                f"a new candidate version must record the new hash "
-                f"(`odds candidates rule-hash {candidate.rule}` prints it)"
-            )
 
 
 def decision_leads(candidates: Sequence[Candidate], sport: str) -> list[timedelta]:

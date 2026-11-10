@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import structlog
+from odds_core.bookmakers import POLYMARKET_BOOKMAKER
 from odds_core.job_specs import job_cadence
 from odds_core.odds_math import PRICE_DECIMAL_KEY
 from odds_core.vocabulary import Source
@@ -23,7 +24,6 @@ logger = structlog.get_logger()
 
 Observation = tuple[datetime, float]
 
-BOOKMAKER_KEY = "polymarket"
 BOOKMAKER_TITLE = "Polymarket"
 SNAPSHOT_SOURCE = "polymarket"
 DRAW_OUTCOME = "Draw"
@@ -305,7 +305,7 @@ def build_envelope(
     return {
         "bookmakers": [
             {
-                "key": BOOKMAKER_KEY,
+                "key": POLYMARKET_BOOKMAKER,
                 "title": BOOKMAKER_TITLE,
                 "last_update": snapshot_time.isoformat(),
                 "markets": [

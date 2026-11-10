@@ -17,7 +17,8 @@ from typing import TYPE_CHECKING, Any, cast, get_args
 import numpy as np
 import structlog
 from odds_core.as_of import by_snapshot
-from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS
+from odds_core.book_price import polymarket_price
+from odds_core.bookmakers import POLYMARKET_BOOKMAKER, UK_RETAIL_BOOKMAKERS
 from odds_core.close import close_spec, pick_close
 from odds_core.exchange_price import (
     MAX_EXCHANGE_OVERROUND,
@@ -47,7 +48,6 @@ logger = structlog.get_logger()
 
 DECISION_WINDOW = timedelta(days=7)
 DECISION_CUTOFF = timedelta(minutes=5)
-POLYMARKET_BOOKMAKER = "polymarket"
 # Twice the coarsest step of the Polymarket history grid, and the exchange's age cap.
 MAX_POLYMARKET_AGE = timedelta(hours=2)
 MOVE_WINDOWS: tuple[timedelta, ...] = (timedelta(hours=1), timedelta(hours=3), timedelta(hours=6))
@@ -255,20 +255,17 @@ def _outcome_prices(
     return books
 
 
-def _polymarket_price(
-    snapshot: Sequence[Quote], outcomes: tuple[Outcome, ...]
-) -> PolymarketPrice | None:
-    """The devigged Yes midpoints of a Polymarket snapshot, with the Yes ask minus bid where both
-    are stored (as back and lay prices)."""
-    mids = _outcome_prices(snapshot, Side.MID, outcomes).get(POLYMARKET_BOOKMAKER)
-    if mids is None or set(mids) != set(outcomes):
+def _polymarket_price(snapshot: Sequence[Quote], market: str) -> PolymarketPrice | None:
+    """A Polymarket snapshot's price (``odds_core.book_price.polymarket_price``), with the Yes
+    ask minus bid where both are stored (as back and lay prices)."""
+    price = polymarket_price(snapshot, market)
+    if price is None:
         return None
+    outcomes = market_outcomes(market)
     asks = _outcome_prices(snapshot, Side.BACK, outcomes).get(POLYMARKET_BOOKMAKER, {})
     bids = _outcome_prices(snapshot, Side.LAY, outcomes).get(POLYMARKET_BOOKMAKER, {})
     spread = {o: 1 / asks[o] - 1 / bids[o] for o in outcomes if o in asks and o in bids}
-    return PolymarketPrice(
-        time=snapshot[0].snapshot_time, fair=devig(mids, outcomes), spread=spread
-    )
+    return PolymarketPrice(time=price.time, fair=price.fair, spread=spread)
 
 
 def _consensus_move(now: _RetailQuote, before: _RetailQuote, outcome: Outcome) -> float | None:
@@ -384,7 +381,7 @@ def build_event_rows(
     for snapshot in snapshots:
         source = snapshot[0].source
         if source is Source.POLYMARKET:
-            pm_price = _polymarket_price(snapshot, outcomes)
+            pm_price = _polymarket_price(snapshot, market)
             if pm_price is not None and pm_price.time < kickoff:
                 polymarket.append(pm_price)
             continue

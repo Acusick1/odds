@@ -3,6 +3,7 @@
 import asyncio
 import dataclasses
 import json
+import subprocess
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated, Any, cast
@@ -10,6 +11,7 @@ from typing import Annotated, Any, cast
 import typer
 from odds_analytics.candidate_backtest import BacktestResult, HashStatus, replay
 from odds_analytics.candidate_parity import ParityReport, ParityStatus, check_parity
+from odds_analytics.candidate_rehash import rehash as record_rehash
 from odds_analytics.candidate_report import (
     CandidateSummary,
     Checkpoint,
@@ -29,7 +31,8 @@ from odds_core.candidates import (
     load_candidates,
 )
 from odds_core.database import async_session_maker
-from odds_lambda.candidate_rules import RULES, ModelRuleSpec, rule_sha256, validate_candidate_rules
+from odds_lambda.candidate_rules import RULES, ModelRuleSpec
+from odds_lambda.candidate_rules.pinning import rule_sha256, validate_candidate_rules
 from rich.console import Console
 from rich.table import Table
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -503,6 +506,77 @@ def parity(
         )
     if not report.ok:
         raise typer.Exit(1)
+
+
+@app.command("rehash")
+def rehash(
+    rule: Annotated[str, typer.Argument(help="Rule name")],
+    database_url: Annotated[
+        str, typer.Option("--database-url", help="Database to replay against, read-only")
+    ],
+    start: Annotated[str, typer.Option("--from", help="First kick-off day, YYYY-MM-DD")],
+    end: Annotated[str, typer.Option("--to", help="Last kick-off day, YYYY-MM-DD")],
+    link: Annotated[str, typer.Option("--evidence", help="The PR or issue of the change")],
+    base: Annotated[
+        str | None,
+        typer.Option(
+            "--base",
+            help="Revision whose code recorded the old hash; default the merge-base with origin/main",
+        ),
+    ] = None,
+) -> None:
+    """Record a rule's new hash when the change leaves every candidate's bets the same.
+
+    Replays every registered candidate of the rule under the base revision's code and the
+    committed working tree's, on one read-only database snapshot, and checks parity; refuses
+    unless the candidates record the base's hash, the replays are byte-identical with decisions
+    and bets, and parity holds. Then updates each candidate file's rule_sha256 and appends the
+    rehash ledger.
+    """
+    if rule not in RULES:
+        raise _fail(f"unknown rule {rule!r}; known rules: {', '.join(sorted(RULES))}")
+    root = Path(
+        subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"], check=True, capture_output=True, text=True
+        ).stdout.strip()
+    )
+    revision = (
+        base
+        or subprocess.run(
+            ["git", "merge-base", "HEAD", "origin/main"],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    )
+    try:
+        result = asyncio.run(
+            record_rehash(
+                root, rule, database_url, _parse_day(start), _parse_day(end), link, revision
+            )
+        )
+    except subprocess.CalledProcessError as exc:
+        raise _fail(f"{exc}\n{exc.stderr}") from exc
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
+    if result.refused is not None:
+        raise _fail(f"{rule}: not rehashed, {result.refused}")
+    if result.rehash is None:
+        console.print(f"{rule}: every candidate already records {result.new}", soft_wrap=True)
+        return
+    entry = result.rehash
+    console.print(
+        f"{rule}: {entry.old} -> {entry.new} (base {entry.base}, head {entry.head}, "
+        f"{entry.start}..{entry.end} on {entry.database}, replay sha256 {entry.replay_sha256})",
+        soft_wrap=True,
+    )
+    for c in entry.candidates:
+        console.print(
+            f"  {c.name} v{c.version}: {c.decisions} decisions, {c.bets} bets, "
+            f"parity {c.parity_matched}/{c.parity_total}",
+            soft_wrap=True,
+        )
 
 
 def _missing(name: str) -> Candidate:

@@ -1,5 +1,5 @@
-"""The only query behind a candidate rule's inputs, kept apart from ``odds_core.quotes`` so the
-rule hash covers it and nothing else that reads prices."""
+"""The only query behind a candidate rule's inputs, kept apart from ``odds_core.quotes`` so a
+change to the shared price reader does not change the rule hash."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS
+from odds_core.bookmakers import POLYMARKET_BOOKMAKER, UK_RETAIL_BOOKMAKERS
 from odds_core.exchange_price import EXCHANGE_BOOKMAKER
 from odds_core.models import OddsSnapshot, Price
 from odds_core.quotes import Quote
@@ -21,7 +21,6 @@ from sqlmodel import col
 # upper bound on when they were taken, which a live run at t never sees.
 RETAIL_SOURCES: tuple[Source, ...] = (Source.ODDS_API, Source.ODDSPORTAL)
 RULE_BOOKMAKERS: frozenset[str] = UK_RETAIL_BOOKMAKERS | {EXCHANGE_BOOKMAKER}
-POLYMARKET_BOOKMAKER = "polymarket"
 
 
 class SharpInput(StrEnum):

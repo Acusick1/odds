@@ -53,7 +53,7 @@ Every snapshot of `market` that holds a book price, in time order, each with its
 
 ## Retail edges
 
-`odds_mcp.server.find_retail_edges` ranks retail books that price an outcome longer than the sharp reference ([sharp benchmark](../modelling/sharp-benchmark.md)). Books in `sharp_bookmakers` and in `odds_core.bookmakers.NON_BETTABLE_BOOKMAKERS` (Pinnacle and `polymarket`, which a UK bettor cannot use) are never retail rows. Exchanges are retail rows unless the sharp list names them.
+`odds_mcp.server.find_retail_edges` ranks retail books that price an outcome longer than the sharp reference ([sharp benchmark](../modelling/sharp-benchmark.md)). Books in `sharp_bookmakers` and in `odds_core.bookmakers.NON_BETTABLE_BOOKMAKERS` (Pinnacle and Polymarket, `odds_core.bookmakers.POLYMARKET_BOOKMAKER`, which a UK bettor cannot use) are never retail rows. Exchanges are retail rows unless the sharp list names them.
 
 Inputs: `event_id`, `market` (`h2h`, `1x2`, `totals`, `spreads`), `sharp_bookmakers` (list, JSON-array string or comma string; default `odds_core.bookmakers.SHARP_BOOKMAKERS`, `pinnacle` then `betfair_exchange`), `sharp_lookback_hours=2.0`, `lookback_hours=2.0` (retail).
 

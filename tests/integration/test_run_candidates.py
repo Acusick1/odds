@@ -15,19 +15,11 @@ import structlog
 import yaml
 from odds_analytics.candidate_parity import ParityStatus, check_parity
 from odds_core.candidates import MechanicalCandidate
-from odds_core.market_prices import Outcome
 from odds_core.models import Event, EventStatus
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
-from odds_lambda.candidate_rules import (
-    RULES,
-    BetIntent,
-    MarketState,
-    RuleParams,
-    RuleSpec,
-    SharpInput,
-)
+from odds_lambda.candidate_rules import RULES, RuleSpec, SharpInput
 from odds_lambda.candidate_rules import rules as rules_module
-from odds_lambda.candidate_rules.rules import rule_sha256
+from odds_lambda.candidate_rules.pinning import rule_sha256
 from odds_lambda.jobs import run_candidates
 from odds_lambda.jobs.run_candidates import (
     MAX_LATENESS,
@@ -42,6 +34,13 @@ from odds_lambda.scheduling.jobs import JobContext
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from tests.candidate_rule_fixtures import (
+    FixtureRuleParams,
+    bet_home,
+    bet_longest,
+    no_bet,
+    twice,
+)
 from tests.test_helpers import (
     make_epl_event,
     make_tagged_snapshot,
@@ -58,38 +57,13 @@ EXCHANGE_ROW = three_way_bookmaker("betfair_exchange", (2.0, 4.0, 4.0))
 EPL = "soccer_epl"
 
 
-class _Params(RuleParams):
-    pass
-
-
-def _bet_home(state: MarketState, params: _Params) -> list[BetIntent]:
-    return [BetIntent(Outcome.HOME, "bet365", state.retail[None]["bet365"][Outcome.HOME], 1.0)]
-
-
-def _no_bet(state: MarketState, params: _Params) -> list[BetIntent]:
-    return []
-
-
-def _twice(state: MarketState, params: _Params) -> list[BetIntent]:
-    return _bet_home(state, params) * 2
-
-
-def _bet_longest(state: MarketState, params: _Params) -> list[BetIntent]:
-    prices = state.retail[None]["bet365"]
-    outcome = max(prices, key=lambda o: prices[o])
-    return [BetIntent(outcome, "bet365", prices[outcome], 1.0)]
-
-
 @pytest.fixture(autouse=True)
 def rules(monkeypatch: pytest.MonkeyPatch) -> None:
-    for name, function in (
-        ("bet_home", _bet_home),
-        ("no_bet", _no_bet),
-        ("twice", _twice),
-        ("bet_longest", _bet_longest),
-    ):
+    for function in (bet_home, no_bet, twice, bet_longest):
         monkeypatch.setitem(
-            RULES, name, RuleSpec(function, _Params, frozenset({SharpInput.EXCHANGE}))
+            RULES,
+            function.__name__,
+            RuleSpec(function, FixtureRuleParams, frozenset({SharpInput.EXCHANGE})),
         )
 
 
@@ -113,7 +87,7 @@ def write_candidate(directory: Path, name: str = "cand", **fields: Any) -> None:
         "start_date": (NOW - timedelta(days=1)).date().isoformat(),
         "status": "active",
         "rule": rule,
-        "rule_sha256": rule_sha256(rule) if rule in RULES else "0" * 64,
+        "rule_sha256": rule_sha256(rule) if isinstance(RULES.get(rule), RuleSpec) else "0" * 64,
         "params": {"minutes_before_kickoff": [60], "max_input_age_minutes": 120},
         **fields,
     }
@@ -689,7 +663,9 @@ def _event(kickoff: datetime) -> Any:
 
 
 def _runnable(*minutes: int) -> Any:
-    return SimpleNamespace(params=_Params(minutes_before_kickoff=minutes, max_input_age_minutes=10))
+    return SimpleNamespace(
+        params=FixtureRuleParams(minutes_before_kickoff=minutes, max_input_age_minutes=10)
+    )
 
 
 class TestNextRunTime:

@@ -5,9 +5,13 @@ from __future__ import annotations
 import asyncio
 import base64
 import gzip
+import importlib
 import json
 import os
-from collections.abc import AsyncIterator, Callable
+import subprocess
+import sys
+import textwrap
+from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +21,7 @@ import pytest
 import pytest_asyncio
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from odds_lambda.candidate_rules import code_hash
 from odds_lambda.oddsportal_client import _key
 from py_pglite.config import PGliteConfig
 from py_pglite.manager import PGliteManager
@@ -25,6 +30,135 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 OP_FIXTURES = Path(__file__).parent.parent / "fixtures" / "oddsportal"
+
+
+SourceEdit = Callable[[str, Callable[[str], str]], None]
+
+
+@pytest.fixture
+def edit_source(monkeypatch: pytest.MonkeyPatch) -> Iterator[SourceEdit]:
+    """Make the code hasher read ``transform`` of a module's source in place of its file."""
+    edits: dict[str, Callable[[str], str]] = {}
+    real = code_hash.module_source
+
+    def source(name: str) -> tuple[str, bool] | None:
+        found = real(name)
+        if found is None or name not in edits:
+            return found
+        return edits[name](found[0]), found[1]
+
+    def edit(module: str, transform: Callable[[str], str]) -> None:
+        found = real(module)
+        assert found is not None and transform(found[0]) != found[0], module
+        edits[module] = transform
+        code_hash.clear_cache()
+
+    monkeypatch.setattr(code_hash, "module_source", source)
+    code_hash.clear_cache()
+    yield edit
+    code_hash.clear_cache()
+
+
+FIXTURE_PACKAGE = "odds_code_hash_fixture"
+
+
+@pytest.fixture
+def fixture_package(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[Callable[[dict[str, str]], None]]:
+    """Write the modules, by name and source, of the first-party package ``FIXTURE_PACKAGE``."""
+    root = tmp_path / FIXTURE_PACKAGE
+    root.mkdir()
+    (root / "__init__.py").write_text("")
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    def write(modules: dict[str, str]) -> None:
+        for name, source in modules.items():
+            (root / f"{name}.py").write_text(textwrap.dedent(source))
+        importlib.invalidate_caches()
+        code_hash.clear_cache()
+
+    yield write
+    code_hash.clear_cache()
+    for name in [m for m in sys.modules if m.split(".")[0] == FIXTURE_PACKAGE]:
+        del sys.modules[name]
+
+
+OLD, NEW = "a" * 64, "b" * 64
+
+
+def ledger_row(rule: str = "gap", old: str = OLD, new: str = NEW, **changes: Any) -> dict[str, Any]:
+    """A complete rehash ledger row, with ``changes`` applied."""
+    row: dict[str, Any] = {
+        "rule": rule,
+        "old": old,
+        "new": new,
+        "base": "c" * 40,
+        "head": "d" * 40,
+        "start": "2025-08-01",
+        "end": "2026-05-31",
+        "database": "odds_web@localhost:5433/odds",
+        "replay_sha256": "e" * 64,
+        "link": "https://github.com/Acusick1/odds/pull/1",
+        "candidates": [ledger_row_candidate()[0]],
+    }
+    return {**row, **changes}
+
+
+def ledger_row_candidate(**changes: Any) -> list[dict[str, Any]]:
+    candidate = {
+        "name": "back-longest",
+        "version": 2,
+        "decisions": 10,
+        "bets": 3,
+        "parity_matched": 4,
+        "parity_total": 4,
+    }
+    return [{**candidate, **changes}]
+
+
+# Rows the ledger model and the version hook must both reject.
+INVALID_LEDGER_ROWS: dict[str, Any] = {
+    "no evidence": {"rule": "gap", "old": OLD, "new": NEW},
+    "no base": {k: v for k, v in ledger_row().items() if k != "base"},
+    "extra key": ledger_row(note="x"),
+    "base not a SHA": ledger_row(base="HEAD"),
+    "no head": ledger_row(head=""),
+    "no rule": ledger_row(rule=""),
+    "no database": ledger_row(database=""),
+    "no link": ledger_row(link="see PR"),
+    "bare GitHub link": ledger_row(link="https://github.com/"),
+    "same old and new hash": ledger_row(new=OLD),
+    "replay not a sha256": ledger_row(replay_sha256="x"),
+    "empty range": ledger_row(start="2026-11-10", end="2020-01-01"),
+    "range not dates": ledger_row(start="soon"),
+    "no candidates": ledger_row(candidates=[]),
+    "no decisions": ledger_row(candidates=ledger_row_candidate(decisions=0)),
+    "no bets": ledger_row(candidates=ledger_row_candidate(bets=0)),
+    "parity mismatch": ledger_row(candidates=ledger_row_candidate(parity_matched=3)),
+    "unnamed candidate": ledger_row(candidates=ledger_row_candidate(name="")),
+    "candidate without counts": ledger_row(candidates=[{"name": "back-longest"}]),
+    "not JSON": "not json",
+}
+
+
+def git_commit(repo: Path) -> None:
+    """Commit everything in ``repo`` as one commit."""
+    for args in (("add", "-A"), ("commit", "-q", "-m", "commit")):
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+
+@pytest.fixture
+def candidates_repo(tmp_path: Path) -> Path:
+    """A git repo on ``main`` with an empty ``candidates/`` directory."""
+    for args in (
+        ("init", "-q", "-b", "main"),
+        ("config", "user.email", "t@example.com"),
+        ("config", "user.name", "t"),
+    ):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "candidates").mkdir()
+    return tmp_path
 
 
 @pytest.fixture

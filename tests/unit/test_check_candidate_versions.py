@@ -1,11 +1,16 @@
 """Unit tests for scripts/check_candidate_versions.py."""
 
+import json
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
+
+from scripts import check_candidate_versions as hook
+from tests.unit.conftest import INVALID_LEDGER_ROWS, NEW, OLD, ledger_row, ledger_row_candidate
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "check_candidate_versions.py"
 
@@ -25,15 +30,11 @@ def git(repo: Path, *args: str) -> None:
 
 class TestCheckCandidateVersions:
     @pytest.fixture
-    def repo(self, tmp_path: Path) -> Path:
-        git(tmp_path, "init", "-q", "-b", "main")
-        git(tmp_path, "config", "user.email", "t@example.com")
-        git(tmp_path, "config", "user.name", "t")
-        (tmp_path / "candidates").mkdir()
-        (tmp_path / "candidates" / "back-longest.yaml").write_text(BASE_YAML)
-        git(tmp_path, "add", "candidates")
-        git(tmp_path, "commit", "-q", "-m", "base")
-        return tmp_path
+    def repo(self, candidates_repo: Path) -> Path:
+        (candidates_repo / "candidates" / "back-longest.yaml").write_text(BASE_YAML)
+        git(candidates_repo, "add", "candidates")
+        git(candidates_repo, "commit", "-q", "-m", "base")
+        return candidates_repo
 
     def run(self, repo: Path, base: str | None = "HEAD") -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -114,12 +115,8 @@ class TestCheckCandidateVersions:
 
 class TestUnstartedCandidates:
     @pytest.fixture
-    def repo(self, tmp_path: Path) -> Path:
-        git(tmp_path, "init", "-q", "-b", "main")
-        git(tmp_path, "config", "user.email", "t@example.com")
-        git(tmp_path, "config", "user.name", "t")
-        (tmp_path / "candidates").mkdir()
-        return tmp_path
+    def repo(self, candidates_repo: Path) -> Path:
+        return candidates_repo
 
     def commit_base(self, repo: Path, start_offset_days: int) -> Path:
         start = datetime.now(UTC).date() + timedelta(days=start_offset_days)
@@ -181,3 +178,73 @@ class TestUnstartedCandidates:
         git(repo, "commit", "-q", "-m", "base")
         path.write_text(BASE_YAML.replace("0.02", "0.05"))
         assert self.run(repo).returncode == 1
+
+
+class TestRehashLedger:
+    @pytest.fixture
+    def path(self, candidates_repo: Path) -> Path:
+        path = candidates_repo / "candidates" / "back-longest.yaml"
+        path.write_text(BASE_YAML + f"start_date: 2020-01-01\nrule: gap\nrule_sha256: {OLD}\n")
+        git(candidates_repo, "add", "candidates")
+        git(candidates_repo, "commit", "-q", "-m", "base")
+        path.write_text(path.read_text().replace(OLD, NEW))
+        return path
+
+    def ledger(self, path: Path, *rows: Any) -> None:
+        (path.parent / "rehashes.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+    def errors(self, path: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+        monkeypatch.chdir(path.parents[1])
+        return hook.check("HEAD")
+
+    def test_a_complete_ledger_row_passes_at_the_same_version(
+        self, path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self.ledger(path, ledger_row())
+        assert self.errors(path, monkeypatch) == []
+
+    def test_a_candidate_without_recorded_decisions_passes(
+        self, path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self.ledger(
+            path, ledger_row(candidates=ledger_row_candidate(parity_matched=0, parity_total=0))
+        )
+        assert self.errors(path, monkeypatch) == []
+
+    def test_without_a_ledger_a_hash_change_fails(
+        self, path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        errors = self.errors(path, monkeypatch)
+        assert len(errors) == 1 and "rule_sha256" in errors[0]
+
+    @pytest.mark.parametrize(
+        "row",
+        [ledger_row(rule="other"), ledger_row(old="c" * 64), ledger_row(new="c" * 64)],
+        ids=["another rule", "another old hash", "another new hash"],
+    )
+    def test_a_row_for_another_rule_or_hash_fails(
+        self, path: Path, monkeypatch: pytest.MonkeyPatch, row: dict[str, Any]
+    ) -> None:
+        self.ledger(path, row)
+        errors = self.errors(path, monkeypatch)
+        assert len(errors) == 1 and "rule_sha256" in errors[0]
+
+    @pytest.mark.parametrize("case", list(INVALID_LEDGER_ROWS))
+    def test_an_incomplete_row_is_an_error_and_accepts_nothing(
+        self, path: Path, monkeypatch: pytest.MonkeyPatch, case: str
+    ) -> None:
+        row = INVALID_LEDGER_ROWS[case]
+        (path.parent / "rehashes.jsonl").write_text(
+            (row if isinstance(row, str) else json.dumps(row)) + "\n"
+        )
+        errors = self.errors(path, monkeypatch)
+        assert len(errors) == 2
+        assert "rehashes.jsonl:1" in errors[0] and "rule_sha256" in errors[1]
+
+    def test_a_rehash_with_another_change_fails(
+        self, path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self.ledger(path, ledger_row())
+        path.write_text(path.read_text().replace("0.02", "0.05"))
+        errors = self.errors(path, monkeypatch)
+        assert len(errors) == 1 and "params" in errors[0] and "rule_sha256" not in errors[0]

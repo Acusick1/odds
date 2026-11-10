@@ -739,14 +739,14 @@ class TestPolymarketPrice:
             best_ask={"home": 0.46, "away": 0.27},
         )
         assert {q.side for q in snapshot} == {Side.MID, Side.BACK, Side.LAY}
-        price = _polymarket_price(snapshot, OUTCOMES)
+        price = _polymarket_price(snapshot, "1x2")
         assert price is not None
         assert price.fair == pytest.approx(_fair(PM_LATE))
         assert price.spread == {Outcome.HOME: pytest.approx(0.02)}
 
     def test_missing_midpoint_is_no_price(self) -> None:
         snapshot = [q for q in _polymarket(190, PM_LATE) if q.outcome.value != "draw"]
-        assert _polymarket_price(snapshot, OUTCOMES) is None
+        assert _polymarket_price(snapshot, "1x2") is None
 
 
 class TestLaySide:
