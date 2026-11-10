@@ -3,8 +3,18 @@ name: Test
 on:
   push:
     branches-ignore: [main]
+    # The wiki and docs are checked by Lint; they can't change a test result.
+    paths-ignore:
+      - 'wiki/**'
+      - 'docs/**'
+      - '**/*.md'
   workflow_call:
   workflow_dispatch:
+
+# A newer push to the same branch supersedes a run still in progress.
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:

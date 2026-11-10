@@ -24,7 +24,7 @@ Mechanical gates come first; the rest is convention checked in review.
 
 ## Mechanical gates
 
-Pre-commit (`.pre-commit-config.yaml`) runs on every commit; the `Lint` workflow (`.github/workflows/lint.yml`) runs all hooks on every pushed branch except main. The Python version CI sets up is on [CI/CD workflows](../operations/ci-cd-workflows.md).
+Pre-commit (`.pre-commit-config.yaml`) runs on every commit; the `Lint` workflow (`.github/workflows/lint.yml`) runs all hooks on every pushed branch except main, and a newer push to a branch cancels its run still in progress. The Python version CI sets up is on [CI/CD workflows](../operations/ci-cd-workflows.md).
 
 | Hook | Scope | Enforces |
 |---|---|---|

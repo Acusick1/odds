@@ -1,17 +1,8 @@
 name: CI/CD Pipeline
 
+# Manual only: pull requests pass Test before merge, and its dev deploy targets the
+# dormant AWS stack.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'packages/**/*.py'
-      - 'tests/**'
-      - 'migrations/**'
-      - 'deployment/aws/**'
-      - '.github/workflows/**'
-      - 'pyproject.toml'
-      - 'uv.lock'
-      - 'alembic.ini'
   workflow_dispatch:
 
 concurrency:
