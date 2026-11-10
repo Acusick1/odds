@@ -1,5 +1,9 @@
 """A sport added through the add-sport guide reaches the collectors, the status strip and the
-candidate rules."""
+candidate rules.
+
+La Liga stands in for the new sport: ``SportKey`` is a Literal, so its own steps (the key,
+timezone, kick-off authority, candidate markets and closes) are already taken.
+"""
 
 from __future__ import annotations
 
@@ -73,6 +77,19 @@ def collecting(*jobs: str) -> Settings:
             "data_collection": settings.data_collection.model_copy(update={"sports": [SPORT]}),
         }
     )
+
+
+class TestSourcesFollowTheirConfig:
+    def test_oddsportal_collects_each_league_spec(self) -> None:
+        assert fetch_oddsportal.SOURCE.sports == {
+            spec.sport_key: league_collection(spec) for spec in fetch_oddsportal.LEAGUE_SPECS
+        }
+
+    def test_betfair_collects_each_sport_config(self) -> None:
+        assert fetch_betfair_exchange.SOURCE.sports == {
+            sport_key: betfair_collection(config)
+            for sport_key, config in betfair_constants.SPORT_CONFIG.items()
+        }
 
 
 @pytest.mark.usefixtures("la_liga")
