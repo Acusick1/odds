@@ -1,0 +1,20 @@
+issue: 771
+name: exchange-steam-continuation
+version: 1
+rule: exchange_steam
+market: 1x2
+leagues:
+  - soccer_epl
+  - soccer_spain_la_liga
+  - soccer_italy_serie_a
+  - soccer_germany_bundesliga
+  - soccer_france_ligue_one
+  - soccer_efl_champ
+grid:
+  m: [0.01, 0.015, 0.025]
+  lookback_minutes: [180, 360]
+  g: [0, 0.01]
+  decision_times: [[120, 60]]
+  max_input_age_minutes: [10]
+  lookback_max_input_age_minutes: [60]
+selection_rule: https://github.com/Acusick1/odds/issues/821#issuecomment-6769611091

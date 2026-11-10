@@ -1,0 +1,19 @@
+issue: 836
+name: fixed-totals-side
+version: 1
+rule: fixed_totals_side
+market: totals
+leagues:
+  - soccer_epl
+  - soccer_spain_la_liga
+  - soccer_italy_serie_a
+  - soccer_germany_bundesliga
+  - soccer_france_ligue_one
+  - soccer_efl_champ
+grid:
+  side: ["under", "over"]
+  decision:
+    - {"decision_times": [1440], "max_input_age_minutes": 60}
+    - {"decision_times": [360], "max_input_age_minutes": 60}
+    - {"decision_times": [60], "max_input_age_minutes": 10}
+selection_rule: https://github.com/Acusick1/odds/issues/821#issuecomment-6769611091
