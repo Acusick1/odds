@@ -116,6 +116,14 @@ class Event(SQLModel, table=True):
         self.home_team = normalize_team_name(self.home_team)
         self.away_team = normalize_team_name(self.away_team)
 
+    # The kick-off an accepted postponement moved the event away from: set when a move after
+    # the stored kick-off passed (or of a POSTPONED event) puts the start in the future.
+    postponed_from: datetime | None = Field(
+        sa_column=Column(DateTime(timezone=True)),
+        default=None,
+        description="Kick-off before the event's accepted postponement",
+    )
+
     # Results (populated after game completion)
     home_score: int | None = Field(default=None, description="Final home team score")
     away_score: int | None = Field(default=None, description="Final away team score")

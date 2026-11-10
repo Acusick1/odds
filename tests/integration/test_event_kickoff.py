@@ -220,6 +220,62 @@ class TestMoveKickoffAfterTheStoredKickoff:
         assert stored_epl_event.commence_time == tomorrow
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("minutes", [59, 60, 61, 90])
+    @pytest.mark.parametrize(
+        ("sport", "source"),
+        [("soccer_epl", Source.ODDSPORTAL), ("basketball_nba", Source.ESPN)],
+    )
+    async def test_an_event_never_postponed_is_corrected_to_a_start_just_past(
+        self, pglite_async_session, stored_epl_event, sport, source, minutes
+    ) -> None:
+        now = TWIN_KICKOFF
+        stored_epl_event.sport_key = sport
+        stored_epl_event.commence_time = now + timedelta(minutes=minutes)
+        corrected = now - timedelta(minutes=10)
+
+        assert await move_kickoff(
+            pglite_async_session, stored_epl_event, source, corrected, now=now
+        )
+        assert stored_epl_event.commence_time == corrected
+        assert stored_epl_event.postponed_from is None
+
+    @pytest.mark.asyncio
+    async def test_a_move_after_the_kickoff_passed_records_the_postponement(
+        self, pglite_async_session, stored_epl_event
+    ) -> None:
+        now = TWIN_KICKOFF + timedelta(hours=2)
+
+        assert await move_kickoff(
+            pglite_async_session,
+            stored_epl_event,
+            Source.ODDSPORTAL,
+            now + timedelta(days=1),
+            now=now,
+        )
+        assert stored_epl_event.postponed_from == TWIN_KICKOFF
+
+    @pytest.mark.asyncio
+    async def test_a_postponed_event_moved_to_a_new_slot_records_the_postponement(
+        self, pglite_async_session, stored_epl_event
+    ) -> None:
+        stored_epl_event.status = EventStatus.POSTPONED
+        now = TWIN_KICKOFF - timedelta(days=1)
+
+        assert await move_kickoff(
+            pglite_async_session, stored_epl_event, Source.ODDSPORTAL, MOVED, now=now
+        )
+        assert stored_epl_event.postponed_from == TWIN_KICKOFF
+
+    @pytest.mark.asyncio
+    async def test_an_ordinary_move_before_the_kickoff_records_none(
+        self, pglite_async_session, stored_epl_event
+    ) -> None:
+        assert await move_kickoff(
+            pglite_async_session, stored_epl_event, Source.ODDSPORTAL, MOVED, now=BEFORE
+        )
+        assert stored_epl_event.postponed_from is None
+
+    @pytest.mark.asyncio
     async def test_an_in_play_start_is_refused(
         self, pglite_async_session, stored_epl_event
     ) -> None:

@@ -27,7 +27,7 @@ The wiki is the documentation ([SCHEMA](../SCHEMA.md)); [README.md](../../README
 | Alerting and reporting | [Alerts](../operations/alerts.md#delivery) and [reporting surfaces](../operations/reporting-surfaces.md#reporting-surfaces) cite their implementations. |
 | MCP toolset | Registered tool signatures and return shapes; [server catalogue](../agent/mcp-server.md#tool-catalogue-16). |
 | Agent behaviour | Prompt files in `packages/odds-mcp/agents/`; [betting agent](../agent/betting-agent.md#prompts). |
-| Schema and storage | Model files, mainly `odds_core.models`; [storage table map](../storage/index.md#table-map). |
+| Schema and storage | Model files, mainly `odds_core.models` (the `events` columns are on [events](../storage/events.md#columns)); [storage table map](../storage/index.md#table-map). |
 | Training data, target and feature config | `odds_analytics.training.config.FeatureConfig` and `odds_analytics.feature_groups.prepare_training_data`; [feature pipeline](../modelling/feature-pipeline.md#feature-pipeline). Evidence lives in `experiments/results/` ([evaluation index](../evaluation/index.md#backtests-and-model-research)). |
 | Agent data sources | [Agent data sources](../agent/agent-data-sources.md#agent-data-sources-and-rejected-sources). |
 | Issue and triage workflow | `docs/agents/` ([issue tracker](#issue-tracker)). |
