@@ -5,7 +5,13 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
-from odds_core.models import Event, EventExternalId, EventStatus, OddsSnapshot
+from odds_core.models import (
+    Event,
+    EventExternalId,
+    EventPostponement,
+    EventStatus,
+    OddsSnapshot,
+)
 from odds_core.vocabulary import Source
 from odds_lambda.storage.event_kickoff import KICKOFF_AUTHORITY, move_kickoff
 
@@ -237,7 +243,7 @@ class TestMoveKickoffAfterTheStoredKickoff:
             pglite_async_session, stored_epl_event, source, corrected, now=now
         )
         assert stored_epl_event.commence_time == corrected
-        assert stored_epl_event.postponed_from is None
+        assert await pglite_async_session.get(EventPostponement, stored_epl_event.id) is None
 
     @pytest.mark.asyncio
     async def test_a_move_after_the_kickoff_passed_records_the_postponement(
@@ -252,7 +258,8 @@ class TestMoveKickoffAfterTheStoredKickoff:
             now + timedelta(days=1),
             now=now,
         )
-        assert stored_epl_event.postponed_from == TWIN_KICKOFF
+        recorded = await pglite_async_session.get(EventPostponement, stored_epl_event.id)
+        assert recorded is not None and recorded.postponed_from == TWIN_KICKOFF
 
     @pytest.mark.asyncio
     async def test_a_postponed_event_moved_to_a_new_slot_records_the_postponement(
@@ -264,7 +271,8 @@ class TestMoveKickoffAfterTheStoredKickoff:
         assert await move_kickoff(
             pglite_async_session, stored_epl_event, Source.ODDSPORTAL, MOVED, now=now
         )
-        assert stored_epl_event.postponed_from == TWIN_KICKOFF
+        recorded = await pglite_async_session.get(EventPostponement, stored_epl_event.id)
+        assert recorded is not None and recorded.postponed_from == TWIN_KICKOFF
 
     @pytest.mark.asyncio
     async def test_an_ordinary_move_before_the_kickoff_records_none(
@@ -273,7 +281,7 @@ class TestMoveKickoffAfterTheStoredKickoff:
         assert await move_kickoff(
             pglite_async_session, stored_epl_event, Source.ODDSPORTAL, MOVED, now=BEFORE
         )
-        assert stored_epl_event.postponed_from is None
+        assert await pglite_async_session.get(EventPostponement, stored_epl_event.id) is None
 
     @pytest.mark.asyncio
     async def test_an_in_play_start_is_refused(

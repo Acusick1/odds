@@ -116,14 +116,6 @@ class Event(SQLModel, table=True):
         self.home_team = normalize_team_name(self.home_team)
         self.away_team = normalize_team_name(self.away_team)
 
-    # The kick-off an accepted postponement moved the event away from: set when a move after
-    # the stored kick-off passed (or of a POSTPONED event) puts the start in the future.
-    postponed_from: datetime | None = Field(
-        sa_column=Column(DateTime(timezone=True)),
-        default=None,
-        description="Kick-off before the event's accepted postponement",
-    )
-
     # Results (populated after game completion)
     home_score: int | None = Field(default=None, description="Final home team score")
     away_score: int | None = Field(default=None, description="Final away team score")
@@ -261,6 +253,22 @@ class EventExternalId(SQLModel, table=True):
     __table_args__ = (
         UniqueConstraint("event_id", "source", name="uq_event_external_ids_event_source"),
         closed_set_check("source", EXTERNAL_ID_SOURCES, "ck_event_external_ids_source"),
+    )
+
+
+class EventPostponement(SQLModel, table=True):
+    """The kick-off an event was postponed from: recorded when a move after the stored kick-off
+    passed, or of a POSTPONED event, puts the start in the future. Its presence makes
+    ``odds_lambda.storage.event_kickoff.move_kickoff`` refuse a later start at or before now."""
+
+    __tablename__ = "event_postponements"
+
+    event_id: int = Field(
+        sa_column=Column(BigInteger, ForeignKey("events.id", ondelete="CASCADE"), primary_key=True)
+    )
+    postponed_from: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
+    recorded_at: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False), default_factory=utc_now
     )
 
 

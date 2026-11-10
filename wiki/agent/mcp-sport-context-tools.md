@@ -41,7 +41,7 @@ Each game carries `home_pitcher_name`/`id` and `away_pitcher_name`/`id`, nullabl
 
 ## Behaviour to know
 
-- Standings use a simplified tiebreak (points, goal difference, goals for, team name) without the official head-to-head step, so tied positions are approximate. `odds_mcp.tools.epl._derive_standings` tallies each ESPN row into an `odds_analytics.standings_features.TeamRecord` and orders them with `odds_analytics.standings_features.rank_table`, the same records and order the standings features build from `odds_core.models.Event` rows with status FINAL ([EPL context features](../modelling/epl-context-features.md)).
+- Standings use a simplified tiebreak (points, goal difference, goals for, team name) without the official head-to-head step, so tied positions are approximate. `odds_mcp.tools.epl._derive_standings` tallies each ESPN row into an `odds_analytics.standings_features.TeamRecord` and orders them with `odds_analytics.standings_features.rank_table`, the same records and order the standings features build from `odds_core.models.Event` rows with status FINAL (one per match) ([EPL context features](../modelling/epl-context-features.md)).
 - `odds_core.team.normalize_team_name` returns an unknown name unchanged, so a misspelt team yields empty lists and `team_row: null`, not an error.
 - The `team` fixture query is not season-scoped; only standings filter by season label.
 - `odds_mcp.tools.epl.get_team_context` exists only for the EPL; MLB has no equivalent form or schedule tool.
