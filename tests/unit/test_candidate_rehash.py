@@ -2,114 +2,227 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import asyncio
+import fcntl
+import json
+import subprocess
+from collections.abc import AsyncIterator, Callable, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
 from odds_analytics import candidate_rehash
-from odds_core.candidates import load_candidates, load_rehashes
-from odds_lambda.candidate_rules import RULES, rule_sha256
+from odds_analytics.candidate_rehash import RehashResult, Replay
+from odds_core.candidates import candidates_dir, load_candidates, load_rehashes
+from odds_lambda.candidate_rules import RULES
 
+from scripts import check_candidate_versions as hook
 from tests.unit.conftest import git_commit
 
-OLD = "a" * 64
-REGISTERED = {
-    "name": "gap",
-    "description": "d",
-    "kind": "mechanical",
-    "market": "1x2",
-    "sport": "soccer_epl",
-    "version": 1,
-    "issue": 1,
-    "start_date": "2020-01-01",
-    "status": "active",
-    "rule": "exchange_gap",
-    "rule_sha256": OLD,
-    "params": {"threshold": 0.01, "minutes_before_kickoff": [60], "max_input_age_minutes": 10},
-}
+OLD, NEW = "a" * 64, "b" * 64
+NAMES = ("gap-one", "gap-two")
 LINK = "https://github.com/Acusick1/odds/pull/1"
+START, END = date(2025, 1, 1), date(2025, 2, 1)
+
+
+def candidate(name: str, rule_sha256: str = OLD) -> dict[str, Any]:
+    return {
+        "name": name,
+        "description": "d",
+        "kind": "mechanical",
+        "market": "1x2",
+        "sport": "soccer_epl",
+        "version": 1,
+        "issue": 1,
+        "start_date": "2020-01-01",
+        "status": "active",
+        "rule": "exchange_gap",
+        "rule_sha256": rule_sha256,
+        "params": {"threshold": 0.01, "minutes_before_kickoff": [60], "max_input_age_minutes": 10},
+    }
+
+
+def replay_output(decisions: int = 5, bets: int = 2) -> bytes:
+    return json.dumps(
+        {n: {"counts": {"with_input": decisions}, "bets": [{}] * bets} for n in NAMES}
+    ).encode()
+
+
+class Fakes:
+    """What the rehash reads from git checkouts and the database, set per test."""
+
+    def __init__(self) -> None:
+        self.before = Replay(replay_output(), OLD)
+        self.after = Replay(replay_output(), NEW)
+        self.parity: dict[str, tuple[int, int]] = dict.fromkeys(NAMES, (3, 3))
 
 
 class TestRehash:
     @pytest.fixture
-    def root(self, candidates_repo: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-        (candidates_repo / "candidates" / "gap.yaml").write_text(yaml.safe_dump(REGISTERED))
+    def root(self, candidates_repo: Path) -> Path:
+        for name in NAMES:
+            (candidates_repo / "candidates" / f"{name}.yaml").write_text(
+                yaml.safe_dump(candidate(name))
+            )
         git_commit(candidates_repo)
-        monkeypatch.setattr(candidate_rehash, "_git", lambda root, *args: "base")
         return candidates_repo
 
-    def run(
-        self,
-        root: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        replays: Callable[[Path], bytes],
-        parity: tuple[bool, str] = (True, "gap v1: 3/3 matched"),
-    ) -> candidate_rehash.RehashResult:
-        monkeypatch.setattr(
-            candidate_rehash, "replay_under", lambda checkout, *_: replays(checkout)
-        )
+    @pytest.fixture
+    def fakes(self, root: Path, monkeypatch: pytest.MonkeyPatch) -> Fakes:
+        fakes = Fakes()
+        checkout = root / "base-checkout"
 
-        async def parity_summary(*_: object) -> tuple[bool, str]:
-            return parity
+        @asynccontextmanager
+        async def frozen_snapshot(url: str) -> AsyncIterator[tuple[None, str]]:
+            yield None, "snapshot-1"
 
-        monkeypatch.setattr(candidate_rehash, "parity_summary", parity_summary)
-        import asyncio
+        @contextmanager
+        def base_checkout(root: Path, base: str) -> Iterator[Path]:
+            yield checkout
 
+        def replay_under(where: Path, *args: Any) -> Replay:
+            assert args[-1] == "snapshot-1"
+            return fakes.before if where == checkout else fakes.after
+
+        async def parity_counts(connection: None, c: Any) -> tuple[int, int]:
+            return fakes.parity[c.name]
+
+        monkeypatch.setattr(candidate_rehash, "rule_sha256", lambda rule: NEW)
+        monkeypatch.setattr(candidate_rehash, "frozen_snapshot", frozen_snapshot)
+        monkeypatch.setattr(candidate_rehash, "base_checkout", base_checkout)
+        monkeypatch.setattr(candidate_rehash, "replay_under", replay_under)
+        monkeypatch.setattr(candidate_rehash, "parity_counts", parity_counts)
+        return fakes
+
+    def run(self, root: Path, start: date = START, end: date = END) -> RehashResult:
         return asyncio.run(
             candidate_rehash.rehash(
                 root,
                 "exchange_gap",
-                "postgresql://x",
-                date(2025, 1, 1),
-                date(2025, 2, 1),
+                "postgresql+asyncpg://odds_web:pw@db:5433/odds",
+                start,
+                end,
                 LINK,
-                "base",
+                "HEAD",
             )
         )
 
-    def test_identical_replays_record_the_rehash(
-        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    def unchanged(self, root: Path) -> bool:
+        directory = root / "candidates"
+        return load_rehashes(directory) == [] and all(
+            c.rule_sha256 == OLD for c in load_candidates(directory)
+        )
+
+    def test_identical_replays_record_every_candidate_of_the_rule(
+        self, root: Path, fakes: Fakes
     ) -> None:
-        result = self.run(root, monkeypatch, lambda _: b"same")
+        result = self.run(root)
         assert result.refused is None
         (entry,) = load_rehashes(root / "candidates")
-        assert (entry.rule, entry.old, entry.new) == (
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True
+        ).stdout.strip()
+        assert (entry.rule, entry.old, entry.new, entry.base, entry.head) == (
             "exchange_gap",
             OLD,
-            rule_sha256("exchange_gap"),
+            NEW,
+            head,
+            head,
         )
-        assert entry.evidence.link == LINK and "byte-identical" in entry.evidence.replay
-        assert entry.evidence.parity == "gap v1: 3/3 matched"
-        (candidate,) = load_candidates(root / "candidates")
-        assert candidate.rule_sha256 == rule_sha256("exchange_gap")
+        assert entry.database == "odds_web@db:5433/odds" and "pw" not in entry.model_dump_json()
+        assert [(c.name, c.decisions, c.bets, c.parity_matched) for c in entry.candidates] == [
+            (n, 5, 2, 3) for n in NAMES
+        ]
+        assert all(c.rule_sha256 == NEW for c in load_candidates(root / "candidates"))
+        assert hook._row_problem(json.loads(entry.model_dump_json())) is None
+
+    def test_a_candidate_without_recorded_decisions_is_recorded_as_such(
+        self, root: Path, fakes: Fakes
+    ) -> None:
+        fakes.parity["gap-two"] = (0, 0)
+        assert self.run(root).refused is None
+        (entry,) = load_rehashes(root / "candidates")
+        assert (entry.candidates[1].parity_matched, entry.candidates[1].parity_total) == (0, 0)
 
     @pytest.mark.parametrize(
-        ("replays", "parity"),
+        ("setup", "reason"),
         [
-            (lambda checkout: str(checkout).encode(), (True, "")),
-            (lambda _: b"same", (False, "gap v1: 2/3 matched")),
+            (lambda f: setattr(f, "before", Replay(replay_output(), "c" * 64)), "hash at base"),
+            (lambda f: setattr(f, "after", Replay(replay_output(bets=3), NEW)), "differ"),
+            (
+                lambda f: (
+                    setattr(f, "before", Replay(replay_output(decisions=0), OLD)),
+                    setattr(f, "after", Replay(replay_output(decisions=0), NEW)),
+                ),
+                "no decision",
+            ),
+            (
+                lambda f: (
+                    setattr(f, "before", Replay(replay_output(bets=0), OLD)),
+                    setattr(f, "after", Replay(replay_output(bets=0), NEW)),
+                ),
+                "no bet",
+            ),
+            (lambda f: f.parity.update({"gap-one": (2, 3)}), "parity matched 2 of 3"),
         ],
-        ids=["replays differ", "parity mismatch"],
+        ids=["base hash differs", "replays differ", "no decisions", "no bets", "parity mismatch"],
     )
-    def test_a_difference_writes_nothing(
-        self,
-        root: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        replays: Callable[[Path], bytes],
-        parity: tuple[bool, str],
+    def test_missing_or_contrary_evidence_writes_nothing(
+        self, root: Path, fakes: Fakes, setup: Callable[[Fakes], object], reason: str
     ) -> None:
-        before = (root / "candidates" / "gap.yaml").read_text()
-        result = self.run(root, monkeypatch, replays, parity)
-        assert result.refused is not None
+        setup(fakes)
+        result = self.run(root)
+        assert result.refused is not None and reason in result.refused
+        assert self.unchanged(root)
+
+    def test_an_empty_range_is_refused(self, root: Path, fakes: Fakes) -> None:
+        assert "after" in (self.run(root, start=END, end=START).refused or "")
+        assert self.unchanged(root)
+
+    def test_candidates_recording_different_hashes_are_refused(
+        self, root: Path, fakes: Fakes
+    ) -> None:
+        path = root / "candidates" / "gap-two.yaml"
+        path.write_text(yaml.safe_dump(candidate("gap-two", "c" * 64)))
+        git_commit(root)
+        assert "hash at base" in (self.run(root).refused or "")
+
+    def test_uncommitted_code_is_refused(self, root: Path, fakes: Fakes) -> None:
+        (root / "rule.py").write_text("x = 1\n")
+        assert "commit" in (self.run(root).refused or "")
+        assert self.unchanged(root)
+
+    def test_a_concurrent_rehash_is_refused(self, root: Path, fakes: Fakes) -> None:
+        with (root / ".git" / candidate_rehash.LOCK_FILE).open("w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            assert "lock" in (self.run(root).refused or "")
+        assert self.unchanged(root)
+
+    def test_a_failed_write_leaves_no_ledger_row(
+        self, root: Path, fakes: Fakes, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        written: list[Path] = []
+        real = candidate_rehash._write_atomically
+
+        def write(path: Path, content: str) -> None:
+            if written:
+                raise OSError("disk full")
+            written.append(path)
+            real(path, content)
+
+        monkeypatch.setattr(candidate_rehash, "_write_atomically", write)
+        with pytest.raises(OSError):
+            self.run(root)
         assert load_rehashes(root / "candidates") == []
-        assert (root / "candidates" / "gap.yaml").read_text() == before
 
 
 class TestLedger:
-    def test_the_committed_ledger_is_valid(self) -> None:
-        from odds_core.candidates import candidates_dir
-
-        for entry in load_rehashes(candidates_dir()):
+    def test_the_committed_ledger_is_valid_and_complete(self) -> None:
+        path = candidates_dir() / "rehashes.jsonl"
+        lines = path.read_text().splitlines() if path.exists() else []
+        for entry, line in zip(load_rehashes(candidates_dir()), lines, strict=True):
             assert entry.rule in RULES
+            assert hook._row_problem(json.loads(line)) is None

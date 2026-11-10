@@ -27,9 +27,9 @@ from odds_lambda.candidate_rules import (
     Selection,
     decision_times,
     resolve_rule,
-    rule_sha256,
     run_rule,
 )
+from odds_lambda.candidate_rules.pinning import rule_sha256
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 

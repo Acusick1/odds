@@ -8,7 +8,7 @@ issue: 708
 start_date: 2026-10-30
 status: active
 rule: exchange_gap
-rule_sha256: 7efda860cd2181483de93149d784506dfb671ef48b4de3f35ba499ef5cb850cd
+rule_sha256: ce8d329b559651d5559db59b7f9efe8e3b19ea4c124a88a557b0c18dadd3b864
 params:
   threshold: 0.01
   minutes_before_kickoff: [60, 30]

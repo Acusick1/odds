@@ -32,10 +32,9 @@ from odds_lambda.candidate_rules import (
     polymarket_gap,
     resolve_rule,
     retail_ev_model,
-    rule_sha256,
-    validate_candidate_rules,
 )
 from odds_lambda.candidate_rules.market_state import PolymarketPrice
+from odds_lambda.candidate_rules.pinning import rule_sha256, validate_candidate_rules
 from pydantic import ValidationError
 
 from tests.test_helpers import (

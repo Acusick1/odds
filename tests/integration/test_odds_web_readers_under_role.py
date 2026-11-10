@@ -16,7 +16,7 @@ from odds_core.config import SchedulerConfig, Settings, get_settings
 from odds_core.mlb_data_models import MlbProbablePitchers
 from odds_core.models import AlertHistory, EventStatus, FetchLog
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade, TradeResult
-from odds_lambda.candidate_rules import rule_sha256
+from odds_lambda.candidate_rules.pinning import rule_sha256
 from odds_web.app import create_app
 from odds_web.db import WebDatabase
 from odds_web.role_check import READ_TABLES

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 from odds_lambda.candidate_rules.code_hash import closure, code_sha256
@@ -94,16 +95,6 @@ BEHAVIOUR_CHANGES: dict[str, tuple[dict[str, str], dict[str, str]]] = {
             "rule": 'from . import plugin\nfrom .helpers import REGISTRY\ndef decide(): return REGISTRY["bet"]()\n',
             "helpers": REGISTRY,
             "plugin": PLUGIN.replace("return 1", "return 2"),
-        },
-    ),
-    "literal import_module": (
-        {
-            "rule": f'import importlib\ndef decide(): return importlib.import_module("{P}.helpers").bet()\n',
-            "helpers": "def bet(): return 1\n",
-        },
-        {
-            "rule": f'import importlib\ndef decide(): return importlib.import_module("{P}.helpers").bet()\n',
-            "helpers": "def bet(): return 2\n",
         },
     ),
     "swapped module implementations": (
@@ -234,6 +225,12 @@ class TestCodeSha256:
         fixture_package({"rule": RULE.replace(".helpers", ".limits")})
         assert len({before, moved, code_sha256([ROOT])}) == 3
 
+    def test_an_empty_and_a_docstring_only_init_hash_alike(self, fixture_package: Write) -> None:
+        fixture_package(package({"rule": RULE, "helpers": HELPERS}))
+        before = code_sha256([ROOT])
+        fixture_package({"__init__": '"""Package docs."""\n'})
+        assert code_sha256([ROOT]) == before
+
     def test_extra_values_change_it(self, fixture_package: Write) -> None:
         fixture_package(package({"rule": RULE, "helpers": HELPERS}))
         assert code_sha256([ROOT], ["sharp_inputs=[]"]) != code_sha256([ROOT])
@@ -260,21 +257,76 @@ class TestClosure:
         assert closure([ROOT]) == [P, f"{P}.rule"]
 
     @pytest.mark.parametrize(
-        "call",
+        "rule",
         [
-            "importlib.import_module(name)",
-            f'importlib.import_module(".helpers", "{P}")',
-            f'__import__("{P}.helpers")',
+            'import importlib\ndef decide(): return importlib.import_module("{P}.helpers")\n',
+            'from importlib import import_module as load\ndef decide(): return load("{P}.helpers")\n',
+            'from builtins import __import__ as load\ndef decide(): return load("{P}.helpers")\n',
+            'def decide(): return __import__("{P}.helpers")\n',
+            "from importlib.metadata import EntryPoint\n"
+            'def decide(): return EntryPoint(name="b", value="{P}.helpers:bet", group="g").load()\n',
+            "import importlib.util\ndef decide(): return importlib.util\n",
+            'import runpy\ndef decide(): return runpy.run_module("{P}.helpers")\n',
+            "import pkg_resources\ndef decide(): return pkg_resources\n",
+            'import sys\ndef decide(): return sys.modules["{P}.helpers"]\n',
+            'def decide(): return eval("1")\n',
+            "from . import *\ndef decide(): return helpers.bet()\n",
+        ],
+        ids=[
+            "import_module",
+            "aliased import_module",
+            "aliased __import__",
+            "__import__",
+            "entry point",
+            "importlib submodule",
+            "runpy",
+            "pkg_resources",
+            "sys.modules",
+            "eval",
+            "star import",
         ],
     )
-    def test_a_dynamic_import_it_cannot_follow_fails(
-        self, fixture_package: Write, call: str
+    def test_a_module_that_could_load_code_unseen_fails(
+        self, fixture_package: Write, rule: str
     ) -> None:
-        rule = f"import importlib\ndef decide(name):\n return {call}\n"
-        fixture_package(package({"rule": rule, "helpers": HELPERS}))
-        with pytest.raises(ValueError, match="dynamic import"):
+        fixture_package(package({"rule": rule.replace("{P}", P), "helpers": HELPERS}))
+        with pytest.raises(ValueError, match="cannot follow"):
+            closure([ROOT])
+
+    def test_a_dynamic_import_in_any_closure_module_fails(self, fixture_package: Write) -> None:
+        fixture_package(package({"rule": RULE, "helpers": HELPERS + "import importlib\n"}))
+        with pytest.raises(ValueError, match="helpers"):
             closure([ROOT])
 
     def test_a_root_without_a_source_fails(self) -> None:
         with pytest.raises(ValueError, match="no source"):
             closure([f"{P}_missing.rule.decide"])
+
+
+class TestOutsideTheHash:
+    """What a rule reads at run time, other than its imports, is not hashed: rule code must not
+    take behaviour from files, the environment or settings."""
+
+    def test_a_data_file_next_to_a_closure_module_is_not_hashed(
+        self, fixture_package: Write, tmp_path: Path
+    ) -> None:
+        rule = (
+            "import json\nfrom pathlib import Path\n"
+            'def decide(): return json.loads(Path(__file__).with_name("c.json").read_text())\n'
+        )
+        fixture_package(package({"rule": rule}))
+        config = tmp_path / P / "c.json"
+        config.write_text('{"stake": 1}')
+        before = code_sha256([ROOT])
+        config.write_text('{"stake": 2}')
+        assert code_sha256([ROOT]) == before
+
+    def test_the_environment_is_not_hashed(
+        self, fixture_package: Write, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rule = 'import os\ndef decide(): return int(os.environ["STAKE"])\n'
+        fixture_package(package({"rule": rule}))
+        monkeypatch.setenv("STAKE", "1")
+        before = code_sha256([ROOT])
+        monkeypatch.setenv("STAKE", "2")
+        assert code_sha256([ROOT]) == before

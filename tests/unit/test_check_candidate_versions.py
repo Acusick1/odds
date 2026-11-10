@@ -5,6 +5,7 @@ import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -181,6 +182,36 @@ class TestUnstartedCandidates:
         assert self.run(repo).returncode == 1
 
 
+def ledger_row(rule: str = "gap", old: str = OLD, new: str = NEW, **changes: Any) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "rule": rule,
+        "old": old,
+        "new": new,
+        "base": "c" * 40,
+        "head": "d" * 40,
+        "start": "2025-08-01",
+        "end": "2026-05-31",
+        "database": "odds_web@localhost:5433/odds",
+        "replay_sha256": "e" * 64,
+        "link": "https://github.com/Acusick1/odds/pull/1",
+        "candidates": [
+            {
+                "name": "back-longest",
+                "version": 2,
+                "decisions": 10,
+                "bets": 3,
+                "parity_matched": 4,
+                "parity_total": 4,
+            }
+        ],
+    }
+    return {**row, **changes}
+
+
+def _candidate(**changes: Any) -> list[dict[str, Any]]:
+    return [{**ledger_row()["candidates"][0], **changes}]
+
+
 class TestRehashLedger:
     @pytest.fixture
     def path(self, candidates_repo: Path) -> Path:
@@ -191,22 +222,23 @@ class TestRehashLedger:
         path.write_text(path.read_text().replace(OLD, NEW))
         return path
 
-    def ledger(self, path: Path, *rows: tuple[str, str, str]) -> None:
-        (path.parent / "rehashes.jsonl").write_text(
-            "".join(
-                json.dumps({"rule": r, "old": o, "new": n, "evidence": {}}) + "\n"
-                for r, o, n in rows
-            )
-        )
+    def ledger(self, path: Path, *rows: Any) -> None:
+        (path.parent / "rehashes.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
 
     def errors(self, path: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
         monkeypatch.chdir(path.parents[1])
         return hook.check("HEAD")
 
-    def test_a_ledger_rehash_passes_at_the_same_version(
+    def test_a_complete_ledger_row_passes_at_the_same_version(
         self, path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        self.ledger(path, ("gap", OLD, NEW))
+        self.ledger(path, ledger_row())
+        assert self.errors(path, monkeypatch) == []
+
+    def test_a_candidate_without_recorded_decisions_passes(
+        self, path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self.ledger(path, ledger_row(candidates=_candidate(parity_matched=0, parity_total=0)))
         assert self.errors(path, monkeypatch) == []
 
     def test_without_a_ledger_a_hash_change_fails(
@@ -216,19 +248,70 @@ class TestRehashLedger:
         assert len(errors) == 1 and "rule_sha256" in errors[0]
 
     @pytest.mark.parametrize(
-        "row", [("other", OLD, NEW), ("gap", "c" * 64, NEW), ("gap", OLD, "c" * 64)]
+        "row",
+        [ledger_row(rule="other"), ledger_row(old="c" * 64), ledger_row(new="c" * 64)],
+        ids=["another rule", "another old hash", "another new hash"],
     )
     def test_a_row_for_another_rule_or_hash_fails(
-        self, path: Path, monkeypatch: pytest.MonkeyPatch, row: tuple[str, str, str]
+        self, path: Path, monkeypatch: pytest.MonkeyPatch, row: dict[str, Any]
     ) -> None:
         self.ledger(path, row)
         errors = self.errors(path, monkeypatch)
         assert len(errors) == 1 and "rule_sha256" in errors[0]
 
+    @pytest.mark.parametrize(
+        "row",
+        [
+            {"rule": "gap", "old": OLD, "new": NEW},
+            {k: v for k, v in ledger_row().items() if k != "base"},
+            ledger_row(base="HEAD"),
+            ledger_row(head=""),
+            ledger_row(database=""),
+            ledger_row(link="see PR"),
+            ledger_row(replay_sha256="x"),
+            ledger_row(start="2026-11-10", end="2020-01-01"),
+            ledger_row(start="soon"),
+            ledger_row(candidates=[]),
+            ledger_row(candidates=_candidate(decisions=0)),
+            ledger_row(candidates=_candidate(bets=0)),
+            ledger_row(candidates=_candidate(parity_matched=3)),
+            ledger_row(candidates=_candidate(name="")),
+            ledger_row(candidates=[{"name": "back-longest"}]),
+            "not json",
+        ],
+        ids=[
+            "no evidence",
+            "no base",
+            "base not a SHA",
+            "no head",
+            "no database",
+            "no link",
+            "replay not a sha256",
+            "empty range",
+            "range not dates",
+            "no candidates",
+            "no decisions",
+            "no bets",
+            "parity mismatch",
+            "unnamed candidate",
+            "candidate without counts",
+            "not JSON",
+        ],
+    )
+    def test_an_incomplete_row_is_an_error_and_accepts_nothing(
+        self, path: Path, monkeypatch: pytest.MonkeyPatch, row: Any
+    ) -> None:
+        (path.parent / "rehashes.jsonl").write_text(
+            (row if isinstance(row, str) else json.dumps(row)) + "\n"
+        )
+        errors = self.errors(path, monkeypatch)
+        assert len(errors) == 2
+        assert "rehashes.jsonl:1" in errors[0] and "rule_sha256" in errors[1]
+
     def test_a_rehash_with_another_change_fails(
         self, path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        self.ledger(path, ("gap", OLD, NEW))
+        self.ledger(path, ledger_row())
         path.write_text(path.read_text().replace("0.02", "0.05"))
         errors = self.errors(path, monkeypatch)
         assert len(errors) == 1 and "params" in errors[0] and "rule_sha256" not in errors[0]

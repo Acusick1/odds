@@ -17,13 +17,9 @@ from odds_analytics.candidate_parity import ParityStatus, check_parity
 from odds_core.candidates import MechanicalCandidate
 from odds_core.models import Event, EventStatus
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
-from odds_lambda.candidate_rules import (
-    RULES,
-    RuleSpec,
-    SharpInput,
-)
+from odds_lambda.candidate_rules import RULES, RuleSpec, SharpInput
 from odds_lambda.candidate_rules import rules as rules_module
-from odds_lambda.candidate_rules.rules import rule_sha256
+from odds_lambda.candidate_rules.pinning import rule_sha256
 from odds_lambda.jobs import run_candidates
 from odds_lambda.jobs.run_candidates import (
     MAX_LATENESS,

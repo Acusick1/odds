@@ -11,7 +11,7 @@ from odds_analytics.candidate_report import candidate_report, load_decision_star
 from odds_core.candidates import MechanicalCandidate
 from odds_core.models import EventStatus
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade, TradeResult
-from odds_lambda.candidate_rules import rule_sha256
+from odds_lambda.candidate_rules.pinning import rule_sha256
 
 from tests.test_helpers import (
     betfair_exchange_bookmaker,

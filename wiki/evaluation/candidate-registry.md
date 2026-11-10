@@ -11,7 +11,7 @@ sources:
   - odds_core.paper_trade_models.PaperTrade
   - odds_mcp.server.get_portfolio
   - scripts.check_candidate_versions
-  - odds_lambda.candidate_rules.validate_candidate_rules
+  - odds_lambda.candidate_rules.pinning.validate_candidate_rules
 status: stable
 ---
 
@@ -26,7 +26,7 @@ The registry is the `candidates/` directory: one `<name>.yaml` file per candidat
 | Field | Model | Meaning |
 |---|---|---|
 | `name`, `description`, `sport`, `version`, `issue`, `start_date`, status | `odds_core.candidates._CandidateBase` | Shared by both kinds. `name` matches the file name and the pattern `odds_core.candidates.NAME_PATTERN`. `sport` is a [sport key](../collection/sport-and-market-keys.md). `issue` is the idea's GitHub issue. `start_date` is the first day it may place bets. The status is an `odds_core.candidates.CandidateStatus` |
-| `kind: mechanical`, `market`, `rule`, `odds_core.candidates.MechanicalCandidate.rule_sha256` and params | `odds_core.candidates.MechanicalCandidate` | `market` is the market the rule decides, an `odds_core.vocabulary.Market` such as `1x2` or `totals` ([market keys](../collection/sport-and-market-keys.md)). `rule` names a rule function ([candidate rules](candidate-rules.md)). `odds_core.candidates.MechanicalCandidate.rule_sha256` is the hash of the rule's code ([rule pinning](candidate-rules.md#rule-pinning)), 64 lowercase hex characters, and required in the registry; a [draft](candidate-backtest.md#command) outside it may omit it. The parameters are a free JSON mapping here, validated against the rule's params model, and its hash checked against the rule's current one, by `odds_lambda.candidate_rules.validate_candidate_rules`; every rule requires `minutes_before_kickoff`, the list of decision times, and `max_input_age_minutes` ([rule interface](candidate-rules.md#rule-interface)) |
+| `kind: mechanical`, `market`, `rule`, `odds_core.candidates.MechanicalCandidate.rule_sha256` and params | `odds_core.candidates.MechanicalCandidate` | `market` is the market the rule decides, an `odds_core.vocabulary.Market` such as `1x2` or `totals` ([market keys](../collection/sport-and-market-keys.md)). `rule` names a rule function ([candidate rules](candidate-rules.md)). `odds_core.candidates.MechanicalCandidate.rule_sha256` is the hash of the rule's code ([rule pinning](candidate-rules.md#rule-pinning)), 64 lowercase hex characters, and required in the registry; a [draft](candidate-backtest.md#command) outside it may omit it. The parameters are a free JSON mapping here, validated against the rule's params model, and its hash checked against the rule's current one, by `odds_lambda.candidate_rules.pinning.validate_candidate_rules`; every rule requires `minutes_before_kickoff`, the list of decision times, and `max_input_age_minutes` ([rule interface](candidate-rules.md#rule-interface)) |
 | `kind: agent` | `odds_core.candidates.AgentCandidate` | No further fields; the agent's prompts and model are its definition ([agent run](../agent/agent-run-job.md)) |
 
 `odds_core.candidates.load_candidates` raises a `ValueError` naming the file when a file fails validation, its `name` differs from its file stem or a mechanical file lacks `odds_core.candidates.MechanicalCandidate.rule_sha256`, and when a sport has more than one agent candidate whose status is active or promoted. Agents for one sport share `packages/odds-mcp/agents/common.md` and the sport's `base.md`, so two live agents for one sport would run identical prompts. A killed agent does not count, so its replacement can be added.
@@ -35,11 +35,11 @@ A change of status goes through a pull request. The version is a strict positive
 
 ## `odds candidates list`
 
-`odds_cli.commands.candidates.list_candidates` prints each candidate's name, kind, sport, version, status, start date and issue, optionally filtered by status. It reads the files in `odds_core.candidates.candidates_dir` and does not touch the database. It validates every mechanical candidate's rule and params with `odds_lambda.candidate_rules.validate_candidate_rules`. An invalid registry or rule prints the error in red and exits 1.
+`odds_cli.commands.candidates.list_candidates` prints each candidate's name, kind, sport, version, status, start date and issue, optionally filtered by status. It reads the files in `odds_core.candidates.candidates_dir` and does not touch the database. It validates every mechanical candidate's rule and params with `odds_lambda.candidate_rules.pinning.validate_candidate_rules`. An invalid registry or rule prints the error in red and exits 1.
 
 ## `odds candidates rule-hash`
 
-`odds_cli.commands.candidates.rule_hash` prints `odds_lambda.candidate_rules.rules.rule_sha256` for a rule name (the hash of every first-party module the rule's code imports, from the rule function through the code that loads, picks and prices its inputs and, for a model rule, the code that fits and queries its model, and of the sharp inputs it needs, [rule pinning](candidate-rules.md#rule-pinning)), the value a mechanical candidate records as `odds_core.candidates.MechanicalCandidate.rule_sha256`. An unknown rule name prints the known names and exits 1.
+`odds_cli.commands.candidates.rule_hash` prints `odds_lambda.candidate_rules.pinning.rule_sha256` for a rule name (the hash of every first-party module the rule's code imports, from the rule function through the code that loads, picks and prices its inputs and, for a model rule, the code that fits and queries its model, and of the sharp inputs it needs, [rule pinning](candidate-rules.md#rule-pinning)), the value a mechanical candidate records as `odds_core.candidates.MechanicalCandidate.rule_sha256`. An unknown rule name prints the known names and exits 1.
 
 ## `odds candidates report`
 
@@ -78,17 +78,30 @@ It fails when:
 
 A new file always passes. The check compares YAML only. A mechanical rule's code is pinned by the `odds_core.candidates.MechanicalCandidate.rule_sha256` in the file ([rule pinning](candidate-rules.md#rule-pinning)), so a code change reaches this check as a change to that key.
 
-A `odds_core.candidates.MechanicalCandidate.rule_sha256` may also change at the same version when the rule and its old and new hashes are a row of the [rehash ledger](#rehash-ledger); any other key that changed still needs a new version, and without a matching row so does the hash. Changes to an agent's prompts or model are not enforced by it.
+A `odds_core.candidates.MechanicalCandidate.rule_sha256` may also change at the same version when the rule and its old and new hashes are a complete row of the [rehash ledger](#rehash-ledger); any other key that changed still needs a new version, and without a matching row so does the hash. Changes to an agent's prompts or model are not enforced by it.
 
 ## Rehash ledger
 
-`candidates/rehashes.jsonl` (`odds_core.candidates.REHASH_LEDGER`) records the hash changes that leave every bet the same, one JSON object per line, an `odds_core.candidates.Rehash`: the rule, the old and new hash, and its evidence (`odds_core.candidates.RehashEvidence`): a GitHub PR or issue link, the replay summary and the parity summary. `odds_core.candidates.load_rehashes` reads it. Paper trades, decisions, the report and the parity check key a candidate by name and version, never by hash, so a candidate's forward test continues across a rehash.
+`candidates/rehashes.jsonl` (`odds_core.candidates.REHASH_LEDGER`) records the hash changes that leave every bet the same, one JSON object per line, an `odds_core.candidates.Rehash`:
 
-`odds_cli.commands.candidates.rehash` (`odds candidates rehash <rule> --database-url <url> --from <day> --to <day> --evidence <link> [--base <revision>]`) writes a row through `odds_analytics.candidate_rehash.rehash`:
+- the rule, its old hash (at the base commit) and its new hash (at the head commit), and both commit SHAs;
+- the replay's kick-off days, the database it read (role, host, port and name, no password) and the sha256 of the replay output;
+- the GitHub PR or issue of the change;
+- per candidate of the rule (`odds_core.candidates.RehashCandidate`), its version, its decisions with inputs and its bets in the replay, and the recorded decisions the parity check matched, of all of them.
 
-1. It computes the rule's current hash and takes the registered candidates of the rule that record another one; with none it writes nothing.
-2. It replays those candidates' files over the kick-off days with `scripts.replay_candidates` twice, against the given database read-only: under the base revision's code, checked out in a temporary git worktree in `worktrees/` (`--base`, by default the merge-base of `HEAD` with `origin/main`), and under the working tree's. Each run writes every decision's counts, bets and backtest summary as canonical JSON.
-3. It runs the [parity check](candidate-parity.md) of each candidate against the same database.
-4. It refuses, writing nothing and exiting 1, unless the two replays are byte-identical and parity holds. Otherwise it appends one row per old hash and sets each candidate file's `odds_core.candidates.MechanicalCandidate.rule_sha256` to the new hash.
+`odds_core.candidates.load_rehashes` reads it. Paper trades, decisions, the report and the parity check key a candidate by name and version, never by hash, so a candidate's forward test continues across a rehash.
 
-On the production host, pass `WEB_DATABASE_URL`, the read-only `odds_web` role ([odds-web](../operations/odds-web.md#database-access)), as `--database-url`: `odds copy from-prod` copies no decisions or trades, so parity can only hold there. The steps that use it are on [From idea to verdict](howto-take-an-idea-to-a-verdict.md).
+The [version check](#version-check) accepts a row only when every field is present and well formed: commit SHAs, a non-empty range and database, a decision for each candidate, a bet in all, and parity matched for every recorded decision. A candidate with no recorded decisions is recorded as 0 of 0. The hook cannot rerun the replay in CI. The ledger is a record the rehash command makes, not a proof, and review of the PR that adds a row is what trusts it.
+
+`odds_cli.commands.candidates.rehash` (`odds candidates rehash <rule> --database-url <url> --from <day> --to <day> --evidence <link> [--base <revision>]`) writes a row through `odds_analytics.candidate_rehash.rehash`. It refuses, writing nothing and exiting 1, at the first of these that fails:
+
+1. The range runs forwards, no other rehash holds the repository's lock, and the working tree has no uncommitted change outside `candidates/`, so the head commit is the code replayed.
+2. Every registered candidate of the rule records one hash. When all record the current hash, there is nothing to do.
+3. It opens a read-only repeatable-read transaction on the database and exports its snapshot (`odds_analytics.candidate_rehash.frozen_snapshot`). Both replays and the parity checks read that one snapshot.
+4. It replays every candidate of the rule with `scripts.replay_candidates` under the base revision's code (`--base`, by default the merge-base of `HEAD` with `origin/main`, resolved to a commit SHA), checked out in a temporary git worktree in `worktrees/`, and computes the rule's hash there. That hash must be the one the candidates record.
+5. It replays them again under the head's code, whose hash must be the current one. The two outputs, every decision's counts, bets and backtest summary as canonical JSON, must be byte-identical.
+6. Each candidate needs a decision with inputs in the replay, and the replay needs a bet. The [parity check](candidate-parity.md) of each candidate must match every recorded decision.
+
+It then writes each candidate file's `odds_core.candidates.MechanicalCandidate.rule_sha256`, then appends the row last. A failure between the two leaves a hash change without its row, which the version check rejects.
+
+On the production host, pass `WEB_DATABASE_URL`, the read-only `odds_web` role ([odds-web](../operations/odds-web.md#database-access)), as `--database-url`: `odds copy from-prod` copies no decisions or trades, so parity can only be checked there. The steps that use it are on [From idea to verdict](howto-take-an-idea-to-a-verdict.md).

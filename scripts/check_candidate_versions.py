@@ -2,8 +2,9 @@
 
 A candidate whose start_date at the base is later than today (UTC) has made no
 decisions yet, so it may change in place at the same version. A rule_sha256 may also
-change in place when the rule and both hashes are a row of the rehash ledger,
-candidates/rehashes.jsonl.
+change in place when the rule and both hashes are a complete row of the rehash ledger,
+candidates/rehashes.jsonl. The hook checks a row's shape only: the ledger is a record the
+rehash command makes, and nothing here re-runs the replay it records.
 
 Compares candidates/*.yaml in the working tree with the base: --base, else the
 merge-base of HEAD with origin/main, else with main, else HEAD.
@@ -12,6 +13,7 @@ Only stdlib and yaml are imported: the pre-commit hook env has no project instal
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from datetime import UTC, date, datetime
@@ -59,21 +61,97 @@ def _not_started(candidate: dict[str, Any], today: date) -> bool:
     return isinstance(start, date) and not isinstance(start, datetime) and start > today
 
 
-def _rehashes(root: Path) -> set[tuple[str, str, str]]:
-    """The (rule, old hash, new hash) rows of the working tree's rehash ledger."""
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_COMMIT = re.compile(r"^[0-9a-f]{40}$")
+_ROW_KEYS = {
+    "rule",
+    "old",
+    "new",
+    "base",
+    "head",
+    "start",
+    "end",
+    "database",
+    "replay_sha256",
+    "link",
+    "candidates",
+}
+_CANDIDATE_KEYS = {"name", "version", "decisions", "bets", "parity_matched", "parity_total"}
+
+
+def _count(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _row_problem(row: Any) -> str | None:
+    """Why a ledger row is not a complete record, or None. The hook checks the record's shape;
+    it cannot re-run the replay the row records."""
+    if not isinstance(row, dict) or set(row) != _ROW_KEYS:
+        return f"needs exactly the keys {sorted(_ROW_KEYS)}"
+    for key in ("old", "new", "replay_sha256"):
+        if not isinstance(row[key], str) or not _SHA256.match(row[key]):
+            return f"{key} is not a sha256"
+    for key in ("base", "head"):
+        if not isinstance(row[key], str) or not _COMMIT.match(row[key]):
+            return f"{key} is not a commit SHA"
+    for key in ("rule", "database"):
+        if not isinstance(row[key], str) or not row[key]:
+            return f"{key} is empty"
+    if not isinstance(row["link"], str) or not row["link"].startswith("https://github.com/"):
+        return "link is not a GitHub link"
+    try:
+        start, end = date.fromisoformat(row["start"]), date.fromisoformat(row["end"])
+    except (TypeError, ValueError):
+        return "start and end are not dates"
+    if start > end:
+        return "the replay range is empty"
+    candidates = row["candidates"]
+    if not isinstance(candidates, list) or not candidates:
+        return "it lists no candidate"
+    for c in candidates:
+        if not isinstance(c, dict) or set(c) != _CANDIDATE_KEYS:
+            return f"each candidate needs exactly the keys {sorted(_CANDIDATE_KEYS)}"
+        if not isinstance(c["name"], str) or not c["name"]:
+            return "a candidate has no name"
+        if not all(_count(c[k]) for k in _CANDIDATE_KEYS - {"name"}):
+            return f"{c['name']}: counts must be non-negative integers"
+        if c["version"] == 0 or c["decisions"] == 0:
+            return f"{c['name']}: no version or no decision in the replay"
+        if c["parity_matched"] != c["parity_total"]:
+            return f"{c['name']}: parity did not hold"
+    if not any(c["bets"] for c in candidates):
+        return "the replay placed no bet"
+    return None
+
+
+def _rehashes(root: Path) -> tuple[set[tuple[str, str, str]], list[str]]:
+    """The (rule, old hash, new hash) of each complete row of the working tree's rehash
+    ledger, and a problem for each other row."""
     path = root / CANDIDATES_DIR / REHASH_LEDGER
     if not path.exists():
-        return set()
-    rows = (json.loads(line) for line in path.read_text().splitlines() if line.strip())
-    return {(row["rule"], row["old"], row["new"]) for row in rows}
+        return set(), []
+    accepted: set[tuple[str, str, str]] = set()
+    problems: list[str] = []
+    for number, line in enumerate(path.read_text().splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            row = None
+        if (problem := _row_problem(row)) is not None:
+            problems.append(f"{CANDIDATES_DIR}/{REHASH_LEDGER}:{number}: {problem}")
+        else:
+            accepted.add((row["rule"], row["old"], row["new"]))
+    return accepted, problems
 
 
 def check(base: str, today: date | None = None) -> list[str]:
     today = today or datetime.now(UTC).date()
     root = Path(_git("rev-parse", "--show-toplevel").strip())
-    rehashes = _rehashes(root)
+    rehashes, ledger_problems = _rehashes(root)
     listing = _git("ls-tree", "-r", "--name-only", base, "--", f"{CANDIDATES_DIR}/")
-    errors: list[str] = []
+    errors: list[str] = list(ledger_problems)
     for rel in listing.splitlines():
         if not rel.endswith(".yaml"):
             continue

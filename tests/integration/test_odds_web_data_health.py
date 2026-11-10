@@ -19,7 +19,8 @@ from odds_core.close import CloseKind
 from odds_core.config import SchedulerConfig, Settings, get_settings
 from odds_core.models import AlertHistory, Event, FetchLog
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
-from odds_lambda.candidate_rules import load_market_state, max_input_age, resolve_rule, rule_sha256
+from odds_lambda.candidate_rules import load_market_state, max_input_age, resolve_rule
+from odds_lambda.candidate_rules.pinning import rule_sha256
 from odds_web.app import create_app
 from odds_web.closes import CloseClass, close_coverage, week_of
 from odds_web.coverage import RETAIL, candidate_coverage

@@ -28,9 +28,7 @@ from odds_lambda.candidate_rules.rules import (
     polymarket_gap,
     resolve_rule,
     retail_ev_model,
-    rule_sha256,
     run_rule,
-    validate_candidate_rules,
 )
 
 __all__ = [
@@ -59,7 +57,5 @@ __all__ = [
     "polymarket_gap",
     "resolve_rule",
     "retail_ev_model",
-    "rule_sha256",
     "run_rule",
-    "validate_candidate_rules",
 ]

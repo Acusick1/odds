@@ -12,7 +12,8 @@ from odds_core.candidates import (
     load_candidate_file,
     load_candidates,
 )
-from odds_lambda.candidate_rules import resolve_rule, rule_sha256
+from odds_lambda.candidate_rules import resolve_rule
+from odds_lambda.candidate_rules.pinning import rule_sha256
 from typer.testing import CliRunner
 
 MECHANICAL: dict[str, object] = {

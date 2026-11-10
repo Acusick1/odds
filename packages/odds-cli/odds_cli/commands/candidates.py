@@ -31,7 +31,8 @@ from odds_core.candidates import (
     load_candidates,
 )
 from odds_core.database import async_session_maker
-from odds_lambda.candidate_rules import RULES, ModelRuleSpec, rule_sha256, validate_candidate_rules
+from odds_lambda.candidate_rules import RULES, ModelRuleSpec
+from odds_lambda.candidate_rules.pinning import rule_sha256, validate_candidate_rules
 from rich.console import Console
 from rich.table import Table
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -526,9 +527,11 @@ def rehash(
 ) -> None:
     """Record a rule's new hash when the change leaves every candidate's bets the same.
 
-    Replays the rule's registered candidates under the base revision's code and the working
-    tree's, and checks parity; refuses unless the replays are byte-identical and parity holds.
-    Then appends the rehash ledger and updates each candidate file's rule_sha256.
+    Replays every registered candidate of the rule under the base revision's code and the
+    committed working tree's, on one read-only database snapshot, and checks parity; refuses
+    unless the candidates record the base's hash, the replays are byte-identical with decisions
+    and bets, and parity holds. Then updates each candidate file's rule_sha256 and appends the
+    rehash ledger.
     """
     if rule not in RULES:
         raise _fail(f"unknown rule {rule!r}; known rules: {', '.join(sorted(RULES))}")
@@ -553,16 +556,25 @@ def rehash(
                 root, rule, database_url, _parse_day(start), _parse_day(end), link, revision
             )
         )
-    except (ValueError, subprocess.CalledProcessError) as exc:
+    except subprocess.CalledProcessError as exc:
+        raise _fail(f"{exc}\n{exc.stderr}") from exc
+    except ValueError as exc:
         raise _fail(str(exc)) from exc
     if result.refused is not None:
         raise _fail(f"{rule}: not rehashed, {result.refused}")
-    if not result.rehashes:
+    if result.rehash is None:
         console.print(f"{rule}: every candidate already records {result.new}", soft_wrap=True)
         return
-    for entry in result.rehashes:
+    entry = result.rehash
+    console.print(
+        f"{rule}: {entry.old} -> {entry.new} (base {entry.base}, head {entry.head}, "
+        f"{entry.start}..{entry.end} on {entry.database}, replay sha256 {entry.replay_sha256})",
+        soft_wrap=True,
+    )
+    for c in entry.candidates:
         console.print(
-            f"{rule}: {entry.old} -> {entry.new}\n  {entry.evidence.replay}\n  {entry.evidence.parity}",
+            f"  {c.name} v{c.version}: {c.decisions} decisions, {c.bets} bets, "
+            f"parity {c.parity_matched}/{c.parity_total}",
             soft_wrap=True,
         )
 

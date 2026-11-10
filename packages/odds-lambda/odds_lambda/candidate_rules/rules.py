@@ -25,7 +25,6 @@ from pydantic import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_lambda.candidate_rules.code_hash import code_sha256
 from odds_lambda.candidate_rules.inputs import SharpInput
 from odds_lambda.candidate_rules.market_state import Line, MarketState, load_market_state
 
@@ -278,25 +277,6 @@ def apply_rule(
     return state, [b for b in spec.function(state, params) if b.selection not in bet_selections]
 
 
-# Imported by every rule's decision: the market state, rule and once-per-selection filter, and
-# the alias maps by which the writers give price rows the book keys the state selects.
-RULE_ROOTS: tuple[object | str, ...] = (
-    run_rule,
-    "odds_core.bookmakers.BOOKMAKER_ALIASES_BY_SOURCE",
-)
-
-
-def rule_sha256(rule_name: str) -> str:
-    """Hash of every first-party module in the import closure of the rule function, its params
-    model, ``RULE_ROOTS`` and a model rule's ``model_roots`` (``code_hash.code_sha256``), then
-    the rule's sharp inputs."""
-    spec = RULES[rule_name]
-    roots: list[object | str] = [spec.function, spec.params_model, *RULE_ROOTS]
-    if isinstance(spec, ModelRuleSpec):
-        roots += spec.model_roots
-    return code_sha256(roots, [f"sharp_inputs={sorted(i.value for i in spec.sharp_inputs)}"])
-
-
 def resolve_rule(candidate: MechanicalCandidate) -> tuple[RuleSpec | ModelRuleSpec, RuleParams]:
     """The candidate's rule and validated params; ``ValueError`` names what is invalid.
 
@@ -326,21 +306,6 @@ def resolve_rule(candidate: MechanicalCandidate) -> tuple[RuleSpec | ModelRuleSp
             f"candidate {candidate.name!r}: invalid params for rule {candidate.rule!r}: {exc}"
         ) from exc
     return spec, params
-
-
-def validate_candidate_rules(candidates: Sequence[Candidate]) -> None:
-    """Raise ``ValueError`` naming a mechanical candidate that is invalid or whose rule code changed."""
-    for candidate in candidates:
-        if not isinstance(candidate, MechanicalCandidate):
-            continue
-        resolve_rule(candidate)
-        if candidate.rule_sha256 != (current := rule_sha256(candidate.rule)):
-            raise ValueError(
-                f"candidate {candidate.name!r}: the code of rule {candidate.rule!r} changed "
-                f"(recorded rule_sha256 {candidate.rule_sha256}, current {current}); "
-                f"a new candidate version must record the new hash "
-                f"(`odds candidates rule-hash {candidate.rule}` prints it)"
-            )
 
 
 def decision_leads(candidates: Sequence[Candidate], sport: str) -> list[timedelta]:
