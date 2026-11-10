@@ -271,6 +271,26 @@ class TestClosure:
             'import sys\ndef decide(): return sys.modules["{P}.helpers"]\n',
             'def decide(): return eval("1")\n',
             "from . import *\ndef decide(): return helpers.bet()\n",
+            'import inspect\ndef decide(): return inspect.importlib.import_module("{P}.helpers")\n',
+            'def decide():\n    "1"\n    return int(decide.__doc__)\n',
+            "import sys as s\ndef decide(): return s.modules\n",
+            "from sys import modules\ndef decide(): return modules\n",
+            'import sys\ndef decide(): return getattr(sys, "modules")\n',
+            'import sys\nsys.path.insert(0, "/tmp/other")\ndef decide(): return 1\n',
+            "import gc\ndef decide(): return gc\n",
+            "import ctypes\ndef decide(): return ctypes\n",
+            "import types\ndef decide(): return types\n",
+            "import site\ndef decide(): return site\n",
+            "def decide(x, name): return getattr(x, name)\n",
+            'def decide(x, v): setattr(x, "a" + "b", v)\n',
+            "def decide(): return globals()\n",
+            "def decide(): return vars()\n",
+            "def decide(x): return x.__class__.__subclasses__()\n",
+            "def decide(f): return f.__globals__\n",
+            'def decide(x): return getattr(x, "__dict__")\n',
+            "def decide(): return __loader__\n",
+            "lookup = getattr\ndef decide(x): return lookup(x, 'a')\n",
+            "def decide(): return __all__\n",
         ],
         ids=[
             "import_module",
@@ -284,6 +304,26 @@ class TestClosure:
             "sys.modules",
             "eval",
             "star import",
+            "inspect.importlib",
+            "docstring as a value",
+            "aliased sys",
+            "from sys import modules",
+            "getattr on sys",
+            "sys.path",
+            "gc",
+            "ctypes",
+            "types",
+            "site",
+            "getattr with a computed name",
+            "setattr with a computed name",
+            "globals",
+            "vars",
+            "__class__",
+            "__globals__",
+            "getattr of a dunder",
+            "__loader__",
+            "aliased getattr",
+            "reading __all__",
         ],
     )
     def test_a_module_that_could_load_code_unseen_fails(
@@ -292,6 +332,28 @@ class TestClosure:
         fixture_package(package({"rule": rule.replace("{P}", P), "helpers": HELPERS}))
         with pytest.raises(ValueError, match="cannot follow"):
             closure([ROOT])
+
+    @pytest.mark.parametrize(
+        "rule",
+        [
+            "from types import MappingProxyType\ndef decide(): return MappingProxyType({})\n",
+            '__all__ = ["decide"]\ndef decide(): return 1\n',
+            'class Row:\n    __tablename__ = "rows"\n    __table_args__ = ()\n'
+            "def decide(): return Row\n",
+            'def decide(x): return getattr(x, "a", None), hasattr(x, "b")\n',
+            "class A:\n    def __init__(self): self.n = __name__\ndef decide(): return A()\n",
+        ],
+        ids=[
+            "MappingProxyType",
+            "__all__",
+            "SQLAlchemy table",
+            "literal getattr",
+            "__init__ and __name__",
+        ],
+    )
+    def test_the_allowances_pass(self, fixture_package: Write, rule: str) -> None:
+        fixture_package(package({"rule": rule}))
+        assert closure([ROOT]) == [P, f"{P}.rule"]
 
     def test_a_dynamic_import_in_any_closure_module_fails(self, fixture_package: Write) -> None:
         fixture_package(package({"rule": RULE, "helpers": HELPERS + "import importlib\n"}))
@@ -307,15 +369,13 @@ class TestOutsideTheHash:
     """What a rule reads at run time, other than its imports, is not hashed: rule code must not
     take behaviour from files, the environment or settings."""
 
-    def test_a_data_file_next_to_a_closure_module_is_not_hashed(
-        self, fixture_package: Write, tmp_path: Path
-    ) -> None:
+    def test_a_data_file_is_not_hashed(self, fixture_package: Write, tmp_path: Path) -> None:
+        config = tmp_path / "c.json"
         rule = (
             "import json\nfrom pathlib import Path\n"
-            'def decide(): return json.loads(Path(__file__).with_name("c.json").read_text())\n'
+            f"def decide(): return json.loads(Path({str(config)!r}).read_text())\n"
         )
         fixture_package(package({"rule": rule}))
-        config = tmp_path / P / "c.json"
         config.write_text('{"stake": 1}')
         before = code_sha256([ROOT])
         config.write_text('{"stake": 2}')

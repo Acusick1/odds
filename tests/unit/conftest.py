@@ -84,6 +84,64 @@ def fixture_package(
         del sys.modules[name]
 
 
+OLD, NEW = "a" * 64, "b" * 64
+
+
+def ledger_row(rule: str = "gap", old: str = OLD, new: str = NEW, **changes: Any) -> dict[str, Any]:
+    """A complete rehash ledger row, with ``changes`` applied."""
+    row: dict[str, Any] = {
+        "rule": rule,
+        "old": old,
+        "new": new,
+        "base": "c" * 40,
+        "head": "d" * 40,
+        "start": "2025-08-01",
+        "end": "2026-05-31",
+        "database": "odds_web@localhost:5433/odds",
+        "replay_sha256": "e" * 64,
+        "link": "https://github.com/Acusick1/odds/pull/1",
+        "candidates": [ledger_row_candidate()[0]],
+    }
+    return {**row, **changes}
+
+
+def ledger_row_candidate(**changes: Any) -> list[dict[str, Any]]:
+    candidate = {
+        "name": "back-longest",
+        "version": 2,
+        "decisions": 10,
+        "bets": 3,
+        "parity_matched": 4,
+        "parity_total": 4,
+    }
+    return [{**candidate, **changes}]
+
+
+# Rows the ledger model and the version hook must both reject.
+INVALID_LEDGER_ROWS: dict[str, Any] = {
+    "no evidence": {"rule": "gap", "old": OLD, "new": NEW},
+    "no base": {k: v for k, v in ledger_row().items() if k != "base"},
+    "extra key": ledger_row(note="x"),
+    "base not a SHA": ledger_row(base="HEAD"),
+    "no head": ledger_row(head=""),
+    "no rule": ledger_row(rule=""),
+    "no database": ledger_row(database=""),
+    "no link": ledger_row(link="see PR"),
+    "bare GitHub link": ledger_row(link="https://github.com/"),
+    "same old and new hash": ledger_row(new=OLD),
+    "replay not a sha256": ledger_row(replay_sha256="x"),
+    "empty range": ledger_row(start="2026-11-10", end="2020-01-01"),
+    "range not dates": ledger_row(start="soon"),
+    "no candidates": ledger_row(candidates=[]),
+    "no decisions": ledger_row(candidates=ledger_row_candidate(decisions=0)),
+    "no bets": ledger_row(candidates=ledger_row_candidate(bets=0)),
+    "parity mismatch": ledger_row(candidates=ledger_row_candidate(parity_matched=3)),
+    "unnamed candidate": ledger_row(candidates=ledger_row_candidate(name="")),
+    "candidate without counts": ledger_row(candidates=[{"name": "back-longest"}]),
+    "not JSON": "not json",
+}
+
+
 def git_commit(repo: Path) -> None:
     """Commit everything in ``repo`` as one commit."""
     for args in (("add", "-A"), ("commit", "-q", "-m", "commit")):

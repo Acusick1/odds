@@ -4,7 +4,9 @@ The closure starts from the roots' modules and follows every import statement an
 module (conditional, ``TYPE_CHECKING`` and function-local ones included) and every parent
 package's ``__init__``, through first-party (``odds_*``) modules only. A closure module that
 could load a module the closure cannot see raises, so the hash fails rather than leaving code
-out: one that imports a dynamic-import mechanism, names ``__import__``, or star-imports.
+out: one with reflective access to modules, code or namespaces (``REFLECTIVE_MODULES``,
+``REFLECTIVE_BUILTINS``, dunders outside ``ALLOWED_DUNDERS``, ``getattr`` and its kin with a
+computed name), or a star import.
 """
 
 from __future__ import annotations
@@ -19,12 +21,38 @@ from functools import cache
 from pathlib import Path
 
 FIRST_PARTY_PREFIX = "odds_"
-# Packages that load modules by a name chosen at run time, however the loading call is spelt.
-DYNAMIC_IMPORT_PACKAGES = frozenset({"importlib", "pkg_resources", "runpy", "builtins"})
-# Names that load or run code chosen at run time.
-DYNAMIC_IMPORT_NAMES = frozenset({"__import__", "__builtins__", "exec", "eval", "compile"})
-# Attributes of ``sys`` that reach loaded modules or the import machinery.
-SYS_IMPORT_ATTRIBUTES = frozenset({"modules", "meta_path", "path_hooks"})
+# Modules that give code reflective access to loaded modules, frames or the import machinery.
+REFLECTIVE_MODULES = frozenset(
+    {
+        "sys",
+        "inspect",
+        "importlib",
+        "builtins",
+        "gc",
+        "ctypes",
+        "types",
+        "pkg_resources",
+        "runpy",
+        "site",
+    }
+)
+# Dunder names and attributes closure code may use; any other can reach module objects, code,
+# globals or docstrings at run time.
+ALLOWED_DUNDERS = frozenset({"__name__", "__init__"})
+# Builtins that run code or expose namespaces chosen at run time.
+REFLECTIVE_BUILTINS = frozenset(
+    {"__import__", "exec", "eval", "compile", "globals", "locals", "vars", "breakpoint"}
+)
+# Builtins safe only with a literal attribute name.
+ATTRIBUTE_BUILTINS = frozenset({"getattr", "setattr", "delattr", "hasattr"})
+# The narrow exceptions the current closures need.
+# Declarations closure code may assign but never read: the export list (star imports are
+# refused) and SQLAlchemy's table name and arguments.
+DECLARED_DUNDERS = frozenset({"__all__", "__tablename__", "__table_args__"})
+# Names imported from a reflective module that expose no reflection.
+ALLOWED_FROM_IMPORTS = frozenset({("types", "MappingProxyType")})
+# Per module, dunder names it may read: the settings locate the project root from their file.
+MODULE_DUNDERS: dict[str, frozenset[str]] = {"odds_core.config": frozenset({"__file__"})}
 
 
 @dataclass(frozen=True)
@@ -93,31 +121,52 @@ def _relative(name: str, is_package: bool, level: int, target: str | None) -> st
     return ".".join([*base, target] if target else base)
 
 
-def _dynamic(name: str, node: ast.AST) -> str | None:
-    """Why ``node`` could load a module the closure cannot see, or None."""
+def _is_dunder(name: str) -> bool:
+    return name.startswith("__") and name.endswith("__") and name not in ALLOWED_DUNDERS
+
+
+def _literal_attribute_calls(tree: ast.AST) -> set[int]:
+    """The ids of ``getattr``-family names called with a literal, allowed attribute name."""
+    allowed: set[int] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in ATTRIBUTE_BUILTINS
+            and len(node.args) >= 2
+            and isinstance(node.args[1], ast.Constant)
+            and isinstance(node.args[1].value, str)
+            and not _is_dunder(node.args[1].value)
+        ):
+            allowed.add(id(node.func))
+    return allowed
+
+
+def _reflective(name: str, node: ast.AST, literal_calls: set[int]) -> str | None:
+    """Why ``node`` in module ``name`` gives reflective access the closure cannot follow, or
+    None."""
     if isinstance(node, ast.Import):
         for alias in node.names:
-            if alias.name.split(".")[0] in DYNAMIC_IMPORT_PACKAGES:
+            if alias.name.split(".")[0] in REFLECTIVE_MODULES:
                 return f"imports {alias.name}"
     elif isinstance(node, ast.ImportFrom):
-        source = (node.module or "").split(".")[0]
-        if node.level == 0 and source in DYNAMIC_IMPORT_PACKAGES:
-            return f"imports from {node.module}"
-        if any(alias.name == "*" for alias in node.names):
-            return "star-imports, which loads the submodules ``__all__`` names"
-        if any(alias.name in DYNAMIC_IMPORT_NAMES for alias in node.names):
-            return "imports a dynamic-import name"
-    elif isinstance(node, ast.Name) and node.id in DYNAMIC_IMPORT_NAMES:
-        return f"names {node.id}"
-    elif isinstance(node, ast.Attribute) and node.attr == "__import__":
-        return "names __import__"
-    elif (
-        isinstance(node, ast.Attribute)
-        and node.attr in SYS_IMPORT_ATTRIBUTES
-        and isinstance(node.value, ast.Name)
-        and node.value.id == "sys"
-    ):
-        return f"names sys.{node.attr}"
+        reflective = node.level == 0 and (node.module or "").split(".")[0] in REFLECTIVE_MODULES
+        for alias in node.names:
+            if reflective and (node.module, alias.name) not in ALLOWED_FROM_IMPORTS:
+                return f"imports {alias.name} from {node.module}"
+            if alias.name == "*":
+                return "star-imports, which loads the submodules ``__all__`` names"
+            if _is_dunder(alias.name) or alias.name in REFLECTIVE_BUILTINS:
+                return f"imports {alias.name}"
+    elif isinstance(node, ast.Name):
+        declared = node.id in DECLARED_DUNDERS and isinstance(node.ctx, ast.Store)
+        allowed = node.id in MODULE_DUNDERS.get(name, frozenset())
+        if node.id in REFLECTIVE_BUILTINS or (_is_dunder(node.id) and not declared and not allowed):
+            return f"names {node.id}"
+        if node.id in ATTRIBUTE_BUILTINS and id(node) not in literal_calls:
+            return f"uses {node.id} other than with a literal attribute name"
+    elif isinstance(node, ast.Attribute) and _is_dunder(node.attr):
+        return f"accesses {node.attr}"
     return None
 
 
@@ -127,11 +176,11 @@ def _imports(name: str, is_package: bool, tree: ast.Module) -> set[str]:
 
     Raises ``ValueError`` for a module that could load one some other way."""
     found: set[str] = set()
+    literal_calls = _literal_attribute_calls(tree)
     for node in ast.walk(tree):
-        if (reason := _dynamic(name, node)) is not None:
+        if (reason := _reflective(name, node, literal_calls)) is not None:
             raise ValueError(
-                f"{name}:{getattr(node, 'lineno', 0)}: {reason}, which the code hash cannot "
-                "follow; import modules statically"
+                f"{name}:{getattr(node, 'lineno', 0)}: {reason}, which the code hash cannot follow"
             )
         if isinstance(node, ast.Import):
             for alias in node.names:

@@ -82,16 +82,16 @@ A `odds_core.candidates.MechanicalCandidate.rule_sha256` may also change at the 
 
 ## Rehash ledger
 
-The ledger file in `candidates/`, named by `odds_core.candidates.REHASH_LEDGER`, records the hash changes that leave every bet the same, one JSON object per line, an `odds_core.candidates.Rehash`:
+The ledger file in `candidates/`, named by `odds_core.rehash_ledger.REHASH_LEDGER`, records the hash changes that leave every bet the same, one JSON object per line, an `odds_core.rehash_ledger.Rehash`:
 
 - the rule, its old hash (at the base commit) and its new hash (at the head commit), and both commit SHAs;
 - the replay's kick-off days, the database it read (role, host, port and name, no password) and the sha256 of the replay output;
 - the GitHub PR or issue of the change;
-- per candidate of the rule (`odds_core.candidates.RehashCandidate`), its version, its decisions with inputs and its bets in the replay, and the recorded decisions the parity check matched, of all of them.
+- per candidate of the rule (`odds_core.rehash_ledger.RehashCandidate`), its version, its decisions with inputs and its bets in the replay, and the recorded decisions the parity check matched, of all of them.
 
-`odds_core.candidates.load_rehashes` reads it. Paper trades, decisions, the report and the parity check key a candidate by name and version, never by hash, so a candidate's forward test continues across a rehash.
+`odds_core.rehash_ledger.load_rehashes` reads it. Paper trades, decisions, the report and the parity check key a candidate by name and version, never by hash, so a candidate's forward test continues across a rehash.
 
-The [version check](#version-check) accepts a row only when every field is present and well formed: commit SHAs, a non-empty range and database, a decision for each candidate, a bet in all, and parity matched for every recorded decision. A candidate with no recorded decisions is recorded as 0 of 0. The hook cannot rerun the replay in CI. The ledger is a record the rehash command makes, not a proof, and review of the PR that adds a row is what trusts it.
+The [version check](#version-check) validates each row with `odds_core.rehash_ledger.Rehash` itself, loading `odds_core.rehash_ledger` from its file (it imports only pydantic), and accepts a row only when every field is present and well formed: commit SHAs, a non-empty range and database, a decision for each candidate, a bet in all, and parity matched for every recorded decision. A candidate with no recorded decisions is recorded as 0 of 0. The hook cannot rerun the replay in CI. The ledger is a record the rehash command makes, not a proof, and review of the PR that adds a row is what trusts it.
 
 `odds_cli.commands.candidates.rehash` (`odds candidates rehash <rule> --database-url <url> --from <day> --to <day> --evidence <link> [--base <revision>]`) writes a row through `odds_analytics.candidate_rehash.rehash`. It refuses, writing nothing and exiting 1, at the first of these that fails:
 
@@ -102,6 +102,6 @@ The [version check](#version-check) accepts a row only when every field is prese
 5. It replays them again under the head's code, whose hash must be the current one. The two outputs, every decision's counts, bets and backtest summary as canonical JSON, must be byte-identical.
 6. Each candidate needs a decision with inputs in the replay, and the replay needs a bet. The [parity check](candidate-parity.md) of each candidate must match every recorded decision.
 
-It then writes each candidate file's `odds_core.candidates.MechanicalCandidate.rule_sha256`, then appends the row last. A failure between the two leaves a hash change without its row, which the version check rejects.
+It then writes each candidate file's `odds_core.candidates.MechanicalCandidate.rule_sha256` in place, keeping the file's other lines and any comment on that line (`odds_analytics.candidate_rehash.staged_file`). It refuses unless exactly one plain `odds_core.candidates.MechanicalCandidate.rule_sha256` line changes and the edited file parses to the new hash, and reloads every written file to check it records the new hash. Then it appends the row last. A failure between the two leaves a hash change without its row, which the version check rejects.
 
 On the production host, pass `WEB_DATABASE_URL`, the read-only `odds_web` role ([odds-web](../operations/odds-web.md#database-access)), as `--database-url`: `odds copy from-prod` copies no decisions or trades, so parity can only be checked there. The steps that use it are on [From idea to verdict](howto-take-an-idea-to-a-verdict.md).

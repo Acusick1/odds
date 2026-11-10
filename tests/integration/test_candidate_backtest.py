@@ -422,7 +422,7 @@ def model_candidate(**params: Any) -> MechanicalCandidate:
     return candidate(
         name="model",
         rule="retail_ev_model",
-        rule_sha256=rule_sha256("retail_ev_model"),
+        rule_sha256="0" * 64,
         params={
             "model": "retail_ev_price_only",
             "threshold": 0.01,

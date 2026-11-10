@@ -16,11 +16,12 @@ import pytest
 import yaml
 from odds_analytics import candidate_rehash
 from odds_analytics.candidate_rehash import RehashResult, Replay
-from odds_core.candidates import candidates_dir, load_candidates, load_rehashes
+from odds_core.candidates import candidates_dir, load_candidates
+from odds_core.rehash_ledger import REHASH_LEDGER, Rehash, load_rehashes
 from odds_lambda.candidate_rules import RULES
 
 from scripts import check_candidate_versions as hook
-from tests.unit.conftest import git_commit
+from tests.unit.conftest import INVALID_LEDGER_ROWS, git_commit, ledger_row
 
 OLD, NEW = "a" * 64, "b" * 64
 NAMES = ("gap-one", "gap-two")
@@ -137,7 +138,7 @@ class TestRehash:
             (n, 5, 2, 3) for n in NAMES
         ]
         assert all(c.rule_sha256 == NEW for c in load_candidates(root / "candidates"))
-        assert hook._row_problem(json.loads(entry.model_dump_json())) is None
+        assert hook._row_problem(entry.model_dump_json()) is None
 
     def test_a_candidate_without_recorded_decisions_is_recorded_as_such(
         self, root: Path, fakes: Fakes
@@ -201,6 +202,45 @@ class TestRehash:
             assert "lock" in (self.run(root).refused or "")
         assert self.unchanged(root)
 
+    def test_a_comment_on_the_hash_line_is_kept_and_the_hash_updated(
+        self, root: Path, fakes: Fakes
+    ) -> None:
+        path = root / "candidates" / "gap-one.yaml"
+        path.write_text(
+            path.read_text().replace(f"rule_sha256: {OLD}", f"rule_sha256: {OLD} # pinned")
+        )
+        git_commit(root)
+        assert self.run(root).refused is None
+        assert f"rule_sha256: {NEW} # pinned" in path.read_text()
+        assert load_candidates(root / "candidates")[0].rule_sha256 == NEW
+
+    @pytest.mark.parametrize(
+        "edit",
+        [
+            lambda text: text.replace(f"rule_sha256: {OLD}", f"rule_sha256: '{OLD}'"),
+            lambda text: text + f"rule_sha256: {OLD}\n",
+        ],
+        ids=["quoted value", "duplicate key"],
+    )
+    def test_a_hash_line_it_cannot_update_safely_is_refused(
+        self, root: Path, fakes: Fakes, edit: Callable[[str], str]
+    ) -> None:
+        path = root / "candidates" / "gap-one.yaml"
+        path.write_text(edit(path.read_text()))
+        git_commit(root)
+        before = path.read_text()
+        result = self.run(root)
+        assert result.refused is not None and "gap-one.yaml" in result.refused
+        assert path.read_text() == before and load_rehashes(root / "candidates") == []
+
+    def test_a_file_that_does_not_record_the_new_hash_after_writing_leaves_no_ledger_row(
+        self, root: Path, fakes: Fakes, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(candidate_rehash, "_write_atomically", lambda path, content: None)
+        result = self.run(root)
+        assert result.refused is not None and "after writing" in result.refused
+        assert load_rehashes(root / "candidates") == []
+
     def test_a_failed_write_leaves_no_ledger_row(
         self, root: Path, fakes: Fakes, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -220,9 +260,20 @@ class TestRehash:
 
 
 class TestLedger:
-    def test_the_committed_ledger_is_valid_and_complete(self) -> None:
-        path = candidates_dir() / "rehashes.jsonl"
-        lines = path.read_text().splitlines() if path.exists() else []
-        for entry, line in zip(load_rehashes(candidates_dir()), lines, strict=True):
-            assert entry.rule in RULES
-            assert hook._row_problem(json.loads(line)) is None
+    def test_the_committed_ledger_is_valid(self) -> None:
+        path = candidates_dir() / REHASH_LEDGER
+        for line in path.read_text().splitlines() if path.exists() else []:
+            assert hook._row_problem(line) is None
+            assert Rehash.model_validate_json(line).rule in RULES
+
+    def test_the_model_and_the_hook_accept_a_complete_row(self) -> None:
+        Rehash.model_validate(ledger_row())
+        assert hook._row_problem(json.dumps(ledger_row())) is None
+
+    @pytest.mark.parametrize("case", list(INVALID_LEDGER_ROWS))
+    def test_the_model_and_the_hook_reject_the_same_rows(self, case: str) -> None:
+        row = INVALID_LEDGER_ROWS[case]
+        line = row if isinstance(row, str) else json.dumps(row)
+        with pytest.raises(ValueError):
+            Rehash.model_validate_json(line)
+        assert hook._row_problem(line) is not None

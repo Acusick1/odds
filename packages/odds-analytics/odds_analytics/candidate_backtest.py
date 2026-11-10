@@ -54,6 +54,8 @@ class HashStatus(StrEnum):
     MATCH = "match"
     MISMATCH = "mismatch"
     ABSENT = "absent"
+    # The rule's closure has code the hash cannot follow, so no candidate of it can register.
+    UNHASHABLE = "unhashable"
 
 
 @dataclass(frozen=True)
@@ -108,7 +110,11 @@ class BacktestResult:
 def hash_status(candidate: MechanicalCandidate) -> HashStatus:
     if candidate.rule_sha256 is None:
         return HashStatus.ABSENT
-    if candidate.rule_sha256 == rule_sha256(candidate.rule):
+    try:
+        current = rule_sha256(candidate.rule)
+    except ValueError:
+        return HashStatus.UNHASHABLE
+    if candidate.rule_sha256 == current:
         return HashStatus.MATCH
     return HashStatus.MISMATCH
 

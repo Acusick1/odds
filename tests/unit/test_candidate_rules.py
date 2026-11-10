@@ -817,7 +817,7 @@ class TestValidateCandidateRules:
         candidate = _candidate(
             market="totals",
             rule="retail_ev_model",
-            rule_sha256=rule_sha256("retail_ev_model"),
+            rule_sha256="0" * 64,
             params=MODEL_PARAMS.model_dump(mode="json"),
         )
         with pytest.raises(ValueError, match="'gap'.*no model for market 'totals'"):
@@ -829,13 +829,21 @@ class TestValidateCandidateRules:
     def test_model_candidate_resolves_to_its_model_rule(self) -> None:
         candidate = _candidate(
             rule="retail_ev_model",
-            rule_sha256=rule_sha256("retail_ev_model"),
+            rule_sha256="0" * 64,
             params=MODEL_PARAMS.model_dump(mode="json"),
         )
-        validate_candidate_rules([candidate])
         spec, params = resolve_rule(candidate)
         assert isinstance(spec, ModelRuleSpec)
         assert params == MODEL_PARAMS
+
+    def test_a_model_candidate_cannot_register_while_its_rule_is_unhashable(self) -> None:
+        candidate = _candidate(
+            rule="retail_ev_model",
+            rule_sha256="0" * 64,
+            params=MODEL_PARAMS.model_dump(mode="json"),
+        )
+        with pytest.raises(ValueError, match="cannot follow"):
+            validate_candidate_rules([candidate])
 
 
 class TestDecisionLeads:
@@ -893,7 +901,7 @@ class TestRuleSha256:
         ],
         ids=["docstring", "comment", "formatting"],
     )
-    @pytest.mark.parametrize("rule", list(RULES))
+    @pytest.mark.parametrize("rule", MECHANICAL_RULES)
     def test_a_docstring_comment_or_format_edit_leaves_it_unchanged(
         self, edit_source: SourceEdit, module: str, transform: Callable[[str], str], rule: str
     ) -> None:
@@ -956,7 +964,7 @@ class TestRuleSha256:
             ("odds_lambda", _append("VERSION = 1\n")),
         ],
     )
-    @pytest.mark.parametrize("rule", list(RULES))
+    @pytest.mark.parametrize("rule", MECHANICAL_RULES)
     def test_a_code_edit_in_a_closure_module_changes_it(
         self, edit_source: SourceEdit, module: str, transform: Callable[[str], str], rule: str
     ) -> None:
@@ -973,34 +981,11 @@ class TestRuleSha256:
         )
         assert rule_sha256("exchange_gap") != before
 
-    @pytest.mark.parametrize(
-        ("module", "transform"),
-        [
-            (
-                "odds_analytics.candidate_model",
-                _replace("RetailEvArm.RESIDUAL)", "RetailEvArm.DIRECT)"),
-            ),
-            (
-                "odds_analytics.retail_ev",
-                _replace("LOSS_WEIGHT_SCALE = 1013.0", "LOSS_WEIGHT_SCALE = 1.0"),
-            ),
-            ("odds_analytics.retail_ev_metrics", _replace("/ np.sum(weights))", "/ len(weights))")),
-            (
-                "odds_core.close",
-                _replace(
-                    "LIVE_CLOSE_WINDOW = timedelta(minutes=30)",
-                    "LIVE_CLOSE_WINDOW = timedelta(minutes=5)",
-                ),
-            ),
-        ],
-    )
-    def test_model_rule_covers_the_code_that_fits_and_queries_the_model(
-        self, edit_source: SourceEdit, module: str, transform: Callable[[str], str]
-    ) -> None:
-        before = {rule: rule_sha256(rule) for rule in RULES}
-        edit_source(module, transform)
-        assert rule_sha256("retail_ev_model") != before["retail_ev_model"]
-        assert all(rule_sha256(rule) == before[rule] for rule in MECHANICAL_RULES)
+    def test_the_model_rule_fails_closed(self) -> None:
+        # Its closure reads attributes by computed name and dunders such as ``__version__``,
+        # which the hash cannot follow.
+        with pytest.raises(ValueError, match="cannot follow"):
+            rule_sha256("retail_ev_model")
 
     def test_a_stale_hash_fails_validation_with_the_new_one(self) -> None:
         with pytest.raises(ValueError, match="'gap'.*code of rule 'exchange_gap' changed") as exc:

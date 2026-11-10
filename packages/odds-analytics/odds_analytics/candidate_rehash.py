@@ -15,13 +15,9 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-from odds_core.candidates import (
-    MechanicalCandidate,
-    Rehash,
-    RehashCandidate,
-    append_rehash,
-    load_candidates,
-)
+import yaml
+from odds_core.candidates import MechanicalCandidate, load_candidate_file, load_candidates
+from odds_core.rehash_ledger import Rehash, RehashCandidate, append_rehash
 from odds_lambda.candidate_rules.pinning import rule_sha256
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
@@ -164,6 +160,23 @@ def base_checkout(root: Path, base: str) -> Iterator[Path]:
         _git(root, "worktree", "remove", "--force", str(checkout))
 
 
+def staged_file(path: Path, new: str) -> str:
+    """The candidate file at ``path`` with its ``rule_sha256`` set to ``new``, keeping every
+    other line; refuses unless exactly one value changes and the result parses to ``new``."""
+    content, count = re.subn(
+        r"^(rule_sha256:[ \t]*)[0-9a-f]{64}(?![0-9a-f])",
+        rf"\g<1>{new}",
+        path.read_text(),
+        flags=re.M,
+    )
+    if count != 1:
+        raise Refused(f"{path.name}: no single rule_sha256 line to update")
+    parsed = MechanicalCandidate.model_validate(yaml.safe_load(content))
+    if parsed.rule_sha256 != new:
+        raise Refused(f"{path.name}: the updated file records {parsed.rule_sha256}, not {new}")
+    return content
+
+
 def _write_atomically(path: Path, content: str) -> None:
     tmp = path.with_name(f".{path.name}.tmp")
     tmp.write_text(content)
@@ -275,16 +288,15 @@ async def rehash(
                 root, rule, new, candidates, database_url, start, end, link, commit, head
             )
             updated = {
-                directory / f"{c.name}.yaml": re.sub(
-                    r"^rule_sha256: \S+$",
-                    f"rule_sha256: {new}",
-                    (directory / f"{c.name}.yaml").read_text(),
-                    flags=re.M,
-                )
-                for c in candidates
+                path: staged_file(path, new)
+                for path in (directory / f"{c.name}.yaml" for c in candidates)
             }
             for path, content in updated.items():
                 _write_atomically(path, content)
+            for path in updated:
+                written = load_candidate_file(path)
+                if not isinstance(written, MechanicalCandidate) or written.rule_sha256 != new:
+                    raise Refused(f"{path.name} does not record {new} after writing")
             append_rehash(directory, entry)
             return RehashResult(rule, new, entry)
     except Refused as exc:

@@ -8,16 +8,18 @@ rehash command makes, and nothing here re-runs the replay it records.
 
 Compares candidates/*.yaml in the working tree with the base: --base, else the
 merge-base of HEAD with origin/main, else with main, else HEAD.
-Only stdlib and yaml are imported: the pre-commit hook env has no project install.
+Only stdlib, yaml and pydantic are imported: the pre-commit hook env has no project install.
 """
 
 import argparse
+import importlib.util
 import json
-import re
 import subprocess
 import sys
 from datetime import UTC, date, datetime
+from functools import cache
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import yaml
@@ -61,66 +63,34 @@ def _not_started(candidate: dict[str, Any], today: date) -> bool:
     return isinstance(start, date) and not isinstance(start, datetime) and start > today
 
 
-_SHA256 = re.compile(r"^[0-9a-f]{64}$")
-_COMMIT = re.compile(r"^[0-9a-f]{40}$")
-_ROW_KEYS = {
-    "rule",
-    "old",
-    "new",
-    "base",
-    "head",
-    "start",
-    "end",
-    "database",
-    "replay_sha256",
-    "link",
-    "candidates",
-}
-_CANDIDATE_KEYS = {"name", "version", "decisions", "bets", "parity_matched", "parity_total"}
+# The ledger's models, loaded from their file: importing the package would need the project's
+# dependencies, which the pre-commit hook env lacks.
+_LEDGER_MODULE = (
+    Path(__file__).resolve().parents[1] / "packages/odds-core/odds_core/rehash_ledger.py"
+)
 
 
-def _count(value: Any) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+@cache
+def _ledger_models() -> ModuleType:
+    name = "odds_core.rehash_ledger"
+    if (loaded := sys.modules.get(name)) is not None:
+        return loaded
+    spec = importlib.util.spec_from_file_location(name, _LEDGER_MODULE)
+    assert spec is not None and spec.loader is not None  # noqa: S101
+    module = importlib.util.module_from_spec(spec)
+    # pydantic resolves the models' annotations through the registered module.
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
-def _row_problem(row: Any) -> str | None:
-    """Why a ledger row is not a complete record, or None. The hook checks the record's shape;
-    it cannot re-run the replay the row records."""
-    if not isinstance(row, dict) or set(row) != _ROW_KEYS:
-        return f"needs exactly the keys {sorted(_ROW_KEYS)}"
-    for key in ("old", "new", "replay_sha256"):
-        if not isinstance(row[key], str) or not _SHA256.match(row[key]):
-            return f"{key} is not a sha256"
-    for key in ("base", "head"):
-        if not isinstance(row[key], str) or not _COMMIT.match(row[key]):
-            return f"{key} is not a commit SHA"
-    for key in ("rule", "database"):
-        if not isinstance(row[key], str) or not row[key]:
-            return f"{key} is empty"
-    if not isinstance(row["link"], str) or not row["link"].startswith("https://github.com/"):
-        return "link is not a GitHub link"
+def _row_problem(line: str) -> str | None:
+    """Why a ledger line is not a complete record, or None. The hook checks the record's
+    shape; it cannot re-run the replay the row records."""
     try:
-        start, end = date.fromisoformat(row["start"]), date.fromisoformat(row["end"])
-    except (TypeError, ValueError):
-        return "start and end are not dates"
-    if start > end:
-        return "the replay range is empty"
-    candidates = row["candidates"]
-    if not isinstance(candidates, list) or not candidates:
-        return "it lists no candidate"
-    for c in candidates:
-        if not isinstance(c, dict) or set(c) != _CANDIDATE_KEYS:
-            return f"each candidate needs exactly the keys {sorted(_CANDIDATE_KEYS)}"
-        if not isinstance(c["name"], str) or not c["name"]:
-            return "a candidate has no name"
-        if not all(_count(c[k]) for k in _CANDIDATE_KEYS - {"name"}):
-            return f"{c['name']}: counts must be non-negative integers"
-        if c["version"] == 0 or c["decisions"] == 0:
-            return f"{c['name']}: no version or no decision in the replay"
-        if c["parity_matched"] != c["parity_total"]:
-            return f"{c['name']}: parity did not hold"
-    if not any(c["bets"] for c in candidates):
-        return "the replay placed no bet"
+        _ledger_models().Rehash.model_validate_json(line)
+    except ValueError as exc:
+        return " ".join(str(exc).split())
     return None
 
 
@@ -135,13 +105,10 @@ def _rehashes(root: Path) -> tuple[set[tuple[str, str, str]], list[str]]:
     for number, line in enumerate(path.read_text().splitlines(), start=1):
         if not line.strip():
             continue
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError:
-            row = None
-        if (problem := _row_problem(row)) is not None:
+        if (problem := _row_problem(line)) is not None:
             problems.append(f"{CANDIDATES_DIR}/{REHASH_LEDGER}:{number}: {problem}")
         else:
+            row = json.loads(line)
             accepted.add((row["rule"], row["old"], row["new"]))
     return accepted, problems
 
