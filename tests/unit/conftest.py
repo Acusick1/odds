@@ -13,7 +13,7 @@ import sys
 import textwrap
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import suppress
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -352,3 +352,61 @@ async def seed(connection: AsyncConnection, data: dict[str, Any]) -> None:
             text(f"INSERT INTO odds ({columns}) VALUES ({','.join(':' + k for k in values)})"),
             values,
         )
+
+
+CROSS_KICKOFF = datetime(2026, 11, 7, 15, 0, tzinfo=UTC)
+CROSS_T = CROSS_KICKOFF - timedelta(hours=1)
+RunQuotes = Callable[..., list[Any]]
+
+
+@pytest.fixture
+def cross_market_run() -> RunQuotes:
+    """The quotes of one source run's 1x2 and totals 2.5 snapshots for ``make_epl_event(1)``,
+    each a snapshot of its own sharing ``payload_id``, stamped ``minutes_before_t`` before the
+    decision time; ``None`` leaves a market out. Snapshot ids start at ``first_id`` (1x2) and
+    ``first_id + 1`` (totals)."""
+    from tests.test_helpers import (
+        betfair_exchange_bookmaker,
+        make_epl_event,
+        make_quotes,
+        three_way_bookmaker,
+        totals_book,
+    )
+
+    event = make_epl_event(1, CROSS_KICKOFF)
+
+    def run(
+        payload_id: int | None,
+        first_id: int,
+        one_x_two: float | None = 2.0,
+        totals: float | None = 2.0,
+        source: str = "oddsportal_live",
+    ) -> list[Any]:
+        quotes: list[Any] = []
+        if one_x_two is not None:
+            quotes += make_quotes(
+                event,
+                first_id,
+                CROSS_T - timedelta(minutes=one_x_two),
+                [
+                    three_way_bookmaker("bet365", (2.0, 3.0, 4.0)),
+                    betfair_exchange_bookmaker((2.0, 4.0, 4.0)),
+                ],
+                source,
+                payload_id=payload_id,
+            )
+        if totals is not None:
+            quotes += make_quotes(
+                event,
+                first_id + 1,
+                CROSS_T - timedelta(minutes=totals),
+                [
+                    totals_book("bet365", {2.5: (1.9, 1.9)}),
+                    totals_book("betfair_exchange", {2.5: (2.0, 2.0)}),
+                ],
+                source,
+                payload_id=payload_id,
+            )
+        return quotes
+
+    return run

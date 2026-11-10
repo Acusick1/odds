@@ -404,6 +404,8 @@ class TaggedSnapshot:
     source: str | None
     fduk_basis: str | None = None
     created_at: datetime | None = None
+    # The source run the snapshot's markets were stored under, when the writer stored one.
+    payload_id: int | None = None
     # The stored snapshot of the envelope's first market, once ``store_tagged`` stored it.
     id: int | None = None
 
@@ -418,12 +420,15 @@ def make_tagged_snapshot(
     bookmakers: list[dict[str, Any]],
     source: str | None,
     fduk_basis: str | None = None,
+    payload_id: int | None = None,
 ) -> TaggedSnapshot:
     """A snapshot to store with ``store_tagged``: ``source`` is a tag (``None`` is the Odds API,
     ``"oddsportal"`` OddsPortal history, ``"oddsportal_live"``, ``"betfair_api"``,
     ``"polymarket"``, ``"football_data_uk"``), and ``fduk_basis`` FDUK's ``"kickoff"`` (the
     close) or ``"fduk_collection_deadline"``."""
-    return TaggedSnapshot(event_id, snapshot_time, bookmakers, source, fduk_basis)
+    return TaggedSnapshot(
+        event_id, snapshot_time, bookmakers, source, fduk_basis, payload_id=payload_id
+    )
 
 
 def betfair_exchange_bookmaker(
@@ -471,6 +476,7 @@ def make_quotes(
     source: str | None,
     fduk_basis: str | None = None,
     created_at: datetime | None = None,
+    payload_id: int | None = None,
 ) -> list[Quote]:
     """The quotes the writers would store for a ``make_tagged_snapshot`` of ``event``, as one
     snapshot per market numbered from ``snapshot_id``."""
@@ -499,6 +505,7 @@ def make_quotes(
             size=None if spec.size is None else float(spec.size),
             matched=None if spec.matched is None else float(spec.matched),
             changed_at=spec.changed_at,
+            payload_id=payload_id,
         )
         for i, market in enumerate(expanded.markets)
         for spec in market.prices
@@ -517,7 +524,7 @@ async def store_tagged(session: AsyncSession, snapshot: TaggedSnapshot) -> OddsS
         event,
         snapshot.envelope,
         snapshot.snapshot_time,
-        SnapshotShape(source, time_basis, None),
+        SnapshotShape(source, time_basis, snapshot.payload_id),
         created_at=snapshot.created_at,
     )
     snapshot.id = written.snapshot.id

@@ -137,12 +137,15 @@ def polymarket_gap(state: MarketState, params: GapParams) -> list[BetIntent]:
 @dataclass(frozen=True)
 class RuleSpec:
     """``sharp_inputs`` are the sharp prices the rule needs: a decision without each of them
-    has no inputs, and the exchange makes the retail snapshot one that also quotes it."""
+    has no inputs, and the exchange makes the retail snapshot one that also quotes it.
+    ``also_markets`` are extra markets the rule reads, read-only, in ``MarketState.also``: a
+    decision without an input for each of them has no inputs."""
 
     # Each rule takes its own params model, which a shared Callable cannot express.
     function: Callable[[MarketState, Any], list[BetIntent]]
     params_model: type[RuleParams]
     sharp_inputs: frozenset[SharpInput]
+    also_markets: frozenset[Market] = frozenset()
 
 
 # Predicted EV of each (outcome, UK retail book) quote in a state of a market without lines.
@@ -164,10 +167,14 @@ class ModelRuleSpec:
     sharp_inputs: frozenset[SharpInput]
     model_roots: tuple[str, ...]
     markets: frozenset[Market]
+    also_markets: frozenset[Market] = frozenset()
 
     def bind(self, predict: EvPredictor) -> RuleSpec:
         return RuleSpec(
-            partial(self.function, predict=predict), self.params_model, self.sharp_inputs
+            partial(self.function, predict=predict),
+            self.params_model,
+            self.sharp_inputs,
+            self.also_markets,
         )
 
 
@@ -252,7 +259,14 @@ async def run_rule(
     The returned state's ``snapshot_id`` is the decision's input.
     """
     state = await load_market_state(
-        session, event, market, at, max_input_age(params), spec.sharp_inputs, known_at
+        session,
+        event,
+        market,
+        at,
+        max_input_age(params),
+        spec.sharp_inputs,
+        known_at,
+        also_markets=spec.also_markets,
     )
     return apply_rule(spec, params, state, kickoff, bet_selections)
 
@@ -298,6 +312,13 @@ def resolve_rule(candidate: MechanicalCandidate) -> tuple[RuleSpec | ModelRuleSp
         raise ValueError(
             f"candidate {candidate.name!r}: rule {candidate.rule!r} has no model for market "
             f"{candidate.market.value!r}, model markets {sorted(m.value for m in spec.markets)}"
+        )
+    if candidate.market in spec.also_markets or not spec.also_markets <= sport_markets:
+        raise ValueError(
+            f"candidate {candidate.name!r}: rule {candidate.rule!r} also reads "
+            f"{sorted(m.value for m in spec.also_markets)}, which must be markets other than "
+            f"{candidate.market.value!r} that sport {candidate.sport!r} decides, "
+            f"{sorted(m.value for m in sport_markets)}"
         )
     try:
         params = spec.params_model.model_validate(candidate.params)

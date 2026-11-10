@@ -126,6 +126,7 @@ async def _recorded_inputs(
         max_input_age(params),
         spec.sharp_inputs,
         snapshot_ids=ids,
+        also_markets=spec.also_markets,
     )
     _, intents = apply_rule(spec, params, state, decision.kickoff_at_decision, bet_selections)
     return intents, missing
