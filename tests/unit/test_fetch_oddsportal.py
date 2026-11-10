@@ -163,6 +163,7 @@ class TestIngestLeague:
             listing_path="/x/",
             sport_key="soccer_x",
             sport_title="X",
+            fixture_horizon=timedelta(hours=48),
         )
         with patch(
             "odds_lambda.jobs.fetch_oddsportal.scrape_league",

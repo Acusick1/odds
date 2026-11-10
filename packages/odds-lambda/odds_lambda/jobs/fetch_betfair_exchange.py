@@ -40,6 +40,7 @@ from odds_lambda.betfair.kickoff import next_betfair_kickoff
 from odds_lambda.collection_calendar import (
     CollectionSource,
     FixtureKey,
+    SportCollection,
     decide_collection_run,
     require_rows_for_fixtures,
 )
@@ -77,20 +78,17 @@ CLOSE_LEAD = Lead(timedelta(minutes=5))
 # schedule's, so a game stays listed, and priced while pre-play, until it is seen in play.
 LOOKBACK_HOURS = 12
 
+
+def betfair_collection(config: SportBetfairConfig) -> SportCollection:
+    return SportCollection(config.fixture_horizon, tuple(spec.market for spec in config.markets))
+
+
 SOURCE = CollectionSource(
     key="betfair_exchange",
     job_name="fetch-betfair-exchange",
     source=Source.BETFAIR,
     cadence=CADENCE,
-    fixture_horizons={
-        "soccer_epl": timedelta(hours=72),
-        "baseball_mlb": timedelta(hours=6),
-        "basketball_nba": timedelta(hours=6),
-    },
-    markets={
-        sport_key: tuple(spec.market for spec in config.markets)
-        for sport_key, config in SPORT_CONFIG.items()
-    },
+    sports={sport_key: betfair_collection(config) for sport_key, config in SPORT_CONFIG.items()},
     skips_overnight=True,
 )
 

@@ -106,14 +106,15 @@ async def source_freshness(
         if source.job_name not in bootstrapped:
             continue
         for sport_key in resolve_target_sports(source.job_name, settings.data_collection.sports):
-            if sport_key not in source.fixture_horizons:
+            collection = source.sports.get(sport_key)
+            if collection is None:
                 continue
             job_name = make_compound_job_name(source.job_name, sport_key)
-            horizon = source.fixture_horizon(sport_key)
+            horizon = collection.fixture_horizon
             calendar = await fixture_calendar(session, sport_key, now=now, horizon=horizon)
             # The next kick-off, when a fixture inside the horizon makes a snapshot due.
             due = calendar.next_kickoff if calendar.kickoffs_in_horizon else None
-            for market in source.markets[sport_key]:
+            for market in collection.markets:
                 last = await latest_snapshot_time(session, sport_key, source.source, market)
                 status, active, threshold = Freshness.IDLE, None, None
                 if due is not None and last is None:

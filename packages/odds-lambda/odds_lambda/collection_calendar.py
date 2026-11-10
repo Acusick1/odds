@@ -54,31 +54,37 @@ class EmptyCollectionError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class SportCollection:
+    """What a source collects for one sport.
+
+    ``fixture_horizon`` is how far ahead a scheduled fixture must be before the
+    source is expected to price it, and ``markets`` the markets it writes.
+    """
+
+    fixture_horizon: timedelta
+    markets: tuple[Market, ...]
+
+    def __post_init__(self) -> None:
+        if not self.markets:
+            raise ValueError("a collected sport needs at least one market")
+
+
+@dataclass(frozen=True, slots=True)
 class CollectionSource:
     """A snapshot source and the schedule its job promises to keep.
 
     ``cadence`` is the job's own polling cadence, so the expected gap between
-    rows follows the tier of the next fixture. ``fixture_horizons`` is how far
-    ahead a scheduled fixture of each sport must be before the source is
-    expected to price it, and ``markets`` the markets it writes for each of
-    those sports. ``source`` is the ``source`` of the snapshots its job writes,
-    all of them ``observed``.
+    rows follows the tier of the next fixture. ``sports`` holds what the source
+    collects for each sport it covers. ``source`` is the ``source`` of the
+    snapshots its job writes, all of them ``observed``.
     """
 
     key: str
     job_name: str
     source: Source
     cadence: CadenceConfig
-    fixture_horizons: Mapping[str, timedelta]
-    markets: Mapping[str, tuple[Market, ...]]
+    sports: Mapping[str, SportCollection]
     skips_overnight: bool
-
-    def __post_init__(self) -> None:
-        if set(self.markets) != set(self.fixture_horizons) or not all(self.markets.values()):
-            raise ValueError(f"{self.key}: every sport with a fixture horizon needs its markets")
-
-    def fixture_horizon(self, sport_key: str) -> timedelta:
-        return self.fixture_horizons[sport_key]
 
     def overnight_window(self, sport_key: str) -> OvernightWindow | None:
         return OVERNIGHT_WINDOWS.get(sport_key) if self.skips_overnight else None
@@ -326,9 +332,9 @@ async def require_rows_for_fixtures(
     moment = now or datetime.now(UTC)
     async with async_session_maker() as session:
         for sport_key, rows_written in rows_by_sport.items():
-            if rows_written > 0 or sport_key not in source.fixture_horizons:
+            if rows_written > 0 or sport_key not in source.sports:
                 continue
-            horizon = source.fixture_horizon(sport_key)
+            horizon = source.sports[sport_key].fixture_horizon
             calendar = await fixture_calendar(
                 session,
                 sport_key,

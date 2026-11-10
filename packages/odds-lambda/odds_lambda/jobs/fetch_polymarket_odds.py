@@ -23,7 +23,11 @@ from odds_core.vocabulary import Market, Source, TimeBasis
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_lambda.collection_calendar import CollectionSource, decide_collection_run
+from odds_lambda.collection_calendar import (
+    CollectionSource,
+    SportCollection,
+    decide_collection_run,
+)
 from odds_lambda.polymarket_fetcher import PolymarketClient
 from odds_lambda.polymarket_odds import (
     MAX_HORIZON,
@@ -58,9 +62,9 @@ SOURCE = CollectionSource(
     job_name="fetch-polymarket-odds",
     source=Source.POLYMARKET,
     cadence=CADENCE,
-    fixture_horizons=dict.fromkeys(POLYMARKET_SPORTS, LISTING_CHECK_HORIZON),
-    markets={
-        sport_key: (Market(config.market_key),) for sport_key, config in POLYMARKET_SPORTS.items()
+    sports={
+        sport_key: SportCollection(LISTING_CHECK_HORIZON, (Market(config.market_key),))
+        for sport_key, config in POLYMARKET_SPORTS.items()
     },
     skips_overnight=True,
 )

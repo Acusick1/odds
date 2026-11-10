@@ -35,6 +35,7 @@ from odds_core.vocabulary import Market, Source, TimeBasis
 from odds_lambda.candidate_rules import decision_leads
 from odds_lambda.collection_calendar import (
     CollectionSource,
+    SportCollection,
     decide_collection_run,
     require_rows_for_fixtures,
 )
@@ -79,6 +80,8 @@ class LeagueSpec:
     listing_path: str  # OddsPortal listing page (e.g. "/football/england/premier-league/")
     sport_key: str  # Pipeline sport key (e.g. "soccer_epl")
     sport_title: str  # Display name (e.g. "EPL")
+    # How far ahead a scheduled fixture must be before a run is expected to price it.
+    fixture_horizon: timedelta
     markets: list[str] = field(default_factory=lambda: ["1x2"])
     primary_market: str = "1x2"
     num_outcomes: int = 3
@@ -90,6 +93,7 @@ LEAGUE_SPECS: list[LeagueSpec] = [
         listing_path="/football/england/premier-league/",
         sport_key="soccer_epl",
         sport_title="EPL",
+        fixture_horizon=timedelta(hours=48),
         markets=["1x2", "over_under_2_5"],
     ),
     LeagueSpec(
@@ -97,6 +101,7 @@ LEAGUE_SPECS: list[LeagueSpec] = [
         listing_path="/baseball/usa/mlb/",
         sport_key="baseball_mlb",
         sport_title="MLB",
+        fixture_horizon=timedelta(hours=48),
         markets=["home_away"],
         primary_market="home_away",
         num_outcomes=2,
@@ -106,6 +111,7 @@ LEAGUE_SPECS: list[LeagueSpec] = [
         listing_path="/basketball/usa/nba/",
         sport_key="basketball_nba",
         sport_title="NBA",
+        fixture_horizon=timedelta(hours=48),
         markets=["home_away", "totals_ladder", "spreads_ladder"],
         primary_market="home_away",
         num_outcomes=2,
@@ -118,20 +124,20 @@ _LEAGUE_SPEC_BY_SPORT: dict[str, LeagueSpec] = {spec.sport_key: spec for spec in
 # Index by league name for fast lookup from scrape commands / MCP tools
 LEAGUE_SPEC_BY_NAME: dict[str, LeagueSpec] = {spec.league: spec for spec in LEAGUE_SPECS}
 
+
+def league_collection(spec: LeagueSpec) -> SportCollection:
+    return SportCollection(
+        spec.fixture_horizon,
+        tuple(Market(FEED_MARKETS[key].pipeline_key) for key in spec.markets),
+    )
+
+
 SOURCE = CollectionSource(
     key="oddsportal",
     job_name="fetch-oddsportal",
     source=Source.ODDSPORTAL,
     cadence=CADENCE,
-    fixture_horizons={
-        "soccer_epl": timedelta(hours=48),
-        "baseball_mlb": timedelta(hours=48),
-        "basketball_nba": timedelta(hours=48),
-    },
-    markets={
-        spec.sport_key: tuple(Market(FEED_MARKETS[key].pipeline_key) for key in spec.markets)
-        for spec in LEAGUE_SPECS
-    },
+    sports={spec.sport_key: league_collection(spec) for spec in LEAGUE_SPECS},
     skips_overnight=True,
 )
 

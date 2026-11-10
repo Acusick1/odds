@@ -48,7 +48,7 @@ These filters apply only to Odds API requests ([configuration](../foundations/co
 
 - OddsPortal names map through `odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP` (32 entries; unmapped names fall back to `odds_lambda.oddsportal_common.slugify`). The map holds Pinnacle, BetMGM, DraftKings, FanDuel, Betfair Exchange, William Hill, Ladbrokes and others.
 - FDUK issues no id of its own for an event ([events](../storage/events.md#external-ids)). Its snapshots carry source `football_data_uk` (the envelope's `source` is the same string), and FDUK maps its column prefixes in `scripts.ingest_football_data_uk.BOOKMAKER_PREFIXES`: pinnacle, bet365, bwin, betfair_exchange (`BFE`), betfair_sportsbook (`BF`), interwetten, williamhill, betvictor (`VC`, `BV`), betfred (`BFD`), paddypower (`PP`), skybet (`SKB`), betmgm (`BMGM`), coral (`CL`), ladbrokes, onexbet, plus pseudo-books `market_max` / `market_avg` (`AGGREGATE_PREFIXES`).
-- Betfair Exchange covers EPL, MLB and NBA (`odds_lambda.betfair.constants.SPORT_CONFIG`): match odds for all three, and over/under 2.5 goals for EPL (the line is on `odds_lambda.betfair.constants.BetfairMarketSpec`).
+- Betfair Exchange covers EPL, MLB and NBA (`odds_lambda.betfair.constants.SPORT_CONFIG`): match odds for all three, and over/under 2.5 goals for EPL (the line is on `odds_lambda.betfair.constants.BetfairMarketSpec`), each sport with its own fixture horizon.
 
 ## Sport keys
 
