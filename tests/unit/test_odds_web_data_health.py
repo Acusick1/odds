@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 from odds_core.close import CloseKind
 from odds_core.vocabulary import Source
+from odds_lambda.health_monitor import SCHEDULE_OVERDUE_GRACE
 from odds_lambda.health_readers import Freshness, SourceFreshness
 from odds_lambda.storage.readers import BurnProjection, KeyQuota
 from odds_web.app import create_app
@@ -25,6 +26,7 @@ from odds_web.status import (
     SourceChip,
     StatusStrip,
     _job_state,
+    _overdue_state,
     _source_state,
 )
 from sqlalchemy.exc import DBAPIError
@@ -217,6 +219,16 @@ class TestStatusSplit:
         assert quota is not None
         assert (quota.remaining, quota.limit, quota.days_left) == (18640, 20500, 228)
 
+    def test_quota_is_unknown_not_idle_while_any_key_has_no_projection(self) -> None:
+        idle = QuotaChip(1, KeyQuota(("soccer_epl",), 100, 0), BurnProjection(0, None, NOW))
+        unread = QuotaChip(0, KeyQuota(("basketball_nba",), 400, 100), None)
+
+        mixed = strip(quotas=[unread, idle]).quota()
+        all_idle = strip(quotas=[idle]).quota()
+
+        assert mixed is not None and (mixed.days_left, mixed.no_spend) == (None, False)
+        assert all_idle is not None and (all_idle.days_left, all_idle.no_spend) == (None, True)
+
     def test_problems_are_late_stale_and_unknown_worst_first(self) -> None:
         status = strip()
 
@@ -242,6 +254,14 @@ class TestChipStates:
         assert _job_state(beat(2 * STALE_FACTOR + 0.1), 2, NOW) is ChipState.STALE
         assert _job_state(None, 2, NOW) is ChipState.UNKNOWN
         assert _job_state(beat(500), None, NOW) is ChipState.OK
+
+    def test_a_job_whose_next_run_passed_unserved_is_late(self) -> None:
+        grace = SCHEDULE_OVERDUE_GRACE
+
+        assert _overdue_state(NOW - grace + timedelta(minutes=1), False, NOW) is ChipState.OK
+        assert _overdue_state(NOW - grace - timedelta(minutes=1), False, NOW) is ChipState.LATE
+        assert _overdue_state(NOW - timedelta(hours=3), True, NOW) is ChipState.OK
+        assert _overdue_state(None, False, NOW) is ChipState.OK
 
     def test_a_source_is_late_then_stale_by_its_threshold(self) -> None:
         def freshness(active_hours: float | None, status: Freshness) -> SourceFreshness:
@@ -310,6 +330,18 @@ class TestStatusStrip:
         )
         assert "check-health" not in body and "betfair epl 1x2" not in body
         assert "odds_api nba h2h" not in body
+
+    def test_a_next_run_on_another_day_names_its_weekday(
+        self, client: TestClient, readers: dict[str, object]
+    ) -> None:
+        tomorrow = NOW + timedelta(days=1, hours=-4)
+        jobs = [JobChip("run-candidates-epl", ChipState.OK, NOW, None, tomorrow, False)]
+        readers["status"] = strip(jobs=jobs)
+
+        assert (
+            'run-candidates next <span class="num">Tue 08:00</span>'
+            in client.get("/fragments/status").text
+        )
 
     def test_the_next_run_chip_carries_its_state(self, client: TestClient) -> None:
         body = client.get("/fragments/status").text

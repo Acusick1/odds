@@ -11,7 +11,7 @@ last snapshot {{ c.last_snapshot | stamp }}"><span class="dot {{ c.state }}"></s
 {% endfor %}
 {% if next_run %}
 <span class="chip" title="{{ next_run.job }}: {{ next_run.state }}
-next run {{ next_run.next_run | stamp }}"><span class="dot {{ next_run.state }}"></span>run-candidates next <span class="num">{{ next_run.next_run | hhmm }}</span></span>
+next run {{ next_run.next_run | stamp }}"><span class="dot {{ next_run.state }}"></span>run-candidates next <span class="num">{{ next_run.next_run | hhmm(s.now) }}</span></span>
 {% endif %}
 {% if quota %}
 <span class="chip" title="summed over {{ s.quotas | length }} key{{ 's' if s.quotas | length != 1 }}; days left is the worst key's">Odds API quota <span class="num">{{ '{:,}'.format(quota.remaining) }} / {{ '{:,}'.format(quota.limit) }}</span> ·

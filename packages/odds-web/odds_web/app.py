@@ -84,8 +84,11 @@ def _stamp(value: datetime | None) -> str:
     return "never" if value is None else value.strftime("%Y-%m-%d %H:%M UTC")
 
 
-def _hhmm(value: datetime | None) -> str:
-    return "—" if value is None else value.strftime("%H:%M")
+def _hhmm(value: datetime | None, now: datetime) -> str:
+    """A UTC clock time, led by the weekday when it is not on ``now``'s date."""
+    if value is None:
+        return "—"
+    return value.strftime("%H:%M" if value.date() == now.date() else "%a %H:%M")
 
 
 def _ago(value: datetime | None, now: datetime) -> str:

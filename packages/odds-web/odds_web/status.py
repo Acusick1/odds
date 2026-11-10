@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 
 from odds_core.config import Settings
+from odds_lambda.health_monitor import SCHEDULE_OVERDUE_GRACE
 from odds_lambda.health_readers import (
     Freshness,
     SourceFreshness,
@@ -29,7 +30,7 @@ class ChipState(StrEnum):
     OK = "ok"
     # A job past its heartbeat expectation, or a source past its staleness threshold.
     LATE = "late"
-    # Late by more than ``STALE_FACTOR`` times what the job or source is allowed.
+    # Older than ``STALE_FACTOR`` times what the job or source is allowed.
     STALE = "stale"
     # Not enough history to judge.
     UNKNOWN = "unknown"
@@ -151,7 +152,7 @@ class StatusStrip:
             for q in self.quotas
             if q.projection is not None and q.projection.days_left is not None
         ]
-        spending_known = any(q.projection is not None for q in self.quotas)
+        spending_known = all(q.projection is not None for q in self.quotas)
         return QuotaSummary(
             remaining=sum(q.quota.remaining for q in self.quotas),
             limit=sum(q.quota.limit for q in self.quotas),
@@ -197,6 +198,18 @@ def _job_state(last: datetime | None, max_hours: float | None, now: datetime) ->
     return ChipState.OK
 
 
+def _overdue_state(next_run: datetime | None, running: bool, now: datetime) -> ChipState:
+    """Late when a job's next fire time has passed unserved, as the monitor's schedule-chain check
+    judges it; a running job is being served."""
+    if running or next_run is None or next_run >= now - SCHEDULE_OVERDUE_GRACE:
+        return ChipState.OK
+    return ChipState.LATE
+
+
+def _worse(a: ChipState, b: ChipState) -> ChipState:
+    return max(a, b, key=_SEVERITY.__getitem__)
+
+
 def _source_state(freshness: SourceFreshness) -> ChipState:
     state = _FRESHNESS_STATE[freshness.status]
     if (
@@ -221,7 +234,10 @@ async def load_status(session: AsyncSession, settings: Settings, now: datetime) 
         jobs.append(
             JobChip(
                 name=schedule.job_name,
-                state=_job_state(last, max_hours, now),
+                state=_worse(
+                    _job_state(last, max_hours, now),
+                    _overdue_state(schedule.next_fire_time, schedule.running > 0, now),
+                ),
                 last_success=last,
                 max_hours=max_hours,
                 next_run=schedule.next_fire_time,
