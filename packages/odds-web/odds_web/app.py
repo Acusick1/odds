@@ -14,7 +14,11 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from odds_analytics.candidate_report import CandidateReport, candidate_report
+from odds_analytics.candidate_report import (
+    CandidateReport,
+    candidate_report,
+    unscored_version,
+)
 from odds_core.candidates import candidates_dir, load_candidates
 from odds_core.config import Settings, get_settings
 
@@ -147,17 +151,16 @@ def create_app(
         report = await report_section()
         if report.value is None:
             return Section(None, report.as_of, report.failure)
-        summary = next(
+        known = next(
             (s for s in report.value.summaries if (s.name, s.version) == (name, version)), None
         )
-        if summary is None:
+        if known is None and not any(s.name == name for s in report.value.summaries):
             raise HTTPException(status_code=404, detail=f"No candidate {name} v{version}")
-        running = report.value.running[(name, version)]
 
         async def load_listings() -> tuple[DecisionHistory | None, LedgerPage]:
             async with database.session_maker() as session:
                 decisions = None
-                if reads_decisions(summary.registered):
+                if known is None or reads_decisions(known.registered):
                     decisions = await load_decision_history(
                         session, name, version, datetime.now(UTC)
                     )
@@ -167,6 +170,12 @@ def create_app(
         # The figures and charts are built from the report entry on every request, so they
         # always describe one snapshot; only the listings are cached per page.
         listings = Section.of(await cache.get(f"candidate:{name}:{version}:{page}", load_listings))
+        summary, running = known, report.value.running.get((name, version))
+        if summary is None or running is None:
+            # An earlier version the report holds no trades for exists only if it recorded decisions.
+            if listings.value is not None and not (listings.value[0] and listings.value[0].total):
+                raise HTTPException(status_code=404, detail=f"No candidate {name} v{version}")
+            summary, running = unscored_version(name, version, datetime.now(UTC))
         built = listings.map(lambda found: build_candidate_page(summary, running, *found))
         # The page is as old as the older of its two reads.
         as_of = (

@@ -121,6 +121,9 @@ class TestBacktestCommand:
         assert summary["coverage"]["events"] == 10
         assert summary["hash_status"] == HashStatus.MATCH
         assert summary["start"] == "2025-08-01"
+        assert summary["summary"]["status"] == "active"
+        assert "registered" not in summary["summary"]
+        assert summary["summary"]["verdict"] == "not_yet"
 
     def test_compare_replays_the_other_candidate_and_reports_both(
         self, registry: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -144,6 +147,8 @@ class TestBacktestCommand:
         payload = json.loads(out.read_text())
         assert payload["comparison"]["name"] == "other"
         assert payload["comparison"]["summary"]["verdict"] == "not_yet"
+        assert payload["comparison"]["summary"]["status"] == "active"
+        assert "registered" not in payload["comparison"]["summary"]
 
     def _model_draft(self, tmp_path: Path) -> Path:
         draft = tmp_path / "model.yaml"

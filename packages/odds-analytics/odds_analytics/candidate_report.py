@@ -380,6 +380,14 @@ def summarize_candidate(
     )
 
 
+def unscored_version(
+    name: str, version: int, now: datetime
+) -> tuple[CandidateSummary, RunningScore]:
+    """The summary and running score of a version with no trades and no registry entry, one the
+    report omits: its figures are all empty and its family one."""
+    return summarize_candidate(name, version, None, [], now, lambda _: 1), running_score([])
+
+
 def _by_version(
     trades: Sequence[ScoredBet], registry: Sequence[Candidate]
 ) -> dict[tuple[str, int], list[ScoredBet]]:

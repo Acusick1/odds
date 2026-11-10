@@ -195,6 +195,13 @@ class TestPortfolioRows:
         assert row.status == "killed" and row.progress is None
         assert row.verdict == "not yet"
 
+    def test_a_promoted_candidate_shows_no_next_checkpoint(self) -> None:
+        promoted = mechanical().model_copy(update={"status": CandidateStatus.PROMOTED})
+
+        [row] = portfolio_rows(summaries([], [promoted]))
+
+        assert row.status == "promoted" and row.progress is None
+
     def test_a_historical_version_does_not_take_the_current_versions_scope(self) -> None:
         v2 = mechanical(sport="basketball_nba", market="h2h").model_copy(update={"version": 2})
         old, current = portfolio_rows(summaries([bet(i, 0.5) for i in range(3)], [v2]))

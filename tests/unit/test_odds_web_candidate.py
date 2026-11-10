@@ -210,6 +210,17 @@ class TestCandidatePage:
         assert re.findall(r'<span class="verdict">(.*?)</span>', body) == ["not yet"]
         assert "/ 100" not in body
 
+    def test_a_promoted_candidate_shows_no_next_checkpoint(
+        self, client: TestClient, data: dict[str, object]
+    ) -> None:
+        promoted = mechanical().model_copy(update={"status": CandidateStatus.PROMOTED})
+        seed(data, [], promoted)
+
+        body = client.get("/c/gap/1").text
+
+        assert re.findall(r'<span class="status">(.*?)</span>', body) == ["promoted"]
+        assert "/ 100" not in body
+
     def test_a_historical_version_takes_not_the_current_versions_scope_or_progress(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
@@ -234,6 +245,30 @@ class TestCandidatePage:
 
         assert "mark-bet" in recorded and "1 of 2" in recorded
         assert "mark-" not in none_recorded and "Decisions" not in none_recorded
+
+    def test_a_historical_version_with_decisions_only_is_shown_with_its_timeline(
+        self, client: TestClient, data: dict[str, object]
+    ) -> None:
+        v2 = mechanical().model_copy(update={"version": 2})
+        seed(data, [bet(i, 0.5) for i in range(3)], v2)
+        data["trades"] = []
+        data["decisions"] = history(DecisionKind.NO_BET, DecisionKind.MISSED, missed=1)
+
+        response = client.get("/c/gap/1")
+
+        assert response.status_code == 200
+        assert re.findall(r'<span class="status">(.*?)</span>', response.text) == ["not current"]
+        assert "mark-no-bet" in response.text and "1 of 2" in response.text
+        assert "/ 100" not in response.text
+
+    def test_a_version_with_no_trades_and_no_decisions_is_not_found(
+        self, client: TestClient, data: dict[str, object]
+    ) -> None:
+        v2 = mechanical().model_copy(update={"version": 2})
+        seed(data, [], v2)
+        data["decisions"] = history(total=0)
+
+        assert client.get("/c/gap/1").status_code == 404
 
     def test_a_candidate_with_no_close_shows_pnl_and_the_ledger_but_no_ev_charts(
         self, client: TestClient, data: dict[str, object]
@@ -478,6 +513,7 @@ class TestNoScoringInOddsWeb:
             "checkpoints_through_next",
             "close_probabilities",
             "expected_value",
+            "unscored_version",
         }
         imported: set[str] = set()
         for path in Path(odds_web.__file__).parent.rglob("*.py"):
