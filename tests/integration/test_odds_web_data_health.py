@@ -3,6 +3,7 @@ and the status strip under the ``odds_web`` role."""
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -15,8 +16,8 @@ from odds_core.candidates import (
     load_candidates,
 )
 from odds_core.close import CloseKind
-from odds_core.config import get_settings
-from odds_core.models import Event, FetchLog
+from odds_core.config import SchedulerConfig, Settings, get_settings
+from odds_core.models import AlertHistory, Event, FetchLog
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from odds_lambda.candidate_rules import load_market_state, max_input_age, resolve_rule, rule_sha256
 from odds_web.app import create_app
@@ -253,24 +254,106 @@ class TestCloseCoverage:
         assert [c.label for c in weeks.classes] == ["live Betfair", "pending", "no close"]
 
 
+def bootstrapping(*jobs: str) -> Settings:
+    settings = get_settings()
+    return settings.model_copy(
+        update={
+            "scheduler": SchedulerConfig(bootstrap_jobs=list(jobs)),
+            "data_collection": settings.data_collection.model_copy(
+                update={"sports": ["soccer_epl"]}
+            ),
+        }
+    )
+
+
+async def book(session: AsyncSession, job: str, next_run: datetime | None) -> None:
+    await session.execute(
+        text(
+            "INSERT INTO tasks (id, func, job_executor, metadata) "
+            "VALUES (:id, 'f', 'async', '{}') ON CONFLICT DO NOTHING"
+        ),
+        {"id": job},
+    )
+    await session.execute(
+        text(
+            "INSERT INTO schedules (id, task_id, coalesce, job_executor, metadata, "
+            "next_fire_time) VALUES (:id, :id, 'latest', 'async', '{}', :next)"
+        ),
+        {"id": job, "next": next_run},
+    )
+
+
+class TestDeadChains:
+    @pytest.fixture
+    async def scheduler(self, pglite_async_session: AsyncSession) -> AsyncSession:
+        await create_scheduler_tables(pglite_async_session)
+        return pglite_async_session
+
+    async def test_a_candidate_job_that_ran_and_booked_nothing_is_stale(
+        self, scheduler: AsyncSession
+    ) -> None:
+        scheduler.add(
+            AlertHistory(
+                alert_type="heartbeat:run-candidates-epl",
+                severity="info",
+                message="ok",
+                sent_at=NOW - timedelta(minutes=10),
+            )
+        )
+        await book(scheduler, "run-candidates-epl", None)
+        await scheduler.commit()
+
+        strip = await load_status(scheduler, bootstrapping("run-candidates"), NOW)
+
+        [chip] = strip.jobs
+        assert (chip.name, chip.state, chip.next_run) == (
+            "run-candidates-epl",
+            ChipState.STALE,
+            None,
+        )
+        assert chip.last_success == NOW - timedelta(minutes=10)
+        assert strip.problem_jobs() == [chip]
+
+    async def test_an_expected_job_with_no_schedule_row_is_listed_as_stale(
+        self, scheduler: AsyncSession
+    ) -> None:
+        await book(scheduler, "check-health", NOW + timedelta(minutes=30))
+        await scheduler.commit()
+
+        strip = await load_status(scheduler, bootstrapping("check-health", "run-candidates"), NOW)
+
+        assert [(j.name, j.state) for j in strip.jobs] == [
+            ("check-health", ChipState.UNKNOWN),
+            ("run-candidates-epl", ChipState.STALE),
+        ]
+
+    async def test_a_run_in_flight_is_not_a_dead_chain(self, scheduler: AsyncSession) -> None:
+        await book(scheduler, "run-candidates-epl", None)
+        await scheduler.execute(
+            text(
+                "INSERT INTO jobs (id, task_id, args, kwargs, schedule_id, executor, metadata, "
+                "created_at) VALUES (:id, 'run-candidates-epl', '', '', 'run-candidates-epl', "
+                "'async', '{}', :now)"
+            ),
+            {"id": uuid.uuid4(), "now": NOW},
+        )
+        await scheduler.commit()
+
+        strip = await load_status(scheduler, bootstrapping("run-candidates"), NOW)
+
+        assert [(j.name, j.state) for j in strip.jobs] == [
+            ("run-candidates-epl", ChipState.UNKNOWN)
+        ]
+
+
 class TestUnderTheRole:
     async def test_the_readers_run_on_the_grants_in_read_only_transactions(
         self, odds_web_session: AsyncSession, tmp_path: Path
     ) -> None:
         session = odds_web_session
         await create_scheduler_tables(session)
-        await session.execute(
-            text(
-                "INSERT INTO tasks (id, func, job_executor, metadata) "
-                "VALUES ('check-health', 'f', 'async', '{}')"
-            )
-        )
-        await session.execute(
-            text(
-                "INSERT INTO schedules (id, task_id, coalesce, job_executor, metadata) "
-                "VALUES ('check-health', 'check-health', 'latest', 'async', '{}')"
-            )
-        )
+        for job in ("check-health", "fetch-oddsportal-epl"):
+            await book(session, job, NOW + timedelta(minutes=30))
         session.add(make_epl_event(1, NOW + timedelta(hours=3)))
         # Two quota readings an hour apart: a balance, but too little history for a projection.
         session.add_all(
@@ -295,7 +378,9 @@ class TestUnderTheRole:
 
         with as_odds_web_login(engine):
             async with makers() as reader:
-                strip = await load_status(reader, get_settings(), NOW)
+                strip = await load_status(
+                    reader, bootstrapping("check-health", "fetch-oddsportal"), NOW
+                )
                 assert (
                     await reader.scalar(text("SELECT current_setting('transaction_read_only')"))
                     == "on"
@@ -305,7 +390,10 @@ class TestUnderTheRole:
                 data = (await client.get("/data")).text
                 fragment = (await client.get("/fragments/status")).text
 
-        assert [(j.name, j.state) for j in strip.jobs] == [("check-health", ChipState.UNKNOWN)]
+        assert [(j.name, j.state) for j in strip.jobs] == [
+            ("check-health", ChipState.UNKNOWN),
+            ("fetch-oddsportal-epl", ChipState.UNKNOWN),
+        ]
         [quota] = strip.quotas
         assert (quota.quota.remaining, quota.projection) == (416, None)
         assert any(s.state is ChipState.UNKNOWN for s in strip.sources)

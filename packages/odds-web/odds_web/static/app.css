@@ -11,6 +11,8 @@
   --chart-2: #b48ead;
   --chart-3: #d2a8ff;
   --warning: #d29922;
+  --status-late: #d29922;
+  --status-stale: #e5534b;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 body { margin: 0; font: 13px/1.4 system-ui, sans-serif; background: var(--background); color: var(--foreground); }
@@ -52,15 +54,18 @@ header.top nav a { color: var(--foreground); text-decoration: none; }
 header.top nav a:hover { text-decoration: underline; }
 .as-of { margin: 0 0 6px; }
 .strip { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; padding: 4px 0; }
-.strip-label { font-size: 11px; color: var(--muted-foreground); width: 64px; }
 .chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; border: 1px solid var(--border); border-radius: 999px; font-size: 11px; white-space: nowrap; }
-/* Green and red mean EV sign only, so state is shown by fill and amber. */
-.dot { width: 7px; height: 7px; border-radius: 50%; box-sizing: border-box; }
+/* Status has its own palette, apart from the EV sign colours: grey is healthy, amber is late, red is
+   stale, hollow is unknown, and a faint ring is dormant. */
+.dot { width: 7px; height: 7px; border-radius: 50%; box-sizing: border-box; display: inline-block; flex: none; }
 .dot.ok { background: var(--muted-foreground); }
-.dot.late { background: var(--warning); }
+.dot.late { background: var(--status-late); }
+.dot.stale { background: var(--status-stale); opacity: 1; }
 .dot.unknown { border: 1px solid var(--muted-foreground); }
 .dot.idle { background: var(--secondary); border: 1px solid var(--border); }
 .stale { opacity: .55; }
+.chip.more { color: var(--muted-foreground); text-decoration: none; }
+.chip.more:hover { color: var(--foreground); }
 .sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; box-sizing: border-box; }
 svg .rowlabel { font-family: system-ui, sans-serif; font-size: 11px; fill: var(--foreground); }
 svg .rowlabel .sub { fill: var(--muted-foreground); font-size: 10px; }

@@ -84,6 +84,13 @@ def _stamp(value: datetime | None) -> str:
     return "never" if value is None else value.strftime("%Y-%m-%d %H:%M UTC")
 
 
+def _hhmm(value: datetime | None, now: datetime) -> str:
+    """A UTC clock time, led by the weekday when it is not on ``now``'s date."""
+    if value is None:
+        return "—"
+    return value.strftime("%H:%M" if value.date() == now.date() else "%a %H:%M")
+
+
 def _ago(value: datetime | None, now: datetime) -> str:
     """How long before ``now`` ``value`` was, in its largest whole unit."""
     if value is None:
@@ -117,6 +124,7 @@ def create_app(
     templates = Jinja2Templates(directory=PACKAGE_DIR / "templates")
     templates.env.filters["signed"] = _signed
     templates.env.filters["clock"] = _clock
+    templates.env.filters["hhmm"] = _hhmm
     templates.env.filters["stamp"] = _stamp
     templates.env.filters["percent"] = _percent
     templates.env.globals.update(
@@ -209,6 +217,12 @@ def create_app(
             request, "_status.html.j2", {"status": await status_section()}
         )
 
+    @app.get("/fragments/status-detail", response_class=HTMLResponse)
+    async def status_detail_fragment(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request, "_status_detail.html.j2", {"status": await status_section()}
+        )
+
     @app.get("/fragments/coverage", response_class=HTMLResponse)
     async def coverage_fragment(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
@@ -226,7 +240,11 @@ def create_app(
         return templates.TemplateResponse(
             request,
             "data.html.j2",
-            {"coverage": await coverage_section(), "closes": await closes_section()},
+            {
+                "coverage": await coverage_section(),
+                "closes": await closes_section(),
+                "status": await status_section(),
+            },
         )
 
     @app.get("/", response_class=HTMLResponse)

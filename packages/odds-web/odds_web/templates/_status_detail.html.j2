@@ -1,0 +1,47 @@
+{% from "_macros.html.j2" import section_state, quota_days %}
+<div id="status" hx-get="{{ url_path('status_detail_fragment') }}" hx-trigger="every 60s" hx-swap="outerHTML">
+{{ section_state(status) }}
+{% set s = status.value %}
+{% if s is not none %}
+<div class="scroll {{ 'stale' if status.failure }}">
+<h3>Jobs</h3>
+<table>
+<thead><tr><th>Job</th><th>State</th><th class="r">Last success</th><th class="r">Expected every</th><th>Next run</th></tr></thead>
+<tbody>
+{% for job in s.jobs %}
+<tr><td>{{ job.name }}{% if job.running %} <span class="sub">running</span>{% endif %}</td>
+<td><span class="dot {{ job.state }}"></span> {{ job.state }}</td>
+<td class="r num" title="{{ job.last_success | stamp }}">{{ 'never' if job.last_success is none else ago(job.last_success, s.now) }}</td>
+<td class="r num">{{ (job.max_hours | round(0) | int ~ ' h') if job.max_hours else '—' }}</td>
+<td class="num">{{ job.next_run | stamp }}</td></tr>
+{% else %}
+<tr><td colspan="5" class="sub">no schedules in the scheduler's store</td></tr>
+{% endfor %}
+</tbody></table>
+<h3>Collection sources</h3>
+<table>
+<thead><tr><th>Source</th><th>State</th><th class="r">Last snapshot</th><th class="r">Stale after</th></tr></thead>
+<tbody>
+{% for source in s.sources %}
+<tr><td>{{ source.label }}</td>
+<td><span class="dot {{ source.state }}"></span> {{ source.state }}</td>
+<td class="r num" title="{{ source.last_snapshot | stamp }}">{{ 'never' if source.last_snapshot is none else ago(source.last_snapshot, s.now) }}</td>
+<td class="r num">{{ ('%.1f' | format(source.threshold_hours) ~ ' active h') if source.threshold_hours else '—' }}</td></tr>
+{% endfor %}
+</tbody></table>
+<h3>Odds API quota</h3>
+<table>
+<thead><tr><th>Key</th><th>Sports</th><th class="r">Remaining / limit</th><th class="r">Burn</th><th class="r">Left</th></tr></thead>
+<tbody>
+{% for q in s.quotas %}
+<tr><td>key {{ q.key_index }}</td><td>{{ q.quota.sports | join(', ') }}</td>
+<td class="r num">{{ '{:,}'.format(q.quota.remaining) }} / {{ '{:,}'.format(q.quota.limit) }}</td>
+<td class="r num">{% if q.projection %}{{ '{:,.0f}'.format(q.projection.per_day) }} a day since {{ q.projection.since | stamp }}{% else %}under a day of readings{% endif %}</td>
+<td class="r num">{{ quota_days(q.projection) }}</td></tr>
+{% else %}
+<tr><td colspan="5" class="sub">quota unknown: no reading yet</td></tr>
+{% endfor %}
+</tbody></table>
+</div>
+{% endif %}
+</div>

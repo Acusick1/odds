@@ -38,3 +38,14 @@ async def read_schedules(session: AsyncSession) -> list[StoredSchedule]:
         )
     )
     return [StoredSchedule(*row) for row in rows.all()]
+
+
+async def read_outstanding_job_names(session: AsyncSession) -> set[str]:
+    """Schedule ids with a job released but not finished (queued or running), as
+    ``LocalSchedulerBackend.get_outstanding_job_names`` reports them."""
+    if await session.scalar(text("SELECT to_regclass('jobs')")) is None:
+        return set()
+    rows = await session.scalars(
+        text("SELECT DISTINCT schedule_id FROM jobs WHERE schedule_id IS NOT NULL")
+    )
+    return set(rows.all())

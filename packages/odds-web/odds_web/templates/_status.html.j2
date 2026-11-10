@@ -2,33 +2,31 @@
 {% set s = status.value %}
 {% if s is none %}{{ section_state(status) }}{% else %}
 {% if status.failure %}{{ section_state(status) }}{% endif %}
+{% set next_run = s.next_candidate_run() %}
+{% set quota = s.quota() %}
 <div class="strip{{ ' stale' if status.failure }}">
-<span class="strip-label">Jobs</span>
-{% for job in s.jobs %}
-<span class="chip" title="{{ job.name }}
-last success {{ job.last_success | stamp }}{% if job.max_hours %} (expected every {{ job.max_hours | round(0) | int }} h){% endif %}
-next run {{ job.next_run | stamp }}{% if job.running %}
-running now{% endif %}"><span class="dot {{ job.state }}"></span>{{ job.name }} <span class="num">{{ 'unknown' if job.last_success is none else ago(job.last_success, s.now) }}</span>{% if job.running %} <span class="sub">running</span>{% endif %}</span>
-{% else %}
-<span class="chip"><span class="dot unknown"></span>no schedules in the scheduler's store</span>
+{% for c in s.collections() %}
+<span class="chip" title="{{ c.sport }} collection: {{ c.state }}, {{ c.sources }} live source{{ 's' if c.sources != 1 }}
+last snapshot {{ c.last_snapshot | stamp }}"><span class="dot {{ c.state }}"></span>{{ c.sport }} <span class="num">{{ 'unknown' if c.last_snapshot is none else ago(c.last_snapshot, s.now) }}</span></span>
 {% endfor %}
-</div>
-<div class="strip{{ ' stale' if status.failure }}">
-<span class="strip-label">Sources</span>
-{% for source in s.sources %}
-<span class="chip" title="{{ source.label }}: {{ source.state }}
-last snapshot {{ source.last_snapshot | stamp }}{% if source.threshold_hours %}
-stale after {{ '%.1f' | format(source.threshold_hours) }} active hours{% endif %}"><span class="dot {{ source.state }}"></span>{{ source.label }} <span class="num">{{ 'unknown' if source.last_snapshot is none else ago(source.last_snapshot, s.now) }}</span></span>
-{% endfor %}
-</div>
-<div class="strip{{ ' stale' if status.failure }}">
-<span class="strip-label">Odds API</span>
-{% for q in s.quotas %}
-<span class="chip" title="{% if q.projection %}{{ '{:,.0f}'.format(q.projection.per_day) }} a day since {{ q.projection.since | stamp }}{% else %}under a day of readings since the last reset{% endif %}">key {{ q.key_index }} ({{ q.quota.sports | join(', ') }}) <span class="num">{{ '{:,}'.format(q.quota.remaining) }} / {{ '{:,}'.format(q.quota.limit) }}</span> ·
-{%- if q.projection is none %} unknown{% elif q.projection.days_left is none %} no spend{% else %} <span class="num">~{{ q.projection.days_left | round(0) | int }}d</span> left{% endif %}</span>
+{% if next_run %}
+<span class="chip" title="{{ next_run.job }}: {{ next_run.state }}
+next run {{ next_run.next_run | stamp }}"><span class="dot {{ next_run.state }}"></span>run-candidates next <span class="num">{{ next_run.next_run | hhmm(s.now) }}</span></span>
+{% endif %}
+{% if quota %}
+<span class="chip" title="summed over {{ s.quotas | length }} key{{ 's' if s.quotas | length != 1 }}; days left is the worst key's">Odds API quota <span class="num">{{ '{:,}'.format(quota.remaining) }} / {{ '{:,}'.format(quota.limit) }}</span> ·
+{%- if quota.days_left is not none %} <span class="num">~{{ quota.days_left | round(0) | int }}d</span> left{% elif quota.no_spend %} no spend{% else %} unknown{% endif %}</span>
 {% else %}
 <span class="chip"><span class="dot unknown"></span>quota unknown</span>
+{% endif %}
+{% for job in s.problem_jobs() %}
+<span class="chip" title="{{ job.name }}: {{ job.state }}
+last success {{ job.last_success | stamp }}{% if job.max_hours %} (expected every {{ job.max_hours | round(0) | int }} h){% endif %}"><span class="dot {{ job.state }}"></span>{{ job.name }} <span class="num">{{ 'unknown' if job.last_success is none else ago(job.last_success, s.now) }}</span></span>
 {% endfor %}
-{% if not status.failure %}<span class="sub">as of {{ status.as_of | clock }}</span>{% endif %}
+{% for source in s.problem_sources() %}
+<span class="chip" title="{{ source.label }}: {{ source.state }}
+last snapshot {{ source.last_snapshot | stamp }}"><span class="dot {{ source.state }}"></span>{{ source.label }} <span class="num">{{ 'unknown' if source.last_snapshot is none else ago(source.last_snapshot, s.now) }}</span></span>
+{% endfor %}
+<a class="chip more" href="{{ url_path('data_health') }}#status" title="every job, source and quota key, as of {{ status.as_of | clock }}">all &rarr;</a>
 </div>
 {% endif %}
