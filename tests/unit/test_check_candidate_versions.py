@@ -1,11 +1,14 @@
 """Unit tests for scripts/check_candidate_versions.py."""
 
+import json
 import subprocess
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+
+from scripts import check_candidate_versions as hook
 
 SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "check_candidate_versions.py"
 
@@ -19,21 +22,20 @@ params:
 """
 
 
+OLD, NEW = "a" * 64, "b" * 64
+
+
 def git(repo: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
 
 
 class TestCheckCandidateVersions:
     @pytest.fixture
-    def repo(self, tmp_path: Path) -> Path:
-        git(tmp_path, "init", "-q", "-b", "main")
-        git(tmp_path, "config", "user.email", "t@example.com")
-        git(tmp_path, "config", "user.name", "t")
-        (tmp_path / "candidates").mkdir()
-        (tmp_path / "candidates" / "back-longest.yaml").write_text(BASE_YAML)
-        git(tmp_path, "add", "candidates")
-        git(tmp_path, "commit", "-q", "-m", "base")
-        return tmp_path
+    def repo(self, candidates_repo: Path) -> Path:
+        (candidates_repo / "candidates" / "back-longest.yaml").write_text(BASE_YAML)
+        git(candidates_repo, "add", "candidates")
+        git(candidates_repo, "commit", "-q", "-m", "base")
+        return candidates_repo
 
     def run(self, repo: Path, base: str | None = "HEAD") -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -114,12 +116,8 @@ class TestCheckCandidateVersions:
 
 class TestUnstartedCandidates:
     @pytest.fixture
-    def repo(self, tmp_path: Path) -> Path:
-        git(tmp_path, "init", "-q", "-b", "main")
-        git(tmp_path, "config", "user.email", "t@example.com")
-        git(tmp_path, "config", "user.name", "t")
-        (tmp_path / "candidates").mkdir()
-        return tmp_path
+    def repo(self, candidates_repo: Path) -> Path:
+        return candidates_repo
 
     def commit_base(self, repo: Path, start_offset_days: int) -> Path:
         start = datetime.now(UTC).date() + timedelta(days=start_offset_days)
@@ -181,3 +179,56 @@ class TestUnstartedCandidates:
         git(repo, "commit", "-q", "-m", "base")
         path.write_text(BASE_YAML.replace("0.02", "0.05"))
         assert self.run(repo).returncode == 1
+
+
+class TestRehashLedger:
+    @pytest.fixture
+    def path(self, candidates_repo: Path) -> Path:
+        path = candidates_repo / "candidates" / "back-longest.yaml"
+        path.write_text(BASE_YAML + f"start_date: 2020-01-01\nrule: gap\nrule_sha256: {OLD}\n")
+        git(candidates_repo, "add", "candidates")
+        git(candidates_repo, "commit", "-q", "-m", "base")
+        path.write_text(path.read_text().replace(OLD, NEW))
+        return path
+
+    def ledger(self, path: Path, *rows: tuple[str, str, str]) -> None:
+        (path.parent / "rehashes.jsonl").write_text(
+            "".join(
+                json.dumps({"rule": r, "old": o, "new": n, "evidence": {}}) + "\n"
+                for r, o, n in rows
+            )
+        )
+
+    def errors(self, path: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+        monkeypatch.chdir(path.parents[1])
+        return hook.check("HEAD")
+
+    def test_a_ledger_rehash_passes_at_the_same_version(
+        self, path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self.ledger(path, ("gap", OLD, NEW))
+        assert self.errors(path, monkeypatch) == []
+
+    def test_without_a_ledger_a_hash_change_fails(
+        self, path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        errors = self.errors(path, monkeypatch)
+        assert len(errors) == 1 and "rule_sha256" in errors[0]
+
+    @pytest.mark.parametrize(
+        "row", [("other", OLD, NEW), ("gap", "c" * 64, NEW), ("gap", OLD, "c" * 64)]
+    )
+    def test_a_row_for_another_rule_or_hash_fails(
+        self, path: Path, monkeypatch: pytest.MonkeyPatch, row: tuple[str, str, str]
+    ) -> None:
+        self.ledger(path, row)
+        errors = self.errors(path, monkeypatch)
+        assert len(errors) == 1 and "rule_sha256" in errors[0]
+
+    def test_a_rehash_with_another_change_fails(
+        self, path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self.ledger(path, ("gap", OLD, NEW))
+        path.write_text(path.read_text().replace("0.02", "0.05"))
+        errors = self.errors(path, monkeypatch)
+        assert len(errors) == 1 and "params" in errors[0] and "rule_sha256" not in errors[0]

@@ -1,7 +1,9 @@
 """Fail when a candidate file changes without a version bump, or is deleted.
 
 A candidate whose start_date at the base is later than today (UTC) has made no
-decisions yet, so it may change in place at the same version.
+decisions yet, so it may change in place at the same version. A rule_sha256 may also
+change in place when the rule and both hashes are a row of the rehash ledger,
+candidates/rehashes.jsonl.
 
 Compares candidates/*.yaml in the working tree with the base: --base, else the
 merge-base of HEAD with origin/main, else with main, else HEAD.
@@ -9,6 +11,7 @@ Only stdlib and yaml are imported: the pre-commit hook env has no project instal
 """
 
 import argparse
+import json
 import subprocess
 import sys
 from datetime import UTC, date, datetime
@@ -20,6 +23,7 @@ import yaml
 CANDIDATES_DIR = "candidates"
 # Neither changes what a candidate bets on.
 UNVERSIONED_KEYS = frozenset({"status", "description"})
+REHASH_LEDGER = "rehashes.jsonl"
 
 
 def _git(*args: str) -> str:
@@ -55,9 +59,19 @@ def _not_started(candidate: dict[str, Any], today: date) -> bool:
     return isinstance(start, date) and not isinstance(start, datetime) and start > today
 
 
+def _rehashes(root: Path) -> set[tuple[str, str, str]]:
+    """The (rule, old hash, new hash) rows of the working tree's rehash ledger."""
+    path = root / CANDIDATES_DIR / REHASH_LEDGER
+    if not path.exists():
+        return set()
+    rows = (json.loads(line) for line in path.read_text().splitlines() if line.strip())
+    return {(row["rule"], row["old"], row["new"]) for row in rows}
+
+
 def check(base: str, today: date | None = None) -> list[str]:
     today = today or datetime.now(UTC).date()
     root = Path(_git("rev-parse", "--show-toplevel").strip())
+    rehashes = _rehashes(root)
     listing = _git("ls-tree", "-r", "--name-only", base, "--", f"{CANDIDATES_DIR}/")
     errors: list[str] = []
     for rel in listing.splitlines():
@@ -91,7 +105,13 @@ def check(base: str, today: date | None = None) -> list[str]:
         changed = sorted(
             k
             for k in old.keys() | new.keys()
-            if k not in UNVERSIONED_KEYS and old.get(k) != new.get(k)
+            if k not in UNVERSIONED_KEYS
+            and old.get(k) != new.get(k)
+            and not (
+                k == "rule_sha256"
+                and old.get("rule") == new.get("rule")
+                and (new.get("rule"), old.get(k), new.get(k)) in rehashes
+            )
         )
         if changed:
             errors.append(

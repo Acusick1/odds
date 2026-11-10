@@ -1,13 +1,18 @@
-"""The devigged price of one book's side in one snapshot's quotes."""
+"""The devigged price of one book's side in one snapshot's quotes, and Polymarket's price."""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 
+from odds_core.bookmakers import POLYMARKET_BOOKMAKER
 from odds_core.exchange_price import ExchangePrice, devig, overround
 from odds_core.market_prices import Outcome, market_outcomes
 from odds_core.quotes import Quote
 from odds_core.vocabulary import Side
+
+# Polymarket's price is its Yes midpoints, and its book the Yes asks, stored as back prices.
+POLYMARKET_SIDE = Side.MID
+POLYMARKET_BOOK_SIDE = Side.BACK
 
 
 def book_price(
@@ -46,4 +51,13 @@ def book_price(
         in_play=bool(first.in_play),
         fair=devig(prices, outcomes),
         overround=overround(book if set(book) == set(outcomes) else prices, outcomes),
+    )
+
+
+def polymarket_price(
+    snapshot: Sequence[Quote], market: str, line: float | None = None
+) -> ExchangePrice | None:
+    """Polymarket's devigged Yes midpoints on ``line`` in one snapshot's quotes (``book_price``)."""
+    return book_price(
+        snapshot, market, line, POLYMARKET_BOOKMAKER, POLYMARKET_SIDE, POLYMARKET_BOOK_SIDE
     )

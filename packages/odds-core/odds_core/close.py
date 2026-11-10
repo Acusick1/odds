@@ -12,7 +12,8 @@ from enum import StrEnum
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_core.as_of import by_snapshot
-from odds_core.book_price import book_price
+from odds_core.book_price import POLYMARKET_BOOK_SIDE, POLYMARKET_SIDE, book_price
+from odds_core.bookmakers import POLYMARKET_BOOKMAKER
 from odds_core.exchange_price import EXCHANGE_BOOKMAKER, MAX_EXCHANGE_OVERROUND, ExchangePrice
 from odds_core.models import Event
 from odds_core.quotes import Quote, quotes
@@ -63,11 +64,11 @@ FDUK_CLOSE = FallbackSpec(
 )
 POLYMARKET_CLOSE = FallbackSpec(
     Source.POLYMARKET,
-    "polymarket",
-    Side.MID,
+    POLYMARKET_BOOKMAKER,
+    POLYMARKET_SIDE,
     TimeBasis.OBSERVED,
     windowed=True,
-    book_side=Side.BACK,
+    book_side=POLYMARKET_BOOK_SIDE,
     arrives_after=timedelta(0),
 )
 

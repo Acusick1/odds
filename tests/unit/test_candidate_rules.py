@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import inspect
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -45,6 +45,7 @@ from tests.test_helpers import (
     polymarket_bookmaker,
     three_way_bookmaker,
 )
+from tests.unit.conftest import SourceEdit
 
 KICKOFF = datetime(2026, 11, 7, 15, 0, tzinfo=UTC)
 T = KICKOFF - timedelta(hours=1)
@@ -856,56 +857,113 @@ class TestDecisionLeads:
         ]
 
 
+MECHANICAL_RULES = [name for name, spec in RULES.items() if isinstance(spec, RuleSpec)]
+
+
+def _replace(old: str, new: str) -> Callable[[str], str]:
+    return lambda source: source.replace(old, new)
+
+
+def _append(text: str) -> Callable[[str], str]:
+    return lambda source: source + text
+
+
 class TestRuleSha256:
     def test_is_a_stable_sha256(self) -> None:
         assert rule_sha256("exchange_gap") == rule_sha256("exchange_gap")
         assert len(rule_sha256("exchange_gap")) == 64
 
     @pytest.mark.parametrize(
-        "target",
+        ("module", "transform"),
         [
-            "odds_lambda.candidate_rules.rules.exchange_gap",
-            "odds_lambda.candidate_rules.rules.GapParams",
-            "odds_lambda.candidate_rules.rules.RuleParams",
-            "odds_lambda.candidate_rules.rules.longest_retail",
-            "odds_lambda.candidate_rules.rules.gap_bets",
-            "odds_lambda.candidate_rules.rules.BetIntent",
-            "odds_lambda.candidate_rules.rules.apply_rule",
-            "odds_lambda.candidate_rules.inputs",
-            "odds_lambda.candidate_rules.market_state",
-            "odds_core.as_of",
-            "odds_core.exchange_price",
+            (
+                "odds_lambda.candidate_rules.inputs",
+                _replace('"""The back prices of UK retail books', '"""Back prices of UK books'),
+            ),
+            (
+                "odds_lambda.candidate_rules.market_state",
+                _replace("# A market's line, None", "# The line, None"),
+            ),
+            (
+                "odds_core.exchange_price",
+                _replace(
+                    "return sum(1 / prices[o] for o in outcomes) - 1",
+                    "return (\n        sum(1 / prices[o] for o in outcomes)\n        - 1\n    )",
+                ),
+            ),
+        ],
+        ids=["docstring", "comment", "formatting"],
+    )
+    @pytest.mark.parametrize("rule", list(RULES))
+    def test_a_docstring_comment_or_format_edit_leaves_it_unchanged(
+        self, edit_source: SourceEdit, module: str, transform: Callable[[str], str], rule: str
+    ) -> None:
+        before = rule_sha256(rule)
+        edit_source(module, transform)
+        assert rule_sha256(rule) == before
+
+    @pytest.mark.parametrize(
+        ("module", "transform"),
+        [
+            # The close the report scores against is outside a mechanical rule's imports.
+            (
+                "odds_core.close",
+                _replace("return CloseStatus(CloseKind.UNSUPPORTED)", "return None"),
+            ),
+            (
+                "odds_analytics.retail_ev",
+                _replace("LOSS_WEIGHT_SCALE = 1013.0", "LOSS_WEIGHT_SCALE = 1.0"),
+            ),
         ],
     )
-    def test_covers_the_code_that_picks_the_inputs(
-        self, monkeypatch: pytest.MonkeyPatch, target: str
+    @pytest.mark.parametrize("rule", MECHANICAL_RULES)
+    def test_a_module_outside_a_mechanical_rules_imports_leaves_it_unchanged(
+        self, edit_source: SourceEdit, module: str, transform: Callable[[str], str], rule: str
     ) -> None:
-        real = inspect.getsource
+        before = rule_sha256(rule)
+        edit_source(module, transform)
+        assert rule_sha256(rule) == before
 
-        def name_of(obj: Any) -> str:
-            return (
-                getattr(obj, "__name__", "")
-                if inspect.ismodule(obj)
-                else (f"{obj.__module__}.{obj.__qualname__}")
-            )
-
-        def fake(obj: Any) -> str:
-            return real(obj) + ("# changed" if name_of(obj) == target else "")
-
-        before = rule_sha256("exchange_gap")
-        monkeypatch.setattr(inspect, "getsource", fake)
-        assert rule_sha256("exchange_gap") != before
-
-    def test_does_not_cover_the_shared_quote_reader(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        real = inspect.getsource
-
-        def fake(obj: Any) -> str:
-            changed = inspect.ismodule(obj) and obj.__name__ == "odds_core.quotes"
-            return real(obj) + ("# changed" if changed else "")
-
-        before = rule_sha256("exchange_gap")
-        monkeypatch.setattr(inspect, "getsource", fake)
-        assert rule_sha256("exchange_gap") == before
+    @pytest.mark.parametrize(
+        ("module", "transform"),
+        [
+            (
+                "odds_core.odds_math",
+                _replace("return tuple(p / total for p in probs)", "return probs"),
+            ),
+            (
+                "odds_core.market_prices",
+                _replace("(Outcome.OVER, Outcome.UNDER)", "(Outcome.UNDER, Outcome.OVER)"),
+            ),
+            ("odds_core.bookmakers", _replace('        "bet365",\n', "")),
+            (
+                "odds_core.book_price",
+                _replace("POLYMARKET_SIDE = Side.MID", "POLYMARKET_SIDE = Side.BACK"),
+            ),
+            ("odds_core.as_of", _replace("if accept(group):", "if not accept(group):")),
+            ("odds_core.quotes", _replace("    snapshot_id: int\n", "    snapshot_id: str\n")),
+            (
+                "odds_lambda.candidate_rules.market_state",
+                _replace("line % 1 == 0.5", "line % 1 == 0"),
+            ),
+            (
+                "odds_lambda.candidate_rules.rules",
+                _replace("b.selection not in bet_selections", "True"),
+            ),
+            (
+                "odds_lambda.candidate_rules.market_state",
+                _append("\n\ndef unrelated() -> int:\n    return 1\n"),
+            ),
+            ("odds_lambda", _append("VERSION = 1\n")),
+        ],
+    )
+    @pytest.mark.parametrize("rule", list(RULES))
+    def test_a_code_edit_in_a_closure_module_changes_it(
+        self, edit_source: SourceEdit, module: str, transform: Callable[[str], str], rule: str
+    ) -> None:
+        before = rule_sha256(rule)
+        edit_source(module, transform)
+        assert rule_sha256(rule) != before
 
     def test_covers_the_sharp_inputs(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from odds_lambda.candidate_rules import rules
@@ -916,63 +974,34 @@ class TestRuleSha256:
         )
         assert rule_sha256("exchange_gap") != before
 
-    def test_covers_the_uk_retail_roster(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        before = rule_sha256("exchange_gap")
-        monkeypatch.setattr("odds_core.bookmakers.UK_RETAIL_BOOKMAKERS", frozenset({"bet365"}))
-        assert rule_sha256("exchange_gap") != before
-
-    @pytest.mark.parametrize("source", [Source.ODDS_API, Source.ODDSPORTAL])
-    def test_covers_the_write_time_alias_map_of_each_retail_source(
-        self, monkeypatch: pytest.MonkeyPatch, source: Source
-    ) -> None:
-        from odds_core import bookmakers
-
-        before = rule_sha256("exchange_gap")
-        aliases = dict(bookmakers.BOOKMAKER_ALIASES_BY_SOURCE)
-        aliases[source] = {**aliases[source], "bet365_uk": "bet365"}
-        monkeypatch.setattr(bookmakers, "BOOKMAKER_ALIASES_BY_SOURCE", aliases)
-        assert rule_sha256("exchange_gap") != before
-
-    def test_covers_the_rule_markets(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from odds_lambda.candidate_rules import rules
-
-        before = rule_sha256("exchange_gap")
-        monkeypatch.setattr(rules, "RULE_MARKETS", rules.RULE_MARKETS[:2])
-        assert rule_sha256("exchange_gap") != before
-
-    def test_covers_the_outcomes_of_each_market(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from odds_lambda.candidate_rules import rules
-
-        before = rule_sha256("exchange_gap")
-        monkeypatch.setattr(rules, "market_outcomes", lambda market: (HOME, AWAY))
-        assert rule_sha256("exchange_gap") != before
-
     @pytest.mark.parametrize(
-        "target",
+        ("module", "transform"),
         [
-            "odds_lambda.candidate_rules.rules.retail_ev_model",
-            "odds_lambda.candidate_rules.rules.RetailEvModelParams",
-            "odds_lambda.candidate_rules.market_state",
-            "odds_analytics.candidate_model",
-            "odds_analytics.retail_ev",
-            "odds_analytics.xgboost_line_movement",
-            "odds_core.close",
-            "odds_analytics.retail_ev_metrics",
+            (
+                "odds_analytics.candidate_model",
+                _replace("RetailEvArm.RESIDUAL)", "RetailEvArm.DIRECT)"),
+            ),
+            (
+                "odds_analytics.retail_ev",
+                _replace("LOSS_WEIGHT_SCALE = 1013.0", "LOSS_WEIGHT_SCALE = 1.0"),
+            ),
+            ("odds_analytics.retail_ev_metrics", _replace("/ np.sum(weights))", "/ len(weights))")),
+            (
+                "odds_core.close",
+                _replace(
+                    "LIVE_CLOSE_WINDOW = timedelta(minutes=30)",
+                    "LIVE_CLOSE_WINDOW = timedelta(minutes=5)",
+                ),
+            ),
         ],
     )
     def test_model_rule_covers_the_code_that_fits_and_queries_the_model(
-        self, monkeypatch: pytest.MonkeyPatch, target: str
+        self, edit_source: SourceEdit, module: str, transform: Callable[[str], str]
     ) -> None:
-        real = inspect.getsource
-
-        def fake(obj: Any) -> str:
-            name = obj.__name__ if inspect.ismodule(obj) else f"{obj.__module__}.{obj.__qualname__}"
-            return real(obj) + ("# changed" if name == target else "")
-
-        before = rule_sha256("retail_ev_model")
-        assert before != rule_sha256("exchange_gap")
-        monkeypatch.setattr(inspect, "getsource", fake)
-        assert rule_sha256("retail_ev_model") != before
+        before = {rule: rule_sha256(rule) for rule in RULES}
+        edit_source(module, transform)
+        assert rule_sha256("retail_ev_model") != before["retail_ev_model"]
+        assert all(rule_sha256(rule) == before[rule] for rule in MECHANICAL_RULES)
 
     def test_a_stale_hash_fails_validation_with_the_new_one(self) -> None:
         with pytest.raises(ValueError, match="'gap'.*code of rule 'exchange_gap' changed") as exc:

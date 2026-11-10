@@ -8,25 +8,21 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 
 from odds_core.as_of import latest_snapshot
-from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS
+from odds_core.book_price import polymarket_price
+from odds_core.bookmakers import POLYMARKET_BOOKMAKER, UK_RETAIL_BOOKMAKERS
 from odds_core.exchange_price import (
     EXCHANGE_BOOKMAKER,
     MAX_EXCHANGE_OVERROUND,
     ExchangePrice,
     exchange_price,
 )
-from odds_core.market_prices import Outcome, market_outcomes
+from odds_core.market_prices import Outcome
 from odds_core.models import Event
 from odds_core.quotes import Quote
 from odds_core.vocabulary import Market, Side, Source
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_lambda.candidate_rules.inputs import (
-    POLYMARKET_BOOKMAKER,
-    RETAIL_SOURCES,
-    SharpInput,
-    rule_quotes,
-)
+from odds_lambda.candidate_rules.inputs import RETAIL_SOURCES, SharpInput, rule_quotes
 
 # A market's line, None in a market without lines.
 Line = float | None
@@ -110,23 +106,13 @@ def _exchange(snapshot: Sequence[Quote], market: Market) -> dict[Line, ExchangeP
 
 
 def _polymarket(snapshot: Sequence[Quote], market: Market) -> dict[Line, PolymarketPrice]:
-    outcomes = market_outcomes(market)
-    mids: dict[Line, dict[Outcome, float]] = {}
-    for q in snapshot:
-        if is_bettable_line(market, q.line):
-            mids.setdefault(q.line, {})[q.outcome] = q.price
+    lines = {q.line for q in snapshot if is_bettable_line(market, q.line)}
     prices: dict[Line, PolymarketPrice] = {}
     # A market's bettable lines are all None or all numbers, so they sort.
-    for line in sorted(mids):  # type: ignore[type-var]
-        if set(mids[line]) != set(outcomes):
-            continue
-        implied = {o: 1 / mids[line][o] for o in outcomes}
-        total = sum(implied.values())
-        prices[line] = PolymarketPrice(
-            snapshot_id=snapshot[0].snapshot_id,
-            time=snapshot[0].snapshot_time,
-            fair={o: p / total for o, p in implied.items()},
-        )
+    for line in sorted(lines):  # type: ignore[type-var]
+        price = polymarket_price(snapshot, market, line)
+        if price is not None:
+            prices[line] = PolymarketPrice(snapshot[0].snapshot_id, price.time, price.fair)
     return prices
 
 

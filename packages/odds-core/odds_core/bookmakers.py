@@ -10,11 +10,12 @@ from odds_core.vocabulary import PRICE_SOURCES, Source
 EXCHANGE_BOOKMAKERS: frozenset[str] = frozenset(
     {"betfair_exchange", "betdaq", "smarkets", "matchbook"}
 )
-PREDICTION_MARKET_BOOKMAKERS: frozenset[str] = frozenset({"polymarket"})
+POLYMARKET_BOOKMAKER = "polymarket"
+PREDICTION_MARKET_BOOKMAKERS: frozenset[str] = frozenset({POLYMARKET_BOOKMAKER})
 # Venues that quote no meaningful overround.
 ZERO_MARGIN_BOOKMAKERS: frozenset[str] = EXCHANGE_BOOKMAKERS | PREDICTION_MARKET_BOOKMAKERS
 # Venues a UK bettor cannot bet on, so never a retail price to find edges against.
-NON_BETTABLE_BOOKMAKERS: frozenset[str] = frozenset({"pinnacle", "polymarket"})
+NON_BETTABLE_BOOKMAKERS: frozenset[str] = frozenset({"pinnacle", POLYMARKET_BOOKMAKER})
 # The sharp books the agent's tools read a sharp price from, in priority order.
 SHARP_BOOKMAKERS: tuple[str, ...] = ("pinnacle", "betfair_exchange")
 

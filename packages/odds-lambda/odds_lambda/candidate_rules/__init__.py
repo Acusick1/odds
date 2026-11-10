@@ -10,7 +10,6 @@ from odds_lambda.candidate_rules.market_state import (
     load_market_state,
 )
 from odds_lambda.candidate_rules.rules import (
-    RULE_MARKETS,
     RULES,
     BetIntent,
     EvPredictor,
@@ -36,7 +35,6 @@ from odds_lambda.candidate_rules.rules import (
 
 __all__ = [
     "RULES",
-    "RULE_MARKETS",
     "BetIntent",
     "EvPredictor",
     "GapParams",

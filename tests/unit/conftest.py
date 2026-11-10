@@ -5,9 +5,13 @@ from __future__ import annotations
 import asyncio
 import base64
 import gzip
+import importlib
 import json
 import os
-from collections.abc import AsyncIterator, Callable
+import subprocess
+import sys
+import textwrap
+from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +21,7 @@ import pytest
 import pytest_asyncio
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from odds_lambda.candidate_rules import code_hash
 from odds_lambda.oddsportal_client import _key
 from py_pglite.config import PGliteConfig
 from py_pglite.manager import PGliteManager
@@ -25,6 +30,77 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 OP_FIXTURES = Path(__file__).parent.parent / "fixtures" / "oddsportal"
+
+
+SourceEdit = Callable[[str, Callable[[str], str]], None]
+
+
+@pytest.fixture
+def edit_source(monkeypatch: pytest.MonkeyPatch) -> Iterator[SourceEdit]:
+    """Make the code hasher read ``transform`` of a module's source in place of its file."""
+    edits: dict[str, Callable[[str], str]] = {}
+    real = code_hash.module_source
+
+    def source(name: str) -> tuple[str, bool] | None:
+        found = real(name)
+        if found is None or name not in edits:
+            return found
+        return edits[name](found[0]), found[1]
+
+    def edit(module: str, transform: Callable[[str], str]) -> None:
+        found = real(module)
+        assert found is not None and transform(found[0]) != found[0], module
+        edits[module] = transform
+        code_hash.clear_cache()
+
+    monkeypatch.setattr(code_hash, "module_source", source)
+    code_hash.clear_cache()
+    yield edit
+    code_hash.clear_cache()
+
+
+FIXTURE_PACKAGE = "odds_code_hash_fixture"
+
+
+@pytest.fixture
+def fixture_package(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[Callable[[dict[str, str]], None]]:
+    """Write the modules, by name and source, of the first-party package ``FIXTURE_PACKAGE``."""
+    root = tmp_path / FIXTURE_PACKAGE
+    root.mkdir()
+    (root / "__init__.py").write_text("")
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    def write(modules: dict[str, str]) -> None:
+        for name, source in modules.items():
+            (root / f"{name}.py").write_text(textwrap.dedent(source))
+        importlib.invalidate_caches()
+        code_hash.clear_cache()
+
+    yield write
+    code_hash.clear_cache()
+    for name in [m for m in sys.modules if m.split(".")[0] == FIXTURE_PACKAGE]:
+        del sys.modules[name]
+
+
+def git_commit(repo: Path) -> None:
+    """Commit everything in ``repo`` as one commit."""
+    for args in (("add", "-A"), ("commit", "-q", "-m", "commit")):
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+
+@pytest.fixture
+def candidates_repo(tmp_path: Path) -> Path:
+    """A git repo on ``main`` with an empty ``candidates/`` directory."""
+    for args in (
+        ("init", "-q", "-b", "main"),
+        ("config", "user.email", "t@example.com"),
+        ("config", "user.name", "t"),
+    ):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "candidates").mkdir()
+    return tmp_path
 
 
 @pytest.fixture

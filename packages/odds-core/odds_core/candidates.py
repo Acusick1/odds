@@ -57,6 +57,46 @@ def candidates_dir() -> Path:
     return get_settings().project_root / "candidates"
 
 
+# The rehash ledger, beside the candidate files; not a YAML file, so not a candidate.
+REHASH_LEDGER = "rehashes.jsonl"
+
+
+class RehashEvidence(BaseModel):
+    """Why a rehash changes no bet: a PR or issue link, and the replay and parity summaries."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    link: str = Field(pattern=r"^https://github\.com/")
+    replay: str
+    parity: str
+
+
+class Rehash(BaseModel):
+    """A change of ``rule``'s hash from ``old`` to ``new`` that changes no bet."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    rule: str
+    old: str = Field(pattern=SHA256_PATTERN)
+    new: str = Field(pattern=SHA256_PATTERN)
+    evidence: RehashEvidence
+
+
+def load_rehashes(directory: Path) -> list[Rehash]:
+    """The rehash ledger in ``directory``, one JSON object per line; empty without one."""
+    path = directory / REHASH_LEDGER
+    if not path.exists():
+        return []
+    return [
+        Rehash.model_validate_json(line) for line in path.read_text().splitlines() if line.strip()
+    ]
+
+
+def append_rehash(directory: Path, rehash: Rehash) -> None:
+    with (directory / REHASH_LEDGER).open("a") as ledger:
+        ledger.write(rehash.model_dump_json() + "\n")
+
+
 def load_candidate_file(path: Path) -> Candidate:
     """Parse one candidate file; a draft may lack ``rule_sha256`` and have any file name."""
     try:

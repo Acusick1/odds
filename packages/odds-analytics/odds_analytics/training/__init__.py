@@ -19,44 +19,38 @@ from odds_analytics.training.config import (
     XGBoostConfig,
 )
 
-_LAZY_IMPORTS: dict[str, tuple[str, str]] = {
-    "CVFoldResult": ("odds_analytics.training.cross_validation", "CVFoldResult"),
-    "CVResult": ("odds_analytics.training.cross_validation", "CVResult"),
-    "TrainableStrategy": ("odds_analytics.training.cross_validation", "TrainableStrategy"),
-    "run_cv": ("odds_analytics.training.cross_validation", "run_cv"),
-    "train_with_cv": ("odds_analytics.training.cross_validation", "train_with_cv"),
-    "TrainingDataResult": ("odds_analytics.training.data_preparation", "TrainingDataResult"),
-    "filter_events_by_date_range": (
-        "odds_analytics.training.data_preparation",
+# Names loaded from modules that need the training extra, on first access, by static imports
+# the rule hash can follow.
+_CROSS_VALIDATION: frozenset[str] = frozenset(
+    {"CVFoldResult", "CVResult", "TrainableStrategy", "run_cv", "train_with_cv"}
+)
+_DATA_PREPARATION: frozenset[str] = frozenset(
+    {
+        "TrainingDataResult",
         "filter_events_by_date_range",
-    ),
-    "prepare_training_data_from_config": (
-        "odds_analytics.training.data_preparation",
         "prepare_training_data_from_config",
-    ),
-    "save_verification_artifacts": (
-        "odds_analytics.training.data_preparation",
         "save_verification_artifacts",
-    ),
-    "ExperimentTracker": ("odds_analytics.training.tracking", "ExperimentTracker"),
-    "MLflowTracker": ("odds_analytics.training.tracking", "MLflowTracker"),
-    "create_tracker": ("odds_analytics.training.tracking", "create_tracker"),
-    "HyperparameterTuner": ("odds_analytics.training.tuner", "HyperparameterTuner"),
-    "OptunaTuner": ("odds_analytics.training.tuner", "OptunaTuner"),
-    "create_objective": ("odds_analytics.training.tuner", "create_objective"),
-    "compute_regression_metrics": ("odds_analytics.training.utils", "compute_regression_metrics"),
-    "flatten_config_for_tracking": ("odds_analytics.training.utils", "flatten_config_for_tracking"),
-}
+    }
+)
+_TRACKING: frozenset[str] = frozenset({"ExperimentTracker", "MLflowTracker", "create_tracker"})
+_TUNER: frozenset[str] = frozenset({"HyperparameterTuner", "OptunaTuner", "create_objective"})
+_UTILS: frozenset[str] = frozenset({"compute_regression_metrics", "flatten_config_for_tracking"})
 
 
 def __getattr__(name: str) -> object:
-    if name in _LAZY_IMPORTS:
-        import importlib
-
-        module_path, attr = _LAZY_IMPORTS[name]
-        module = importlib.import_module(module_path)
-        return getattr(module, attr)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    if name in _CROSS_VALIDATION:
+        from odds_analytics.training import cross_validation as module
+    elif name in _DATA_PREPARATION:
+        from odds_analytics.training import data_preparation as module
+    elif name in _TRACKING:
+        from odds_analytics.training import tracking as module
+    elif name in _TUNER:
+        from odds_analytics.training import tuner as module
+    elif name in _UTILS:
+        from odds_analytics.training import utils as module
+    else:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    return getattr(module, name)
 
 
 __all__ = [
