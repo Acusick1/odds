@@ -418,25 +418,37 @@ HOLDOUT_CELL: dict[str, object] = {
     "minutes_before_kickoff": [60],
     "max_input_age_minutes": 10,
 }
+HOLDOUT_GRID: dict[str, list[object]] = {
+    "threshold": [0.02, 0.05],
+    "minutes_before_kickoff": [[60], [60, 30]],
+    "max_input_age_minutes": [10],
+}
+
+
+def preregistration(**changes: object) -> dict[str, object]:
+    """A pre-registration of issue 610 for two sealed leagues."""
+    return {
+        "issue": 610,
+        "name": "back-longest",
+        "version": 1,
+        "rule": "exchange_gap",
+        "market": "1x2",
+        "leagues": ["soccer_spain_la_liga", "soccer_germany_bundesliga"],
+        "grid": HOLDOUT_GRID,
+        "selection_rule": "https://github.com/Acusick1/odds/issues/821#issuecomment-6769611091",
+        "cell": HOLDOUT_CELL,
+        **changes,
+    }
 
 
 @pytest.fixture
 def holdout_repo(candidates_repo: Path) -> Path:
-    """A committed ``candidates/`` with a pre-registration for issue 610 and an empty ledger,
-    with its grid frozen at the first commit; returns the ``candidates/`` directory."""
+    """A committed ``candidates/`` with an empty holdout ledger and, in one later commit, the
+    pre-registration ``preregistrations/610.yaml``; returns the ``candidates/`` directory."""
     directory = candidates_repo / "candidates"
     (directory / "holdout.jsonl").write_text("")
     git_commit(candidates_repo)
-    grid_sha = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=candidates_repo,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
     (directory / "preregistrations").mkdir()
-    (directory / "preregistrations" / "610.yaml").write_text(
-        yaml.safe_dump({"issue": 610, "grid_sha": grid_sha, "cell": HOLDOUT_CELL})
-    )
+    (directory / "preregistrations" / "610.yaml").write_text(yaml.safe_dump(preregistration()))
     git_commit(candidates_repo)
     return directory

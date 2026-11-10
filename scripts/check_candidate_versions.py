@@ -6,6 +6,10 @@ change in place when the rule and both hashes are a complete row of the rehash l
 candidates/rehashes.jsonl. The hook checks a row's shape only: the ledger is a record the
 rehash command makes, and nothing here re-runs the replay it records.
 
+The holdout ledger, candidates/holdout.jsonl, is append-only: the base's rows must be the
+first rows of the working tree's, and no idea version may be reserved twice. A pre-registration
+under candidates/preregistrations/ that exists at the base may not change or be deleted.
+
 Compares candidates/*.yaml in the working tree with the base: --base, else the
 merge-base of HEAD with origin/main, else with main, else HEAD.
 Only stdlib, yaml and pydantic are imported: the pre-commit hook env has no project install.
@@ -28,6 +32,8 @@ CANDIDATES_DIR = "candidates"
 # Neither changes what a candidate bets on.
 UNVERSIONED_KEYS = frozenset({"status", "description"})
 REHASH_LEDGER = "rehashes.jsonl"
+HOLDOUT_LEDGER = "holdout.jsonl"
+PREREGISTRATIONS = "preregistrations"
 
 
 def _git(*args: str) -> str:
@@ -113,12 +119,44 @@ def _rehashes(root: Path) -> tuple[set[tuple[str, str, str]], list[str]]:
     return accepted, problems
 
 
+def _holdout_problems(base: str, root: Path) -> list[str]:
+    """Why the holdout ledger or a pre-registration changed other than by appending."""
+    problems: list[str] = []
+    ledger = f"{CANDIDATES_DIR}/{HOLDOUT_LEDGER}"
+    current = root / ledger
+    now = current.read_text().splitlines() if current.exists() else []
+    shown = subprocess.run(["git", "show", f"{base}:{ledger}"], capture_output=True, text=True)
+    before = shown.stdout.splitlines() if shown.returncode == 0 else []
+    if now[: len(before)] != before:
+        problems.append(f"{ledger}: a committed row was modified or removed; it is append-only")
+    reserved: set[tuple[Any, Any]] = set()
+    for number, line in enumerate(now, start=1):
+        try:
+            row = json.loads(line)
+        except ValueError:
+            problems.append(f"{ledger}:{number}: not JSON")
+            continue
+        if isinstance(row, dict) and row.get("kind") == "reserved":
+            key = (row.get("issue"), row.get("version"))
+            if key in reserved:
+                problems.append(
+                    f"{ledger}:{number}: issue {key[0]} version {key[1]} reserved twice"
+                )
+            reserved.add(key)
+    directory = f"{CANDIDATES_DIR}/{PREREGISTRATIONS}/"
+    for rel in _git("ls-tree", "-r", "--name-only", base, "--", directory).splitlines():
+        path = root / rel
+        if not path.exists() or path.read_text() != _git("show", f"{base}:{rel}"):
+            problems.append(f"{rel}: a pre-registration never changes; a change is a new version")
+    return problems
+
+
 def check(base: str, today: date | None = None) -> list[str]:
     today = today or datetime.now(UTC).date()
     root = Path(_git("rev-parse", "--show-toplevel").strip())
     rehashes, ledger_problems = _rehashes(root)
     listing = _git("ls-tree", "-r", "--name-only", base, "--", f"{CANDIDATES_DIR}/")
-    errors: list[str] = list(ledger_problems)
+    errors: list[str] = [*ledger_problems, *_holdout_problems(base, root)]
     for rel in listing.splitlines():
         if not rel.endswith(".yaml"):
             continue

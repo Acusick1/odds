@@ -27,17 +27,19 @@ A file loaded by path may be an unregistered draft. `odds_core.candidates.load_c
 
 ## Sealed holdout
 
-`odds_analytics.holdout.admit` runs before any replay. A range whose days touch `odds_analytics.holdout.holdout_windows` for the draft's sport is a holdout range: the 2025-26 season (1 August to 31 July) of the Championship, La Liga, Serie A, the Bundesliga and Ligue 1, and EPL 2022-23 and 2023-24 while `odds_analytics.holdout.EPL_2022_24_SEALED` is true (the substitute close of [#730](https://github.com/Acusick1/odds/issues/730) is not accepted; set it false only if that is rejected). The choice is recorded in [ADR-0021](../../docs/adr/0021-sealed-holdout-and-one-shot-gate.md).
+The 2025-26 season (1 August to 31 July) of the Championship, La Liga, Serie A, the Bundesliga and Ligue 1, and EPL 2022-23 and 2023-24 while `odds_analytics.holdout.EPL_2022_24_SEALED` is true, are sealed ([ADR-0021](../../docs/adr/0021-sealed-holdout-and-one-shot-gate.md)). The switch defaults to sealed; the substitute close of [#730](https://github.com/Acusick1/odds/issues/730) is what would let those EPL seasons be scored, and the switch goes false only if it is rejected.
 
-The command refuses a holdout range, replaying and writing nothing, and exits 1, unless all of these hold:
+**The seal.** `odds_analytics.candidate_backtest.final_events` and `odds_analytics.candidate_backtest.collect`, which `odds_analytics.candidate_backtest.replay` and every other replay reach, call `odds_analytics.holdout.require_clear`. A range that touches a sealed window of the candidate's sport raises `odds_analytics.holdout.HoldoutRefused` before any query, so the development backtest (with `--compare`: each candidate is checked) exits 1 on such a range, mixed ranges included, and `scripts.replay_candidates.dump` replays only the days outside the windows (`odds_analytics.holdout.development_segments`, passed by the rehash command as `--segments`). Only an `odds_analytics.holdout.HoldoutAccess` for the sport's window opens it, and only `odds_analytics.holdout.Reservation.access` issues one.
 
-1. `candidates/preregistrations/<issue>.yaml` for the draft's `issue` exists, is committed and equals its committed version. It is an `odds_analytics.holdout.Preregistration`: the issue, the selected cell's `cell` params and the `grid_sha` at which the grid was frozen, a commit in HEAD's history.
-2. The draft's params equal `cell`.
-3. No tracked file has an uncommitted change, except the ledger, so HEAD is the code that runs.
-4. The ledger `candidates/holdout.jsonl` has no row for the draft's issue and version.
-5. The command has no `--compare`.
+**The command.** `odds candidates holdout <preregistration>` (`odds_cli.commands.candidates.holdout_command`, `odds_analytics.holdout_run.run_holdout`) runs a [pre-registration](candidate-registry.md#sealed-holdout-files) once:
 
-A run then appends an `odds_analytics.holdout.HoldoutRun` to the ledger before printing: issue, version, name, sport, cell, range, run date, `git_sha` (HEAD), `grid_sha` and the gate result. Commit the row. The command prints `odds_analytics.holdout.gate`'s verdict over every bet with a close: pass when mean EV is above 0 and the 95% interval's upper bound is above 0; under `odds_analytics.holdout.MIN_GATE_BETS` (30) bets, the interval condition alone passes and the result is flagged; no bets fails, flagged. The holdout run never promotes, and the verdict label says so.
+1. It checks the file and that each league has a sealed window, and resolves the rule with the cell as params for each league, so a mistake costs no run.
+2. Under an exclusive lock shared by every worktree (`odds_analytics.holdout.exclusive_lock`), `odds_analytics.holdout.reserve` requires the file committed, unchanged and touched by one commit, older than the earliest Odds API `source_stamped` snapshot in the database read (`odds_analytics.holdout_run.earliest_backfill`) when there is one; a clean tree; and a committed ledger that extends `origin/main`'s and holds no row for the issue and version. It then appends and syncs a `reserved` row.
+3. `odds_analytics.candidate_backtest.collect` replays the cell on each league's window as a single-sport draft, with that league's access.
+4. The bets of every league are pooled and scored once with `odds_analytics.candidate_backtest.score` at family size 1; `odds_analytics.holdout.gate` judges the overall estimate: pass when mean EV is above 0 and the event-clustered 95% interval's upper bound is above 0; under `odds_analytics.holdout.MIN_GATE_BETS` (30) bets, the interval condition alone passes and the result is flagged; no bets fails, flagged.
+5. A `result` row is appended. An error after step 2 leaves the `reserved` row and the run is spent.
+
+The command prints each window's coverage and the gate, and a holdout result never promotes.
 
 ## Replay
 

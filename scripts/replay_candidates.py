@@ -33,8 +33,14 @@ def current_rule_sha256(rule: str) -> str:
 
 
 async def dump(
-    paths: list[Path], start: date, end: date, snapshot: str | None
+    paths: list[Path],
+    start: date,
+    end: date,
+    snapshot: str | None,
+    segments: dict[str, list[tuple[date, date]]],
 ) -> dict[str, object]:
+    """The replay of each candidate over its sport's segments (``start``..``end`` when it has
+    none), so a sealed holdout window is never replayed."""
     out: dict[str, object] = {}
     async with async_session_maker() as session:
         await session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
@@ -44,15 +50,21 @@ async def dump(
             candidate = load_candidate_file(path)
             assert isinstance(candidate, MechanicalCandidate)  # noqa: S101
             spec, params = resolve_rule(candidate)
-            events = await final_events(session, candidate.sport, start, end)
             counts = _Counts()
-            bets = await _decide(session, candidate, spec, params, events, counts)
-            summary = dataclasses.asdict(await replay(session, candidate, start, end, 1, now=NOW))
-            summary.pop("hash_status")
+            bets = []
+            summaries = []
+            for first, last in segments.get(candidate.sport, [(start, end)]):
+                events = await final_events(session, candidate.sport, first, last)
+                bets += await _decide(session, candidate, spec, params, events, counts)
+                summary = dataclasses.asdict(
+                    await replay(session, candidate, first, last, 1, now=NOW)
+                )
+                summary.pop("hash_status")
+                summaries.append(summary)
             out[candidate.name] = {
                 "counts": dataclasses.asdict(counts),
                 "bets": [dataclasses.asdict(b) for b in bets],
-                "summary": summary,
+                "summary": summaries,
             }
     return out
 
@@ -63,13 +75,22 @@ def main() -> None:
     parser.add_argument("--to", dest="end", type=date.fromisoformat, required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--snapshot", help="An exported snapshot id to read")
+    parser.add_argument(
+        "--segments",
+        default="{}",
+        help="JSON of sport to [from, to] day ranges to replay in place of --from to --to",
+    )
     parser.add_argument("--rule", help="Also write this rule's hash to --hash-out")
     parser.add_argument("--hash-out", type=Path)
     parser.add_argument("paths", nargs="+", type=Path)
     args = parser.parse_args()
     if args.rule is not None:
         args.hash_out.write_text(current_rule_sha256(args.rule))
-    result = asyncio.run(dump(args.paths, args.start, args.end, args.snapshot))
+    segments = {
+        sport: [(date.fromisoformat(a), date.fromisoformat(b)) for a, b in ranges]
+        for sport, ranges in json.loads(args.segments).items()
+    }
+    result = asyncio.run(dump(args.paths, args.start, args.end, args.snapshot, segments))
     args.out.write_text(json.dumps(result, sort_keys=True, default=str))
 
 

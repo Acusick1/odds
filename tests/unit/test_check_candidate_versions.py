@@ -248,3 +248,58 @@ class TestRehashLedger:
         path.write_text(path.read_text().replace("0.02", "0.05"))
         errors = self.errors(path, monkeypatch)
         assert len(errors) == 1 and "params" in errors[0] and "rule_sha256" not in errors[0]
+
+
+class TestHoldoutLedgerHook:
+    ROW = json.dumps({"kind": "reserved", "issue": 1, "version": 1, "git_sha": "a" * 40})
+    OTHER = json.dumps({"kind": "reserved", "issue": 2, "version": 1, "git_sha": "a" * 40})
+
+    @pytest.fixture
+    def repo(self, candidates_repo: Path) -> Path:
+        directory = candidates_repo / "candidates"
+        (directory / "holdout.jsonl").write_text(self.ROW + "\n")
+        (directory / "preregistrations").mkdir()
+        (directory / "preregistrations" / "1.yaml").write_text("issue: 1\n")
+        git(candidates_repo, "add", "candidates")
+        git(candidates_repo, "commit", "-q", "-m", "base")
+        return candidates_repo
+
+    def errors(self, repo: Path) -> list[str]:
+        return hook.check("HEAD")
+
+    def test_appending_passes(self, repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.chdir(repo)
+        with (repo / "candidates" / "holdout.jsonl").open("a") as f:
+            f.write(self.OTHER + "\n")
+        assert self.errors(repo) == []
+
+    def test_removing_a_committed_row_fails(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(repo)
+        (repo / "candidates" / "holdout.jsonl").write_text("")
+        assert any("append-only" in e for e in self.errors(repo))
+
+    def test_editing_a_committed_row_fails(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(repo)
+        (repo / "candidates" / "holdout.jsonl").write_text(
+            self.ROW.replace('"version": 1', '"version": 7') + "\n"
+        )
+        assert any("append-only" in e for e in self.errors(repo))
+
+    def test_reserving_a_version_twice_fails(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(repo)
+        with (repo / "candidates" / "holdout.jsonl").open("a") as f:
+            f.write(self.ROW + "\n")
+        assert any("reserved twice" in e for e in self.errors(repo))
+
+    def test_changing_a_preregistration_fails(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(repo)
+        (repo / "candidates" / "preregistrations" / "1.yaml").write_text("issue: 1\ncell: {}\n")
+        assert any("never changes" in e for e in self.errors(repo))

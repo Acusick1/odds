@@ -25,7 +25,7 @@ status: stable
 
 # Odds API historical backfill
 
-Fills in historical Odds API snapshots (the paid `/historical/odds` endpoint, 10 units per region per market per call; the free tier has no historical endpoints; [odds-api-client](odds-api-client.md#cost-per-call)) and final scores. A replay backtest needs FINAL events plus snapshots before decision time (`odds_analytics.candidate_backtest.final_events` selects the events; [replay backtest](../evaluation/candidate-backtest.md)). Code: `packages/odds-cli/odds_cli/commands/{discover,backfill}.py` with logic in odds-analytics. The steps are on [howto-backfill-odds-api-history](howto-backfill-odds-api-history.md). It is separate from the EPL scripts ([historical-ingest-scripts](historical-ingest-scripts.md)); neither is scheduled.
+Fills in historical Odds API snapshots (the paid `/historical/odds` endpoint, 10 units per region per market per call; the free tier has no historical endpoints; [odds-api-client](odds-api-client.md#cost-per-call)) and final scores. A replay backtest needs FINAL events plus snapshots before decision time (`odds_analytics.candidate_backtest.final_events` selects the events, and refuses the sealed holdout days; [replay backtest](../evaluation/candidate-backtest.md)). Code: `packages/odds-cli/odds_cli/commands/{discover,backfill}.py` with logic in odds-analytics. The steps are on [howto-backfill-odds-api-history](howto-backfill-odds-api-history.md). It is separate from the EPL scripts ([historical-ingest-scripts](historical-ingest-scripts.md)); neither is scheduled.
 
 ## Acquisition manifests
 

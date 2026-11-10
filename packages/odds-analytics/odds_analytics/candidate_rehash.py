@@ -24,6 +24,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, create_async_engine
 
 from odds_analytics.candidate_parity import ParityStatus, check_parity
+from odds_analytics.holdout import development_segments
 
 REPLAY_SCRIPT = Path("scripts") / "replay_candidates.py"
 LOCK_FILE = "odds-rehash.lock"
@@ -80,6 +81,12 @@ class Replay:
         return replayed["counts"]["with_input"], len(replayed["bets"])
 
 
+def _sport(path: Path) -> str:
+    candidate = load_candidate_file(path)
+    assert isinstance(candidate, MechanicalCandidate)  # noqa: S101
+    return candidate.sport
+
+
 def replay_under(
     checkout: Path,
     root: Path,
@@ -92,6 +99,12 @@ def replay_under(
 ) -> Replay:
     """The replay of the candidate files under ``checkout``'s code from the exported database
     ``snapshot``, and the rule's hash under that code."""
+    # The replay never reads the sealed holdout: each sport's days less its windows, which the
+    # script replays as separate ranges. Computed here because a base revision has no holdout.
+    segments = {
+        sport: [(a.isoformat(), b.isoformat()) for a, b in development_segments(sport, start, end)]
+        for sport in {_sport(p) for p in paths}
+    }
     with tempfile.TemporaryDirectory() as tmp:
         out, hash_out = Path(tmp) / "replay.json", Path(tmp) / "hash"
         subprocess.run(
@@ -108,6 +121,8 @@ def replay_under(
                 end.isoformat(),
                 "--out",
                 str(out),
+                "--segments",
+                json.dumps(segments),
                 "--snapshot",
                 snapshot,
                 "--rule",

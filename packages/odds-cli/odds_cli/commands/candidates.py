@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Annotated, Any, cast
 
 import typer
-from odds_analytics import holdout
+from odds_analytics import holdout, holdout_run
 from odds_analytics.candidate_backtest import BacktestResult, HashStatus, replay
 from odds_analytics.candidate_parity import ParityReport, ParityStatus, check_parity
 from odds_analytics.candidate_rehash import rehash as record_rehash
@@ -230,7 +230,7 @@ def _checkpoint_row(table: Table, label: str, cp: Checkpoint | None) -> None:
     table.add_row(label, str(cp.n), f"{cp.mean_ev:+.4f}", _interval(cp.ci95), _promote_interval(cp))
 
 
-def _backtest_tables(result: BacktestResult, sealed: bool = False) -> list[Table]:
+def _backtest_tables(result: BacktestResult) -> list[Table]:
     cov, summary = result.coverage, result.summary
     leads = ", ".join(map(str, cast("list[int]", result.params["minutes_before_kickoff"])))
     coverage = Table(
@@ -275,7 +275,7 @@ def _backtest_tables(result: BacktestResult, sealed: bool = False) -> list[Table
     style = _VERDICT_STYLE[summary.verdict]
     label = _backtest_verdict(summary.verdict)
     if summary.verdict is Verdict.PROMOTE:
-        label += " (holdout, not a promotion)" if sealed else " (development data, not a promotion)"
+        label += " (development data, not a promotion)"
     verdict.caption = (
         f"[{style}]{label}[/{style}]  family versions k={summary.family_versions}  "
         f"staked {summary.total_stake:.2f}  P&L {summary.pnl:+.2f}  ROI {summary.roi:+.1%}"
@@ -349,7 +349,7 @@ def _comparison_table(result: BacktestResult, comparison: BacktestResult) -> Tab
     return table
 
 
-def _print_backtest(result: BacktestResult, sealed: bool = False) -> None:
+def _print_backtest(result: BacktestResult) -> None:
     if result.hash_status is not HashStatus.MATCH:
         console.print(
             f"[yellow]{result.name}: rule_sha256 {result.hash_status}: this is a draft, not a "
@@ -361,32 +361,8 @@ def _print_backtest(result: BacktestResult, sealed: bool = False) -> None:
         console.print(_tuning_table(result))
     if result.decided_event_ids is not None:
         console.print(_refit_table(result))
-    for table in _backtest_tables(result, sealed):
+    for table in _backtest_tables(result):
         console.print(table)
-
-
-def _print_gate(run: holdout.HoldoutRun) -> None:
-    g = run.result
-    style = "green" if g.verdict is holdout.GateVerdict.PASS else "red"
-    if g.mean_ev is None:
-        scored = "no bets with a close"
-    else:
-        scored = (
-            f"n={g.bets} mean EV {g.mean_ev:+.4f} 95% CI [{g.ci_lower:+.4f}, {g.ci_upper:+.4f}]"
-            f"{' (killed)' if g.killed else ''}"
-        )
-    console.print(f"[{style}]Holdout gate: {g.verdict.value}[/{style}]  {scored}", soft_wrap=True)
-    if g.low_bets:
-        console.print(
-            f"[yellow]Under {holdout.MIN_GATE_BETS} holdout bets: not killed alone passes. "
-            f"Flag this on issue {run.issue}.[/yellow]",
-            soft_wrap=True,
-        )
-    console.print(
-        f"Recorded in candidates/{holdout.HOLDOUT_LEDGER}: commit it. A holdout result never "
-        "promotes; the forward test decides.",
-        soft_wrap=True,
-    )
 
 
 async def _family_size(
@@ -437,12 +413,6 @@ def backtest(
     first, last = _parse_day(start), _parse_day(end)
     if last < first:
         raise _fail("--to is before --from")
-    try:
-        prereg = holdout.admit(resolved, first, last, candidates_dir())
-        if prereg is not None and other is not None:
-            raise holdout.HoldoutRefused("a holdout run scores one candidate, without --compare")
-    except holdout.HoldoutRefused as exc:
-        raise _fail(str(exc)) from exc
 
     async def run() -> BacktestResult:
         async with async_session_maker() as session:
@@ -466,22 +436,7 @@ def backtest(
     except ValueError as exc:
         raise _fail(str(exc)) from exc
 
-    run_record = (
-        None
-        if prereg is None
-        else holdout.record(
-            resolved,
-            prereg,
-            first,
-            last,
-            result.overall,
-            candidates_dir(),
-            datetime.now(UTC).date(),
-        )
-    )
-    _print_backtest(result, sealed=prereg is not None)
-    if run_record is not None:
-        _print_gate(run_record)
+    _print_backtest(result)
     if result.comparison is not None:
         console.print(f"[bold]Compared with {result.comparison.name}[/bold]")
         _print_backtest(result.comparison)
@@ -489,6 +444,72 @@ def backtest(
     if json_path is not None:
         payload = _backtest_json(result)
         json_path.write_text(json.dumps(payload, indent=2, default=str) + "\n")
+
+
+@app.command("holdout")
+def holdout_command(
+    preregistration: Annotated[
+        Path, typer.Argument(help="candidates/preregistrations/<issue>.yaml, committed")
+    ],
+) -> None:
+    """Run a pre-registered idea's selected cell once on the sealed holdout and print the gate.
+
+    The only command that replays the holdout. It reserves the idea's version in
+    candidates/holdout.jsonl before reading any holdout data: a failure after that leaves the
+    reservation, and the run is spent. A holdout result never promotes.
+    """
+
+    async def run() -> holdout_run.HoldoutRun:
+        async with async_session_maker() as session:
+            return await holdout_run.run_holdout(session, preregistration, candidates_dir())
+
+    try:
+        done = asyncio.run(run())
+    except holdout.HoldoutRefused as exc:
+        raise _fail(str(exc)) from exc
+    except Exception as exc:
+        raise _fail(
+            f"the run failed after reserving its version, which is spent: {exc!r}. "
+            "Commit the reservation in candidates/holdout.jsonl."
+        ) from exc
+    table = Table(title=f"Holdout of #{done.row.issue} {done.row.name} v{done.row.version}")
+    for column in ("Window", "Events", "Decisions", "Bets", "With close"):
+        table.add_column(column, justify="left" if column == "Window" else "right")
+    for league in done.leagues:
+        cov = league.coverage
+        table.add_row(
+            str(league.window),
+            str(cov.events),
+            str(cov.decisions),
+            str(cov.bets),
+            str(cov.bets_with_close),
+        )
+    console.print(table)
+    _print_gate(done.row)
+
+
+def _print_gate(row: holdout.HoldoutResult) -> None:
+    g = row.result
+    style = "green" if g.verdict is holdout.GateVerdict.PASS else "red"
+    if g.mean_ev is None:
+        scored = "no bets with a close"
+    else:
+        scored = (
+            f"pooled n={g.bets} mean EV {g.mean_ev:+.4f} "
+            f"95% CI [{g.ci_lower:+.4f}, {g.ci_upper:+.4f}]{' (killed)' if g.killed else ''}"
+        )
+    console.print(f"[{style}]Holdout gate: {g.verdict.value}[/{style}]  {scored}", soft_wrap=True)
+    if g.low_bets:
+        console.print(
+            f"[yellow]Under {holdout.MIN_GATE_BETS} holdout bets: not killed alone passes. "
+            f"Flag this on issue {row.issue}.[/yellow]",
+            soft_wrap=True,
+        )
+    console.print(
+        f"Recorded in candidates/{holdout.HOLDOUT_LEDGER}: commit it. A holdout result never "
+        "promotes; the forward test decides.",
+        soft_wrap=True,
+    )
 
 
 @app.command("parity")
