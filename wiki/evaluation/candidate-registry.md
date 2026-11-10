@@ -82,7 +82,7 @@ A `odds_core.candidates.MechanicalCandidate.rule_sha256` may also change at the 
 
 ## Rehash ledger
 
-`candidates/rehashes.jsonl` (`odds_core.candidates.REHASH_LEDGER`) records the hash changes that leave every bet the same, one JSON object per line, an `odds_core.candidates.Rehash`:
+The ledger file in `candidates/`, named by `odds_core.candidates.REHASH_LEDGER`, records the hash changes that leave every bet the same, one JSON object per line, an `odds_core.candidates.Rehash`:
 
 - the rule, its old hash (at the base commit) and its new hash (at the head commit), and both commit SHAs;
 - the replay's kick-off days, the database it read (role, host, port and name, no password) and the sha256 of the replay output;
