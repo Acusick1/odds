@@ -18,7 +18,11 @@ from odds_core.config import Settings, get_settings
 from odds_core.job_specs import job_cadence
 from odds_core.vocabulary import Market, Source
 
-from odds_lambda.collection_calendar import CollectionSource, require_rows_for_fixtures
+from odds_lambda.collection_calendar import (
+    CollectionSource,
+    SportCollection,
+    require_rows_for_fixtures,
+)
 from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.event_sync import EventSyncService
 from odds_lambda.ingestion import OddsIngestionService
@@ -49,8 +53,11 @@ SOURCE = CollectionSource(
     job_name="fetch-odds",
     source=Source.ODDS_API,
     cadence=CADENCE,
-    fixture_horizons={"soccer_epl": timedelta(hours=48)},
-    markets={"soccer_epl": (Market.ONE_X_TWO, Market.SPREADS, Market.TOTALS)},
+    sports={
+        "soccer_epl": SportCollection(
+            timedelta(hours=48), (Market.ONE_X_TWO, Market.SPREADS, Market.TOTALS)
+        )
+    },
     skips_overnight=False,
 )
 
@@ -85,8 +92,11 @@ NBA_SOURCE = CollectionSource(
     job_name="fetch-odds",
     source=Source.ODDS_API,
     cadence=NBA_CADENCE,
-    fixture_horizons={"basketball_nba": timedelta(hours=14)},
-    markets={"basketball_nba": (Market.H2H, Market.SPREADS, Market.TOTALS)},
+    sports={
+        "basketball_nba": SportCollection(
+            timedelta(hours=14), (Market.H2H, Market.SPREADS, Market.TOTALS)
+        )
+    },
     skips_overnight=False,
 )
 

@@ -16,6 +16,7 @@ from odds_core import as_of, bookmakers, exchange_price
 from odds_core.candidates import Candidate, CandidateStatus, MechanicalCandidate
 from odds_core.market_prices import Outcome, market_outcomes
 from odds_core.models import Event
+from odds_core.sports import SportKey
 from odds_core.vocabulary import Market
 from pydantic import (
     BaseModel,
@@ -37,7 +38,7 @@ from odds_lambda.candidate_rules.market_state import Line, MarketState, load_mar
 Selection = tuple[Outcome, Line]
 _FOOTBALL_MARKETS = frozenset({Market.ONE_X_TWO, Market.TOTALS})
 # The markets a candidate of each sport can decide.
-SPORT_MARKETS: dict[str, frozenset[Market]] = {
+SPORT_MARKETS: dict[SportKey, frozenset[Market]] = {
     "soccer_epl": _FOOTBALL_MARKETS,
     "soccer_efl_champ": _FOOTBALL_MARKETS,
     "soccer_spain_la_liga": _FOOTBALL_MARKETS,

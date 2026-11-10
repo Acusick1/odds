@@ -381,4 +381,5 @@ class TestCloseDefinedPerSport:
 
     def test_every_fallback_is_read_from_the_sides_it_names(self) -> None:
         for spec in CLOSES.values():
-            assert spec.fallback is None or spec.fallback.side in spec.fallback.sides
+            if spec is not None and spec.fallback is not None:
+                assert spec.fallback.side in spec.fallback.sides

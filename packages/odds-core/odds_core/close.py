@@ -81,14 +81,17 @@ FDUK_CLOSED_LEAGUES: tuple[str, ...] = (
     "soccer_france_ligue_one",
 )
 
-# A (sport, market) without an entry has no close (MLB's h2h).
-CLOSES: dict[tuple[str, Market], CloseSpec] = {
+# Every (sport, market) a candidate can decide, and its close; None where it has none (MLB,
+# ADR-0019).
+CLOSES: dict[tuple[str, Market], CloseSpec | None] = {
     **{
         (league, market): CloseSpec(FDUK_CLOSE)
         for league in FDUK_CLOSED_LEAGUES
         for market in (Market.ONE_X_TWO, Market.TOTALS)
     },
     ("basketball_nba", Market.H2H): CloseSpec(POLYMARKET_CLOSE),
+    ("baseball_mlb", Market.H2H): None,
+    ("baseball_mlb", Market.TOTALS): None,
 }
 
 
