@@ -11,7 +11,6 @@ import pytest
 from fastapi.testclient import TestClient
 from odds_core.close import CloseKind
 from odds_core.vocabulary import Source
-from odds_lambda.health_monitor import SCHEDULE_OVERDUE_GRACE
 from odds_lambda.health_readers import Freshness, SourceFreshness
 from odds_lambda.storage.readers import BurnProjection, KeyQuota
 from odds_web.app import create_app
@@ -26,7 +25,6 @@ from odds_web.status import (
     SourceChip,
     StatusStrip,
     _job_state,
-    _overdue_state,
     _source_state,
 )
 from sqlalchemy.exc import DBAPIError
@@ -254,14 +252,6 @@ class TestChipStates:
         assert _job_state(beat(2 * STALE_FACTOR + 0.1), 2, NOW) is ChipState.STALE
         assert _job_state(None, 2, NOW) is ChipState.UNKNOWN
         assert _job_state(beat(500), None, NOW) is ChipState.OK
-
-    def test_a_job_whose_next_run_passed_unserved_is_late(self) -> None:
-        grace = SCHEDULE_OVERDUE_GRACE
-
-        assert _overdue_state(NOW - grace + timedelta(minutes=1), False, NOW) is ChipState.OK
-        assert _overdue_state(NOW - grace - timedelta(minutes=1), False, NOW) is ChipState.LATE
-        assert _overdue_state(NOW - timedelta(hours=3), True, NOW) is ChipState.OK
-        assert _overdue_state(None, False, NOW) is ChipState.OK
 
     def test_a_source_is_late_then_stale_by_its_threshold(self) -> None:
         def freshness(active_hours: float | None, status: Freshness) -> SourceFreshness:

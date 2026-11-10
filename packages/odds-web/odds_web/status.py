@@ -11,17 +11,21 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 
 from odds_core.config import Settings
-from odds_lambda.health_monitor import SCHEDULE_OVERDUE_GRACE
 from odds_lambda.health_readers import (
     Freshness,
     SourceFreshness,
+    dead_chains,
     heartbeat_late,
     last_heartbeats,
     schedule_heartbeat_name,
     source_freshness,
 )
-from odds_lambda.scheduling.jobs import resolve_job_name, sport_key_to_suffix
-from odds_lambda.scheduling.schedule_store import read_schedules
+from odds_lambda.scheduling.jobs import (
+    expected_compound_job_names,
+    resolve_job_name,
+    sport_key_to_suffix,
+)
+from odds_lambda.scheduling.schedule_store import read_outstanding_job_names, read_schedules
 from odds_lambda.storage.readers import BurnProjection, KeyQuota, OddsReader
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -198,18 +202,6 @@ def _job_state(last: datetime | None, max_hours: float | None, now: datetime) ->
     return ChipState.OK
 
 
-def _overdue_state(next_run: datetime | None, running: bool, now: datetime) -> ChipState:
-    """Late when a job's next fire time has passed unserved, as the monitor's schedule-chain check
-    judges it; a running job is being served."""
-    if running or next_run is None or next_run >= now - SCHEDULE_OVERDUE_GRACE:
-        return ChipState.OK
-    return ChipState.LATE
-
-
-def _worse(a: ChipState, b: ChipState) -> ChipState:
-    return max(a, b, key=_SEVERITY.__getitem__)
-
-
 def _source_state(freshness: SourceFreshness) -> ChipState:
     state = _FRESHNESS_STATE[freshness.status]
     if (
@@ -224,24 +216,39 @@ def _source_state(freshness: SourceFreshness) -> ChipState:
 
 async def load_status(session: AsyncSession, settings: Settings, now: datetime) -> StatusStrip:
     schedules = await read_schedules(session)
-    names = {s.job_name: schedule_heartbeat_name(s.job_name) for s in schedules}
+    expected = expected_compound_job_names(
+        settings.scheduler.bootstrap_jobs, settings.data_collection.sports
+    )
+    dead = {
+        chain.job_name
+        for chain in dead_chains(
+            expected,
+            {s.job_name: s.next_fire_time for s in schedules},
+            await read_outstanding_job_names(session),
+            settings,
+            now,
+        )
+    }
+    stored = {s.job_name for s in schedules}
+    names = {name: schedule_heartbeat_name(name) for name in stored | dead}
     beats = await last_heartbeats(session, set(names.values()))
     expectations = settings.alerts.heartbeat_expectations
     jobs: list[JobChip] = []
-    for schedule in schedules:
-        last = beats.get(names[schedule.job_name])
-        max_hours = expectations.get(names[schedule.job_name])
+    for name, next_run, running in [
+        *((s.job_name, s.next_fire_time, s.running > 0) for s in schedules),
+        *((name, None, False) for name in sorted(dead - stored)),
+    ]:
+        last = beats.get(names[name])
+        max_hours = expectations.get(names[name])
+        state = _job_state(last, max_hours, now)
         jobs.append(
             JobChip(
-                name=schedule.job_name,
-                state=_worse(
-                    _job_state(last, max_hours, now),
-                    _overdue_state(schedule.next_fire_time, schedule.running > 0, now),
-                ),
+                name=name,
+                state=ChipState.STALE if name in dead else state,
                 last_success=last,
                 max_hours=max_hours,
-                next_run=schedule.next_fire_time,
-                running=schedule.running > 0,
+                next_run=next_run,
+                running=running,
             )
         )
     sources = [

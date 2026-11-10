@@ -15,7 +15,11 @@ from odds_lambda.health_readers import (
     schedule_heartbeat_name,
     source_freshness,
 )
-from odds_lambda.scheduling.schedule_store import StoredSchedule, read_schedules
+from odds_lambda.scheduling.schedule_store import (
+    StoredSchedule,
+    read_outstanding_job_names,
+    read_schedules,
+)
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -201,3 +205,38 @@ class TestReadSchedules:
         await pglite_async_session.commit()
 
         assert await read_schedules(pglite_async_session) == []
+
+
+class TestReadOutstandingJobNames:
+    async def test_a_released_job_is_outstanding_under_its_schedule_id(
+        self, pglite_async_session: AsyncSession
+    ) -> None:
+        await create_scheduler_tables(pglite_async_session)
+        await pglite_async_session.execute(
+            text(
+                "INSERT INTO tasks (id, func, job_executor, metadata) "
+                "VALUES ('check-health', 'f', 'async', '{}')"
+            )
+        )
+        for schedule_id in ("check-health", "check-health", None):
+            await pglite_async_session.execute(
+                text(
+                    "INSERT INTO jobs (id, task_id, args, kwargs, schedule_id, executor, "
+                    "metadata, created_at) VALUES (:id, 'check-health', '', '', :schedule, "
+                    "'async', '{}', :now)"
+                ),
+                {"id": uuid.uuid4(), "schedule": schedule_id, "now": NOW},
+            )
+        await pglite_async_session.commit()
+
+        assert await read_outstanding_job_names(pglite_async_session) == {"check-health"}
+
+    async def test_a_database_the_scheduler_never_booted_on_has_none(
+        self, pglite_async_session: AsyncSession
+    ) -> None:
+        await pglite_async_session.execute(
+            text("DROP TABLE IF EXISTS job_results, jobs, schedules, tasks, metadata CASCADE")
+        )
+        await pglite_async_session.commit()
+
+        assert await read_outstanding_job_names(pglite_async_session) == set()

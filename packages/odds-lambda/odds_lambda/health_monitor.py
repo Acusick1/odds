@@ -13,7 +13,6 @@ Stale data is detected via OddsSnapshot recency; other checks use OddsReader.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import NamedTuple, Protocol
@@ -39,7 +38,9 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.health_readers import (
+    DeadChain,
     Freshness,
+    dead_chains,
     heartbeat_late,
     last_heartbeats,
     source_freshness,
@@ -48,8 +49,6 @@ from odds_lambda.mlb_game_resolver import MLB_SPORT_KEY
 from odds_lambda.scheduling.backends.base import ScheduledJob
 from odds_lambda.scheduling.jobs import (
     expected_compound_job_names,
-    get_job_cron,
-    resolve_job_name,
     resolve_target_sports,
 )
 from odds_lambda.storage.event_merge import EventMerger
@@ -68,36 +67,12 @@ BETFAIR_CLOSE_SPORT = "soccer_epl"
 BETFAIR_CLOSE_JOB = "fetch-betfair-exchange"
 BETFAIR_HISTORY_WINDOW = timedelta(hours=72)
 BETFAIR_CLOSE_ALERT_TYPE = "missing_betfair_close"
-SCHEDULE_OVERDUE_GRACE = timedelta(minutes=15)
-
-# Self-scheduling jobs that return before booking a next run while disabled.
-_JOB_ENABLED: dict[str, Callable[[Settings], bool]] = {
-    "fetch-betfair-exchange": lambda settings: settings.betfair.enabled,
-    "fetch-polymarket-odds": lambda settings: settings.polymarket.enabled,
-}
 
 
 class ScheduleReader(Protocol):
     async def get_scheduled_jobs(self) -> list[ScheduledJob]: ...
 
     async def get_outstanding_job_names(self) -> set[str]: ...
-
-
-@dataclass(frozen=True, slots=True)
-class DeadChain:
-    """A bootstrapped self-scheduling job with no run booked, or one long overdue."""
-
-    job_name: str
-    next_run: datetime | None
-
-    @property
-    def alert_type(self) -> str:
-        return f"dead_schedule_chain:{self.job_name}"
-
-    def describe(self) -> str:
-        if self.next_run is None:
-            return f"{self.job_name} has no scheduled run and is not running"
-        return f"{self.job_name} run due at {self.next_run:%Y-%m-%d %H:%M} UTC has not started"
 
 
 @dataclass(frozen=True, slots=True)
@@ -664,18 +639,7 @@ class HealthMonitor:
         }
         outstanding = await self.schedules.get_outstanding_job_names()
 
-        dead: list[DeadChain] = []
-        for job_name in sorted(expected):
-            base_name, _ = resolve_job_name(job_name)
-            if get_job_cron(base_name) is not None or job_name in outstanding:
-                continue
-            enabled = _JOB_ENABLED.get(base_name)
-            if enabled is not None and not enabled(self.settings):
-                continue
-            next_run = next_runs.get(job_name)
-            if next_run is None or next_run < now - SCHEDULE_OVERDUE_GRACE:
-                dead.append(DeadChain(job_name, next_run))
-        return dead
+        return dead_chains(expected, next_runs, outstanding, self.settings, now)
 
     async def purge_old_heartbeats(self) -> int:
         """Delete heartbeat rows older than the configured retention period.
