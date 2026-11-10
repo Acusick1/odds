@@ -251,15 +251,20 @@ class TestRehashLedger:
 
 
 class TestHoldoutLedgerHook:
-    ROW = json.dumps({"kind": "reserved", "issue": 1, "version": 1, "git_sha": "a" * 40})
-    OTHER = json.dumps({"kind": "reserved", "issue": 2, "version": 1, "git_sha": "a" * 40})
+    ROW = json.dumps(
+        {"kind": "reserved", "issue": 1, "market": "1x2", "version": 1, "git_sha": "a" * 40}
+    )
+    OTHER = json.dumps(
+        {"kind": "reserved", "issue": 2, "market": "1x2", "version": 1, "git_sha": "a" * 40}
+    )
 
     @pytest.fixture
     def repo(self, candidates_repo: Path) -> Path:
         directory = candidates_repo / "candidates"
         (directory / "holdout.jsonl").write_text(self.ROW + "\n")
-        (directory / "preregistrations").mkdir()
-        (directory / "preregistrations" / "1.yaml").write_text("issue: 1\n")
+        for folder in ("preregistrations", "selections"):
+            (directory / folder).mkdir()
+            (directory / folder / "1-1x2-v1.yaml").write_text("issue: 1\n")
         git(candidates_repo, "add", "candidates")
         git(candidates_repo, "commit", "-q", "-m", "base")
         return candidates_repo
@@ -301,5 +306,30 @@ class TestHoldoutLedgerHook:
         self, repo: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.chdir(repo)
-        (repo / "candidates" / "preregistrations" / "1.yaml").write_text("issue: 1\ncell: {}\n")
-        assert any("never changes" in e for e in self.errors(repo))
+        (repo / "candidates" / "preregistrations" / "1-1x2-v1.yaml").write_text("issue: 2\n")
+        assert any("changed" in e for e in self.errors(repo))
+
+    def test_changing_a_selection_fails(self, repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.chdir(repo)
+        (repo / "candidates" / "selections" / "1-1x2-v1.yaml").write_text("issue: 2\n")
+        assert any("selections" in e for e in self.errors(repo))
+
+    @pytest.mark.parametrize("folder", ["preregistrations", "selections"])
+    def test_renaming_or_deleting_a_file_fails(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch, folder: str
+    ) -> None:
+        monkeypatch.chdir(repo)
+        path = repo / "candidates" / folder / "1-1x2-v1.yaml"
+        path.rename(path.with_name("1-1x2-v2.yaml"))
+        assert any("deleted or renamed" in e for e in self.errors(repo))
+        path.with_name("1-1x2-v2.yaml").unlink()
+        assert any("deleted or renamed" in e for e in self.errors(repo))
+
+    def test_another_market_may_reserve_the_same_issue(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(repo)
+        other = json.dumps({"kind": "reserved", "issue": 1, "market": "totals", "version": 1})
+        with (repo / "candidates" / "holdout.jsonl").open("a") as f:
+            f.write(other + "\n")
+        assert self.errors(repo) == []

@@ -69,10 +69,12 @@ What is scored, in `odds_analytics.candidate_report`:
 
 Neither of these is a `*.yaml` candidate, so `odds_core.candidates.load_candidates` ignores them. The [holdout command](candidate-backtest.md#sealed-holdout) reads both.
 
-- `candidates/preregistrations/<issue>.yaml` is an `odds_analytics.holdout.Preregistration`: issue, name, version, rule, market, leagues, the grid (each parameter's values, decision times included), `selection_rule` (a link to the text of the rule that selects a cell, [#821's](https://github.com/Acusick1/odds/issues/821#issuecomment-6769611091) for the current round) and the selected `cell`, which has the grid's parameters and a value from each. It is added in one commit and never changed; a new version is a new file.
-- `candidates/holdout.jsonl` (`odds_analytics.holdout.HOLDOUT_LEDGER`) holds, per idea version, a `reserved` row (`odds_analytics.holdout.Reserved`: issue, version, git SHA, start time) and, on success, a `result` row (`odds_analytics.holdout.HoldoutResult`: the strategy, the cell, the windows, the run date, the git SHA, the pre-registration's commit and the pooled `odds_analytics.holdout.Gate`). `odds_analytics.holdout.load_ledger` reads it, rejecting a result without its reservation.
+- `candidates/preregistrations/<issue>-<market>-v<version>.yaml` is an `odds_analytics.holdout.Preregistration`: issue, name, version, rule, market, leagues, the grid (each parameter's values, decision times included) and `selection_rule`, a link to the text of the rule that selects a cell ([#821's](https://github.com/Acusick1/odds/issues/821#issuecomment-6769611091) for the current round). It has no cell. It is added in one commit, before the Odds API backfill reaches the database, and never changed.
+- `candidates/selections/<issue>-<market>-v<version>.yaml` is an `odds_analytics.holdout.Selection`: issue, market, version, the grid file's `grid_sha256` and the selected `cell`, which has the grid's parameters and a value from each. It is added in one commit after the grid file's and never changed; the backfill deadline does not apply to it.
+- The file name is the identity (`odds_analytics.holdout.stem`), so one issue has a pair per market and per version.
+- `candidates/holdout.jsonl` (`odds_analytics.holdout.HOLDOUT_LEDGER`) holds, per idea version, a `reserved` row (`odds_analytics.holdout.Reserved`: issue, market, version, git SHA, start time) and, on success, a `result` row (`odds_analytics.holdout.HoldoutResult`: the strategy, the cell, the windows, the run date, the git SHA, both files' commits and the pooled `odds_analytics.holdout.Gate`). `odds_analytics.holdout.load_ledger` reads it, rejecting a result without its reservation.
 
-The [version check](#version-check) fails a change that modifies or removes a committed ledger row, a version reserved twice, and any change to a pre-registration present at the base.
+The [version check](#version-check) fails a change that modifies or removes a committed ledger row, a version reserved twice, and any edit, rename or deletion of a pre-registration or selection file present at the base.
 
 ## Version check
 

@@ -7,8 +7,9 @@ candidates/rehashes.jsonl. The hook checks a row's shape only: the ledger is a r
 rehash command makes, and nothing here re-runs the replay it records.
 
 The holdout ledger, candidates/holdout.jsonl, is append-only: the base's rows must be the
-first rows of the working tree's, and no idea version may be reserved twice. A pre-registration
-under candidates/preregistrations/ that exists at the base may not change or be deleted.
+first rows of the working tree's, and no idea version may be reserved twice. A file under
+candidates/preregistrations/ or candidates/selections/ that exists at the base may not change,
+be renamed or be deleted.
 
 Compares candidates/*.yaml in the working tree with the base: --base, else the
 merge-base of HEAD with origin/main, else with main, else HEAD.
@@ -33,7 +34,7 @@ CANDIDATES_DIR = "candidates"
 UNVERSIONED_KEYS = frozenset({"status", "description"})
 REHASH_LEDGER = "rehashes.jsonl"
 HOLDOUT_LEDGER = "holdout.jsonl"
-PREREGISTRATIONS = "preregistrations"
+SEALED_DIRS = ("preregistrations", "selections")
 
 
 def _git(*args: str) -> str:
@@ -129,7 +130,7 @@ def _holdout_problems(base: str, root: Path) -> list[str]:
     before = shown.stdout.splitlines() if shown.returncode == 0 else []
     if now[: len(before)] != before:
         problems.append(f"{ledger}: a committed row was modified or removed; it is append-only")
-    reserved: set[tuple[Any, Any]] = set()
+    reserved: set[tuple[Any, Any, Any]] = set()
     for number, line in enumerate(now, start=1):
         try:
             row = json.loads(line)
@@ -137,17 +138,20 @@ def _holdout_problems(base: str, root: Path) -> list[str]:
             problems.append(f"{ledger}:{number}: not JSON")
             continue
         if isinstance(row, dict) and row.get("kind") == "reserved":
-            key = (row.get("issue"), row.get("version"))
+            key = (row.get("issue"), row.get("market"), row.get("version"))
             if key in reserved:
                 problems.append(
-                    f"{ledger}:{number}: issue {key[0]} version {key[1]} reserved twice"
+                    f"{ledger}:{number}: issue {key[0]} {key[1]} version {key[2]} reserved twice"
                 )
             reserved.add(key)
-    directory = f"{CANDIDATES_DIR}/{PREREGISTRATIONS}/"
-    for rel in _git("ls-tree", "-r", "--name-only", base, "--", directory).splitlines():
-        path = root / rel
-        if not path.exists() or path.read_text() != _git("show", f"{base}:{rel}"):
-            problems.append(f"{rel}: a pre-registration never changes; a change is a new version")
+    for folder in SEALED_DIRS:
+        listing = _git("ls-tree", "-r", "--name-only", base, "--", f"{CANDIDATES_DIR}/{folder}/")
+        for rel in listing.splitlines():
+            path = root / rel
+            if not path.exists():
+                problems.append(f"{rel}: deleted or renamed; a pre-registration file never moves")
+            elif path.read_text() != _git("show", f"{base}:{rel}"):
+                problems.append(f"{rel}: changed; a change is a new version with a new file")
     return problems
 
 

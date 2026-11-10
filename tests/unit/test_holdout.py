@@ -21,7 +21,14 @@ from odds_cli.main import app
 from odds_core.candidates import MechanicalCandidate
 from typer.testing import CliRunner
 
-from tests.unit.conftest import HOLDOUT_CELL, HOLDOUT_GRID, git_commit, preregistration
+from tests.unit.conftest import (
+    HOLDOUT_CELL,
+    HOLDOUT_GRID,
+    STEM,
+    git_commit,
+    preregistration,
+    selection,
+)
 from tests.unit.test_candidates import MECHANICAL
 
 RUNNER = CliRunner(env={"COLUMNS": "250"})
@@ -146,8 +153,20 @@ class TestSealInTheLibrary:
 
 
 def reservation_access(sport: str) -> holdout.HoldoutAccess:
+    """An access from a reservation made without any repository: through the module's token."""
     prereg = holdout.Preregistration.model_validate(preregistration())
-    reservation = holdout.Reservation(prereg, Path("."), "a" * 40, "b" * 40)
+    grid = Path("grid.yaml")
+    plan = holdout.Plan(
+        prereg,
+        holdout.Selection(
+            issue=610, market="1x2", version=1, grid_sha256="d" * 64, cell=HOLDOUT_CELL
+        ),
+        grid,
+        grid,
+    )
+    reservation = holdout.Reservation(
+        plan, Path("."), "a" * 40, "b" * 40, "c" * 40, holdout._ISSUER
+    )
     return reservation.access(sport)
 
 
@@ -189,7 +208,7 @@ class TestWindows:
 
 
 class TestPreregistration:
-    def test_binds_the_strategy_grid_and_selection_rule(self) -> None:
+    def test_the_grid_file_binds_strategy_grid_and_selection_rule_and_has_no_cell(self) -> None:
         prereg = holdout.Preregistration.model_validate(preregistration())
         assert (prereg.name, prereg.version, prereg.rule, prereg.market) == (
             "back-longest",
@@ -197,67 +216,152 @@ class TestPreregistration:
             "exchange_gap",
             "1x2",
         )
-        assert prereg.grid == HOLDOUT_GRID
+        assert prereg.grid == HOLDOUT_GRID and prereg.stem == STEM
+
+    def test_a_grid_file_with_a_cell_is_invalid(self) -> None:
+        with pytest.raises(ValueError, match="cell"):
+            holdout.Preregistration.model_validate(preregistration(cell=HOLDOUT_CELL))
 
     @pytest.mark.parametrize(
         "changes",
         [
-            {"cell": {**HOLDOUT_CELL, "threshold": 0.03}},
-            {"cell": {"threshold": 0.02}},
-            {"grid": {**HOLDOUT_GRID, "extra": [1]}},
             {"selection_rule": "see the issue"},
             {"leagues": ["soccer_spain_la_liga", "soccer_spain_la_liga"]},
+            {"grid": {**HOLDOUT_GRID, "threshold": []}},
             {"version": "2"},
+            {"market": "1X2 "},
             {"unknown": 1},
         ],
     )
-    def test_rejects_an_incomplete_or_inconsistent_file(self, changes: dict[str, object]) -> None:
+    def test_rejects_an_incomplete_or_inconsistent_grid_file(
+        self, changes: dict[str, object]
+    ) -> None:
         with pytest.raises(ValueError):
             holdout.Preregistration.model_validate(preregistration(**changes))
 
+
+class TestPlan:
+    def plan(self, directory: Path) -> holdout.Plan:
+        return holdout.load_plan(directory / "selections" / f"{STEM}.yaml", directory)
+
+    def rewrite_selection(self, directory: Path, **changes: object) -> Path:
+        grid = directory / "preregistrations" / f"{STEM}.yaml"
+        path = directory / "selections" / f"{STEM}.yaml"
+        path.write_text(yaml.safe_dump(selection(grid, **changes)))
+        return path
+
+    def test_loads_a_selection_with_its_grid(self, holdout_repo: Path) -> None:
+        plan = self.plan(holdout_repo)
+        assert plan.cell == HOLDOUT_CELL and plan.prereg.grid == HOLDOUT_GRID
+
+    @pytest.mark.parametrize(
+        "cell",
+        [
+            {**HOLDOUT_CELL, "threshold": 0.03},
+            {"threshold": 0.02},
+            {**HOLDOUT_CELL, "extra": 1},
+            {**HOLDOUT_CELL, "minutes_before_kickoff": [30]},
+        ],
+    )
+    def test_a_cell_outside_the_grid_is_refused(
+        self, holdout_repo: Path, cell: dict[str, object]
+    ) -> None:
+        self.rewrite_selection(holdout_repo, cell=cell)
+        with pytest.raises(holdout.HoldoutRefused):
+            self.plan(holdout_repo)
+
+    def test_a_selection_of_another_grid_file_is_refused(self, holdout_repo: Path) -> None:
+        self.rewrite_selection(holdout_repo, grid_sha256="0" * 64)
+        with pytest.raises(holdout.HoldoutRefused, match="another grid file"):
+            self.plan(holdout_repo)
+
+    def test_files_are_named_by_issue_market_and_version(self, holdout_repo: Path) -> None:
+        old = holdout_repo / "selections" / f"{STEM}.yaml"
+        wrong = holdout_repo / "selections" / "610.yaml"
+        wrong.write_text(old.read_text())
+        with pytest.raises(holdout.HoldoutRefused, match="must be named 610-1x2-v1.yaml"):
+            holdout.load_plan(wrong, holdout_repo)
+
+    def test_a_second_market_and_a_second_version_have_their_own_files(
+        self, holdout_repo: Path
+    ) -> None:
+        for market, version in (("totals", 1), ("1x2", 2)):
+            stem = f"610-{market}-v{version}"
+            grid = holdout_repo / "preregistrations" / f"{stem}.yaml"
+            grid.write_text(yaml.safe_dump(preregistration(market=market, version=version)))
+            chosen = holdout_repo / "selections" / f"{stem}.yaml"
+            chosen.write_text(yaml.safe_dump(selection(grid, market=market, version=version)))
+            assert holdout.load_plan(chosen, holdout_repo).prereg.stem == stem
+
     def test_a_league_without_a_window_is_refused(self, holdout_repo: Path) -> None:
-        path = holdout_repo / "preregistrations" / "610.yaml"
-        path.write_text(yaml.safe_dump(preregistration(leagues=["mlb"])))
+        grid = holdout_repo / "preregistrations" / f"{STEM}.yaml"
+        grid.write_text(yaml.safe_dump(preregistration(leagues=["mlb"])))
+        self.rewrite_selection(holdout_repo)
         with pytest.raises(holdout.HoldoutRefused, match="no sealed window"):
-            holdout.load_preregistration(path, holdout_repo)
+            self.plan(holdout_repo)
 
 
-class TestPreregistrationCommit:
-    def commit_of(self, directory: Path, backfill: datetime | None = None) -> str:
-        path = directory / "preregistrations" / "610.yaml"
-        return holdout.preregistration_commit(path, directory.parent, backfill)
+class TestCommittedOnce:
+    def grid(self, directory: Path) -> Path:
+        return directory / "preregistrations" / f"{STEM}.yaml"
+
+    def commit_of(self, path: Path, backfill: datetime | None = None) -> str:
+        return holdout.committed_once(path, path.parents[2], backfill)
 
     def test_one_commit_before_the_backfill_passes(self, holdout_repo: Path) -> None:
-        sha = self.commit_of(holdout_repo, datetime.now(UTC) + timedelta(days=1))
-        assert sha == git(holdout_repo.parent, "rev-parse", "HEAD")
+        past = datetime.now(UTC) + timedelta(days=1)
+        assert self.commit_of(self.grid(holdout_repo), past) == git(
+            holdout_repo.parent, "rev-parse", "HEAD~1"
+        )
 
     def test_no_backfill_yet_passes(self, holdout_repo: Path) -> None:
-        self.commit_of(holdout_repo, None)
+        self.commit_of(self.grid(holdout_repo), None)
 
-    def test_committed_after_the_first_backfill_snapshot_is_refused(
+    def test_the_grid_committed_after_the_first_backfill_snapshot_is_refused(
         self, holdout_repo: Path
     ) -> None:
         with pytest.raises(holdout.HoldoutRefused, match="not before the first backfill"):
-            self.commit_of(holdout_repo, datetime.now(UTC) - timedelta(days=1))
+            self.commit_of(self.grid(holdout_repo), datetime.now(UTC) - timedelta(days=1))
 
     def test_uncommitted_is_refused(self, holdout_repo: Path) -> None:
-        other = holdout_repo / "preregistrations" / "611.yaml"
+        other = holdout_repo / "preregistrations" / "611-1x2-v1.yaml"
         other.write_text("issue: 611\n")
         with pytest.raises(holdout.HoldoutRefused, match="not committed"):
-            holdout.preregistration_commit(other, holdout_repo.parent, None)
+            self.commit_of(other)
 
     def test_edited_since_commit_is_refused(self, holdout_repo: Path) -> None:
-        path = holdout_repo / "preregistrations" / "610.yaml"
-        path.write_text(path.read_text().replace("0.02", "0.05"))
+        path = self.grid(holdout_repo)
+        path.write_text(path.read_text().replace("0.02", "0.04"))
         with pytest.raises(holdout.HoldoutRefused, match="differs from its committed"):
-            self.commit_of(holdout_repo)
+            self.commit_of(path)
 
     def test_a_second_commit_touching_it_is_refused(self, holdout_repo: Path) -> None:
-        path = holdout_repo / "preregistrations" / "610.yaml"
-        path.write_text(yaml.safe_dump(preregistration(cell={**HOLDOUT_CELL, "threshold": 0.05})))
+        path = self.grid(holdout_repo)
+        path.write_text(path.read_text().replace("0.02", "0.04"))
         git_commit(holdout_repo.parent)
         with pytest.raises(holdout.HoldoutRefused, match="exactly one commit"):
-            self.commit_of(holdout_repo)
+            self.commit_of(path)
+
+    def test_a_rename_does_not_hide_the_earlier_history(self, holdout_repo: Path) -> None:
+        root = holdout_repo.parent
+        path = self.grid(holdout_repo)
+        moved = path.with_name("old.yaml")
+        git(root, "mv", str(path), str(moved))
+        moved.write_text(moved.read_text() + "\n# edited\n")
+        git_commit(root)
+        git(root, "mv", str(moved), str(path))
+        git_commit(root)
+        with pytest.raises(holdout.HoldoutRefused, match="exactly one commit"):
+            self.commit_of(path)
+
+    def test_a_plain_rename_to_a_fresh_name_keeps_its_history(self, holdout_repo: Path) -> None:
+        root = holdout_repo.parent
+        path = self.grid(holdout_repo)
+        fresh = path.with_name("611-1x2-v1.yaml")
+        git(root, "mv", str(path), str(fresh))
+        git_commit(root)
+        with pytest.raises(holdout.HoldoutRefused, match="exactly one commit"):
+            self.commit_of(fresh)
 
 
 class TestGate:
@@ -285,16 +389,19 @@ class TestGate:
 
 
 class TestLedger:
-    def reserve(self, directory: Path, **changes: object) -> holdout.Reservation:
-        prereg = holdout.Preregistration.model_validate(preregistration(**changes))
-        path = directory / "preregistrations" / "610.yaml"
+    def reserve(self, directory: Path) -> holdout.Reservation:
+        plan = holdout.load_plan(directory / "selections" / f"{STEM}.yaml", directory)
         with holdout.exclusive_lock(directory.parent):
-            return holdout.reserve(prereg, path, directory, None, NOW)
+            return holdout.reserve(plan, directory, None, NOW)
 
     def test_reserving_writes_a_reserved_row(self, holdout_repo: Path) -> None:
         self.reserve(holdout_repo)
         (row,) = holdout.load_ledger(holdout_repo)
-        assert isinstance(row, holdout.Reserved) and (row.issue, row.version) == (610, 1)
+        assert isinstance(row, holdout.Reserved) and (row.issue, row.market, row.version) == (
+            610,
+            "1x2",
+            1,
+        )
         assert row.git_sha == git(holdout_repo.parent, "rev-parse", "HEAD")
 
     def test_a_second_reservation_is_refused_until_the_first_is_committed(
@@ -333,7 +440,7 @@ class TestLedger:
         (holdout_repo / "holdout.jsonl").write_text("")
         git_commit(root)
         with pytest.raises(holdout.HoldoutRefused, match="extend"):
-            self.reserve(holdout_repo, version=2)
+            self.reserve(holdout_repo)
 
     def test_rows_validate_and_a_result_needs_its_reservation(self) -> None:
         with pytest.raises(ValueError, match="without one reservation"):
@@ -343,13 +450,41 @@ class TestLedger:
         directory = Path(__file__).resolve().parents[2] / "candidates"
         assert (directory / holdout.HOLDOUT_LEDGER).exists()
         holdout.load_ledger(directory)
-        for path in (directory / holdout.PREREGISTRATION_DIR).glob("*.yaml"):
-            holdout.load_preregistration(path, directory)
+        for path in (directory / holdout.SELECTION_DIR).glob("*.yaml"):
+            holdout.load_plan(path, directory)
+
+    def test_sibling_worktrees_cannot_reserve_the_same_version(
+        self, holdout_repo: Path, tmp_path: Path
+    ) -> None:
+        root = holdout_repo.parent
+        sibling = tmp_path / "sibling"
+        git(root, "worktree", "add", "--detach", str(sibling), "HEAD")
+        self.reserve(holdout_repo)
+        with pytest.raises(holdout.HoldoutRefused, match="already reserved"):
+            self.reserve(sibling / "candidates")
+        assert holdout.load_ledger(sibling / "candidates") == []
+
+    def test_a_spent_version_stays_spent_after_the_ledger_row_is_lost(
+        self, holdout_repo: Path
+    ) -> None:
+        self.reserve(holdout_repo)
+        subprocess.run(
+            ["git", "checkout", "--", "candidates/holdout.jsonl"],
+            cwd=holdout_repo.parent,
+            check=True,
+        )
+        with pytest.raises(holdout.HoldoutRefused, match="already reserved"):
+            self.reserve(holdout_repo)
+
+    def test_a_reservation_cannot_be_constructed_directly(self) -> None:
+        with pytest.raises(holdout.HoldoutRefused, match="issued by reserve"):
+            holdout.Reservation(None, Path("."), "a" * 40, "b" * 40, "c" * 40, object())  # type: ignore[arg-type]
 
 
 def result_row() -> holdout.HoldoutResult:
     return holdout.HoldoutResult(
         issue=610,
+        market="1x2",
         version=1,
         name="back-longest",
         rule="exchange_gap",
@@ -359,6 +494,7 @@ def result_row() -> holdout.HoldoutResult:
         ran_on=date(2026, 11, 1),
         git_sha="a" * 40,
         preregistration_commit="b" * 40,
+        selection_commit="c" * 40,
         result=holdout.gate(None),
     )
 
@@ -386,7 +522,7 @@ class TestRun:
         return calls
 
     def run(self, directory: Path) -> holdout_run.HoldoutRun:
-        path = directory / "preregistrations" / "610.yaml"
+        path = directory / "selections" / f"{STEM}.yaml"
         return asyncio.run(holdout_run.run_holdout(None, path, directory, NOW))  # type: ignore[arg-type]
 
     def test_replays_each_leagues_window_with_access_and_pools_one_gate(
@@ -401,7 +537,8 @@ class TestRun:
         reserved, result = holdout.load_ledger(holdout_repo)
         assert isinstance(reserved, holdout.Reserved) and isinstance(result, holdout.HoldoutResult)
         assert result.result.bets == 80 and result.cell == HOLDOUT_CELL
-        assert result.preregistration_commit == git(holdout_repo.parent, "rev-parse", "HEAD")
+        assert result.preregistration_commit == git(holdout_repo.parent, "rev-parse", "HEAD~1")
+        assert result.selection_commit == git(holdout_repo.parent, "rev-parse", "HEAD")
         assert done.row == result
 
     def test_a_second_run_is_refused_without_reading_any_holdout_data(
@@ -435,7 +572,8 @@ class TestRun:
     def test_a_bad_cell_params_cost_no_run(
         self, holdout_repo: Path, collected: list[tuple[str, date, date, bool]]
     ) -> None:
-        path = holdout_repo / "preregistrations" / "610.yaml"
+        path = holdout_repo / "selections" / f"{STEM}.yaml"
+        grid_file = holdout_repo / "preregistrations" / f"{STEM}.yaml"
         bad = {
             "threshold": 0.02,
             "minutes_before_kickoff": [60],
@@ -443,7 +581,8 @@ class TestRun:
             "x": 1,
         }
         grid = {**HOLDOUT_GRID, "x": [1]}
-        path.write_text(yaml.safe_dump(preregistration(cell=bad, grid=grid)))
+        grid_file.write_text(yaml.safe_dump(preregistration(grid=grid)))
+        path.write_text(yaml.safe_dump(selection(grid_file, cell=bad)))
         git_commit(holdout_repo.parent)
         with pytest.raises(holdout.HoldoutRefused):
             asyncio.run(holdout_run.run_holdout(None, path, holdout_repo, NOW))  # type: ignore[arg-type]
@@ -472,7 +611,7 @@ class TestRun:
 
         monkeypatch.setattr("odds_cli.commands.candidates.candidates_dir", lambda: holdout_repo)
         monkeypatch.setattr("odds_cli.commands.candidates.async_session_maker", session)
-        path = str(holdout_repo / "preregistrations" / "610.yaml")
+        path = str(holdout_repo / "selections" / f"{STEM}.yaml")
 
         first = RUNNER.invoke(app, ["candidates", "holdout", path])
         assert first.exit_code == 0, first.stdout

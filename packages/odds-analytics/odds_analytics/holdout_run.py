@@ -28,11 +28,11 @@ from odds_analytics.candidate_report import (
 from odds_analytics.holdout import (
     HoldoutRefused,
     HoldoutResult,
-    Preregistration,
+    Plan,
     Window,
     exclusive_lock,
     gate,
-    load_preregistration,
+    load_plan,
     reserve,
     windows_of,
 )
@@ -50,8 +50,9 @@ class HoldoutRun:
     leagues: list[LeagueRun]
 
 
-def league_draft(prereg: Preregistration, sport: str, today: date) -> MechanicalCandidate:
+def league_draft(plan: Plan, sport: str, today: date) -> MechanicalCandidate:
     """The pre-registered strategy as a draft of one league, with the selected cell's params."""
+    prereg = plan.prereg
     return MechanicalCandidate.model_validate(
         {
             "name": prereg.name,
@@ -64,7 +65,7 @@ def league_draft(prereg: Preregistration, sport: str, today: date) -> Mechanical
             "start_date": today,
             "status": CandidateStatus.ACTIVE,
             "rule": prereg.rule,
-            "params": prereg.cell,
+            "params": plan.cell,
         }
     )
 
@@ -89,15 +90,16 @@ async def earliest_backfill(session: AsyncSession) -> datetime | None:
 async def run_holdout(
     session: AsyncSession, path: Path, directory: Path, now: datetime | None = None
 ) -> HoldoutRun:
-    """Run the pre-registration at ``path`` (in ``directory/preregistrations``) once.
+    """Run the selection at ``path`` (in ``directory/selections``) on its grid, once.
 
     Everything that can be checked without sealed data is checked first, so a mistake costs no
     run. The ``reserved`` ledger row then consumes the version: an error after it leaves the row
     and the run is spent.
     """
     now = now or datetime.now(UTC)
-    prereg = load_preregistration(path, directory)
-    drafts = {sport: league_draft(prereg, sport, now.date()) for sport in prereg.leagues}
+    plan = load_plan(path, directory)
+    prereg = plan.prereg
+    drafts = {sport: league_draft(plan, sport, now.date()) for sport in prereg.leagues}
     for draft in drafts.values():
         try:
             resolve_rule(draft)
@@ -105,7 +107,7 @@ async def run_holdout(
             raise HoldoutRefused(str(exc)) from exc
     backfill_start = await earliest_backfill(session)
     with exclusive_lock(directory.parent):
-        reservation = reserve(prereg, path, directory, backfill_start, now)
+        reservation = reserve(plan, directory, backfill_start, now)
         replays: list[tuple[Window, Replayed]] = []
         for sport, draft in drafts.items():
             (window,) = windows_of(sport)

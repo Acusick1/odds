@@ -448,11 +448,15 @@ def backtest(
 
 @app.command("holdout")
 def holdout_command(
-    preregistration: Annotated[
-        Path, typer.Argument(help="candidates/preregistrations/<issue>.yaml, committed")
+    selection: Annotated[
+        Path,
+        typer.Argument(help="candidates/selections/<issue>-<market>-v<version>.yaml, committed"),
     ],
 ) -> None:
     """Run a pre-registered idea's selected cell once on the sealed holdout and print the gate.
+
+    The argument is the selection file; its grid file, `candidates/preregistrations/` of the
+    same name, is read with it.
 
     The only command that replays the holdout. It reserves the idea's version in
     candidates/holdout.jsonl before reading any holdout data: a failure after that leaves the
@@ -461,7 +465,7 @@ def holdout_command(
 
     async def run() -> holdout_run.HoldoutRun:
         async with async_session_maker() as session:
-            return await holdout_run.run_holdout(session, preregistration, candidates_dir())
+            return await holdout_run.run_holdout(session, selection, candidates_dir())
 
     try:
         done = asyncio.run(run())

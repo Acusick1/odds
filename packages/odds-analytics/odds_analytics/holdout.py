@@ -9,6 +9,8 @@ imports nothing from the replay, which imports it, and lies outside the rule imp
 from __future__ import annotations
 
 import fcntl
+import hashlib
+import json
 import os
 import subprocess
 from collections.abc import Iterator
@@ -34,7 +36,10 @@ from odds_analytics.candidate_report import Checkpoint
 
 HOLDOUT_LEDGER = "holdout.jsonl"
 PREREGISTRATION_DIR = "preregistrations"
+SELECTION_DIR = "selections"
+SPENT_FILE = "odds-holdout-spent.jsonl"
 COMMIT_PATTERN = r"^[0-9a-f]{40}$"
+MARKET_PATTERN = r"^[a-z0-9_]+$"
 SELECTION_RULE_PATTERN = r"^https://github\.com/[^/\s]+/[^/\s]+/(issues|pull)/[0-9]+#\S+$"
 # Below this many holdout bets the gate asks only that the cell is not killed, and flags it.
 MIN_GATE_BETS = 30
@@ -136,11 +141,16 @@ def require_clear(sport: str, start: date, end: date, access: HoldoutAccess | No
     )
 
 
+def stem(issue: int, market: str, version: int) -> str:
+    """The identity of one idea family's version, and the name of its files."""
+    return f"{issue}-{market}-v{version}"
+
+
 class Preregistration(BaseModel):
-    """What an idea fixes before the backfill lands and before its one holdout run: the
-    strategy (name, version, rule, market, leagues), its whole grid, how the cell was to be
-    selected (a link to the rule's text) and the selected cell. A file
-    ``preregistrations/<issue>.yaml`` added in one commit and never changed."""
+    """The frozen grid of an idea's family and version: its strategy (name, rule, market,
+    leagues), every parameter's values (decision times included) and a link to the text of the
+    rule that selects a cell. It holds no cell. A file ``preregistrations/<issue>-<market>-v<version>.yaml``
+    added in one commit, before the backfill lands, and never changed."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -148,11 +158,10 @@ class Preregistration(BaseModel):
     name: str = Field(pattern=r"^[a-z0-9]+(-[a-z0-9]+)*$")
     version: Annotated[int, Field(strict=True, gt=0)]
     rule: str = Field(min_length=1)
-    market: str = Field(min_length=1)
+    market: str = Field(pattern=MARKET_PATTERN)
     leagues: list[str] = Field(min_length=1)
     grid: dict[str, list[object]] = Field(min_length=1)
     selection_rule: str = Field(pattern=SELECTION_RULE_PATTERN)
-    cell: dict[str, object] = Field(min_length=1)
 
     @model_validator(mode="after")
     def _consistent(self) -> Preregistration:
@@ -160,16 +169,43 @@ class Preregistration(BaseModel):
             raise ValueError("a league is listed twice")
         if any(not values for values in self.grid.values()):
             raise ValueError("a grid parameter has no values")
-        if self.cell.keys() != self.grid.keys():
-            raise ValueError(
-                f"the cell's parameters {sorted(self.cell)} are not the grid's {sorted(self.grid)}"
-            )
-        for key, value in self.cell.items():
-            if value not in self.grid[key]:
-                raise ValueError(
-                    f"the cell's {key}={value!r} is not in the grid {self.grid[key]!r}"
-                )
         return self
+
+    @property
+    def stem(self) -> str:
+        return stem(self.issue, self.market, self.version)
+
+
+class Selection(BaseModel):
+    """The cell the pre-registered selection rule picked on development data, bound to the
+    grid file by its sha256. A file ``selections/<issue>-<market>-v<version>.yaml`` added in
+    one commit after the grid's and never changed; no deadline applies to it."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    issue: Annotated[int, Field(strict=True, gt=0)]
+    market: str = Field(pattern=MARKET_PATTERN)
+    version: Annotated[int, Field(strict=True, gt=0)]
+    grid_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    cell: dict[str, object] = Field(min_length=1)
+
+    @property
+    def stem(self) -> str:
+        return stem(self.issue, self.market, self.version)
+
+
+@dataclass(frozen=True)
+class Plan:
+    """A grid file and the selection of its cell, checked against each other."""
+
+    prereg: Preregistration
+    selection: Selection
+    grid_path: Path
+    selection_path: Path
+
+    @property
+    def cell(self) -> dict[str, object]:
+        return self.selection.cell
 
 
 class GateVerdict(StrEnum):
@@ -227,19 +263,21 @@ class Reserved(BaseModel):
 
     kind: Literal["reserved"] = "reserved"
     issue: Annotated[int, Field(strict=True, gt=0)]
+    market: str = Field(pattern=MARKET_PATTERN)
     version: Annotated[int, Field(strict=True, gt=0)]
     git_sha: str = Field(pattern=COMMIT_PATTERN)
     started_at: datetime
 
 
 class HoldoutResult(BaseModel):
-    """The pooled result of a reserved run. ``git_sha`` is the code that ran and
-    ``preregistration_commit`` the one commit that added the pre-registration."""
+    """The pooled result of a reserved run. ``git_sha`` is the code that ran;
+    ``preregistration_commit`` and ``selection_commit`` the one commit of each file."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     kind: Literal["result"] = "result"
     issue: Annotated[int, Field(strict=True, gt=0)]
+    market: str = Field(pattern=MARKET_PATTERN)
     version: Annotated[int, Field(strict=True, gt=0)]
     name: str = Field(min_length=1)
     rule: str = Field(min_length=1)
@@ -249,6 +287,7 @@ class HoldoutResult(BaseModel):
     ran_on: date
     git_sha: str = Field(pattern=COMMIT_PATTERN)
     preregistration_commit: str = Field(pattern=COMMIT_PATTERN)
+    selection_commit: str = Field(pattern=COMMIT_PATTERN)
     result: Gate
 
 
@@ -260,19 +299,17 @@ def parse_ledger(text: str) -> list[Reserved | HoldoutResult]:
     """The rows of a ledger, or ``ValueError``: each idea version has one ``reserved`` row, and
     at most one ``result`` row, after it."""
     rows = [_row_adapter.validate_json(line) for line in text.splitlines() if line.strip()]
-    reserved: set[tuple[int, int]] = set()
-    resulted: set[tuple[int, int]] = set()
+    reserved: set[str] = set()
+    resulted: set[str] = set()
     for row in rows:
-        key = (row.issue, row.version)
+        key = stem(row.issue, row.market, row.version)
         if isinstance(row, Reserved):
             if key in reserved:
-                raise ValueError(f"issue {key[0]} version {key[1]} is reserved twice")
+                raise ValueError(f"{key} is reserved twice")
             reserved.add(key)
         else:
             if key not in reserved or key in resulted:
-                raise ValueError(
-                    f"issue {key[0]} version {key[1]}: a result without one reservation"
-                )
+                raise ValueError(f"{key}: a result without one reservation")
             resulted.add(key)
     return rows
 
@@ -312,41 +349,77 @@ def exclusive_lock(root: Path) -> Iterator[None]:
         yield
 
 
-def load_preregistration(path: Path, directory: Path) -> Preregistration:
-    relative = f"{directory.name}/{PREREGISTRATION_DIR}"
-    if path.resolve().parent != (directory / PREREGISTRATION_DIR).resolve():
-        raise HoldoutRefused(f"{path} is not a file in {relative}/")
+def _common_dir(root: Path) -> Path:
+    return Path(_git_out(root, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+
+
+def _load_file(path: Path, directory: Path, folder: str, model: type[BaseModel]) -> BaseModel:
+    if path.resolve().parent != (directory / folder).resolve():
+        raise HoldoutRefused(f"{path} is not a file in {directory.name}/{folder}/")
     try:
-        prereg = Preregistration.model_validate(yaml.safe_load(path.read_text()))
+        return model.model_validate(yaml.safe_load(path.read_text()))
     except (OSError, ValueError, yaml.YAMLError) as exc:
         raise HoldoutRefused(f"{path} is invalid: {exc}") from exc
-    if path.stem != str(prereg.issue):
-        raise HoldoutRefused(f"{path.name} must be named {prereg.issue}.yaml")
+
+
+def check_cell(prereg: Preregistration, cell: dict[str, object]) -> None:
+    """``ValueError`` unless ``cell`` has the grid's parameters and a grid value for each."""
+    if cell.keys() != prereg.grid.keys():
+        raise ValueError(
+            f"the cell's parameters {sorted(cell)} are not the grid's {sorted(prereg.grid)}"
+        )
+    for key, value in cell.items():
+        if value not in prereg.grid[key]:
+            raise ValueError(f"the cell's {key}={value!r} is not in the grid {prereg.grid[key]!r}")
+
+
+def load_plan(selection_path: Path, directory: Path) -> Plan:
+    """The selection at ``selection_path`` and the grid file of its identity, checked: file
+    names are the identity, the selection's ``grid_sha256`` is the grid file's content, the cell
+    belongs to the grid and every league has a sealed window."""
+    selection = _load_file(selection_path, directory, SELECTION_DIR, Selection)
+    assert isinstance(selection, Selection)  # noqa: S101
+    if selection_path.name != f"{selection.stem}.yaml":
+        raise HoldoutRefused(f"{selection_path.name} must be named {selection.stem}.yaml")
+    grid_path = directory / PREREGISTRATION_DIR / f"{selection.stem}.yaml"
+    if not grid_path.is_file():
+        raise HoldoutRefused(f"no pre-registration {PREREGISTRATION_DIR}/{grid_path.name}")
+    prereg = _load_file(grid_path, directory, PREREGISTRATION_DIR, Preregistration)
+    assert isinstance(prereg, Preregistration)  # noqa: S101
+    if prereg.stem != selection.stem:
+        raise HoldoutRefused(f"{grid_path.name} is for {prereg.stem}, not {selection.stem}")
+    if hashlib.sha256(grid_path.read_bytes()).hexdigest() != selection.grid_sha256:
+        raise HoldoutRefused(f"{selection_path.name} was selected from another grid file")
+    try:
+        check_cell(prereg, selection.cell)
+    except ValueError as exc:
+        raise HoldoutRefused(f"{selection_path.name}: {exc}") from exc
     for league in prereg.leagues:
         if not windows_of(league):
             raise HoldoutRefused(f"{league} has no sealed window, so it has no holdout to run")
-    return prereg
+    return Plan(prereg, selection, grid_path, selection_path)
 
 
-def preregistration_commit(path: Path, root: Path, earliest_backfill: datetime | None) -> str:
-    """The one commit that added ``path``, after checking it is committed, unchanged and older
-    than ``earliest_backfill``, the first Odds API backfill snapshot the database holds."""
+def committed_once(path: Path, root: Path, before: datetime | None = None) -> str:
+    """The one commit that added ``path``, after checking it is committed, unchanged, has one
+    commit in its history (renames followed, so a rename cannot hide edits) and, when
+    ``before`` is given, was committed before it."""
     relative = path.resolve().relative_to(root.resolve()).as_posix()
     if _git(root, "cat-file", "-e", f"HEAD:{relative}").returncode != 0:
         raise HoldoutRefused(f"{relative} is not committed")
     if _git(root, "diff", "--quiet", "HEAD", "--", relative).returncode != 0:
         raise HoldoutRefused(f"{relative} differs from its committed version")
-    log = _git_out(root, "log", "--format=%H %cI", "HEAD", "--", relative).splitlines()
+    log = _git_out(root, "log", "--follow", "--format=%H %cI", "HEAD", "--", relative).splitlines()
     if len(log) != 1:
         raise HoldoutRefused(
             f"{relative} must be touched by exactly one commit, it has {len(log)}: a change "
-            "to a pre-registration is a new version with a new file"
+            "is a new version with a new file"
         )
     commit, committed = log[0].split(" ")
-    if earliest_backfill is not None and datetime.fromisoformat(committed) >= earliest_backfill:
+    if before is not None and datetime.fromisoformat(committed) >= before:
         raise HoldoutRefused(
             f"{relative} was committed {committed}, not before the first backfill snapshot "
-            f"({earliest_backfill.isoformat()}), so its grid was not frozen first"
+            f"({before.isoformat()}), so its grid was not frozen first"
         )
     return commit
 
@@ -356,9 +429,9 @@ def _committed_ledger(root: Path, directory: Path, ref: str) -> str | None:
     return done.stdout if done.returncode == 0 else None
 
 
-def require_committed_ledger(root: Path, directory: Path, issue: int, version: int) -> None:
+def require_committed_ledger(root: Path, directory: Path, key: str) -> None:
     """The tree is clean, the ledger at HEAD extends the one at ``origin/main`` (when there is
-    one) and holds no row for ``issue`` and ``version``."""
+    one) and holds no row for the identity ``key``."""
     if _git_out(root, "status", "--porcelain", "--untracked-files=no"):
         raise HoldoutRefused("tracked files have uncommitted changes, so HEAD is not what runs")
     committed = _committed_ledger(root, directory, "HEAD")
@@ -372,43 +445,67 @@ def require_committed_ledger(root: Path, directory: Path, issue: int, version: i
         rows = parse_ledger(committed)
     except (ValueError, ValidationError) as exc:
         raise HoldoutRefused(f"the committed ledger is invalid: {exc}") from exc
-    if any((r.issue, r.version) == (issue, version) for r in rows):
-        raise HoldoutRefused(
-            f"issue {issue} version {version} already ran on the holdout; a new version "
-            "needs a new pre-registration"
+    if any(stem(r.issue, r.market, r.version) == key for r in rows):
+        raise HoldoutRefused(f"{key} already ran on the holdout; a new version needs a new grid")
+
+
+def _spend(root: Path, key: str, sha: str, started_at: datetime) -> None:
+    """Record ``key`` as spent in state every worktree shares, synced before anything else is
+    written. Under the lock, so two checkouts cannot both pass the check."""
+    path = _common_dir(root) / SPENT_FILE
+    spent = path.read_text().splitlines() if path.exists() else []
+    if key in (json.loads(line)["key"] for line in spent if line.strip()):
+        raise HoldoutRefused(f"{key} was already reserved by a run in this repository")
+    with path.open("a") as handle:
+        handle.write(
+            json.dumps({"key": key, "git_sha": sha, "started_at": started_at.isoformat()}) + "\n"
         )
+        handle.flush()
+        os.fsync(handle.fileno())
 
 
 @dataclass(frozen=True)
 class Reservation:
-    """The idea's one run, reserved in the ledger. Holds the lock until closed by the caller's
-    ``exclusive_lock`` block."""
+    """The idea's one run, reserved in the ledger and in the repository's shared spent file.
 
-    prereg: Preregistration
+    Issued by ``reserve`` only: the constructor refuses any other token. That is a guard
+    against an accidental holdout read, not enforcement, since code that wants to read the
+    holdout can read the database or forge the token."""
+
+    plan: Plan
     directory: Path
     git_sha: str
     preregistration_commit: str
+    selection_commit: str
+    _token: object = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if self._token is not _ISSUER:
+            raise HoldoutRefused("a Reservation is issued by reserve() only")
 
     def access(self, sport: str) -> HoldoutAccess:
         windows = windows_of(sport)
-        if sport not in self.prereg.leagues or len(windows) != 1:
+        if sport not in self.plan.prereg.leagues or len(windows) != 1:
             raise HoldoutRefused(f"{sport} is not a league of this pre-registration's holdout")
         return HoldoutAccess(windows[0], _ISSUER)
 
     def record(
         self, rule_sha: str, windows: list[Window], ran_on: date, result: Gate
     ) -> HoldoutResult:
+        prereg = self.plan.prereg
         row = HoldoutResult(
-            issue=self.prereg.issue,
-            version=self.prereg.version,
-            name=self.prereg.name,
-            rule=self.prereg.rule,
+            issue=prereg.issue,
+            market=prereg.market,
+            version=prereg.version,
+            name=prereg.name,
+            rule=prereg.rule,
             rule_sha256=rule_sha,
-            cell=self.prereg.cell,
+            cell=self.plan.cell,
             windows=windows,
             ran_on=ran_on,
             git_sha=self.git_sha,
             preregistration_commit=self.preregistration_commit,
+            selection_commit=self.selection_commit,
             result=result,
         )
         _append(self.directory, row)
@@ -416,20 +513,29 @@ class Reservation:
 
 
 def reserve(
-    prereg: Preregistration,
-    path: Path,
+    plan: Plan,
     directory: Path,
     earliest_backfill: datetime | None,
     started_at: datetime,
 ) -> Reservation:
-    """Check the pre-registration and the committed ledger, then append and sync the
-    ``reserved`` row. Call inside ``exclusive_lock`` and before any sealed data is read."""
+    """Check both files and the committed ledger, then spend the version in the shared spent
+    file and append and sync the ``reserved`` ledger row. Call inside ``exclusive_lock`` and
+    before any sealed data is read. A crash after the spend leaves the version spent."""
     root = directory.parent
-    commit = preregistration_commit(path, root, earliest_backfill)
-    require_committed_ledger(root, directory, prereg.issue, prereg.version)
+    prereg = plan.prereg
+    grid_commit = committed_once(plan.grid_path, root, earliest_backfill)
+    selection_commit = committed_once(plan.selection_path, root)
+    require_committed_ledger(root, directory, prereg.stem)
     sha = _git_out(root, "rev-parse", "HEAD")
+    _spend(root, prereg.stem, sha, started_at)
     _append(
         directory,
-        Reserved(issue=prereg.issue, version=prereg.version, git_sha=sha, started_at=started_at),
+        Reserved(
+            issue=prereg.issue,
+            market=prereg.market,
+            version=prereg.version,
+            git_sha=sha,
+            started_at=started_at,
+        ),
     )
-    return Reservation(prereg, directory, sha, commit)
+    return Reservation(plan, directory, sha, grid_commit, selection_commit, _ISSUER)
