@@ -13,22 +13,22 @@ from dataclasses import dataclass
 from typing import Any
 
 from odds_analytics.candidate_report import (
-    CHECKPOINT_SIZE,
-    KILL_AT_BETS,
     CandidateSummary,
     Checkpoint,
+    CheckpointProgress,
     RunningScore,
+    checkpoints_through_next,
 )
 from odds_core.candidates import Candidate, MechanicalCandidate
 
 from odds_web.decisions import DecisionHistory
 from odds_web.ledger import LedgerPage
 from odds_web.portfolio import (
-    Progress,
     is_agent,
     no_ev_reason,
     progress_of,
     scope_of,
+    status_of,
     verdict_of,
 )
 
@@ -92,10 +92,10 @@ class CandidatePage:
     version: int
     scope: str
     is_agent: bool
-    not_current: bool
+    status: str
     verdict: str
     verdict_note: str
-    progress: Progress | None
+    progress: CheckpointProgress | None
     bets_with_close: int
     current: Checkpoint | None
     no_ev_reason: str
@@ -135,35 +135,33 @@ def build_series(summary: CandidateSummary, running: RunningScore) -> Series:
     intervals = [_interval(c, True) for c in summary.checkpoints]
     if summary.current is not None and summary.current not in summary.checkpoints:
         intervals.append(_interval(summary.current, False))
-    reach = min(KILL_AT_BETS, (len(running_percent) // CHECKPOINT_SIZE + 1) * CHECKPOINT_SIZE)
     return Series(
         running_ev_percent=running_percent,
         expected_units=list(running.expected),
         pnl_units=list(running.pnl),
         intervals=intervals,
-        checkpoints=list(range(CHECKPOINT_SIZE, reach + 1, CHECKPOINT_SIZE)),
+        checkpoints=checkpoints_through_next(len(running_percent)),
         axis_percent=_axis_percent(running_percent, intervals),
     )
 
 
 def build_candidate_page(
     summary: CandidateSummary,
-    entry: Candidate | None,
     running: RunningScore,
     decisions: DecisionHistory | None,
     ledger: LedgerPage,
 ) -> CandidatePage:
-    agent = is_agent(entry)
+    entry = summary.registered
     verdict, note = verdict_of(summary)
     return CandidatePage(
         name=summary.name,
         version=summary.version,
         scope=scope_of(entry),
-        is_agent=agent,
-        not_current=summary.status is None,
+        is_agent=is_agent(entry),
+        status=status_of(summary),
         verdict=verdict,
         verdict_note=note,
-        progress=progress_of(summary, agent),
+        progress=progress_of(summary),
         bets_with_close=summary.bets_with_close,
         current=summary.current,
         no_ev_reason=no_ev_reason(summary, entry),

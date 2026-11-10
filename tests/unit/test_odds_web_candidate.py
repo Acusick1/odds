@@ -18,6 +18,7 @@ from odds_analytics.candidate_report import (
     RunningScore,
     ScoredBet,
 )
+from odds_core.candidates import CandidateStatus
 from odds_core.paper_trade_models import TradeResult
 from odds_web.app import create_app
 from odds_web.cache import SingleFlightCache
@@ -196,6 +197,30 @@ class TestCandidatePage:
 
         assert "Decisions" not in body and "mark-" not in body
         assert "mlb-agent" in body and "baseball_mlb · agent" in body
+
+    def test_a_killed_candidate_shows_its_status_and_no_next_checkpoint(
+        self, client: TestClient, data: dict[str, object]
+    ) -> None:
+        killed = mechanical().model_copy(update={"status": CandidateStatus.KILLED})
+        seed(data, [], killed)
+
+        body = client.get("/c/gap/1").text
+
+        assert re.findall(r'<span class="status">(.*?)</span>', body) == ["killed"]
+        assert re.findall(r'<span class="verdict">(.*?)</span>', body) == ["not yet"]
+        assert "/ 100" not in body
+
+    def test_a_historical_version_takes_neither_the_current_versions_metadata_nor_its_timeline(
+        self, client: TestClient, data: dict[str, object]
+    ) -> None:
+        v2 = agent("gap").model_copy(update={"version": 2})
+        seed(data, [bet(i, 0.5) for i in range(3)], v2)
+        data["decisions"] = history(DecisionKind.BET)  # must not be read for an unknown kind
+
+        body = client.get("/c/gap/1").text
+
+        assert re.findall(r'<span class="status">(.*?)</span>', body) == ["not current"]
+        assert "baseball_mlb" not in body and "Decisions" not in body
 
     def test_a_candidate_with_no_close_shows_pnl_and_the_ledger_but_no_ev_charts(
         self, client: TestClient, data: dict[str, object]
@@ -432,11 +457,12 @@ class TestNoScoringInOddsWeb:
             "CandidateReport",
             "CandidateSummary",
             "Checkpoint",
+            "CheckpointProgress",
             "RunningScore",
             "Verdict",
-            "CHECKPOINT_SIZE",
-            "KILL_AT_BETS",
             "candidate_report",
+            "checkpoint_progress",
+            "checkpoints_through_next",
             "close_probabilities",
             "expected_value",
         }

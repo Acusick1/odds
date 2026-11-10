@@ -31,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from tests.test_helpers import (
     as_odds_web_login,
     betfair_exchange_bookmaker,
+    book,
     client_of,
     create_scheduler_tables,
     make_epl_event,
@@ -263,23 +264,6 @@ def bootstrapping(*jobs: str) -> Settings:
                 update={"sports": ["soccer_epl"]}
             ),
         }
-    )
-
-
-async def book(session: AsyncSession, job: str, next_run: datetime | None) -> None:
-    await session.execute(
-        text(
-            "INSERT INTO tasks (id, func, job_executor, metadata) "
-            "VALUES (:id, 'f', 'async', '{}') ON CONFLICT DO NOTHING"
-        ),
-        {"id": job},
-    )
-    await session.execute(
-        text(
-            "INSERT INTO schedules (id, task_id, coalesce, job_executor, metadata, "
-            "next_fire_time) VALUES (:id, :id, 'latest', 'async', '{}', :next)"
-        ),
-        {"id": job, "next": next_run},
     )
 
 

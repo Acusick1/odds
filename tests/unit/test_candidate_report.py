@@ -10,9 +10,12 @@ from odds_analytics.candidate_report import (
     Verdict,
     candidate_report,
     checkpoint_at,
+    checkpoint_progress,
+    checkpoints_through_next,
     family_size_at,
     family_starts,
     judge,
+    next_checkpoint,
     promote_level,
     report_candidates,
     summarize_candidates,
@@ -309,6 +312,21 @@ class TestSummaries:
         assert by_version[2].status is CandidateStatus.ACTIVE
         assert by_version[1].settled_bets == by_version[2].settled_bets == 1
 
+    def test_each_version_carries_its_own_registry_entry(self) -> None:
+        sequence = [trade(0, version=1), trade(1, version=2)]
+        v1, v2 = registry_entry(version=1), registry_entry(version=2)
+        v2 = v2.model_copy(update={"sport": "basketball_nba", "status": CandidateStatus.KILLED})
+
+        by_version = {
+            s.version: s for s in summarize_candidates(sequence, [v2], NOW, n_boot=N_BOOT)
+        }
+        both = {s.version: s for s in summarize_candidates(sequence, [v1, v2], NOW, n_boot=N_BOOT)}
+
+        assert by_version[1].registered is None and by_version[2].registered == v2
+        assert by_version[2].status is CandidateStatus.KILLED
+        assert both[1].registered == v1 and both[1].registered.sport == "soccer_epl"
+        assert both[2].registered.sport == "basketball_nba"  # type: ignore[union-attr]
+
     def test_registered_candidate_without_trades_is_listed(self) -> None:
         summary = summarize_candidates([], [registry_entry("fresh", 4)], NOW, n_boot=N_BOOT)[0]
         assert (summary.name, summary.version, summary.settled_bets) == ("fresh", 4, 0)
@@ -318,6 +336,35 @@ class TestSummaries:
     def test_trades_of_a_candidate_missing_from_registry_are_listed(self) -> None:
         summary = summarize_candidates([trade(0, name="ghost")], [], NOW, n_boot=N_BOOT)[0]
         assert summary.name == "ghost" and summary.status is None
+
+
+class TestCheckpointProgress:
+    @pytest.mark.parametrize(
+        ("bets", "target", "fraction"),
+        [
+            (0, 100, 0.0),
+            (30, 100, 0.3),
+            (100, 200, 0.0),
+            (130, 200, 0.3),
+            (499, 500, 0.99),
+            (500, 500, 1.0),
+            (620, 500, 1.0),
+        ],
+    )
+    def test_progress_is_the_distance_from_the_last_checkpoint_to_the_next(
+        self, bets: int, target: int, fraction: float
+    ) -> None:
+        progress = checkpoint_progress(bets)
+
+        assert next_checkpoint(bets) == progress.next_checkpoint == target
+        assert progress.bets_with_close == bets
+        assert progress.fraction == pytest.approx(fraction)
+
+    def test_the_checkpoints_through_the_next_stop_at_the_kill_checkpoint(self) -> None:
+        assert checkpoints_through_next(0) == [100]
+        assert checkpoints_through_next(130) == [100, 200]
+        assert checkpoints_through_next(480) == [100, 200, 300, 400, 500]
+        assert checkpoints_through_next(900) == [100, 200, 300, 400, 500]
 
 
 def mechanical(name: str, version: int = 1, start: str = "2026-01-01", **overrides: object):

@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from odds_analytics.candidate_report import CandidateReport, candidate_report
-from odds_core.candidates import Candidate, candidates_dir, load_candidates
+from odds_core.candidates import candidates_dir, load_candidates
 from odds_core.config import Settings, get_settings
 
 from odds_web.cache import Cached, Failure, SingleFlightCache
@@ -57,14 +57,6 @@ class Section[T]:
         return Section(
             None if self.value is None else convert(self.value), self.as_of, self.failure
         )
-
-
-@dataclass(frozen=True)
-class Report:
-    """The report data and the registry it was computed against."""
-
-    candidates: CandidateReport
-    registry: list[Candidate]
 
 
 def _signed(value: float, digits: int = 1) -> str:
@@ -139,36 +131,33 @@ def create_app(
         axis_percent=f"{AXIS_PERCENT:g}", forest_width=FOREST_WIDTH, url_path=app.url_path_for
     )
 
-    async def load_report() -> Report:
+    async def load_report() -> CandidateReport:
         registry = load_candidates(registry_dir or candidates_dir())
         async with database.session_maker() as session:
-            candidates = await candidate_report(session, registry, executor=executor)
-        return Report(candidates, registry)
+            return await candidate_report(session, registry, executor=executor)
 
-    async def report_section() -> Cached[Report]:
+    async def report_section() -> Cached[CandidateReport]:
         return await cache.get("report", load_report)
 
     async def portfolio_section() -> Section[list[PortfolioRow]]:
         report = Section.of(await report_section())
-        return report.map(lambda r: portfolio_rows(r.candidates.summaries, r.registry))
+        return report.map(lambda r: portfolio_rows(r.summaries))
 
     async def candidate_section(name: str, version: int, page: int) -> Section[CandidatePage]:
         report = await report_section()
         if report.value is None:
             return Section(None, report.as_of, report.failure)
-        candidates = report.value.candidates
         summary = next(
-            (s for s in candidates.summaries if (s.name, s.version) == (name, version)), None
+            (s for s in report.value.summaries if (s.name, s.version) == (name, version)), None
         )
         if summary is None:
             raise HTTPException(status_code=404, detail=f"No candidate {name} v{version}")
-        entry = next((c for c in report.value.registry if c.name == name), None)
-        running = candidates.running[(name, version)]
+        running = report.value.running[(name, version)]
 
         async def load_listings() -> tuple[DecisionHistory | None, LedgerPage]:
             async with database.session_maker() as session:
                 decisions = None
-                if has_decisions(entry):
+                if has_decisions(summary.registered):
                     decisions = await load_decision_history(
                         session, name, version, datetime.now(UTC)
                     )
@@ -178,7 +167,7 @@ def create_app(
         # The figures and charts are built from the report entry on every request, so they
         # always describe one snapshot; only the listings are cached per page.
         listings = Section.of(await cache.get(f"candidate:{name}:{version}:{page}", load_listings))
-        built = listings.map(lambda found: build_candidate_page(summary, entry, running, *found))
+        built = listings.map(lambda found: build_candidate_page(summary, running, *found))
         # The page is as old as the older of its two reads.
         as_of = (
             None if built.as_of is None or report.as_of is None else min(built.as_of, report.as_of)

@@ -9,6 +9,7 @@ import odds_web
 import pytest
 from fastapi.testclient import TestClient
 from odds_analytics.candidate_report import CandidateReport
+from odds_core.candidates import CandidateStatus
 from odds_web.app import create_app
 from odds_web.cache import SingleFlightCache
 from odds_web.db import build_web_database
@@ -182,13 +183,28 @@ class TestPortfolioRows:
     def test_a_version_that_is_not_in_the_registry_is_not_current(self) -> None:
         old = summaries([bet(i, 0.5, name="ghost") for i in range(3)], [])
 
-        [row] = portfolio_rows(old, [])
+        [row] = portfolio_rows(old)
 
-        assert row.not_current and row.scope == "—"
+        assert row.status == "not current" and row.scope == "—"
+
+    def test_a_killed_candidate_shows_its_status_and_no_next_checkpoint(self) -> None:
+        killed = mechanical().model_copy(update={"status": CandidateStatus.KILLED})
+
+        [row] = portfolio_rows(summaries([], [killed]))
+
+        assert row.status == "killed" and row.progress is None
+        assert row.verdict == "not yet"
+
+    def test_a_historical_version_does_not_take_the_current_versions_scope(self) -> None:
+        v2 = mechanical(sport="basketball_nba", market="h2h").model_copy(update={"version": 2})
+        old, current = portfolio_rows(summaries([bet(i, 0.5) for i in range(3)], [v2]))
+
+        assert (old.version, old.scope, old.status) == (1, "—", "not current")
+        assert (current.version, current.scope) == (2, "basketball_nba · h2h")
 
     def test_progress_is_toward_the_next_checkpoint(self) -> None:
         noise = [bet(i, 1.0 if i % 2 else -1.0) for i in range(130)]
-        [row] = portfolio_rows(summaries(noise, [mechanical()]), [mechanical()])
+        [row] = portfolio_rows(summaries(noise, [mechanical()]))
 
         assert row.progress is not None
         assert (row.progress.bets_with_close, row.progress.next_checkpoint) == (130, 200)

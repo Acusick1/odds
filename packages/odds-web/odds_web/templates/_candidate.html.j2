@@ -5,7 +5,7 @@
 {% set c = candidate.value %}
 <div class="{{ 'stale' if candidate.failure }}">
 <h3 class="title"><b>{{ c.name }}</b> <span class="sub num">v{{ c.version }}</span>
-{% if c.not_current %}<span class="sub">not current</span>{% endif %}
+<span class="status">{{ c.status }}</span>
 <span class="sub">{{ c.scope }}</span>
 <span class="verdict">{{ c.verdict }}</span>{% if c.verdict_note %} <span class="sub">{{ c.verdict_note }}</span>{% endif %}</h3>
 

@@ -12,10 +12,10 @@
 <tbody>
 {% for row in portfolio.value %}
 <tr>
-<td><a href="{{ url_path('candidate', name=row.name, version=row.version) }}"><b>{{ row.name }}</b></a> <span class="sub num">v{{ row.version }}</span>{% if row.not_current %} <span class="sub">not current</span>{% endif %}
+<td><a href="{{ url_path('candidate', name=row.name, version=row.version) }}"><b>{{ row.name }}</b></a> <span class="sub num">v{{ row.version }}</span> <span class="status">{{ row.status }}</span>
 <div class="sub">{{ row.scope }}</div></td>
 <td>{% if row.progress %}
-<span class="bar"><i style="width: {{ (row.progress.bets_with_close % 100 or 100) if row.progress.bets_with_close else 0 }}%"></i></span><span class="num">{{ row.progress.bets_with_close }} / {{ row.progress.next_checkpoint }}</span>
+<span class="bar"><i style="width: {{ (row.progress.fraction * 100) | round | int }}%"></i></span><span class="num">{{ row.progress.bets_with_close }} / {{ row.progress.next_checkpoint }}</span>
 {% else %}<span class="sub">—</span>{% endif %}</td>
 <td class="fp">{% if row.forest %}{% set f = row.forest %}
 <svg width="{{ forest_width + 56 }}" height="18" role="img" aria-label="mean EV {{ f.mean_percent | signed }}%">

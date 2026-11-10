@@ -20,7 +20,7 @@ from odds_web.app import create_app
 from odds_web.db import WebDatabase, restrict_transactions
 from odds_web.decisions import load_decision_history
 from odds_web.ledger import load_ledger_page
-from odds_web.role_check import RoleCheckFailed, check_role
+from odds_web.role_check import READ_TABLES, RoleCheckFailed, check_role
 from sqlalchemy import event, text
 from sqlalchemy.exc import DBAPIError, ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -49,6 +49,7 @@ class TestRoleCheck:
                 report = await check_role(conn)
 
         assert "INSERT rejected (SQLSTATE 25006)" in report
+        assert any("can SELECT from 10 tables" in line for line in report)
 
     async def test_passes_when_only_the_privileges_reject_the_write(
         self, odds_web_session: AsyncSession
@@ -72,17 +73,18 @@ class TestRoleCheck:
                 with pytest.raises(RoleCheckFailed, match="write privileges on: paper_trades"):
                     await check_role(conn)
 
-    async def test_fails_when_the_role_cannot_read_what_the_ui_needs(
-        self, odds_web_session: AsyncSession
+    @pytest.mark.parametrize("table", READ_TABLES)
+    async def test_fails_when_the_role_cannot_read_a_table_the_ui_needs(
+        self, odds_web_session: AsyncSession, table: str
     ) -> None:
         engine = odds_web_session.bind
         assert isinstance(engine, AsyncEngine)
-        await odds_web_session.execute(text("REVOKE SELECT ON paper_trades FROM odds_web"))
+        await odds_web_session.execute(text(f"REVOKE SELECT ON {table} FROM odds_web"))
         await odds_web_session.commit()
 
         with as_odds_web_login(engine):
             async with engine.connect() as conn:
-                with pytest.raises(RoleCheckFailed, match="cannot SELECT from paper_trades"):
+                with pytest.raises(RoleCheckFailed, match=f"cannot SELECT from {table}"):
                     await check_role(conn)
 
 
