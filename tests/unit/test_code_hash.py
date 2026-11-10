@@ -247,13 +247,13 @@ class TestClosure:
         rule = (
             "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n from . import a\n"
             "try:\n from . import b\nexcept ImportError:\n from . import c\n"
-            "def decide():\n from . import d\n return d\n"
+            "def decide():\n from . import d\n return d.value\n"
         )
         fixture_package(package({"rule": rule, **dict.fromkeys("abcd", "")}))
         assert closure([ROOT]) == [P, *(f"{P}.{m}" for m in "abcd"), f"{P}.rule"]
 
     def test_does_not_follow_third_party_imports(self, fixture_package: Write) -> None:
-        fixture_package(package({"rule": "import pytest\ndef decide(): return pytest\n"}))
+        fixture_package(package({"rule": "import yaml\ndef decide(): return yaml.safe_load\n"}))
         assert closure([ROOT]) == [P, f"{P}.rule"]
 
     @pytest.mark.parametrize(
@@ -291,6 +291,14 @@ class TestClosure:
             "def decide(): return __loader__\n",
             "lookup = getattr\ndef decide(x): return lookup(x, 'a')\n",
             "def decide(): return __all__\n",
+            'from os import sys as s\ndef decide(): return s.modules["importlib"]\n',
+            "import os\ndef decide(): return os.sys\n",
+            "from os import path\ndef decide(): return path\n",
+            "from yaml import reader\ndef decide(): return reader\n",
+            "import json\ndef decide(): return json\n",
+            "from types import SimpleNamespace\ndef decide(): return SimpleNamespace\n",
+            "from types import ModuleType as MappingProxyType\ndef decide(): return 1\n",
+            "import math\nm = math\ndef decide(): return m.pi\n",
         ],
         ids=[
             "import_module",
@@ -324,6 +332,14 @@ class TestClosure:
             "__loader__",
             "aliased getattr",
             "reading __all__",
+            "from os import sys",
+            "os.sys",
+            "from os import a module not on the list",
+            "from an allowed module, a module not on the list",
+            "a module not on the list",
+            "types extra symbol",
+            "types other name aliased",
+            "a module as a value",
         ],
     )
     def test_a_module_that_could_load_code_unseen_fails(
@@ -355,6 +371,14 @@ class TestClosure:
         fixture_package(package({"rule": rule}))
         assert closure([ROOT]) == [P, f"{P}.rule"]
 
+    def test_a_first_party_re_export_cannot_reach_a_refused_module(
+        self, fixture_package: Write
+    ) -> None:
+        rule = "from .helpers import os as o\ndef decide(): return o.sys.modules\n"
+        fixture_package(package({"rule": rule, "helpers": "import os\n"}))
+        with pytest.raises(ValueError, match="sys"):
+            closure([ROOT])
+
     def test_a_dynamic_import_in_any_closure_module_fails(self, fixture_package: Write) -> None:
         fixture_package(package({"rule": RULE, "helpers": HELPERS + "import importlib\n"}))
         with pytest.raises(ValueError, match="helpers"):
@@ -371,10 +395,7 @@ class TestOutsideTheHash:
 
     def test_a_data_file_is_not_hashed(self, fixture_package: Write, tmp_path: Path) -> None:
         config = tmp_path / "c.json"
-        rule = (
-            "import json\nfrom pathlib import Path\n"
-            f"def decide(): return json.loads(Path({str(config)!r}).read_text())\n"
-        )
+        rule = f"from pathlib import Path\ndef decide(): return Path({str(config)!r}).read_text()\n"
         fixture_package(package({"rule": rule}))
         config.write_text('{"stake": 1}')
         before = code_sha256([ROOT])

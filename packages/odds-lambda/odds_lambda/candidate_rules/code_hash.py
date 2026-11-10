@@ -4,9 +4,9 @@ The closure starts from the roots' modules and follows every import statement an
 module (conditional, ``TYPE_CHECKING`` and function-local ones included) and every parent
 package's ``__init__``, through first-party (``odds_*``) modules only. A closure module that
 could load a module the closure cannot see raises, so the hash fails rather than leaving code
-out: one with reflective access to modules, code or namespaces (``REFLECTIVE_MODULES``,
-``REFLECTIVE_BUILTINS``, dunders outside ``ALLOWED_DUNDERS``, ``getattr`` and its kin with a
-computed name), or a star import.
+out: one that imports a module outside ``ALLOWED_MODULES``, reaches one through an imported
+name or attribute, or has other reflective access (``REFLECTIVE_BUILTINS``, dunders outside
+``ALLOWED_DUNDERS``, ``getattr`` and its kin with a computed name), or star-imports.
 """
 
 from __future__ import annotations
@@ -19,23 +19,41 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
+from types import ModuleType
 
 FIRST_PARTY_PREFIX = "odds_"
-# Modules that give code reflective access to loaded modules, frames or the import machinery.
-REFLECTIVE_MODULES = frozenset(
+# The modules outside the ``odds_*`` packages a closure module may import, exactly those the
+# hashable rules' closures need. Any other import raises: an unlisted module, or a listed one's
+# attribute that is an unlisted module, could reach the import machinery unseen.
+ALLOWED_MODULES = frozenset(
     {
-        "sys",
-        "inspect",
-        "importlib",
-        "builtins",
-        "gc",
-        "ctypes",
-        "types",
-        "pkg_resources",
-        "runpy",
-        "site",
+        "__future__",
+        "collections",
+        "collections.abc",
+        "dataclasses",
+        "datetime",
+        "decimal",
+        "enum",
+        "functools",
+        "math",
+        # odds_core.database reads the environment.
+        "os",
+        "pathlib",
+        "pydantic",
+        "pydantic_settings",
+        "sqlalchemy",
+        "sqlalchemy.dialects.postgresql",
+        "sqlalchemy.ext.asyncio",
+        "sqlalchemy.pool",
+        "sqlalchemy.types",
+        "sqlmodel",
+        "typing",
+        "yaml",
+        "zoneinfo",
     }
 )
+# Names a closure module may import from a module that is otherwise refused.
+ALLOWED_FROM_IMPORTS: dict[str, frozenset[str]] = {"types": frozenset({"MappingProxyType"})}
 # Dunder names and attributes closure code may use; any other can reach module objects, code,
 # globals or docstrings at run time.
 ALLOWED_DUNDERS = frozenset({"__name__", "__init__"})
@@ -49,8 +67,6 @@ ATTRIBUTE_BUILTINS = frozenset({"getattr", "setattr", "delattr", "hasattr"})
 # Declarations closure code may assign but never read: the export list (star imports are
 # refused) and SQLAlchemy's table name and arguments.
 DECLARED_DUNDERS = frozenset({"__all__", "__tablename__", "__table_args__"})
-# Names imported from a reflective module that expose no reflection.
-ALLOWED_FROM_IMPORTS = frozenset({("types", "MappingProxyType")})
 # Per module, dunder names it may read: the settings locate the project root from their file.
 MODULE_DUNDERS: dict[str, frozenset[str]] = {"odds_core.config": frozenset({"__file__"})}
 
@@ -142,22 +158,29 @@ def _literal_attribute_calls(tree: ast.AST) -> set[int]:
     return allowed
 
 
+def _allowed_module(module: str) -> bool:
+    return is_first_party(module) or module in ALLOWED_MODULES
+
+
 def _reflective(name: str, node: ast.AST, literal_calls: set[int]) -> str | None:
     """Why ``node`` in module ``name`` gives reflective access the closure cannot follow, or
     None."""
     if isinstance(node, ast.Import):
         for alias in node.names:
-            if alias.name.split(".")[0] in REFLECTIVE_MODULES:
-                return f"imports {alias.name}"
+            if not _allowed_module(alias.name):
+                return f"imports {alias.name}, not an allowed module,"
     elif isinstance(node, ast.ImportFrom):
-        reflective = node.level == 0 and (node.module or "").split(".")[0] in REFLECTIVE_MODULES
         for alias in node.names:
-            if reflective and (node.module, alias.name) not in ALLOWED_FROM_IMPORTS:
-                return f"imports {alias.name} from {node.module}"
             if alias.name == "*":
                 return "star-imports, which loads the submodules ``__all__`` names"
             if _is_dunder(alias.name) or alias.name in REFLECTIVE_BUILTINS:
                 return f"imports {alias.name}"
+            if (
+                node.level == 0
+                and not _allowed_module(node.module or "")
+                and alias.name not in ALLOWED_FROM_IMPORTS.get(node.module or "", frozenset())
+            ):
+                return f"imports {alias.name} from {node.module}, not an allowed module,"
     elif isinstance(node, ast.Name):
         declared = node.id in DECLARED_DUNDERS and isinstance(node.ctx, ast.Store)
         allowed = node.id in MODULE_DUNDERS.get(name, frozenset())
@@ -168,6 +191,86 @@ def _reflective(name: str, node: ast.AST, literal_calls: set[int]) -> str | None
     elif isinstance(node, ast.Attribute) and _is_dunder(node.attr):
         return f"accesses {node.attr}"
     return None
+
+
+def _import_object(module: str, attribute: str | None = None) -> object:
+    """The real module, or its attribute; a submodule not yet loaded is imported."""
+    loaded = importlib.import_module(module)
+    if attribute is None:
+        return loaded
+    try:
+        return getattr(loaded, attribute)
+    except AttributeError:
+        return importlib.import_module(f"{module}.{attribute}")
+
+
+def _bindings(name: str, is_package: bool, tree: ast.Module) -> dict[str, object]:
+    """The real object each name an import in ``tree`` binds refers to."""
+    bound: dict[str, object] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                target = alias.name if alias.asname else alias.name.split(".")[0]
+                bound[alias.asname or target] = _import_object(target)
+        elif isinstance(node, ast.ImportFrom) and node.module != "__future__":
+            source = _relative(name, is_package, node.level, node.module)
+            for alias in node.names:
+                bound[alias.asname or alias.name] = _import_object(source, alias.name)
+    return bound
+
+
+def _module_reached(value: object) -> str | None:
+    """The name of ``value`` when it is a module closure code may not reach, or None."""
+    if isinstance(value, ModuleType) and not _allowed_module(value.__name__):
+        return value.__name__
+    return None
+
+
+def _check_bindings(name: str, is_package: bool, tree: ast.Module) -> None:
+    """Raise when an imported name, or an attribute chain on one, reaches a module that is not
+    allowed, or when a name bound to a module is used other than to take an attribute."""
+    bound = _bindings(name, is_package, tree)
+    for local, value in bound.items():
+        if (module := _module_reached(value)) is not None:
+            raise ValueError(
+                f"{name}: {local} is the module {module}, not an allowed module, which the "
+                "code hash cannot follow"
+            )
+    attribute_bases: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Attribute):
+            continue
+        chain: list[str] = []
+        base: ast.expr = node
+        while isinstance(base, ast.Attribute):
+            chain.append(base.attr)
+            base = base.value
+        if isinstance(node.value, ast.Name):
+            attribute_bases.add(id(node.value))
+        if not isinstance(base, ast.Name) or base.id not in bound:
+            continue
+        value = bound[base.id]
+        for attribute in reversed(chain):
+            try:
+                value = getattr(value, attribute)
+            except Exception:  # noqa: BLE001 - an attribute only set at run time
+                break
+            if (module := _module_reached(value)) is not None:
+                raise ValueError(
+                    f"{name}:{node.lineno}: {base.id}.{attribute} reaches the module {module}, "
+                    "not an allowed module, which the code hash cannot follow"
+                )
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Name)
+            and isinstance(node.ctx, ast.Load)
+            and isinstance(bound.get(node.id), ModuleType)
+            and id(node) not in attribute_bases
+        ):
+            raise ValueError(
+                f"{name}:{node.lineno}: the module {node.id} is used as a value, which the code "
+                "hash cannot follow"
+            )
 
 
 def _imports(name: str, is_package: bool, tree: ast.Module) -> set[str]:
@@ -190,6 +293,7 @@ def _imports(name: str, is_package: bool, tree: ast.Module) -> set[str]:
             source = _relative(name, is_package, node.level, node.module)
             found.add(source)
             found.update(f"{source}.{alias.name}" for alias in node.names)
+    _check_bindings(name, is_package, tree)
     return found
 
 
