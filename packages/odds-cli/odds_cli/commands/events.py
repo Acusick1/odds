@@ -2,7 +2,7 @@
 
 import asyncio
 from collections import Counter
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 import typer
 from odds_core.database import async_session_maker
@@ -411,6 +411,51 @@ def sync_nba_games(
     """
     last = date.fromisoformat(until) if until is not None else datetime.now(UTC).date()
     asyncio.run(_sync_nba_games(date.fromisoformat(since), last, apply))
+
+
+async def _sync_football_schedule(sports: list[str], days: int, apply: bool) -> None:
+    from odds_lambda.espn_football_schedule import LEAGUES, sync_schedule
+
+    unknown = [s for s in sports if s not in LEAGUES]
+    if unknown:
+        raise typer.BadParameter(f"{', '.join(unknown)} is not one of: {', '.join(LEAGUES)}")
+    today = datetime.now(UTC).date()
+    for key in sports or list(LEAGUES):
+        league = LEAGUES[key]  # type: ignore[index]
+        report = await sync_schedule(league, today, today + timedelta(days=days), apply=apply)
+        verb = "created" if apply else "would create"
+        console.print(
+            f"{key}: ESPN matches {report.games}; {verb}: {report.created}; "
+            f"matched: {report.matched}; postponed or cancelled: {report.rescheduled}; "
+            f"unmatched names: {len(report.dropped)}; failed: {len(report.errors)}"
+        )
+        for dropped in report.dropped:
+            console.print(f"  [yellow]{dropped.describe()}[/yellow]")
+        for error in report.errors:
+            console.print(f"  [red]{error}[/red]")
+    if not apply:
+        console.print("Dry run: nothing written. Re-run with --apply.")
+
+
+@app.command("sync-football-schedule")
+def sync_football_schedule(
+    sport: list[str] | None = typer.Option(  # noqa: B008 — typer option idiom
+        None, "--sport", help="League sport key (repeatable); default every ESPN-scheduled league"
+    ),
+    days: int = typer.Option(21, "--days", help="Days ahead from today"),
+    apply: bool = typer.Option(False, "--apply", help="Write; without it nothing is stored"),
+) -> None:
+    """Create the upcoming events of La Liga, Serie A, the Bundesliga, Ligue 1 and the
+    Championship from ESPN's scoreboards.
+
+    The dry run reads the database but writes nothing, and prints what would be created per
+    league and any ESPN team name outside the league's clubs. The scheduled job
+    (`fetch-espn-fixtures`) does the same with `--apply`.
+
+    Example:
+        odds events sync-football-schedule --sport soccer_spain_la_liga
+    """
+    asyncio.run(_sync_football_schedule(sport or [], days, apply))
 
 
 async def _sync_mlb_seasons(seasons: list[int], apply: bool) -> None:

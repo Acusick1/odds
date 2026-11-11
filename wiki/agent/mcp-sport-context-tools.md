@@ -23,7 +23,7 @@ Two tools in `packages/odds-mcp/odds_mcp/tools/`, each on its own `FastMCP` sub-
 
 ## Team context (EPL)
 
-`get_team_context(team, as_of=None, last_n=5, next_n=5, include_standings=True)` reads the `espn_fixtures` table (rows per team, refreshed daily by `fetch-espn-fixtures`, see [EPL context data](../collection/epl-context-data.md)). That job runs as a daily fixed cron (`0 6 * * *` UTC, its entry in `odds_core.job_specs.JOB_SPECS`) on the production host's scheduler, so the tool goes stale whenever the job fails. `team` goes through `odds_core.team.normalize_team_name`; `as_of` defaults to now (a naive value is taken as UTC); `last_n` and `next_n` are floored at 1.
+`get_team_context(team, as_of=None, last_n=5, next_n=5, include_standings=True)` reads the `espn_fixtures` table (rows per team, refreshed daily by `fetch-espn-fixtures`, see [EPL context data](../collection/epl-context-data.md)). That job runs as a daily fixed cron (`0 6 * * *` UTC, its entry in `odds_core.job_specs.JOB_SPECS`, per sport; the football leagues beyond EPL [create events](../collection/espn-football-schedule.md)) on the production host's scheduler, so the tool goes stale whenever the job fails. `team` goes through `odds_core.team.normalize_team_name`; `as_of` defaults to now (a naive value is taken as UTC); `last_n` and `next_n` are floored at 1.
 
 | Field | Content |
 |---|---|
@@ -41,7 +41,7 @@ Each game carries `home_pitcher_name`/`id` and `away_pitcher_name`/`id`, nullabl
 
 ## Behaviour to know
 
-- Standings use a simplified tiebreak (points, goal difference, goals for, team name) without the official head-to-head step, so tied positions are approximate. `odds_mcp.tools.epl._derive_standings` tallies each ESPN row into an `odds_analytics.standings_features.TeamRecord` and orders them with `odds_analytics.standings_features.rank_table`, the same records and order the standings features build from FINAL `odds_core.models.Event` rows ([EPL context features](../modelling/epl-context-features.md)).
+- Standings use a simplified tiebreak (points, goal difference, goals for, team name) without the official head-to-head step, so tied positions are approximate. `odds_mcp.tools.epl._derive_standings` tallies each ESPN row into an `odds_analytics.standings_features.TeamRecord` and orders them with `odds_analytics.standings_features.rank_table`, the same records and order the standings features build from `odds_core.models.Event` rows with status FINAL (one per match) ([EPL context features](../modelling/epl-context-features.md)).
 - `odds_core.team.normalize_team_name` returns an unknown name unchanged, so a misspelt team yields empty lists and `team_row: null`, not an error.
 - The `team` fixture query is not season-scoped; only standings filter by season label.
 - `odds_mcp.tools.epl.get_team_context` exists only for the EPL; MLB has no equivalent form or schedule tool.

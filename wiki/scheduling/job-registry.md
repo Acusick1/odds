@@ -19,7 +19,7 @@ status: stable
 
 # Job registry
 
-`odds_core.job_specs.JOB_SPECS` contains immutable `odds_core.job_specs.JobSpec` records. Each record owns the entry point, sport routing, bootstrap default and override, smoke side effects, forward cadence, static cron and heartbeat identifiers. Core stores module names without importing runtime code; `odds_lambda.scheduling.jobs` resolves names and imports entry points lazily. [Where each job runs](job-deployment-matrix.md#where-each-job-runs) covers deployment.
+`odds_core.job_specs.JOB_SPECS` contains immutable `odds_core.job_specs.JobSpec` records. Each record owns the entry point, sport routing (`fetch-espn-fixtures` lists seven sports), bootstrap default and override, smoke side effects, forward cadence, static cron and heartbeat identifiers. Core stores module names without importing runtime code; `odds_lambda.scheduling.jobs` resolves names and imports entry points lazily. [Where each job runs](job-deployment-matrix.md#where-each-job-runs) covers deployment.
 
 ## Registry
 
@@ -34,7 +34,7 @@ status: stable
 
 ## Compound job names
 
-`odds_lambda.scheduling.jobs._SPORT_SUFFIX_MAP` maps sport keys to `epl`, `mlb` and `nba`. `odds_lambda.scheduling.jobs.make_compound_job_name("fetch-odds", "soccer_epl")` returns `fetch-odds-epl`, the EventBridge rule suffix and APScheduler schedule id; `odds_lambda.scheduling.jobs.resolve_job_name` reverses it. An unknown sport suffix keeps the bare name; a per-sport job given no sport raises `ValueError`.
+`odds_lambda.scheduling.jobs._SPORT_SUFFIX_MAP` maps sport keys to `epl`, `mlb`, `nba`, `championship`, `laliga`, `seriea`, `bundesliga` and `ligue1`. `odds_lambda.scheduling.jobs.make_compound_job_name("fetch-odds", "soccer_epl")` returns `fetch-odds-epl`, the EventBridge rule suffix and APScheduler schedule id; `odds_lambda.scheduling.jobs.resolve_job_name` reverses it. An unknown sport suffix keeps the bare name; a per-sport job given no sport raises `ValueError`.
 
 Heartbeat identifiers are separate from schedule ids. `odds_core.job_specs.heartbeat_name` preserves the bare `fetch-mlb-probables` and EPL `fetch-espn-fixtures` identifiers; their schedules remain `fetch-mlb-probables-mlb` and `fetch-espn-fixtures-epl`. NBA ESPN uses `fetch-espn-fixtures-nba` for both.
 

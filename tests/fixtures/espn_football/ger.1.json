@@ -1,0 +1,932 @@
+{
+ "events": [
+  {
+   "id": "401884750",
+   "date": "2026-11-01T14:30Z",
+   "name": "FC Cologne at 1. FC Union Berlin",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "1",
+       "team": {
+        "displayName": "1. FC Union Berlin"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "displayName": "FC Cologne"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884752",
+   "date": "2026-11-01T16:30Z",
+   "name": "Hamburg SV at Eintracht Frankfurt",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "3",
+       "team": {
+        "displayName": "Eintracht Frankfurt"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "displayName": "Hamburg SV"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884739",
+   "date": "2026-11-06T19:30Z",
+   "name": "Borussia Mönchengladbach at Hamburg SV",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "3",
+       "team": {
+        "displayName": "Hamburg SV"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "displayName": "Borussia Mönchengladbach"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884745",
+   "date": "2026-11-07T14:30Z",
+   "name": "SV Elversberg at Borussia Dortmund",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "2",
+       "team": {
+        "displayName": "Borussia Dortmund"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "displayName": "SV Elversberg"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884740",
+   "date": "2026-11-07T14:30Z",
+   "name": "Bayern Munich at Mainz",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "1",
+       "team": {
+        "displayName": "Mainz"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "2",
+       "team": {
+        "displayName": "Bayern Munich"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884744",
+   "date": "2026-11-07T14:30Z",
+   "name": "FC Augsburg at RB Leipzig",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "5",
+       "team": {
+        "displayName": "RB Leipzig"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "2",
+       "team": {
+        "displayName": "FC Augsburg"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884737",
+   "date": "2026-11-07T14:30Z",
+   "name": "Eintracht Frankfurt at SC Paderborn 07",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "2",
+       "team": {
+        "displayName": "SC Paderborn 07"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "2",
+       "team": {
+        "displayName": "Eintracht Frankfurt"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884743",
+   "date": "2026-11-07T17:30Z",
+   "name": "Werder Bremen at VfB Stuttgart",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "1",
+       "team": {
+        "displayName": "VfB Stuttgart"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Werder Bremen"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884738",
+   "date": "2026-11-08T14:30Z",
+   "name": "Bayer Leverkusen at FC Cologne",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "1",
+       "team": {
+        "displayName": "FC Cologne"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "2",
+       "team": {
+        "displayName": "Bayer Leverkusen"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884741",
+   "date": "2026-11-08T16:30Z",
+   "name": "1. FC Union Berlin at SC Freiburg",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "2",
+       "team": {
+        "displayName": "SC Freiburg"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "1. FC Union Berlin"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884742",
+   "date": "2026-11-08T18:30Z",
+   "name": "Schalke 04 at TSG Hoffenheim",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_FULL_TIME",
+       "state": "post"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "2",
+       "team": {
+        "displayName": "TSG Hoffenheim"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "1",
+       "team": {
+        "displayName": "Schalke 04"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884736",
+   "date": "2026-11-20T19:30Z",
+   "name": "FC Cologne at Bayern Munich",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Bayern Munich"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "FC Cologne"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884732",
+   "date": "2026-11-21T14:30Z",
+   "name": "RB Leipzig at 1. FC Union Berlin",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "1. FC Union Berlin"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "RB Leipzig"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884735",
+   "date": "2026-11-21T14:30Z",
+   "name": "SC Paderborn 07 at Bayer Leverkusen",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Bayer Leverkusen"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "SC Paderborn 07"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884731",
+   "date": "2026-11-21T14:30Z",
+   "name": "Borussia Dortmund at Borussia Mönchengladbach",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Borussia Mönchengladbach"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Borussia Dortmund"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884734",
+   "date": "2026-11-21T14:30Z",
+   "name": "TSG Hoffenheim at Eintracht Frankfurt",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Eintracht Frankfurt"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "TSG Hoffenheim"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884728",
+   "date": "2026-11-21T14:30Z",
+   "name": "SC Freiburg at SV Elversberg",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "SV Elversberg"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "SC Freiburg"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884729",
+   "date": "2026-11-21T17:30Z",
+   "name": "VfB Stuttgart at Schalke 04",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Schalke 04"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "VfB Stuttgart"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884733",
+   "date": "2026-11-22T14:30Z",
+   "name": "Mainz at FC Augsburg",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "FC Augsburg"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Mainz"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884730",
+   "date": "2026-11-22T16:30Z",
+   "name": "Hamburg SV at Werder Bremen",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Werder Bremen"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Hamburg SV"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884720",
+   "date": "2026-11-27T19:30Z",
+   "name": "Borussia Mönchengladbach at Werder Bremen",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Werder Bremen"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Borussia Mönchengladbach"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884721",
+   "date": "2026-11-28T14:30Z",
+   "name": "SV Elversberg at FC Cologne",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "FC Cologne"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "SV Elversberg"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884722",
+   "date": "2026-11-28T14:30Z",
+   "name": "Bayern Munich at Hamburg SV",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Hamburg SV"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Bayern Munich"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884723",
+   "date": "2026-11-28T14:30Z",
+   "name": "1. FC Union Berlin at Mainz",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Mainz"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "1. FC Union Berlin"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884719",
+   "date": "2026-11-28T14:30Z",
+   "name": "Schalke 04 at SC Paderborn 07",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "SC Paderborn 07"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Schalke 04"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884726",
+   "date": "2026-11-28T17:30Z",
+   "name": "Eintracht Frankfurt at VfB Stuttgart",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "VfB Stuttgart"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Eintracht Frankfurt"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884724",
+   "date": "2026-11-29T14:30Z",
+   "name": "RB Leipzig at SC Freiburg",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "SC Freiburg"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "RB Leipzig"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884725",
+   "date": "2026-11-29T16:30Z",
+   "name": "FC Augsburg at TSG Hoffenheim",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "TSG Hoffenheim"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "FC Augsburg"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "401884727",
+   "date": "2026-11-29T18:30Z",
+   "name": "Bayer Leverkusen at Borussia Dortmund",
+   "competitions": [
+    {
+     "timeValid": true,
+     "status": {
+      "type": {
+       "name": "STATUS_SCHEDULED",
+       "state": "pre"
+      }
+     },
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "team": {
+        "displayName": "Borussia Dortmund"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "team": {
+        "displayName": "Bayer Leverkusen"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

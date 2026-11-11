@@ -183,6 +183,82 @@ class TestNbaSchedule:
             await fetch_espn_fixtures.main(JobContext(sport="baseball_mlb"))
 
 
+class TestFootballSchedule:
+    @pytest.fixture
+    def sync(self) -> Iterator[AsyncMock]:
+        with patch(
+            "odds_lambda.espn_football_schedule.sync_upcoming", new_callable=AsyncMock
+        ) as mock:
+            yield mock
+
+    @pytest.fixture
+    def alert(self) -> Iterator[AsyncMock]:
+        with patch.object(fetch_espn_fixtures, "alert_dropped_games", new_callable=AsyncMock) as m:
+            yield m
+
+    async def test_a_league_run_syncs_that_leagues_scoreboard_not_the_epl_fixtures(
+        self, sync: AsyncMock, alert: AsyncMock
+    ) -> None:
+        from odds_lambda.espn_football_schedule import LEAGUES, SyncReport
+        from odds_lambda.scheduling.jobs import JobContext
+
+        sync.return_value = SyncReport(games=20, created=20)
+        with patch.object(fetch_espn_fixtures, "_fetch_and_upsert", new_callable=AsyncMock) as epl:
+            await fetch_espn_fixtures.main(JobContext(sport="soccer_spain_la_liga"))
+
+        assert sync.await_args.args[0] is LEAGUES["soccer_spain_la_liga"]
+        epl.assert_not_awaited()
+
+    async def test_dropped_matches_raise_the_dropped_games_alert_under_the_leagues_job(
+        self, sync: AsyncMock, alert: AsyncMock
+    ) -> None:
+        from odds_lambda.espn_football_schedule import SyncReport
+        from odds_lambda.live_events import DroppedGame, SkipReason
+        from odds_lambda.mlb_game_resolver import GameRow
+        from odds_lambda.scheduling.jobs import JobContext
+
+        dropped = DroppedGame(
+            GameRow("Bolton Rovers", "Derby", datetime(2026, 11, 21, tzinfo=UTC)),
+            SkipReason.UNKNOWN_TEAM,
+        )
+        sync.return_value = SyncReport(games=11, dropped=[dropped])
+
+        await fetch_espn_fixtures.main(JobContext(sport="soccer_efl_champ"))
+
+        alert.assert_awaited_once_with(
+            "fetch-espn-fixtures-championship", [dropped], stored="event"
+        )
+
+    async def test_failed_matches_fail_the_run(self, sync: AsyncMock, alert: AsyncMock) -> None:
+        from odds_lambda.espn_football_schedule import SyncReport
+        from odds_lambda.scheduling.jobs import JobContext
+
+        sync.return_value = SyncReport(games=1, errors=["X at Y: boom"])
+
+        with pytest.raises(RuntimeError, match="1 Serie A matches failed"):
+            await fetch_espn_fixtures.main(JobContext(sport="soccer_italy_serie_a"))
+
+    @pytest.mark.parametrize(("in_horizon", "warned"), [(3, True), (0, False)])
+    async def test_an_empty_listing_warns_only_when_events_are_scheduled(
+        self, sync: AsyncMock, alert: AsyncMock, in_horizon: int, warned: bool
+    ) -> None:
+        from odds_lambda.espn_football_schedule import SyncReport
+        from odds_lambda.scheduling.jobs import JobContext
+
+        sync.return_value = SyncReport()
+        calendar = FixtureCalendar(next_kickoff=None, kickoffs_in_horizon=in_horizon)
+        with (
+            patch.object(
+                fetch_espn_fixtures, "event_calendar", new_callable=AsyncMock, return_value=calendar
+            ),
+            patch.object(fetch_espn_fixtures, "async_session_maker", MagicMock()),
+            patch.object(fetch_espn_fixtures, "send_job_warning", new_callable=AsyncMock) as warn,
+        ):
+            await fetch_espn_fixtures.main(JobContext(sport="soccer_france_ligue_one"))
+
+        assert warn.await_count == int(warned)
+
+
 class TestNbaEmptyListing:
     @pytest.fixture
     def warn(self) -> Iterator[AsyncMock]:

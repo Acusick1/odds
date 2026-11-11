@@ -28,7 +28,9 @@ from __future__ import annotations
 # ("Atlético Madrid", "Borussia Monchengladbach"), except that a club with an EPL canonical
 # name keeps it in the Championship. Aliases cover the football-data.co.uk and OddsPortal
 # spellings of every club in those leagues' 2024-26 seasons, and the Odds API's own variants
-# ("Girona FC" in its second division).
+# ("Girona FC" in its second division). A club promoted since (no Odds API history) takes the
+# OddsPortal spelling ("Bolton", "Schalke"). ESPN's and Betfair's spellings of every club in the
+# 2026-27 seasons are aliases too.
 #
 # Pipeline canonical NBA names are The Odds API's full names ("Boston Celtics"); the
 # 30 are the values of odds_lambda.polymarket_matching.NBA_ABBREV_MAP. OddsPortal and
@@ -84,6 +86,8 @@ _TEAM_ALIASES: dict[str, str] = {
     "sheffield weds": "Sheffield Wednesday",
     "sheffield wed": "Sheffield Wednesday",
     "wrexham": "Wrexham AFC",
+    "bolton wanderers": "Bolton",
+    "lincoln city": "Lincoln",
     # ---- La Liga
     "alaves": "Alavés",
     "ath bilbao": "Athletic Bilbao",
@@ -100,12 +104,17 @@ _TEAM_ALIASES: dict[str, str] = {
     "valladolid": "Real Valladolid",
     "real valladolid cf": "Real Valladolid",
     "vallecano": "Rayo Vallecano",
+    "athletic club": "Athletic Bilbao",
+    "dep. a coruna": "Deportivo La Coruña",
+    "deportivo": "Deportivo La Coruña",
+    "malaga": "Málaga",
     # ---- Serie A
     "atalanta": "Atalanta BC",
     "inter": "Inter Milan",
     "milan": "AC Milan",
     "roma": "AS Roma",
     "verona": "Hellas Verona",
+    "internazionale": "Inter Milan",
     # ---- Bundesliga
     "bochum": "VfL Bochum",
     "dortmund": "Borussia Dortmund",
@@ -123,6 +132,15 @@ _TEAM_ALIASES: dict[str, str] = {
     "st. pauli": "FC St. Pauli",
     "stuttgart": "VfB Stuttgart",
     "wolfsburg": "VfL Wolfsburg",
+    "1. fc union berlin": "Union Berlin",
+    "borussia mönchengladbach": "Borussia Monchengladbach",
+    "fc augsburg": "Augsburg",
+    "fc cologne": "1. FC Köln",
+    "hamburg sv": "Hamburger SV",
+    "mgladbach": "Borussia Monchengladbach",
+    "sc paderborn 07": "Paderborn",
+    "schalke 04": "Schalke",
+    "sv elversberg": "Elversberg",
     # ---- Ligue 1
     "lens": "RC Lens",
     "monaco": "AS Monaco",
@@ -130,6 +148,12 @@ _TEAM_ALIASES: dict[str, str] = {
     "psg": "Paris Saint Germain",
     "reims": "Stade de Reims",
     "st etienne": "Saint Etienne",
+    "aj auxerre": "Auxerre",
+    "estac troyes": "Troyes",
+    "le havre ac": "Le Havre",
+    "paris saint-germain": "Paris Saint Germain",
+    "paris st-g": "Paris Saint Germain",
+    "stade rennais": "Rennes",
     # ---- MLB: Betfair short forms (and a few common variants)
     "arizona d'backs": "Arizona Diamondbacks",
     "la angels": "Los Angeles Angels",

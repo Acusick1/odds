@@ -164,6 +164,18 @@ def candidates_repo(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def espn_football_scoreboard() -> Callable[[str], dict[str, Any]]:
+    """The recorded November 2026 scoreboard of an ESPN football slug (``eng.2``, ``esp.1``,
+    ``ita.1``, ``ger.1``, ``fra.1``), reduced to the fields the schedule reads."""
+
+    def load(slug: str) -> dict[str, Any]:
+        path = Path(__file__).parent.parent / "fixtures" / "espn_football" / f"{slug}.json"
+        return json.loads(path.read_text())
+
+    return load
+
+
+@pytest.fixture
 def oddsportal_fixtures() -> Path:
     return OP_FIXTURES
 

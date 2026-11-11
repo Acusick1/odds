@@ -256,6 +256,22 @@ class EventExternalId(SQLModel, table=True):
     )
 
 
+class EventPostponement(SQLModel, table=True):
+    """The kick-off an event was postponed from: recorded when a move after the stored kick-off
+    passed, or of a POSTPONED event, puts the start in the future. Its presence makes
+    ``odds_lambda.storage.event_kickoff.move_kickoff`` refuse a later start at or before now."""
+
+    __tablename__ = "event_postponements"
+
+    event_id: int = Field(
+        sa_column=Column(BigInteger, ForeignKey("events.id", ondelete="CASCADE"), primary_key=True)
+    )
+    postponed_from: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))
+    recorded_at: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False), default_factory=utc_now
+    )
+
+
 class HealthCheckAcknowledgement(SQLModel, table=True):
     """An event a health check should no longer report, and why."""
 

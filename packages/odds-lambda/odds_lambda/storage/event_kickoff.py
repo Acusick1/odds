@@ -7,7 +7,13 @@ from datetime import UTC, datetime, timedelta
 from types import MappingProxyType
 
 import structlog
-from odds_core.models import Event, EventExternalId, EventStatus, OddsSnapshot
+from odds_core.models import (
+    Event,
+    EventExternalId,
+    EventPostponement,
+    EventStatus,
+    OddsSnapshot,
+)
 from odds_core.sports import SportKey
 from odds_core.time import ensure_utc
 from odds_core.vocabulary import Source
@@ -17,6 +23,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = structlog.get_logger()
 
 _FOOTBALL_ORDER = (Source.ODDSPORTAL, Source.ODDS_API, Source.FOOTBALL_DATA_UK)
+# The leagues whose events ESPN's scoreboard creates (``odds_lambda.espn_football_schedule``).
+# ESPN ranks last: its kick-offs equalled OddsPortal's and Betfair's when probed, so it adds a
+# source for a postponement only it reports (accepted after kick-off from any source in the order).
+_ESPN_SCHEDULED_FOOTBALL_ORDER = (*_FOOTBALL_ORDER, Source.ESPN)
 
 # Per sport, the sources whose kick-off times an event follows, best first. A source moves an
 # event only when no source ranked above it holds an id on the event. An empty order means no
@@ -25,11 +35,11 @@ KICKOFF_AUTHORITY: Mapping[SportKey, tuple[Source, ...]] = MappingProxyType(
     {
         "baseball_mlb": (Source.MLB_STATS_API,),
         "soccer_epl": _FOOTBALL_ORDER,
-        "soccer_efl_champ": _FOOTBALL_ORDER,
-        "soccer_spain_la_liga": _FOOTBALL_ORDER,
-        "soccer_italy_serie_a": _FOOTBALL_ORDER,
-        "soccer_germany_bundesliga": _FOOTBALL_ORDER,
-        "soccer_france_ligue_one": _FOOTBALL_ORDER,
+        "soccer_efl_champ": _ESPN_SCHEDULED_FOOTBALL_ORDER,
+        "soccer_spain_la_liga": _ESPN_SCHEDULED_FOOTBALL_ORDER,
+        "soccer_italy_serie_a": _ESPN_SCHEDULED_FOOTBALL_ORDER,
+        "soccer_germany_bundesliga": _ESPN_SCHEDULED_FOOTBALL_ORDER,
+        "soccer_france_ligue_one": _ESPN_SCHEDULED_FOOTBALL_ORDER,
         "basketball_nba": (Source.ESPN, Source.ODDSPORTAL, Source.ODDS_API),
     }
 )
@@ -84,7 +94,7 @@ async def move_kickoff(
     ``POSTPONEMENT_MIN_DELAY`` after the stored kick-off is refused, and a later start still ahead
     is accepted from any source in the order, so a postponement the top source stopped listing is
     still followed. A source in ``IN_PLAY_START_SOURCES`` never moves an event to a
-    start at or before ``now``, before the stored kick-off too. A source in ``PLAYED_START_SOURCES`` skips the
+    start at or before ``now``, before the stored kick-off too. An event with a recorded postponement (``EventPostponement``, set when a move after the stored kick-off passed, or of a POSTPONED event, puts the start in the future) refuses a start at or before ``now`` from any source outside ``PLAYED_START_SOURCES``, the reverse of the postponement rule: a stale listing of the original time must not undo it. An event with none is corrected freely. A source in ``PLAYED_START_SOURCES`` skips the
     after-kick-off rule: it dates a postponed game by when it was played, which is in the past.
     Such a source that the order ranks below another moves only an event no other source has
     observed (``_observed_by_another``), since ids alone do not show which sources saw the event.
@@ -95,6 +105,12 @@ async def move_kickoff(
     if ensure_utc(event.commence_time) == ensure_utc(start):
         return False
     if source in IN_PLAY_START_SOURCES and ensure_utc(start) <= ensure_utc(now):
+        return False
+    if (
+        source not in PLAYED_START_SOURCES
+        and ensure_utc(start) <= ensure_utc(now)
+        and await session.get(EventPostponement, event.id) is not None
+    ):
         return False
     if source not in PLAYED_START_SOURCES and ensure_utc(now) >= ensure_utc(event.commence_time):
         if (
@@ -118,6 +134,11 @@ async def _move(
 ) -> bool:
     event_id = event.id
     moved_from = ensure_utc(event.commence_time)
+    postponement = ensure_utc(start) > ensure_utc(now) and (
+        ensure_utc(now) >= moved_from or event.status == EventStatus.POSTPONED
+    )
+    if postponement and await session.get(EventPostponement, event_id) is None:
+        session.add(EventPostponement(event_id=event_id, postponed_from=moved_from))
     event.commence_time = start
     event.updated_at = datetime.now(UTC)
     if event.status == EventStatus.POSTPONED or (
