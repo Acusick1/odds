@@ -14,7 +14,7 @@ A mechanical candidate bet in one sport, and its family, which sets the Bonferro
 - **Verdict.** A candidate's bets in all its leagues form one series in placement order, judged at the same checkpoints with the event-clustered bootstrap unchanged. A per-league breakdown is reported beside the verdict for information and never changes it.
 - **Family.** Two versions share a family when they have the same rule and market and their league sets intersect. k is counted per version and is not transitive: {EPL, Serie A} shares a family with {EPL} and with {Serie A}, but {EPL} and {Serie A} do not share one with each other.
 - **Versioning.** Adding or dropping a league is a new version; the version check compares the league list like any other key. The rename of a one-league `sport: X` to `sports: [X]` is not a change, so the live candidates kept their versions and forward tests through the migration.
-- **Closes.** Every listed league must have a close for the candidate's market in `odds_core.close.CLOSES` at registration. A bet with no close after the close grace is skipped, per league as before.
+- **Closes.** Every listed league must have an entry for the candidate's market in `odds_core.close.CLOSES` at registration. An entry of `None` (MLB) registers, and its bets are reported on P&L without EV, as the goal page allows. A bet with no close after the close grace is skipped, per league as before.
 - **Holdout.** The sealed holdout run replays one pooled draft over the pre-registered leagues, each on its own sealed window ([ADR-0021](0021-sealed-holdout-and-one-shot-gate.md)).
 
 ## Consequences

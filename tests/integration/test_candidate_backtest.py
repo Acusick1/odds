@@ -6,7 +6,7 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import pytest
-from odds_analytics.candidate_backtest import HashStatus, replay
+from odds_analytics.candidate_backtest import BacktestResult, HashStatus, collect, replay
 from odds_analytics.candidate_report import (
     candidate_report,
     family_size_at,
@@ -446,10 +446,20 @@ class TestPooledLeagues:
         )
         await add_event(session, 4, POOLED_KICKOFF, sport="soccer_efl_champ")
 
-    async def replay(self, session: Any, k: int = 1):
+    async def replay(self, session: Any, k: int = 1) -> BacktestResult:
         return await replay(
             session, self.pooled, date(2025, 4, 1), date(2025, 4, 30), k, now=NOW, n_boot=N_BOOT
         )
+
+    async def test_overlapping_day_ranges_are_refused(self, pglite_async_session) -> None:
+        ranges = {
+            "soccer_epl": [
+                (date(2025, 4, 1), date(2025, 4, 10)),
+                (date(2025, 4, 10), date(2025, 4, 30)),
+            ]
+        }
+        with pytest.raises(ValueError, match="soccer_epl: day ranges overlap on 2025-04-10"):
+            await collect(pglite_async_session, self.pooled, ranges)
 
     async def test_a_pooled_draft_backtests_its_leagues_as_one_series(
         self, pglite_async_session

@@ -297,6 +297,12 @@ async def collect(
     league's ``access``."""
     grants = {a.window.sport: a for a in access}
     spans = [(league, span) for league in candidate.sports for span in ranges.get(league, ())]
+    for league in candidate.sports:
+        ordered = sorted(ranges.get(league, ()))
+        for (_, earlier_last), (later_first, _) in zip(ordered, ordered[1:], strict=False):
+            # An event on a shared day would be decided once per range.
+            if later_first <= earlier_last:
+                raise ValueError(f"{league}: day ranges overlap on {later_first}")
     for league, (first, last) in spans:
         require_clear(league, first, last, grants.get(league))
     spec, params = resolve_rule(candidate)

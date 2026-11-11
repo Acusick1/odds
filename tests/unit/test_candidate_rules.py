@@ -29,6 +29,7 @@ from odds_lambda.candidate_rules import (
     exchange_gap,
     is_bettable_line,
     max_input_age,
+    pinning,
     polymarket_gap,
     resolve_rule,
     retail_ev_model,
@@ -818,8 +819,15 @@ class TestValidateCandidateRules:
         with pytest.raises(ValidationError, match="listed twice"):
             _candidate(sports=["soccer_epl", "soccer_epl"])
 
-    def test_registration_refuses_a_league_without_a_close(self) -> None:
-        with pytest.raises(ValueError, match="baseball_mlb has no close for market 'h2h'"):
+    def test_registration_accepts_a_league_whose_close_is_none(self) -> None:
+        validate_candidate_rules([_candidate(sports=["baseball_mlb"], market="h2h")])
+
+    def test_registration_refuses_a_league_missing_from_closes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        closes = {k: v for k, v in pinning.CLOSES.items() if k != ("baseball_mlb", Market.H2H)}
+        monkeypatch.setattr(pinning, "CLOSES", closes)
+        with pytest.raises(ValueError, match="baseball_mlb has no entry for market 'h2h'"):
             validate_candidate_rules([_candidate(sports=["baseball_mlb"], market="h2h")])
 
     def test_a_league_without_a_close_still_resolves_as_a_draft(self) -> None:

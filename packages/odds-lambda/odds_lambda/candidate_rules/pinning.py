@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from odds_core.candidates import Candidate, MechanicalCandidate
-from odds_core.close import close_spec
+from odds_core.close import CLOSES
 
 from odds_lambda.candidate_rules.code_hash import code_sha256
 from odds_lambda.candidate_rules.rules import RULES, ModelRuleSpec, resolve_rule, run_rule
@@ -43,16 +43,15 @@ def rule_sha256(rule_name: str) -> str:
 
 def validate_candidate_rules(candidates: Sequence[Candidate]) -> None:
     """Raise ``ValueError`` naming a mechanical candidate that is invalid, bets in a league
-    whose market has no close, or whose rule code changed."""
+    whose market is not in ``CLOSES``, or whose rule code changed."""
     for candidate in candidates:
         if not isinstance(candidate, MechanicalCandidate):
             continue
         resolve_rule(candidate)
-        if unclosed := [s for s in candidate.sports if close_spec(s, candidate.market) is None]:
+        if unclosed := [s for s in candidate.sports if (s, candidate.market) not in CLOSES]:
             raise ValueError(
-                f"candidate {candidate.name!r}: {', '.join(unclosed)} has no close for market "
-                f"{candidate.market.value!r} (`odds_core.close.CLOSES`), so its bets could not "
-                "be scored"
+                f"candidate {candidate.name!r}: {', '.join(unclosed)} has no entry for market "
+                f"{candidate.market.value!r} in `odds_core.close.CLOSES`"
             )
         if candidate.rule_sha256 != (current := rule_sha256(candidate.rule)):
             raise ValueError(
