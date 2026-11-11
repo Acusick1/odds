@@ -1,0 +1,17 @@
+issue: 842
+name: exchange-gap-early
+version: 1
+rule: exchange_gap
+market: 1x2
+leagues:
+  - soccer_epl
+  - soccer_spain_la_liga
+  - soccer_italy_serie_a
+  - soccer_germany_bundesliga
+  - soccer_france_ligue_one
+  - soccer_efl_champ
+grid:
+  threshold: [0.02, 0.03, 0.04]
+  minutes_before_kickoff: [[1440], [720], [360], [1440, 360]]
+  max_input_age_minutes: [60]
+selection_rule: https://github.com/Acusick1/odds/issues/821#issuecomment-6769611091

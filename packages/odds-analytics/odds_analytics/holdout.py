@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
+import itertools
 import json
 import os
 import subprocess
@@ -147,9 +148,10 @@ def stem(issue: int, market: str, version: int) -> str:
 
 
 class Preregistration(BaseModel):
-    """The frozen grid of an idea's family and version: its strategy (name, rule, market,
-    leagues), every parameter's values (decision times included) and a link to the text of the
-    rule that selects a cell. It holds no cell. A file ``preregistrations/<issue>-<market>-v<version>.yaml``
+    """The frozen cells of an idea's family and version: its strategy (name, rule, market,
+    leagues), either a ``grid`` of every parameter's values (decision times included) or, for
+    parameters that vary together, an explicit list of ``cells``, and a link to the text of the
+    rule that selects a cell. It holds no selected cell. A file ``preregistrations/<issue>-<market>-v<version>.yaml``
     added in one commit, before the backfill lands, and never changed."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -160,16 +162,39 @@ class Preregistration(BaseModel):
     rule: str = Field(min_length=1)
     market: str = Field(pattern=MARKET_PATTERN)
     leagues: list[str] = Field(min_length=1)
-    grid: dict[str, list[object]] = Field(min_length=1)
+    grid: dict[str, list[object]] | None = None
+    cells: list[dict[str, object]] | None = None
     selection_rule: str = Field(pattern=SELECTION_RULE_PATTERN)
 
     @model_validator(mode="after")
     def _consistent(self) -> Preregistration:
         if len(set(self.leagues)) != len(self.leagues):
             raise ValueError("a league is listed twice")
-        if any(not values for values in self.grid.values()):
-            raise ValueError("a grid parameter has no values")
+        if (self.grid is None) == (self.cells is None):
+            raise ValueError("a pre-registration has exactly one of `grid` and `cells`")
+        if self.grid is not None and (
+            not self.grid or any(not values for values in self.grid.values())
+        ):
+            raise ValueError("a grid needs parameters and each needs values")
+        if self.cells is not None:
+            if not self.cells or any(not cell for cell in self.cells):
+                raise ValueError("`cells` needs cells with parameters")
+            if any(cell.keys() != self.cells[0].keys() for cell in self.cells):
+                raise ValueError("every cell has the same parameters")
+            if any(self.cells[i] in self.cells[:i] for i in range(len(self.cells))):
+                raise ValueError("a cell is listed twice")
         return self
+
+    def candidate_cells(self) -> list[dict[str, object]]:
+        """Every cell the file pre-registers: the grid's cartesian product, or its listed cells."""
+        if self.cells is not None:
+            return self.cells
+        assert self.grid is not None  # noqa: S101
+        keys = list(self.grid)
+        return [
+            dict(zip(keys, values, strict=True))
+            for values in itertools.product(*self.grid.values())
+        ]
 
     @property
     def stem(self) -> str:
@@ -363,7 +388,13 @@ def _load_file(path: Path, directory: Path, folder: str, model: type[BaseModel])
 
 
 def check_cell(prereg: Preregistration, cell: dict[str, object]) -> None:
-    """``ValueError`` unless ``cell`` has the grid's parameters and a grid value for each."""
+    """``ValueError`` unless ``cell`` is one of the listed ``cells``, or has the grid's
+    parameters and a grid value for each."""
+    if prereg.cells is not None:
+        if cell not in prereg.cells:
+            raise ValueError(f"the cell {cell!r} is not one of the pre-registered cells")
+        return
+    assert prereg.grid is not None  # noqa: S101
     if cell.keys() != prereg.grid.keys():
         raise ValueError(
             f"the cell's parameters {sorted(cell)} are not the grid's {sorted(prereg.grid)}"

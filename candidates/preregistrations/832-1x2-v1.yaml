@@ -1,0 +1,19 @@
+issue: 832
+name: team-news-latency
+version: 1
+rule: team_news_lag
+market: 1x2
+leagues:
+  - soccer_epl
+  - soccer_spain_la_liga
+  - soccer_italy_serie_a
+  - soccer_germany_bundesliga
+  - soccer_france_ligue_one
+  - soccer_efl_champ
+grid:
+  lookbacks: [[{"minutes_before_decision": 15, "max_input_age_minutes": 10}], [{"minutes_before_decision": 25, "max_input_age_minutes": 10}]]
+  min_rise: [0.01, 0.02]
+  gap: [0, 0.01]
+  minutes_before_kickoff: [[50, 40]]
+  max_input_age_minutes: [10]
+selection_rule: https://github.com/Acusick1/odds/issues/821#issuecomment-6769611091

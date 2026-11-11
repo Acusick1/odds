@@ -1,0 +1,19 @@
+issue: 837
+name: exchange-implied-alternate-totals
+version: 1
+rule: exchange_implied_alternate_totals
+market: totals
+leagues:
+  - soccer_epl
+  - soccer_spain_la_liga
+  - soccer_italy_serie_a
+  - soccer_germany_bundesliga
+  - soccer_france_ligue_one
+  - soccer_efl_champ
+grid:
+  threshold: [0.01, 0.02, 0.03]
+  minutes_before_kickoff: [[60, 30], [120, 60, 30]]
+  lines: [[1.5, 3.5]]
+  exchange_tolerance: [0.02]
+  max_input_age_minutes: [10]
+selection_rule: https://github.com/Acusick1/odds/issues/821#issuecomment-6769611091
