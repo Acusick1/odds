@@ -68,6 +68,8 @@ ODDS_API_KEY_ALIASES: dict[str, str] = {"betmgm": "betmgm_us"}
 ODDS_API_BOOKMAKER_KEY_MAP: dict[str, str] = {
     "betfair_ex_uk": "betfair_exchange",
     "betfair_ex_eu": "betfair_exchange",
+    # The Odds API's key for the exchange before it split the Betfair books (early history).
+    "betfair": "betfair_exchange",
     "ladbrokes_uk": "ladbrokes",
     "betfred_uk": "betfred",
     "sport888": "888sport",
