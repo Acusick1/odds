@@ -24,6 +24,7 @@ A PR that replaces code deletes what it replaces, with its tests and wiki pages;
 - **Pass `--sport` and the sport's market key.** Several CLI defaults are NBA. EPL odds use `1x2` and MLB uses `h2h`. See [sources and keys](wiki/collection/sport-and-market-keys.md).
 - **Historical analysis uses only data at or before decision time.** Bound `odds_core.quotes.quotes` with `until` (and `known_at`). See [look-ahead](wiki/modelling/look-ahead-bias.md).
 - **The retail-EV model's target, EV against the Betfair Exchange close, is `target_type: retail_ev`.** See [target](wiki/modelling/clv-target.md).
+- **Each use has its own sharp reference.** Scoring and the retail-EV model use Betfair Exchange; Pinnacle sits only in the agent tools' and the tabular features' sharp lists. See [sharp references](wiki/modelling/sharp-benchmark.md#which-reference-is-used-for-what).
 - **Use one `async with async_session_maker() as session` per task.** Lambda gets `NullPool` automatically. See [databases](wiki/foundations/databases-and-environments.md).
 
 ## Tests

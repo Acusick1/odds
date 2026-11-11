@@ -56,4 +56,4 @@ The envelope a source returns (archived in `odds_core.models.SnapshotPayload`, [
 - [Devigging and vig-inclusive prices](devigging.md)
 - [Odds snapshots table](../storage/odds-tables.md) — envelope format
 - [Price tables](../storage/price-tables.md)
-- [Sharp benchmark and retail-sharp divergence](../modelling/sharp-benchmark.md)
+- [Sharp references and retail-sharp divergence](../modelling/sharp-benchmark.md)

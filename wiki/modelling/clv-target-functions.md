@@ -91,4 +91,4 @@ This close is the `raw` target's own, a multi-book snapshot for its line-movemen
 
 ## Config fields
 
-`odds_analytics.training.config.FeatureConfig` carries `target_type` and `retail_ev_arm`; all fields and defaults are on [Training config](training-config.md). The tabular group's `retail_sharp_diff` is built from the same prices as the `raw` target ([sharp benchmark](sharp-benchmark.md)).
+`odds_analytics.training.config.FeatureConfig` carries `target_type` and `retail_ev_arm`; all fields and defaults are on [Training config](training-config.md). The tabular group's `retail_sharp_diff` is built from the same prices as the `raw` target ([sharp references](sharp-benchmark.md)).
