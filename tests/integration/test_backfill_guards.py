@@ -311,6 +311,20 @@ class TestRunGuards:
 
 
 class TestProbe:
+    async def test_the_legacy_betfair_key_counts_for_the_required_exchange(
+        self,
+        pglite_async_session: AsyncSession,
+        replay: BackfillReplay,
+        mlb_schedule: type[FakeMlbStatsFetcher],
+    ) -> None:
+        manifest = load_manifest(MLB)
+        for at in (FIRST_PROBE, SECOND_PROBE):
+            replay.record(at, [far_game(at, "betfair", "williamhill")])
+
+        checks = await replay.probe(manifest)
+
+        assert [c.ok for c in checks] == [True, True]
+
     async def test_a_conforming_response_passes_every_check(
         self,
         pglite_async_session: AsyncSession,

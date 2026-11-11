@@ -41,7 +41,12 @@ sources:
   - odds_cli.commands.polymarket.backfill_odds
   - odds_lambda.storage.writers.OddsWriter.store_envelope
   - odds_core.odds_math.PRICE_DECIMAL_KEY
-  - odds_core.bookmakers
+  - odds_core.bookmakers.UK_RETAIL_BOOKMAKERS
+  - odds_core.bookmakers.NON_BETTABLE_BOOKMAKERS
+  - odds_core.bookmakers.POLYMARKET_BOOKMAKER
+  - odds_core.bookmakers.SHARP_BOOKMAKERS
+  - odds_core.bookmakers.ZERO_MARGIN_BOOKMAKERS
+  - odds_core.bookmakers.BOOKMAKER_ALIASES_BY_SOURCE
   - odds_lambda.polymarket_odds.MAX_QUOTE_SPREAD
   - odds_lambda.jobs.fetch_polymarket_odds.EmptyListingError
 mentions:
