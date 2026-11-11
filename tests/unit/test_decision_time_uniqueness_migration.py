@@ -50,8 +50,8 @@ async def _decide(session: AsyncSession, minutes: int, with_lead: bool = True) -
         await session.execute(
             text(
                 "INSERT INTO candidate_decisions (candidate_name, candidate_version, event_id,"
-                f" decision_time, kickoff_at_decision, known_at, bets_placed{lead_column})"
-                f" VALUES ('cand', 1, 1, :t, :k, :t, 0{lead_value}) RETURNING id"
+                f" sports, decision_time, kickoff_at_decision, known_at, bets_placed{lead_column})"
+                f" VALUES ('cand', 1, 1, '{{soccer_epl}}', :t, :k, :t, 0{lead_value}) RETURNING id"
             ),
             {"t": KICKOFF - timedelta(minutes=minutes), "k": KICKOFF, "m": minutes},
         )

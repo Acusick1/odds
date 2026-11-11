@@ -509,8 +509,8 @@ class TestFamilyOfIntersectingLeagues:
         assert self.k(self.epl) == self.k(self.serie_a) == 2
 
     def test_another_market_with_the_same_leagues_is_another_family(self) -> None:
-        totals = mechanical("pooled", sports=[EPL, SERIE_A], market="totals")
-        assert family_starts(totals, self.registry, self.decisions) == [at(3)]
+        totals = mechanical("totals", sports=[EPL, SERIE_A], market="totals")
+        assert family_starts(totals, self.registry, self.decisions) == []
 
 
 class TestPastVersionLeagues:
@@ -579,7 +579,8 @@ class TestKAtEachCheckpoint:
 
     def judged(self, decisions: dict):
         sequence = [trade(i, 0.5, name="a") for i in range(100)]
-        summaries = summarize_candidates(sequence, self.registry, NOW, decisions, N_BOOT)
+        starts = {key: DecisionStart(t, frozenset({EPL})) for key, t in decisions.items()}
+        summaries = summarize_candidates(sequence, self.registry, NOW, starts, N_BOOT)
         return {s.name: s for s in summaries}
 
     def test_a_variant_deciding_after_a_promote_leaves_it_standing(self) -> None:
@@ -624,7 +625,7 @@ class TestKAtEachCheckpoint:
             [trade(0, name="ghost"), trade(1, name="cand")],
             [registry_entry("cand"), mechanical("a"), mechanical("b")],
             NOW,
-            {("a", 1): at(1), ("b", 1): at(1)},
+            {("a", 1): decided(1), ("b", 1): decided(1)},
             n_boot=N_BOOT,
         )
         assert {s.name: s.family_versions for s in summaries}["ghost"] == 1

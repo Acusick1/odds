@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from odds_analytics.candidate_report import (
     CandidateReport,
     CandidateSummary,
+    DecisionStart,
     RunningScore,
     ScoredBet,
 )
@@ -108,7 +109,7 @@ def seed(data: dict[str, object], bets: list[ScoredBet], *registry: object) -> C
 def scored(
     bets: list[ScoredBet],
     registry: list[object] | None = None,
-    starts: dict[tuple[str, int], datetime] | None = None,
+    starts: dict[tuple[str, int], DecisionStart] | None = None,
 ) -> tuple[CandidateSummary, RunningScore]:
     """The report's summary and running score of the version ``gap`` v1."""
     found = report(bets, registry or [mechanical()], starts)
@@ -475,7 +476,11 @@ class TestCurrentBesideACheckpoint:
     def test_a_current_estimate_at_a_checkpoints_n_with_a_larger_family_is_kept(self) -> None:
         registry = [mechanical("gap"), mechanical("sibling")]
         # The 100th bet is placed 99 minutes after LONG_AGO; the sibling starts a day later.
-        starts = {("gap", 1): LONG_AGO, ("sibling", 1): LONG_AGO + timedelta(days=1)}
+        epl = frozenset({"soccer_epl"})
+        starts = {
+            ("gap", 1): DecisionStart(LONG_AGO, epl),
+            ("sibling", 1): DecisionStart(LONG_AGO + timedelta(days=1), epl),
+        }
         bets = [bet(i, 1.0 if i % 2 else -1.0) for i in range(100)]
         summary, running = scored(bets, registry, starts)
         assert summary.checkpoint is not None and summary.current is not None
