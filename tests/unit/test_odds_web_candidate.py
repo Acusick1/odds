@@ -506,6 +506,7 @@ class TestNoScoringInOddsWeb:
             "CandidateSummary",
             "Checkpoint",
             "CheckpointProgress",
+            "LeagueBreakdown",
             "RunningScore",
             "Verdict",
             "candidate_report",

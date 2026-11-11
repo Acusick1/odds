@@ -10,15 +10,15 @@ from typing import Annotated, Any, cast
 
 import typer
 from odds_analytics import holdout, holdout_run
-from odds_analytics.candidate_backtest import BacktestResult, HashStatus, replay
+from odds_analytics.candidate_backtest import BacktestResult, Coverage, HashStatus, replay
 from odds_analytics.candidate_parity import ParityReport, ParityStatus, check_parity
 from odds_analytics.candidate_rehash import rehash as record_rehash
 from odds_analytics.candidate_report import (
     CandidateSummary,
     Checkpoint,
+    LeagueBreakdown,
     Verdict,
     candidate_report,
-    family,
     family_size_at,
     family_starts,
     load_decision_starts,
@@ -70,7 +70,7 @@ def list_candidates(
     table = Table()
     table.add_column("Name", style="cyan")
     table.add_column("Kind")
-    table.add_column("Sport")
+    table.add_column("Leagues")
     table.add_column("Version", justify="right")
     table.add_column("Status")
     table.add_column("Start date")
@@ -79,7 +79,7 @@ def list_candidates(
         table.add_row(
             c.name,
             c.kind,
-            c.sport,
+            ", ".join(c.sports),
             str(c.version),
             c.status,
             c.start_date.isoformat(),
@@ -141,6 +141,9 @@ def report() -> None:
         console.print("[yellow]No candidates registered and no candidate trades[/yellow]")
         return
     console.print(_report_table(summaries))
+    for s in summaries:
+        if len(s.leagues) > 1:
+            console.print(_league_table(f"{s.name} v{s.version}", s.leagues))
 
 
 async def _report(registry: list[Candidate]) -> list[CandidateSummary]:
@@ -187,6 +190,36 @@ def _report_table(summaries: list[CandidateSummary]) -> Table:
             str(s.family_versions),
             f"[{style}]{s.verdict}[/{style}]",
         )
+    return table
+
+
+def _league_table(
+    label: str,
+    leagues: tuple[LeagueBreakdown, ...],
+    coverage: dict[str, Coverage] | None = None,
+) -> Table:
+    table = Table(title=f"{label} per league, for information: the verdict is the pooled series'")
+    table.add_column("League")
+    if coverage is not None:
+        table.add_column("Decisions", justify="right")
+        table.add_column("With input", justify="right")
+        table.add_column("Bets", justify="right")
+    table.add_column("Settled", justify="right")
+    table.add_column("With close", justify="right")
+    table.add_column("Mean EV", justify="right")
+    table.add_column("P&L", justify="right")
+    scored = {b.sport_key: b for b in leagues}
+    for league in coverage if coverage is not None else scored:
+        b = scored.get(league)
+        cells = [str(b.settled_bets), str(b.bets_with_close)] if b else ["0", "0"]
+        cells += [
+            f"{b.mean_ev:+.4f}" if b and b.mean_ev is not None else "-",
+            f"{b.pnl:+.2f}" if b else "-",
+        ]
+        if coverage is not None:
+            cov = coverage[league]
+            cells = [str(cov.decisions), str(cov.with_input), str(cov.bets), *cells]
+        table.add_row(league, *cells)
     return table
 
 
@@ -363,13 +396,19 @@ def _print_backtest(result: BacktestResult) -> None:
         console.print(_refit_table(result))
     for table in _backtest_tables(result):
         console.print(table)
+    if result.league_coverage is not None and len(result.league_coverage) > 1:
+        console.print(
+            _league_table(
+                f"{result.name} v{result.version}", result.summary.leagues, result.league_coverage
+            )
+        )
 
 
 async def _family_size(
     session: AsyncSession, candidate: MechanicalCandidate, registry: list[Candidate], now: datetime
 ) -> int:
     starts = family_starts(
-        family(candidate),
+        candidate,
         registry,
         await load_decision_starts(session),
         draft=(candidate.name, candidate.version),

@@ -81,7 +81,7 @@ def write_candidate(directory: Path, name: str = "cand", **fields: Any) -> None:
         "description": "d",
         "kind": "mechanical",
         "market": "1x2",
-        "sport": EPL,
+        "sports": [EPL],
         "version": 1,
         "issue": 1,
         "start_date": (NOW - timedelta(days=1)).date().isoformat(),
@@ -191,7 +191,7 @@ class TestDecisions:
                 "description": "d",
                 "kind": "mechanical",
                 "market": "1x2",
-                "sport": EPL,
+                "sports": [EPL],
                 "version": 1,
                 "issue": 1,
                 "start_date": "2026-01-01",
@@ -508,7 +508,7 @@ class TestTotals:
                 "description": "d",
                 "kind": "mechanical",
                 "market": "totals",
-                "sport": EPL,
+                "sports": [EPL],
                 "version": 1,
                 "issue": 1,
                 "start_date": "2026-01-01",
@@ -590,11 +590,21 @@ class TestCandidateSelection:
         write_candidate(registry, "killed", status="killed")
         write_candidate(registry, "promoted", status="promoted")
         write_candidate(registry, "future", start_date=(NOW + timedelta(days=1)).date().isoformat())
-        write_candidate(registry, "mlb", sport="baseball_mlb", market="h2h")
+        write_candidate(registry, "mlb", sports=["baseball_mlb"], market="h2h")
 
         runnable = await runnable_candidates(EPL, NOW)
 
         assert [r.candidate.name for r in runnable] == ["active"]
+
+    async def test_a_pooled_candidate_runs_in_the_job_of_each_league_it_lists(
+        self, registry
+    ) -> None:
+        write_candidate(registry, "pooled", sports=[EPL, "soccer_italy_serie_a"])
+
+        for sport, expected in ((EPL, ["pooled"]), ("soccer_italy_serie_a", ["pooled"])):
+            runnable = await runnable_candidates(sport, NOW)
+            assert [r.candidate.name for r in runnable] == expected
+        assert await runnable_candidates("soccer_efl_champ", NOW) == []
 
     async def test_invalid_candidates_alert_once_each_and_others_still_run(
         self, registry, monkeypatch: pytest.MonkeyPatch

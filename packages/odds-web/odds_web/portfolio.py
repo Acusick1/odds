@@ -82,12 +82,13 @@ def forest_for(current: Checkpoint) -> Forest:
 
 def scope_of(entry: Candidate | None) -> str:
     """``entry`` is the registry's entry at the summary's own version; a version the registry
-    no longer holds has no sport or market of its own to show."""
+    no longer holds has no leagues or market of its own to show."""
     if entry is None:
         return "—"
+    leagues = ", ".join(entry.sports)
     if isinstance(entry, MechanicalCandidate):
-        return f"{entry.sport} · {entry.market}"
-    return f"{entry.sport} · agent"
+        return f"{leagues} · {entry.market}"
+    return f"{leagues} · agent"
 
 
 def status_of(summary: CandidateSummary) -> str:
@@ -129,7 +130,8 @@ def no_ev_reason(summary: CandidateSummary, entry: Candidate | None = None) -> s
     candidate's registry entry, else from its bets lacking one), or the events are too few."""
     if summary.bets_with_close == 0:
         no_close = summary.bets_without_close > 0 or (
-            isinstance(entry, MechanicalCandidate) and close_spec(entry.sport, entry.market) is None
+            isinstance(entry, MechanicalCandidate)
+            and all(close_spec(sport, entry.market) is None for sport in entry.sports)
         )
         return "EV not scoreable" if no_close else "no bets with a close"
     return "too few events"

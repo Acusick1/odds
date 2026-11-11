@@ -66,9 +66,10 @@ def _check_candidate(name: str, version: int, event: Event, market: str) -> None
         raise ValueError(f"Candidate '{name}' starts on {candidate.start_date}, after {today}")
     if candidate.version != version:
         raise ValueError(f"Candidate '{name}' is at version {candidate.version}, not {version}")
-    if event.sport_key != candidate.sport:
+    if event.sport_key not in candidate.sports:
         raise ValueError(
-            f"Candidate '{name}' is for {candidate.sport}, not {event.sport_key} ({event.id})"
+            f"Candidate '{name}' is for {', '.join(candidate.sports)}, not {event.sport_key} "
+            f"({event.id})"
         )
     if market == TWO_WAY_MARKET and is_three_way_sport(event.sport_key):
         raise ValueError(f"{event.sport_key} trades use '{THREE_WAY_MARKET}', not '{market}'")

@@ -9,8 +9,8 @@ never promote one.
 
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
-from dataclasses import dataclass, replace
+from collections.abc import Collection, Mapping, Sequence
+from dataclasses import dataclass, fields
 from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
 
@@ -83,7 +83,9 @@ class BacktestResult:
     beyond the checkpoint cap of the verdict. ``range_events`` counts the events in the
     range, a model rule's training prefix included; ``tuning`` and ``refits`` record a model
     rule's hyperparameters chosen on that prefix and its fits, and ``library_versions`` the
-    versions of the libraries that fitted and tuned it. ``comparison`` is another candidate replayed on the same decided events."""
+    versions of the libraries that fitted and tuned it. ``league_coverage`` is the coverage of
+    each league the candidate bets in, for information: the verdict is the pooled series'.
+    ``comparison`` is another candidate replayed on the same decided events."""
 
     name: str
     version: int
@@ -99,6 +101,7 @@ class BacktestResult:
     tuning: Tuning | None = None
     refits: tuple[Refit, ...] = ()
     library_versions: dict[str, str] | None = None
+    league_coverage: dict[str, Coverage] | None = None
     comparison: BacktestResult | None = None
 
     @property
@@ -229,39 +232,80 @@ async def _decide(
                         ),
                         placed_at=t,
                         close_grace=close_grace(event.sport_key, market),
+                        sport_key=event.sport_key,
                     )
                 )
     return bets
 
 
+# Inclusive UTC kick-off days.
+DayRange = tuple[date, date]
+
+
 @dataclass(frozen=True)
 class Replayed:
-    """What a replay decided, before scoring: the bets and the counts behind the coverage."""
+    """What a replay decided, before scoring: the bets in placement order and, per league, the
+    counts behind the coverage and the events decided."""
 
     bets: list[ScoredBet]
-    counts: _Counts
-    scored_events: int
+    counts: dict[str, _Counts]
+    scored_events: dict[str, int]
     range_events: int
     tuning: Tuning | None
     refits: tuple[Refit, ...]
     model: bool
 
 
+def _placement_order(bet: ScoredBet) -> tuple[datetime, datetime, int]:
+    # Stable, so the bets of one event placed at one time keep rule order.
+    return (bet.placed_at, bet.commence_time, bet.event_id)
+
+
+async def _decide_leagues(
+    session: AsyncSession,
+    candidate: MechanicalCandidate,
+    spec: RuleSpec,
+    params: RuleParams,
+    events: Sequence[Event],
+    counts: dict[str, _Counts],
+) -> list[ScoredBet]:
+    """``_decide`` per league of ``events``, counting each league apart."""
+    bets: list[ScoredBet] = []
+    for league in candidate.sports:
+        league_events = [e for e in events if e.sport_key == league]
+        if league_events:
+            bets += await _decide(
+                session,
+                candidate,
+                spec,
+                params,
+                league_events,
+                counts.setdefault(league, _Counts()),
+            )
+    return bets
+
+
 async def collect(
     session: AsyncSession,
     candidate: MechanicalCandidate,
-    start: date,
-    end: date,
+    ranges: Mapping[str, Sequence[DayRange]],
     only_events: Collection[int] | None = None,
-    access: HoldoutAccess | None = None,
+    access: Collection[HoldoutAccess] = (),
 ) -> Replayed:
-    """Decide ``candidate`` over the events kicked off from ``start`` to ``end`` inclusive and
-    settle its bets, in decision-time order. ``access`` is needed for a sealed range."""
-    require_clear(candidate.sport, start, end, access)
+    """Decide ``candidate`` over the events of each of its leagues kicked off in that league's
+    ``ranges`` and settle its bets, pooled in decision-time order. A sealed range needs the
+    league's ``access``."""
+    grants = {a.window.sport: a for a in access}
+    spans = [(league, span) for league in candidate.sports for span in ranges.get(league, ())]
+    for league, (first, last) in spans:
+        require_clear(league, first, last, grants.get(league))
     spec, params = resolve_rule(candidate)
-    events = await final_events(session, candidate.sport, start, end, access)
+    events: list[Event] = []
+    for league, (first, last) in spans:
+        events += await final_events(session, league, first, last, grants.get(league))
+    events.sort(key=lambda e: (e.commence_time, e.id))
     range_events = len(events)
-    counts = _Counts()
+    counts: dict[str, _Counts] = {league: _Counts() for league in candidate.sports}
     refits: list[Refit] = []
     tuning: Tuning | None = None
     if isinstance(spec, ModelRuleSpec):
@@ -277,19 +321,19 @@ async def collect(
         if tuning is not None:
             async for refit, bound, block in model.blocks(tuning):
                 refits.append(refit)
-                bets += await _decide(session, candidate, bound, params, block, counts)
-        scored_events = sum(len(r.event_ids) for r in refits)
+                bets += await _decide_leagues(session, candidate, bound, params, block, counts)
+        league_of = {e.id: e.sport_key for e in events}
+        scored = [league_of[event_id] for r in refits for event_id in r.event_ids]
     else:
         if only_events is not None:
             events = [e for e in events if e.id in only_events]
-        bets = await _decide(session, candidate, spec, params, events, counts)
-        scored_events = len(events)
-    # Stable, so bets placed at one time keep kick-off and rule order.
-    bets.sort(key=lambda bet: bet.placed_at)
+        bets = await _decide_leagues(session, candidate, spec, params, events, counts)
+        scored = [e.sport_key for e in events]
+    bets.sort(key=_placement_order)
     return Replayed(
         bets,
         counts,
-        scored_events,
+        {league: scored.count(league) for league in candidate.sports},
         range_events,
         tuning,
         tuple(refits),
@@ -297,19 +341,37 @@ async def collect(
     )
 
 
-def coverage_of(replayed: Replayed) -> Coverage:
-    counts = replayed.counts
+def _coverage(counts: _Counts, events: int, bets: Sequence[ScoredBet]) -> Coverage:
     return Coverage(
-        events=replayed.scored_events,
+        events=events,
         decisions=counts.decisions,
         with_input=counts.with_input,
         with_exchange=counts.with_exchange,
         with_polymarket=counts.with_polymarket,
         with_retail=counts.with_retail,
         with_bet=counts.with_bet,
-        bets=len(replayed.bets),
-        bets_with_close=sum(b.p_close is not None for b in replayed.bets),
+        bets=len(bets),
+        bets_with_close=sum(b.p_close is not None for b in bets),
     )
+
+
+def league_coverage(replayed: Replayed) -> dict[str, Coverage]:
+    return {
+        league: _coverage(
+            counts,
+            replayed.scored_events.get(league, 0),
+            [b for b in replayed.bets if b.sport_key == league],
+        )
+        for league, counts in replayed.counts.items()
+    }
+
+
+def coverage_of(replayed: Replayed) -> Coverage:
+    total = _Counts()
+    for counts in replayed.counts.values():
+        for field in fields(_Counts):
+            setattr(total, field.name, getattr(total, field.name) + getattr(counts, field.name))
+    return _coverage(total, sum(replayed.scored_events.values()), replayed.bets)
 
 
 async def replay(
@@ -322,16 +384,17 @@ async def replay(
     n_boot: int = DEFAULT_BOOTSTRAP_SAMPLES,
     seed: int = BOOTSTRAP_SEED,
     only_events: Collection[int] | None = None,
-    holdout_access: HoldoutAccess | None = None,
+    holdout_access: Collection[HoldoutAccess] = (),
 ) -> BacktestResult:
-    """Replay ``candidate`` over the events kicked off from ``start`` to ``end`` inclusive.
+    """Replay ``candidate`` over the events of its leagues kicked off from ``start`` to ``end``
+    inclusive.
 
     The decision times are the rule's leads before the event's final kick-off, which is the
     only kick-off a completed event has; a live run saw the kick-off as it was then. An
     event's times are decided earliest first, and an outcome bet at one is not bet again.
     State is built with ``known_at=None`` because backfilled rows were created long after
-    their snapshot time. Bets are scored in decision-time order, as the live report orders
-    trades by placement, all settled.
+    their snapshot time. Bets of every league are scored as one series in decision-time order,
+    as the live report orders trades by placement, all settled.
 
     A model rule decides only the matches after its training prefix, on which its
     hyperparameters are tuned, each block with the model refitted before it
@@ -341,24 +404,22 @@ async def replay(
     A range that intersects the sealed holdout raises ``HoldoutRefused`` unless
     ``holdout_access``, issued only by ``odds_analytics.holdout.Reservation``, covers it.
     """
-    replayed = await collect(session, candidate, start, end, only_events, holdout_access)
-    result = score(
+    replayed = await collect(
+        session,
+        candidate,
+        {league: [(start, end)] for league in candidate.sports},
+        only_events,
+        holdout_access,
+    )
+    return score(
         candidate,
         start,
         end,
-        replayed.bets,
-        coverage_of(replayed),
+        replayed,
         family_versions,
         now or datetime.now(UTC),
         n_boot,
         seed,
-    )
-    return replace(
-        result,
-        range_events=replayed.range_events,
-        tuning=replayed.tuning,
-        refits=replayed.refits,
-        library_versions=library_versions() if replayed.model else None,
     )
 
 
@@ -366,15 +427,16 @@ def score(
     candidate: MechanicalCandidate,
     start: date,
     end: date,
-    bets: Sequence[ScoredBet],
-    coverage: Coverage,
+    replayed: Replayed,
     family_versions: int,
     now: datetime,
     n_boot: int,
     seed: int,
 ) -> BacktestResult:
-    """Summarise replayed ``bets`` with the forward-test report's code, at one family size for all
-    checkpoints: a replay has no placement history to count versions against."""
+    """Summarise the replayed bets with the forward-test report's code, as one series at one
+    family size for all checkpoints: a replay has no placement history to count versions
+    against."""
+    bets = replayed.bets
     summary = summarize_candidate(
         candidate.name,
         candidate.version,
@@ -394,9 +456,14 @@ def score(
         start=start,
         end=end,
         hash_status=hash_status(candidate),
-        coverage=coverage,
+        coverage=coverage_of(replayed),
         summary=summary,
         overall=checkpoint_at(with_close, len(with_close), family_versions, n_boot, seed)
         if with_close
         else None,
+        range_events=replayed.range_events,
+        tuning=replayed.tuning,
+        refits=replayed.refits,
+        library_versions=library_versions() if replayed.model else None,
+        league_coverage=league_coverage(replayed),
     )

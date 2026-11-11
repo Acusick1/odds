@@ -1,13 +1,10 @@
-"""The one holdout run of a pre-registered idea: replay the selected cell on each league's sealed
-window, pool the bets and judge them once.
-
-Each league is replayed as a single-sport draft; pooling the bets into one sample and one gate
-is the seam a pooled draft would replace.
+"""The one holdout run of a pre-registered idea: replay the selected cell as one pooled draft
+over the pre-registered leagues, each on its sealed window, and judge the pooled bets once.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -19,12 +16,8 @@ from odds_lambda.candidate_rules.pinning import rule_sha256
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_analytics.candidate_backtest import Coverage, Replayed, collect, coverage_of, score
-from odds_analytics.candidate_report import (
-    BOOTSTRAP_SEED,
-    DEFAULT_BOOTSTRAP_SAMPLES,
-    ScoredBet,
-)
+from odds_analytics.candidate_backtest import Coverage, collect, league_coverage, score
+from odds_analytics.candidate_report import BOOTSTRAP_SEED, DEFAULT_BOOTSTRAP_SAMPLES
 from odds_analytics.holdout import (
     HoldoutRefused,
     HoldoutResult,
@@ -50,8 +43,9 @@ class HoldoutRun:
     leagues: list[LeagueRun]
 
 
-def league_draft(plan: Plan, sport: str, today: date) -> MechanicalCandidate:
-    """The pre-registered strategy as a draft of one league, with the selected cell's params."""
+def pooled_draft(plan: Plan, today: date) -> MechanicalCandidate:
+    """The pre-registered strategy as one draft over its leagues, with the selected cell's
+    params."""
     prereg = plan.prereg
     return MechanicalCandidate.model_validate(
         {
@@ -59,7 +53,7 @@ def league_draft(plan: Plan, sport: str, today: date) -> MechanicalCandidate:
             "description": f"Holdout run of #{prereg.issue}",
             "kind": "mechanical",
             "market": prereg.market,
-            "sport": sport,
+            "sports": prereg.leagues,
             "version": prereg.version,
             "issue": prereg.issue,
             "start_date": today,
@@ -67,12 +61,6 @@ def league_draft(plan: Plan, sport: str, today: date) -> MechanicalCandidate:
             "rule": prereg.rule,
             "params": plan.cell,
         }
-    )
-
-
-def _pooled_coverage(coverages: list[Coverage]) -> Coverage:
-    return Coverage(
-        **{f.name: sum(getattr(c, f.name) for c in coverages) for f in fields(Coverage)}
     )
 
 
@@ -99,40 +87,26 @@ async def run_holdout(
     now = now or datetime.now(UTC)
     plan = load_plan(path, directory)
     prereg = plan.prereg
-    drafts = {sport: league_draft(plan, sport, now.date()) for sport in prereg.leagues}
-    for draft in drafts.values():
-        try:
-            resolve_rule(draft)
-        except ValueError as exc:
-            raise HoldoutRefused(str(exc)) from exc
+    try:
+        draft = pooled_draft(plan, now.date())
+        resolve_rule(draft)
+    except ValueError as exc:
+        raise HoldoutRefused(str(exc)) from exc
+    windows = {sport: windows_of(sport)[0] for sport in draft.sports}
     backfill_start = await earliest_backfill(session)
     with exclusive_lock(directory.parent):
         reservation = reserve(plan, directory, backfill_start, now)
-        replays: list[tuple[Window, Replayed]] = []
-        for sport, draft in drafts.items():
-            (window,) = windows_of(sport)
-            replays.append(
-                (
-                    window,
-                    await collect(
-                        session,
-                        draft,
-                        window.start,
-                        window.end,
-                        access=reservation.access(sport),
-                    ),
-                )
-            )
-        bets: list[ScoredBet] = sorted(
-            (b for _, r in replays for b in r.bets), key=lambda b: b.placed_at
+        replayed = await collect(
+            session,
+            draft,
+            {sport: [(w.start, w.end)] for sport, w in windows.items()},
+            access=[reservation.access(sport) for sport in draft.sports],
         )
-        first = next(iter(drafts.values()))
         pooled = score(
-            first,
-            min(w.start for w, _ in replays),
-            max(w.end for w, _ in replays),
-            bets,
-            _pooled_coverage([coverage_of(r) for _, r in replays]),
+            draft,
+            min(w.start for w in windows.values()),
+            max(w.end for w in windows.values()),
+            replayed,
             1,
             now,
             DEFAULT_BOOTSTRAP_SAMPLES,
@@ -140,8 +114,9 @@ async def run_holdout(
         )
         row = reservation.record(
             rule_sha256(prereg.rule),
-            [w for w, _ in replays],
+            list(windows.values()),
             now.date(),
             gate(pooled.overall),
         )
-    return HoldoutRun(row, [LeagueRun(w, coverage_of(r)) for w, r in replays])
+    coverage = league_coverage(replayed)
+    return HoldoutRun(row, [LeagueRun(w, coverage[sport]) for sport, w in windows.items()])

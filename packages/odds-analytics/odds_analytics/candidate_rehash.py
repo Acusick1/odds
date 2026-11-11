@@ -81,10 +81,10 @@ class Replay:
         return replayed["counts"]["with_input"], len(replayed["bets"])
 
 
-def _sport(path: Path) -> str:
+def _leagues(path: Path) -> tuple[str, ...]:
     candidate = load_candidate_file(path)
     assert isinstance(candidate, MechanicalCandidate)  # noqa: S101
-    return candidate.sport
+    return candidate.sports
 
 
 def replay_under(
@@ -99,11 +99,11 @@ def replay_under(
 ) -> Replay:
     """The replay of the candidate files under ``checkout``'s code from the exported database
     ``snapshot``, and the rule's hash under that code."""
-    # The replay never reads the sealed holdout: each sport's days less its windows, which the
+    # The replay never reads the sealed holdout: each league's days less its windows, which the
     # script replays as separate ranges. Computed here because a base revision has no holdout.
     segments = {
         sport: [(a.isoformat(), b.isoformat()) for a, b in development_segments(sport, start, end)]
-        for sport in {_sport(p) for p in paths}
+        for sport in {league for p in paths for league in _leagues(p)}
     }
     with tempfile.TemporaryDirectory() as tmp:
         out, hash_out = Path(tmp) / "replay.json", Path(tmp) / "hash"

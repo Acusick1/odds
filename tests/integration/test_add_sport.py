@@ -125,7 +125,7 @@ class TestAddedSport:
         candidate = MechanicalCandidate(
             name="exchange-gap-laliga",
             description="d",
-            sport=SPORT,
+            sports=(SPORT,),
             version=1,
             issue=1,
             start_date="2026-01-01",

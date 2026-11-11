@@ -2,7 +2,7 @@ name: polymarket-gap-epl
 description: Back the longest UK retail price when the Polymarket fair probability times the price minus 1 exceeds 1%, 60 and 30 minutes before kick-off, at most once per outcome
 kind: mechanical
 market: 1x2
-sport: soccer_epl
+sports: [soccer_epl]
 version: 2
 issue: 655
 start_date: 2026-10-30

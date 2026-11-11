@@ -12,15 +12,36 @@ import dataclasses
 import json
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any
 
+import yaml
 from odds_analytics.candidate_backtest import _Counts, _decide, final_events, replay
-from odds_core.candidates import MechanicalCandidate, load_candidate_file
+from odds_core.candidates import MechanicalCandidate
 from odds_core.database import async_session_maker
 from odds_lambda.candidate_rules import resolve_rule
 from sqlalchemy import text
 
 # Fixed so the summary's pending counts do not depend on when it runs.
 NOW = datetime(2000, 1, 1, tzinfo=UTC)
+
+# The fields a replayed bet has in every revision; a later field is left out, so a field added
+# to the bet does not make two revisions' replays differ.
+BET_FIELDS = (
+    "candidate_name",
+    "candidate_version",
+    "event_id",
+    "commence_time",
+    "stake",
+    "pnl",
+    "price_decimal",
+    "p_close",
+    "placed_at",
+    "close_grace",
+)
+# Summary fields that only some revisions have, or that restate the candidate file (whose
+# league field is named differently across revisions), rather than what the replay decided.
+SUMMARY_DROPPED = ("hash_status", "league_coverage")
+CANDIDATE_SUMMARY_DROPPED = ("registered", "leagues")
 
 
 def current_rule_sha256(rule: str) -> str:
@@ -32,6 +53,39 @@ def current_rule_sha256(rule: str) -> str:
     return rule_sha256(rule)
 
 
+def load(path: Path) -> MechanicalCandidate:
+    """The candidate file parsed by this checkout's model: a revision before pooled leagues
+    names its one league ``sport``, a later one lists ``sports``."""
+    raw = yaml.safe_load(path.read_text())
+    if "sports" in MechanicalCandidate.model_fields:
+        if "sport" in raw:
+            raw["sports"] = [raw.pop("sport")]
+    elif "sports" in raw:
+        (raw["sport"],) = raw.pop("sports")
+    return MechanicalCandidate.model_validate(raw)
+
+
+def leagues(candidate: MechanicalCandidate) -> list[str]:
+    raw: Any = candidate
+    return list(raw.sports) if hasattr(raw, "sports") else [raw.sport]
+
+
+def in_league(candidate: MechanicalCandidate, league: str) -> MechanicalCandidate:
+    """``candidate`` restricted to ``league``, whose development days differ from another's."""
+    if "sports" in MechanicalCandidate.model_fields:
+        return candidate.model_copy(update={"sports": (league,)})
+    return candidate
+
+
+def _summary(result: object) -> dict[str, Any]:
+    summary = dataclasses.asdict(result)  # type: ignore[call-overload]
+    for key in SUMMARY_DROPPED:
+        summary.pop(key, None)
+    for key in CANDIDATE_SUMMARY_DROPPED:
+        summary["summary"].pop(key, None)
+    return summary
+
+
 async def dump(
     paths: list[Path],
     start: date,
@@ -39,7 +93,7 @@ async def dump(
     snapshot: str | None,
     segments: dict[str, list[tuple[date, date]]],
 ) -> dict[str, object]:
-    """The replay of each candidate over its sport's segments (``start``..``end`` when it has
+    """The replay of each candidate over each league's segments (``start``..``end`` when it has
     none), so a sealed holdout window is never replayed."""
     out: dict[str, object] = {}
     async with async_session_maker() as session:
@@ -47,23 +101,22 @@ async def dump(
         if snapshot is not None:
             await session.execute(text(f"SET TRANSACTION SNAPSHOT '{snapshot}'"))
         for path in paths:
-            candidate = load_candidate_file(path)
-            assert isinstance(candidate, MechanicalCandidate)  # noqa: S101
+            candidate = load(path)
             spec, params = resolve_rule(candidate)
             counts = _Counts()
             bets = []
             summaries = []
-            for first, last in segments.get(candidate.sport, [(start, end)]):
-                events = await final_events(session, candidate.sport, first, last)
-                bets += await _decide(session, candidate, spec, params, events, counts)
-                summary = dataclasses.asdict(
-                    await replay(session, candidate, first, last, 1, now=NOW)
-                )
-                summary.pop("hash_status")
-                summaries.append(summary)
+            for league in leagues(candidate):
+                single = in_league(candidate, league)
+                for first, last in segments.get(league, [(start, end)]):
+                    events = await final_events(session, league, first, last)
+                    bets += await _decide(session, single, spec, params, events, counts)
+                    summaries.append(
+                        _summary(await replay(session, single, first, last, 1, now=NOW))
+                    )
             out[candidate.name] = {
                 "counts": dataclasses.asdict(counts),
-                "bets": [dataclasses.asdict(b) for b in bets],
+                "bets": [{f: getattr(b, f) for f in BET_FIELDS} for b in bets],
                 "summary": summaries,
             }
     return out
