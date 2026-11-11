@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Candidate rules
-description: The market state and fixture context a mechanical rule reads at decision time, the bets it returns, the rule registry and module layout, decision times and the once-per-selection rule, maximum input age, params validation, rule pinning, the one-bet helper, the exchange-gap and Polymarket-gap rules and the retail-EV model rule.
+description: The market state and fixture context a mechanical rule reads at decision time, the bets it returns, the rule registry and module layout, decision times and the once-per-selection rule, maximum input age, params validation, rule pinning, the one-bet helper, the exchange-gap and Polymarket-gap rules, the retail-consensus rules (retail-quorum lag, subsidised outcome and single-book outlier) and the retail-EV model rule.
 sources:
   - odds_lambda.candidate_rules
   - odds_lambda.candidate_rules.fixture_context
@@ -143,7 +143,7 @@ The hash pins code, not data. A rule's bets must come only from code in its clos
 
 ## Rules
 
-A rule that may find several qualifying selections in one decision but bets only one passes each, with its estimated EV, to `odds_lambda.candidate_rules.best_bet`. It keeps the bet of the highest EV; ties go to the lowest line, then the outcome first in `odds_core.market_prices.market_outcomes` order, then the alphabetically first bookmaker key, as the [round-1 rules](https://github.com/Acusick1/odds/issues/821#issuecomment-6769611091) fix. The gap rules bet every qualifying selection instead.
+A rule that may find several qualifying selections in one decision but bets only one passes each, with its estimated EV, to `odds_lambda.candidate_rules.best_bet`. It keeps the bet of the highest EV; ties go to the lowest line, then the outcome first in `odds_core.market_prices.market_outcomes` order, then the alphabetically first bookmaker key, as the [round-1 rules](https://github.com/Acusick1/odds/issues/821#issuecomment-6769611091) fix. The [retail-consensus rules](#the-retail-consensus-rules) bet that way; the gap rules bet every qualifying selection instead.
 
 ### The gap rules
 
@@ -151,6 +151,22 @@ Both gap rules take params `odds_lambda.candidate_rules.gap.GapParams`: `thresho
 
 - **`odds_lambda.candidate_rules.gap.exchange_gap`.** It serves every rule market. Its sharp input is `odds_lambda.candidate_rules.inputs.SharpInput.EXCHANGE`, and its fair price is each line's exchange price. It returns no bets when the state has no exchange price.
 - **`odds_lambda.candidate_rules.gap.polymarket_gap`.** It has the sharp input `odds_lambda.candidate_rules.inputs.SharpInput.POLYMARKET`, and its fair price is each line's Polymarket price. It returns no bets when the state has no Polymarket price. Its retail snapshot need not carry an exchange price.
+
+### The retail-consensus rules
+
+Three rules of round 1 ([#866](https://github.com/Acusick1/odds/issues/866)) read the UK retail books against each other. Each returns at most one bet per decision through `odds_lambda.candidate_rules.best_bet`, and each params model takes `stake` (> 0, default 1.0) besides the base params. `odds_lambda.candidate_rules.retail_quorum_lag.retail_quorum_lag` and `odds_lambda.candidate_rules.subsidised_outcome.subsidised_outcome` read the state's one line, `None`, so they bet only in a market without lines; `odds_lambda.candidate_rules.single_book_outlier.single_book_outlier` reads each line with an exchange price, as [the gap rules](#the-gap-rules) do.
+
+**Retail consensus.** The quorum-lag and subsidised-outcome rules compare a book's price with the consensus of the other books, from `odds_lambda.candidate_rules.retail_consensus`, the one module both import:
+
+- **Book groups.** `odds_lambda.candidate_rules.retail_consensus.BOOK_GROUPS` puts books that share a parent's pricing in one group, so they count once: Paddy Power with Sky Bet, Ladbrokes with Coral, William Hill with 888sport, Betfred, and BetVictor. Only these eight books, the backfill manifests' UK retail books, form the consensus.
+- **Group probabilities.** `odds_lambda.candidate_rules.retail_consensus.group_probabilities` devigs each grouped book that prices every outcome proportionally ([devigging](../foundations/devigging.md#what-exists)), and a group's probability of each outcome is the mean over its books that do. A group with no such book is absent.
+- **Leave-group-out.** `odds_lambda.candidate_rules.retail_consensus.consensus` compares a book with the groups other than its own (`odds_lambda.candidate_rules.retail_consensus.other_groups`): per outcome, the median of their probabilities (the mean of the middle two for an even count), normalised to sum to 1. Fewer than `odds_lambda.candidate_rules.retail_consensus.MIN_OTHER_GROUPS` other groups gives no consensus, and the book is not bet. A book in no group, such as bet365 or Betway, leaves out none: the grids say "the target's whole group", and the backfill's `regions=uk` carries more books than the eight grouped ones `(inferred)`. Betfred never appears in the backfill ([#859](https://github.com/Acusick1/odds/issues/859)), so a grouped book has at most three other groups there and needs all of them.
+
+The rules:
+
+- **`odds_lambda.candidate_rules.retail_quorum_lag.retail_quorum_lag`** ([#831](https://github.com/Acusick1/odds/issues/831)). Params `odds_lambda.candidate_rules.retail_quorum_lag.RetailQuorumLagParams`: `threshold` (> 0) and `lookbacks` with exactly one [lookback point](#lookback-points). No sharp input. A book's price on an outcome qualifies when it is the same at the decision and at the lookback (a quote missing at either point does not qualify, and the book need not price the other outcomes); at least `odds_lambda.candidate_rules.retail_consensus.MIN_OTHER_GROUPS` groups other than the book's own, each present at both points, raised their probability of the outcome by at least `odds_lambda.candidate_rules.retail_quorum_lag.MIN_GROUP_RISE` over the lookback; and its estimated EV, `q × price − 1` with `q` the consensus at the decision, exceeds `threshold`. The consensus counts every other group present at the decision, including those that did not rise.
+- **`odds_lambda.candidate_rules.subsidised_outcome.subsidised_outcome`** ([#834](https://github.com/Acusick1/odds/issues/834)). Params `odds_lambda.candidate_rules.subsidised_outcome.SubsidisedOutcomeParams`: `threshold` (> 0) and `min_overround` (> 0). No sharp input. A book's price on an outcome qualifies when the book prices every outcome with an overround (`Σ 1/price − 1`) of at least `min_overround`; its estimated EV, `q × price − 1` against the consensus, exceeds `threshold`; and on each other outcome the book's implied probability `1/price` is at least `odds_lambda.candidate_rules.subsidised_outcome.MIN_OTHER_MARGIN` above `q`.
+- **`odds_lambda.candidate_rules.single_book_outlier.single_book_outlier`** ([#833](https://github.com/Acusick1/odds/issues/833)). Params `odds_lambda.candidate_rules.single_book_outlier.SingleBookOutlierParams`: `min_ratio` (> 1) and `gap` (≥ 0). Its sharp input is `odds_lambda.candidate_rules.inputs.SharpInput.EXCHANGE`, and it returns no bets without an exchange price. On each outcome of a line with one, it takes the longest retail price (`odds_lambda.candidate_rules.rules.longest_retail`) and bets that book when the price is at least `min_ratio` times the longest price of every other book on the outcome (at least two books must quote it, and a tie at the top has ratio 1) and its estimated EV, `fair × price − 1` against the exchange fair price, exceeds `gap`. It reads every UK retail book, not only the grouped ones.
 
 ## Model rules
 
