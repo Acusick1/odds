@@ -47,7 +47,8 @@ MIN_GATE_BETS = 30
 
 # Whether EPL 2022-23 and 2023-24 are sealed. They join the holdout once the substitute close is
 # accepted (issue 730); until then no close exists to score them, so sealing them costs nothing
-# and errs safe. Set False only if the substitute close is rejected.
+# and errs safe. Set False only if the substitute close is rejected; EPL then has no window, and a
+# pre-registration that lists it runs on its other leagues.
 EPL_2022_24_SEALED = True
 
 # Seasons run 1 August to 31 July.
@@ -232,6 +233,16 @@ class Plan:
     def cell(self) -> dict[str, object]:
         return self.selection.cell
 
+    @property
+    def holdout_leagues(self) -> list[str]:
+        """The pre-registered leagues that have a sealed window, which the run replays."""
+        return [league for league in self.prereg.leagues if windows_of(league)]
+
+    @property
+    def windowless_leagues(self) -> list[str]:
+        """The pre-registered leagues with no sealed window, which contribute no holdout bets."""
+        return [league for league in self.prereg.leagues if not windows_of(league)]
+
 
 class GateVerdict(StrEnum):
     PASS = "pass"
@@ -296,7 +307,9 @@ class Reserved(BaseModel):
 
 class HoldoutResult(BaseModel):
     """The pooled result of a reserved run. ``git_sha`` is the code that ran;
-    ``preregistration_commit`` and ``selection_commit`` the one commit of each file."""
+    ``preregistration_commit`` and ``selection_commit`` the one commit of each file.
+    ``leagues_without_window`` are the pre-registered leagues that had no sealed window and so
+    contributed no bets."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -309,6 +322,7 @@ class HoldoutResult(BaseModel):
     rule_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     cell: dict[str, object] = Field(min_length=1)
     windows: list[Window] = Field(min_length=1)
+    leagues_without_window: list[str]
     ran_on: date
     git_sha: str = Field(pattern=COMMIT_PATTERN)
     preregistration_commit: str = Field(pattern=COMMIT_PATTERN)
@@ -407,7 +421,7 @@ def check_cell(prereg: Preregistration, cell: dict[str, object]) -> None:
 def load_plan(selection_path: Path, directory: Path) -> Plan:
     """The selection at ``selection_path`` and the grid file of its identity, checked: file
     names are the identity, the selection's ``grid_sha256`` is the grid file's content, the cell
-    belongs to the grid and every league has a sealed window."""
+    belongs to the grid and at least one league has a sealed window."""
     selection = _load_file(selection_path, directory, SELECTION_DIR, Selection)
     assert isinstance(selection, Selection)  # noqa: S101
     if selection_path.name != f"{selection.stem}.yaml":
@@ -425,10 +439,12 @@ def load_plan(selection_path: Path, directory: Path) -> Plan:
         check_cell(prereg, selection.cell)
     except ValueError as exc:
         raise HoldoutRefused(f"{selection_path.name}: {exc}") from exc
-    for league in prereg.leagues:
-        if not windows_of(league):
-            raise HoldoutRefused(f"{league} has no sealed window, so it has no holdout to run")
-    return Plan(prereg, selection, grid_path, selection_path)
+    plan = Plan(prereg, selection, grid_path, selection_path)
+    if not plan.holdout_leagues:
+        raise HoldoutRefused(
+            f"none of {', '.join(prereg.leagues)} has a sealed window, so there is no holdout to run"
+        )
+    return plan
 
 
 def committed_once(path: Path, root: Path, before: datetime | None = None) -> str:
@@ -539,6 +555,7 @@ class Reservation:
             rule_sha256=rule_sha,
             cell=self.plan.cell,
             windows=windows,
+            leagues_without_window=self.plan.windowless_leagues,
             ran_on=ran_on,
             git_sha=self.git_sha,
             preregistration_commit=self.preregistration_commit,

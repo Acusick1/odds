@@ -528,6 +528,12 @@ def holdout_command(
             str(cov.bets_with_close),
         )
     console.print(table)
+    if done.row.leagues_without_window:
+        console.print(
+            f"[yellow]No sealed window, so no holdout bets: "
+            f"{', '.join(done.row.leagues_without_window)}.[/yellow]",
+            soft_wrap=True,
+        )
     _print_gate(done.row)
 
 

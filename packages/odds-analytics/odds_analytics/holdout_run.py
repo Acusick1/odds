@@ -44,8 +44,8 @@ class HoldoutRun:
 
 
 def pooled_draft(plan: Plan, today: date) -> MechanicalCandidate:
-    """The pre-registered strategy as one draft over its leagues, with the selected cell's
-    params."""
+    """The pre-registered strategy as one draft over its leagues that have a sealed window, with
+    the selected cell's params."""
     prereg = plan.prereg
     return MechanicalCandidate.model_validate(
         {
@@ -53,7 +53,7 @@ def pooled_draft(plan: Plan, today: date) -> MechanicalCandidate:
             "description": f"Holdout run of #{prereg.issue}",
             "kind": "mechanical",
             "market": prereg.market,
-            "sports": prereg.leagues,
+            "sports": plan.holdout_leagues,
             "version": prereg.version,
             "issue": prereg.issue,
             "start_date": today,

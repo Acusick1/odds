@@ -346,11 +346,53 @@ class TestPlan:
             chosen.write_text(yaml.safe_dump(selection(grid, market=market, version=version)))
             assert holdout.load_plan(chosen, holdout_repo).prereg.stem == stem
 
-    def test_a_league_without_a_window_is_refused(self, holdout_repo: Path) -> None:
+    @pytest.mark.parametrize(
+        ("sealed", "windowed", "windowless"),
+        [
+            (True, ["soccer_epl", "soccer_spain_la_liga"], []),
+            (False, ["soccer_spain_la_liga"], ["soccer_epl"]),
+        ],
+    )
+    def test_a_league_without_a_window_is_set_aside_while_another_has_one(
+        self,
+        holdout_repo: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        sealed: bool,
+        windowed: list[str],
+        windowless: list[str],
+    ) -> None:
+        monkeypatch.setattr(holdout, "EPL_2022_24_SEALED", sealed)
         grid = holdout_repo / "preregistrations" / f"{STEM}.yaml"
-        grid.write_text(yaml.safe_dump(preregistration(leagues=["mlb"])))
+        grid.write_text(yaml.safe_dump(preregistration(leagues=["soccer_epl", windowed[-1]])))
         self.rewrite_selection(holdout_repo)
-        with pytest.raises(holdout.HoldoutRefused, match="no sealed window"):
+        plan = self.plan(holdout_repo)
+        assert (plan.holdout_leagues, plan.windowless_leagues) == (windowed, windowless)
+
+    @pytest.mark.parametrize(("sealed", "refused"), [(True, False), (False, True)])
+    def test_epl_alone_is_refused_only_without_its_window(
+        self,
+        holdout_repo: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        sealed: bool,
+        refused: bool,
+    ) -> None:
+        monkeypatch.setattr(holdout, "EPL_2022_24_SEALED", sealed)
+        grid = holdout_repo / "preregistrations" / f"{STEM}.yaml"
+        grid.write_text(yaml.safe_dump(preregistration(leagues=["soccer_epl"])))
+        self.rewrite_selection(holdout_repo)
+        if refused:
+            with pytest.raises(holdout.HoldoutRefused, match="none of soccer_epl has a sealed"):
+                self.plan(holdout_repo)
+        else:
+            assert self.plan(holdout_repo).windowless_leagues == []
+
+    def test_a_pre_registration_of_leagues_none_of_which_has_a_window_is_refused(
+        self, holdout_repo: Path
+    ) -> None:
+        grid = holdout_repo / "preregistrations" / f"{STEM}.yaml"
+        grid.write_text(yaml.safe_dump(preregistration(leagues=["mlb", "nba"])))
+        self.rewrite_selection(holdout_repo)
+        with pytest.raises(holdout.HoldoutRefused, match="none of mlb, nba has a sealed window"):
             self.plan(holdout_repo)
 
 
@@ -558,6 +600,7 @@ def result_row() -> holdout.HoldoutResult:
         rule_sha256="c" * 64,
         cell=HOLDOUT_CELL,
         windows=holdout.windows_of("soccer_spain_la_liga"),
+        leagues_without_window=[],
         ran_on=date(2026, 11, 1),
         git_sha="a" * 40,
         preregistration_commit="b" * 40,
@@ -581,8 +624,13 @@ class TestRun:
             granted = tuple(a.window.sport for a in kw["access"])
             calls.append((candidate.sports, dict(ranges), granted))
             return replayed(
-                [scored_bet(i, 0.6, 2025, "soccer_spain_la_liga") for i in range(40)]
-                + [scored_bet(100 + i, 0.3, 2025, "soccer_germany_bundesliga") for i in range(40)]
+                [
+                    scored_bet(
+                        n * 100 + i, 0.6 if sport == "soccer_spain_la_liga" else 0.3, 2025, sport
+                    )
+                    for n, sport in enumerate(candidate.sports)
+                    for i in range(40)
+                ]
             )
 
         async def no_backfill(_session: object) -> None:
@@ -611,9 +659,60 @@ class TestRun:
         reserved, result = holdout.load_ledger(holdout_repo)
         assert isinstance(reserved, holdout.Reserved) and isinstance(result, holdout.HoldoutResult)
         assert result.result.bets == 80 and result.cell == HOLDOUT_CELL
+        assert result.leagues_without_window == []
         assert result.preregistration_commit == git(holdout_repo.parent, "rev-parse", "HEAD~1")
         assert result.selection_commit == git(holdout_repo.parent, "rev-parse", "HEAD")
         assert done.row == result
+
+    def register_epl_and_la_liga(self, directory: Path) -> Path:
+        """Commit a grid file of EPL and La Liga, unlike the fixture's so that git does not read
+        it as a rename of it, and its selection."""
+        cell = {"threshold": 0.03, "minutes_before_kickoff": [45], "max_input_age_minutes": 15}
+        grid = directory / "preregistrations" / "611-1x2-v1.yaml"
+        grid.write_text(
+            yaml.safe_dump(
+                preregistration(
+                    issue=611,
+                    name="back-shortest",
+                    leagues=["soccer_epl", "soccer_spain_la_liga"],
+                    grid={
+                        "threshold": [0.03, 0.04, 0.06],
+                        "minutes_before_kickoff": [[45], [20, 10]],
+                        "max_input_age_minutes": [15, 20],
+                    },
+                    selection_rule="https://github.com/Acusick1/odds/issues/822#issuecomment-1",
+                )
+            )
+        )
+        path = directory / "selections" / "611-1x2-v1.yaml"
+        path.write_text(yaml.safe_dump(selection(grid, issue=611, cell=cell)))
+        git_commit(directory.parent)
+        return path
+
+    @pytest.mark.parametrize("sealed", [True, False])
+    def test_epl_is_replayed_only_while_it_has_a_window_and_the_row_records_when_not(
+        self,
+        holdout_repo: Path,
+        collected: list[Collected],
+        monkeypatch: pytest.MonkeyPatch,
+        sealed: bool,
+    ) -> None:
+        monkeypatch.setattr(holdout, "EPL_2022_24_SEALED", sealed)
+        leagues = ["soccer_epl", "soccer_spain_la_liga"]
+        path = self.register_epl_and_la_liga(holdout_repo)
+
+        done = asyncio.run(holdout_run.run_holdout(None, path, holdout_repo, NOW))  # type: ignore[arg-type]
+
+        replayed_leagues = tuple(leagues if sealed else leagues[1:])
+        assert [(c[0], tuple(c[1]), c[2]) for c in collected] == [
+            (replayed_leagues, replayed_leagues, replayed_leagues)
+        ]
+        assert [r.window.sport for r in done.leagues] == list(replayed_leagues)
+        assert done.row.leagues_without_window == ([] if sealed else ["soccer_epl"])
+        assert done.row.result.bets == 40 * len(replayed_leagues)
+        *_, stored = holdout.load_ledger(holdout_repo)
+        assert stored == done.row
+        assert {w.sport for w in done.row.windows} == set(replayed_leagues)
 
     def test_a_second_run_is_refused_without_reading_any_holdout_data(
         self, holdout_repo: Path, collected: list[Collected]
@@ -672,6 +771,25 @@ class TestRun:
         assert holdout.gate(mixed.overall).verdict is holdout.GateVerdict.PASS
         assert holdout.gate(pure.overall).verdict is holdout.GateVerdict.FAIL
 
+    def test_the_command_names_the_leagues_that_had_no_window(
+        self,
+        holdout_repo: Path,
+        collected: list[Collected],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        @asynccontextmanager
+        async def session() -> Any:
+            yield None
+
+        monkeypatch.setattr(holdout, "EPL_2022_24_SEALED", False)
+        monkeypatch.setattr("odds_cli.commands.candidates.candidates_dir", lambda: holdout_repo)
+        monkeypatch.setattr("odds_cli.commands.candidates.async_session_maker", session)
+        path = self.register_epl_and_la_liga(holdout_repo)
+
+        done = RUNNER.invoke(app, ["candidates", "holdout", str(path)])
+        assert done.exit_code == 0, done.stdout
+        assert "No sealed window, so no holdout bets: soccer_epl" in done.stdout
+
     def test_the_command_prints_the_gate_and_refuses_a_second_run(
         self,
         holdout_repo: Path,
@@ -689,6 +807,7 @@ class TestRun:
         first = RUNNER.invoke(app, ["candidates", "holdout", path])
         assert first.exit_code == 0, first.stdout
         assert "Holdout gate:" in first.stdout and "never promotes" in first.stdout
+        assert "No sealed window" not in first.stdout
 
         git_commit(holdout_repo.parent)
         second = RUNNER.invoke(app, ["candidates", "holdout", path])
