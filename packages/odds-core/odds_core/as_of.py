@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from odds_core.quotes import Quote
+
+# A match counts at t only once its result is known; kick-off plus this covers full time (inferred).
+RESULT_LAG = timedelta(hours=3)
 
 
 def by_snapshot(quoted: Iterable[Quote]) -> list[list[Quote]]:

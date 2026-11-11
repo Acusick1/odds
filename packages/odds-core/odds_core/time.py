@@ -4,6 +4,26 @@ from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
 EASTERN = ZoneInfo("America/New_York")
+# The month a football season (and the NBA's) starts in.
+SEASON_START_MONTH = 8
+
+
+# Sports whose season runs within one calendar year.
+CALENDAR_YEAR_SPORTS = frozenset({"baseball_mlb"})
+
+
+def season_start_year(commence_time: datetime) -> int:
+    """The calendar year the season of a kick-off started in."""
+    return (
+        commence_time.year if commence_time.month >= SEASON_START_MONTH else commence_time.year - 1
+    )
+
+
+def season_start(now: datetime, sport_key: str) -> datetime:
+    """The start of ``now``'s season: 1 January for a calendar-year sport, else 1 August."""
+    if sport_key in CALENDAR_YEAR_SPORTS:
+        return datetime(now.year, 1, 1, tzinfo=UTC)
+    return datetime(season_start_year(now), SEASON_START_MONTH, 1, tzinfo=UTC)
 
 
 def ensure_utc(dt: datetime) -> datetime:

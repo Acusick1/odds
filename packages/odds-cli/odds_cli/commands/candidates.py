@@ -565,6 +565,11 @@ def parity(
                 f"\n  recorded snapshots not in the database: {list(d.missing_snapshot_ids)}"
                 if d.missing_snapshot_ids
                 else ""
+            )
+            + (
+                f"\n  recorded events not in the database: {list(d.missing_event_ids)}"
+                if d.missing_event_ids
+                else ""
             ),
             soft_wrap=True,
         )

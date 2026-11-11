@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+from typing import Any
 
 from sqlalchemy import (
     ARRAY,
@@ -20,6 +21,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, SQLModel
 
 from odds_core.models import utc_now
@@ -83,6 +85,22 @@ class CandidateDecision(SQLModel, table=True):
         default_factory=list,
         sa_column=Column(ARRAY(Integer), nullable=False, server_default=text("'{}'")),
         description="Id of the snapshot the rule's market state was built from; empty when missed",
+    )
+    input_event_ids: list[int] = Field(
+        default_factory=list,
+        sa_column=Column(ARRAY(BigInteger), nullable=False, server_default=text("'{}'")),
+        description=(
+            "Ids of the events the rule's fixture inputs were read from (the previous matches "
+            "and the concurrent kick-offs); empty for a rule with none, and when missed"
+        ),
+    )
+    input_fixture: dict[str, Any] | None = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+        description=(
+            "The fixture values the rule consumed (each team's previous result and the "
+            "concurrent kick-off count), which parity replays; null for a rule with none"
+        ),
     )
     bets_placed: int = Field(default=0)
     missed: bool = Field(

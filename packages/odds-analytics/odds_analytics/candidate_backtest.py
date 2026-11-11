@@ -25,6 +25,7 @@ from odds_lambda.candidate_rules import (
     RuleParams,
     RuleSpec,
     Selection,
+    candidate_leagues,
     decision_times,
     resolve_rule,
     run_rule,
@@ -177,7 +178,15 @@ async def _decide(
             bet_selections: set[Selection] = set()
             for _, t in decision_times(event.commence_time, params):
                 state, intents = await run_rule(
-                    session, spec, params, event, market, t, None, bet_selections=bet_selections
+                    session,
+                    spec,
+                    params,
+                    event,
+                    market,
+                    t,
+                    None,
+                    bet_selections=bet_selections,
+                    fixture_leagues=candidate_leagues(candidate),
                 )
                 bet_selections.update(intent.selection for intent in intents)
                 counts.decisions += 1
