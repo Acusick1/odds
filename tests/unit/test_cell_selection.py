@@ -11,11 +11,13 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
+import numpy as np
 import pytest
 import yaml
 from odds_analytics import cell_selection as cs
 from odds_analytics import holdout
 from odds_analytics.candidate_report import ScoredBet
+from odds_analytics.retail_ev_metrics import _resample_counts
 from odds_cli.main import app
 from typer.testing import CliRunner
 
@@ -165,6 +167,21 @@ class TestInterval:
 
         assert cs.lower_bound(sample) == pytest.approx(-1.0)
         assert cs.score_cell(replay(0, (EPL_2024_26, sample)), False).mean_ev == 0.5
+
+    def test_a_resample_weighs_each_event_by_its_bets_not_its_mean(self) -> None:
+        # Uneven events, where weighting by bets and averaging event means give other bounds.
+        sample = [bet(e, 0.1) for e in range(10) for _ in range(e + 1)] + [
+            bet(100 + e, -0.2) for e in range(10)
+        ]
+        events = sorted({b.event_id for b in sample})
+        totals = np.array([sum(b.ev for b in sample if b.event_id == e) for e in events])
+        sizes = np.array([sum(b.event_id == e for b in sample) for e in events], dtype=float)
+        counts = _resample_counts(len(events), cs.RESAMPLES, cs.SEED)
+        by_bets = float(np.quantile((counts @ totals) / (counts @ sizes), 0.05))
+        by_events = float(np.quantile((counts @ (totals / sizes)) / counts.sum(axis=1), 0.05))
+
+        assert by_bets != pytest.approx(by_events, abs=1e-3)
+        assert cs.lower_bound(sample) == pytest.approx(by_bets)
 
     def test_a_fixed_sample_gives_its_known_bound(self) -> None:
         sample = [bet(i, ((i * 37) % 21 - 8) / 100) for i in range(60)]
