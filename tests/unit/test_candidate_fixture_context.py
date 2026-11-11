@@ -27,8 +27,9 @@ KICKOFF = datetime(2026, 4, 10, 15, 0, tzinfo=UTC)
 
 
 class TestDeclaration:
-    def test_the_registered_rules_declare_no_fixture_input(self) -> None:
-        assert all(not spec.fixture_inputs for spec in RULES.values())
+    def test_the_gap_and_model_rules_declare_no_fixture_input(self) -> None:
+        for rule in ("exchange_gap", "polymarket_gap", "retail_ev_model"):
+            assert not RULES[rule].fixture_inputs
 
     def test_the_declaration_is_part_of_the_rule_hash(
         self, monkeypatch: pytest.MonkeyPatch

@@ -13,8 +13,11 @@ from odds_core.sports import SportKey
 from odds_core.vocabulary import Market
 from pydantic import ValidationError
 
+from odds_lambda.candidate_rules.crowded_gap import CROWDED_GAP
 from odds_lambda.candidate_rules.exchange_steam import EXCHANGE_STEAM
+from odds_lambda.candidate_rules.favourite_price import FAVOURITE_PRICE
 from odds_lambda.candidate_rules.gap import EXCHANGE_GAP, POLYMARKET_GAP
+from odds_lambda.candidate_rules.last_result_overreaction import LAST_RESULT_OVERREACTION
 from odds_lambda.candidate_rules.retail_ev_model import RETAIL_EV_MODEL
 from odds_lambda.candidate_rules.retail_quorum_lag import RETAIL_QUORUM_LAG
 from odds_lambda.candidate_rules.rules import ModelRuleSpec, RuleParams, RuleSpec
@@ -43,6 +46,9 @@ RULES: dict[str, RuleSpec | ModelRuleSpec] = {
     "retail_quorum_lag": RETAIL_QUORUM_LAG,
     "single_book_outlier": SINGLE_BOOK_OUTLIER,
     "subsidised_outcome": SUBSIDISED_OUTCOME,
+    "favourite_price": FAVOURITE_PRICE,
+    "crowded_gap": CROWDED_GAP,
+    "last_result_overreaction": LAST_RESULT_OVERREACTION,
 }
 
 
