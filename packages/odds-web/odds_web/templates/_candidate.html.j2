@@ -44,6 +44,21 @@
 <p class="sub">{{ c.no_ev_reason }}</p>
 {% endif %}
 
+{% if c.leagues %}
+<h3>Per league</h3>
+<div class="sub">For information: the verdict is the pooled series' above, and no league's figures change it.</div>
+<table id="leagues">
+<thead><tr><th>League</th><th class="r">Settled</th><th class="r">With a close</th><th class="r">Mean EV</th><th class="r">P&amp;L</th></tr></thead>
+<tbody class="num">
+{% for l in c.leagues %}
+<tr><td class="text">{{ l.sport_key }}</td><td class="r">{{ l.settled_bets }}</td><td class="r">{{ l.bets_with_close }}</td>
+<td class="r {{ ('pos' if l.mean_ev >= 0 else 'neg') if l.mean_ev is not none }}">{{ l.mean_ev | percent if l.mean_ev is not none else '—' }}</td>
+<td class="r">{{ l.pnl | signed(2) }}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+{% endif %}
+
 {% if c.decisions %}
 <h3>Decisions, last {{ c.decisions.days | length }} days</h3>
 <div class="legend"><span><span class="sw sw-bet"></span>bet</span><span><span class="sw sw-no-bet"></span>no bet</span><span><span class="sw sw-missed"></span>missed (no input)</span></div>

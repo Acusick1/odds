@@ -48,7 +48,7 @@ def mechanical(name: str, sport: str, market: str, rule: str) -> MechanicalCandi
     return MechanicalCandidate(
         name=name,
         description="d",
-        sport=sport,
+        sports=(sport,),
         version=1,
         issue=1,
         start_date="2026-01-01",
@@ -68,7 +68,7 @@ CANDIDATES: list[MechanicalCandidate | AgentCandidate] = [
     AgentCandidate(
         name="mlb-agent",
         description="d",
-        sport="baseball_mlb",
+        sports=("baseball_mlb",),
         version=1,
         issue=1,
         start_date="2026-01-01",

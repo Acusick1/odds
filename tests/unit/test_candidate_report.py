@@ -14,7 +14,9 @@ from odds_analytics.candidate_report import (
     checkpoints_through_next,
     family_size_at,
     family_starts,
+    in_family,
     judge,
+    league_breakdown,
     next_checkpoint,
     promote_level,
     report_candidates,
@@ -26,7 +28,6 @@ from odds_core.close import close_quotes, event_close
 from odds_core.models import Event, EventStatus
 from odds_core.paper_trade_models import PaperTrade, TradeResult
 from odds_core.quotes import quotes
-from odds_core.vocabulary import Market
 from sqlalchemy.ext.asyncio import AsyncSession
 from typer.testing import CliRunner
 
@@ -61,6 +62,7 @@ def trade(
     version: int = 1,
     commence_time: datetime = LONG_AGO,
     close_grace: timedelta = FDUK_GRACE,
+    sport_key: str = "soccer_epl",
 ) -> ScoredBet:
     """A trade at price 3.0 whose EV is ``ev`` (p_close = (1 + ev) / 3), None for no close."""
     return ScoredBet(
@@ -74,6 +76,7 @@ def trade(
         p_close=None if ev is None else (1 + ev) / 3,
         placed_at=LONG_AGO + timedelta(minutes=index),
         close_grace=close_grace,
+        sport_key=sport_key,
     )
 
 
@@ -93,7 +96,7 @@ def registry_entry(name: str = "cand", version: int = 1) -> AgentCandidate:
     return AgentCandidate(
         name=name,
         description="d",
-        sport="soccer_epl",
+        sports=("soccer_epl",),
         version=version,
         issue=1,
         start_date="2026-01-01",
@@ -115,6 +118,7 @@ class TestEv:
             p_close=0.5,
             placed_at=LONG_AGO,
             close_grace=FDUK_GRACE,
+            sport_key="soccer_epl",
         )
         assert t.ev == pytest.approx(0.25)
 
@@ -315,7 +319,7 @@ class TestSummaries:
     def test_each_version_carries_its_own_registry_entry(self) -> None:
         sequence = [trade(0, version=1), trade(1, version=2)]
         v1, v2 = registry_entry(version=1), registry_entry(version=2)
-        v2 = v2.model_copy(update={"sport": "basketball_nba", "status": CandidateStatus.KILLED})
+        v2 = v2.model_copy(update={"sports": ("basketball_nba",), "status": CandidateStatus.KILLED})
 
         by_version = {
             s.version: s for s in summarize_candidates(sequence, [v2], NOW, n_boot=N_BOOT)
@@ -324,8 +328,8 @@ class TestSummaries:
 
         assert by_version[1].registered is None and by_version[2].registered == v2
         assert by_version[2].status is CandidateStatus.KILLED
-        assert both[1].registered == v1 and both[1].registered.sport == "soccer_epl"
-        assert both[2].registered.sport == "basketball_nba"  # type: ignore[union-attr]
+        assert both[1].registered == v1 and both[1].registered.sports == ("soccer_epl",)
+        assert both[2].registered.sports == ("basketball_nba",)  # type: ignore[union-attr]
 
     def test_registered_candidate_without_trades_is_listed(self) -> None:
         summary = summarize_candidates([], [registry_entry("fresh", 4)], NOW, n_boot=N_BOOT)[0]
@@ -376,7 +380,7 @@ def mechanical(name: str, version: int = 1, start: str = "2026-01-01", **overrid
             "description": "d",
             "kind": "mechanical",
             "market": "1x2",
-            "sport": "soccer_epl",
+            "sports": ["soccer_epl"],
             "version": version,
             "issue": 1,
             "start_date": start,
@@ -417,7 +421,7 @@ class TestPromoteLevel:
 class TestFamilyStarts:
     def starts(self, registry, decisions=None, draft=None, draft_start=None):
         return family_starts(
-            ("exchange_gap", "soccer_epl", Market.ONE_X_TWO),
+            mechanical("epl"),
             registry,
             decisions or {},
             draft,
@@ -441,11 +445,15 @@ class TestFamilyStarts:
         registry = [
             mechanical("a"),
             mechanical("b", rule="polymarket_gap"),
-            mechanical("c", sport="baseball_mlb", market="h2h"),
+            mechanical("c", sports=["baseball_mlb"], market="h2h"),
             mechanical("d", market="totals"),
         ]
         decisions = {(name, 1): at(1) for name in ("a", "b", "c", "d", "ghost")}
         assert self.starts(registry, decisions) == [at(1)]
+
+    def test_a_pooled_version_shares_the_family_of_each_league_it_lists(self) -> None:
+        registry = [mechanical("pooled", sports=["soccer_epl", "soccer_italy_serie_a"])]
+        assert self.starts(registry, {("pooled", 1): at(1)}) == [at(1)]
 
     def test_draft_counts_once_from_the_given_time(self) -> None:
         registry = [mechanical("a")]
@@ -459,6 +467,59 @@ class TestFamilyStarts:
         assert family_size_at(starts, at(1)) == 1
         assert family_size_at(starts, at(3)) == 1
         assert family_size_at(starts, at(10)) == 2
+
+
+class TestFamilyOfIntersectingLeagues:
+    epl = mechanical("epl")
+    serie_a = mechanical("serie-a", sports=["soccer_italy_serie_a"])
+    pooled = mechanical("pooled", sports=["soccer_epl", "soccer_italy_serie_a"])
+    registry = [epl, serie_a, pooled]
+    decisions = {("epl", 1): at(1), ("serie-a", 1): at(2), ("pooled", 1): at(3)}
+
+    def k(self, candidate) -> int:
+        return family_size_at(family_starts(candidate, self.registry, self.decisions), at(30))
+
+    def test_the_pooled_version_shares_k_with_each_single_league_version(self) -> None:
+        assert in_family(self.pooled, self.epl) and in_family(self.pooled, self.serie_a)
+        assert self.k(self.pooled) == 3
+
+    def test_single_league_versions_of_different_leagues_do_not_share_k(self) -> None:
+        assert not in_family(self.epl, self.serie_a)
+        assert self.k(self.epl) == self.k(self.serie_a) == 2
+
+    def test_another_market_with_the_same_leagues_is_another_family(self) -> None:
+        totals = mechanical(
+            "pooled", sports=["soccer_epl", "soccer_italy_serie_a"], market="totals"
+        )
+        assert not in_family(totals, self.pooled)
+
+
+class TestLeagueBreakdown:
+    def test_it_splits_the_series_by_league_and_leaves_the_verdict_pooled(self) -> None:
+        epl = [trade(i, 0.5, sport_key="soccer_epl") for i in range(0, 120, 2)]
+        serie_a = [trade(i, -0.1, sport_key="soccer_italy_serie_a") for i in range(1, 120, 2)]
+        sequence = sorted(epl + serie_a, key=lambda t: t.placed_at)
+
+        summary = summary_of(sequence)
+
+        by_league = {b.sport_key: b for b in summary.leagues}
+        assert by_league["soccer_epl"].bets_with_close == 60
+        assert by_league["soccer_epl"].mean_ev == pytest.approx(0.5)
+        assert by_league["soccer_italy_serie_a"].mean_ev == pytest.approx(-0.1)
+        assert summary.checkpoint is not None and summary.checkpoint.n == 100
+        assert summary.checkpoint.mean_ev == pytest.approx(0.2)
+
+    def test_a_bet_beyond_the_scoreable_prefix_has_no_ev_in_its_league(self) -> None:
+        sequence = [
+            trade(0, 0.5, sport_key="soccer_epl"),
+            trade(1, 0.5, pnl=None, sport_key="soccer_epl"),
+            trade(2, 0.5, sport_key="soccer_italy_serie_a"),
+        ]
+        by_league = {b.sport_key: b for b in league_breakdown(sequence, NOW)}
+        assert by_league["soccer_epl"].bets_with_close == 1
+        assert by_league["soccer_epl"].settled_bets == 1
+        assert by_league["soccer_italy_serie_a"].bets_with_close == 0
+        assert by_league["soccer_italy_serie_a"].mean_ev is None
 
 
 class TestKAtEachCheckpoint:

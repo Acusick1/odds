@@ -72,6 +72,7 @@ class ScoredBet:
     placed_at: datetime
     # How long after kick-off a missing close may still arrive (``odds_core.close.close_grace``).
     close_grace: timedelta
+    sport_key: str
 
     @property
     def settled(self) -> bool:
@@ -96,6 +97,19 @@ class Checkpoint:
 
 
 @dataclass(frozen=True)
+class LeagueBreakdown:
+    """One league's bets in a version's series, for information only: the verdict is the pooled
+    series' and this never changes it. ``mean_ev`` is over the league's bets with a close in the
+    scoreable prefix, ``settled_bets`` and ``pnl`` over all its settled bets."""
+
+    sport_key: str
+    settled_bets: int
+    bets_with_close: int
+    mean_ev: float | None
+    pnl: float
+
+
+@dataclass(frozen=True)
 class CandidateSummary:
     """``registered`` is the registry's entry at exactly this version, None for a version the
     registry no longer holds: a version bump overwrites the file, so an old version's kind,
@@ -105,7 +119,8 @@ class CandidateSummary:
     ``checkpoints`` every one evaluated up to it; each is frozen once reached.
 
     ``current`` is a separate estimate over all ``bets_with_close`` at the family size now. It
-    moves with every bet and carries no verdict.
+    moves with every bet and carries no verdict. ``leagues`` splits the bets by league, for
+    information.
     """
 
     name: str
@@ -122,6 +137,7 @@ class CandidateSummary:
     current: Checkpoint | None
     verdict: Verdict
     family_versions: int
+    leagues: tuple[LeagueBreakdown, ...]
 
     @property
     def status(self) -> CandidateStatus | None:
@@ -201,29 +217,32 @@ def promote_level(family_versions: int) -> float:
     return 1 - PROMOTE_ERROR / family_versions
 
 
-# A family of candidate versions: their rule, sport and market.
-Family = tuple[str, str, Market]
+def in_family(a: MechanicalCandidate, b: MechanicalCandidate) -> bool:
+    """Whether ``a`` and ``b`` share a family: the same rule and market and a league in common.
 
-
-def family(candidate: MechanicalCandidate) -> Family:
-    return (candidate.rule, candidate.sport, candidate.market)
+    Not transitive: a pooled {EPL, Serie A} shares a family with EPL alone and with Serie A
+    alone, which do not share one with each other.
+    """
+    return a.rule == b.rule and a.market == b.market and not set(a.sports).isdisjoint(b.sports)
 
 
 def family_starts(
-    key: Family,
+    candidate: MechanicalCandidate,
     registry: Sequence[Candidate],
     decision_starts: Mapping[tuple[str, int], datetime],
     draft: tuple[str, int] | None = None,
     draft_start: datetime | None = None,
 ) -> list[datetime]:
-    """When each version in the family ``key`` took its first look, sorted.
+    """When each version in ``candidate``'s family took its first look, sorted.
 
     A version counts from its first recorded decision in ``decision_starts``, for names whose
-    registry entry is in the family: a version with no decision has taken no look, and a
-    ``start_date`` can be back-dated where a decision cannot. An unregistered ``draft`` counts
-    from ``draft_start``, unless it already has a decision.
+    registry entry is in the family (``in_family``): a version with no decision has taken no
+    look, and a ``start_date`` can be back-dated where a decision cannot. An unregistered
+    ``draft`` counts from ``draft_start``, unless it already has a decision.
     """
-    members = {c.name for c in registry if isinstance(c, MechanicalCandidate) and family(c) == key}
+    members = {
+        c.name for c in registry if isinstance(c, MechanicalCandidate) and in_family(c, candidate)
+    }
     starts = {key: first for key, first in decision_starts.items() if key[0] in members}
     if draft is not None and draft_start is not None:
         starts.setdefault(draft, draft_start)
@@ -326,6 +345,28 @@ def scoreable_prefix(trades: Sequence[ScoredBet], now: datetime) -> tuple[list[S
     return with_close, length
 
 
+def league_breakdown(trades: Sequence[ScoredBet], now: datetime) -> tuple[LeagueBreakdown, ...]:
+    """``trades`` split by league, in league-key order; ``trades`` in placement order."""
+    with_close, _ = scoreable_prefix(trades, now)
+    breakdown: list[LeagueBreakdown] = []
+    for league in sorted({t.sport_key for t in trades}):
+        scored = [t for t in with_close if t.sport_key == league]
+        stake = sum(t.stake for t in scored)
+        settled = [t for t in trades if t.sport_key == league and t.pnl is not None]
+        breakdown.append(
+            LeagueBreakdown(
+                sport_key=league,
+                settled_bets=len(settled),
+                bets_with_close=len(scored),
+                mean_ev=sum(t.stake * t.ev for t in scored if t.ev is not None) / stake
+                if scored
+                else None,
+                pnl=sum(t.pnl for t in settled if t.pnl is not None),
+            )
+        )
+    return tuple(breakdown)
+
+
 def running_score(with_close: Sequence[ScoredBet]) -> RunningScore:
     """The running totals over ``with_close``, bets with a close in placement order."""
     staked = expected = pnl = 0.0
@@ -377,6 +418,7 @@ def summarize_candidate(
         current=current_estimate(with_close, family_size(now), checkpoints, n_boot, seed),
         verdict=verdict,
         family_versions=checkpoint.family_versions if checkpoint else family_size(now),
+        leagues=league_breakdown(trades, now),
     )
 
 
@@ -422,7 +464,7 @@ def summarize_candidates(
         entry = current.get(name)
         if not isinstance(entry, MechanicalCandidate):
             return lambda _: 1
-        starts = family_starts(family(entry), registry, decision_starts or {})
+        starts = family_starts(entry, registry, decision_starts or {})
         return lambda when: family_size_at(starts, when)
 
     return [
@@ -510,6 +552,7 @@ async def load_scored_trades(session: AsyncSession) -> list[ScoredBet]:
                 p_close=p_close,
                 placed_at=trade.placed_at,
                 close_grace=close_grace(event.sport_key, trade.market),
+                sport_key=event.sport_key,
             )
         )
     return scored

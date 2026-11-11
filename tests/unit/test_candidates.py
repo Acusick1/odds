@@ -21,7 +21,7 @@ MECHANICAL: dict[str, object] = {
     "description": "Back the longest retail price.",
     "kind": "mechanical",
     "market": "1x2",
-    "sport": "soccer_epl",
+    "sports": ["soccer_epl"],
     "version": 1,
     "issue": 610,
     "start_date": "2026-11-01",
@@ -35,7 +35,7 @@ AGENT: dict[str, object] = {
     "name": "epl-agent",
     "description": "The EPL betting agent.",
     "kind": "agent",
-    "sport": "soccer_epl",
+    "sports": ["soccer_epl"],
     "version": 3,
     "issue": 611,
     "start_date": "2026-11-02",
@@ -116,7 +116,7 @@ class TestLoadCandidates:
 
     def test_agents_for_different_sports_allowed(self, tmp_path: Path) -> None:
         write(tmp_path, AGENT)
-        write(tmp_path, {**AGENT, "name": "mlb-agent", "sport": "baseball_mlb"})
+        write(tmp_path, {**AGENT, "name": "mlb-agent", "sports": ["baseball_mlb"]})
         assert len(load_candidates(tmp_path)) == 2
 
     def test_repo_registry_is_valid(self) -> None:

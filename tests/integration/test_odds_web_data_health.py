@@ -54,7 +54,7 @@ def candidate(rule: str = "exchange_gap", name: str = "exchange-gap-epl") -> Mec
     return MechanicalCandidate(
         name=name,
         description="d",
-        sport="soccer_epl",
+        sports=("soccer_epl",),
         version=3,
         issue=1,
         start_date="2026-01-01",

@@ -7,7 +7,15 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, PositiveInt, TypeAdapter
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    PositiveInt,
+    TypeAdapter,
+    field_validator,
+)
 
 from odds_core.config import get_settings
 from odds_core.sports import SportKey
@@ -28,11 +36,19 @@ class _CandidateBase(BaseModel):
 
     name: str = Field(pattern=NAME_PATTERN)
     description: str
-    sport: SportKey
+    # The leagues it bets in; a pooled candidate lists several and is judged on one series.
+    sports: tuple[SportKey, ...] = Field(min_length=1)
     version: Annotated[int, Field(strict=True, gt=0)]
     issue: PositiveInt
     start_date: date
     status: CandidateStatus
+
+    @field_validator("sports")
+    @classmethod
+    def _distinct(cls, sports: tuple[SportKey, ...]) -> tuple[SportKey, ...]:
+        if len(set(sports)) != len(sports):
+            raise ValueError("a league is listed twice")
+        return sports
 
 
 class MechanicalCandidate(_CandidateBase):
@@ -79,7 +95,10 @@ def load_candidates(directory: Path) -> list[Candidate]:
         candidates.append(candidate)
 
     live_agents_per_sport = Counter(
-        c.sport for c in candidates if c.kind == "agent" and c.status != CandidateStatus.KILLED
+        sport
+        for c in candidates
+        if c.kind == "agent" and c.status != CandidateStatus.KILLED
+        for sport in c.sports
     )
     for sport, count in live_agents_per_sport.items():
         if count > 1:

@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 import yaml
-from odds_analytics.candidate_backtest import Coverage, HashStatus, score
+from odds_analytics.candidate_backtest import Coverage, HashStatus, Replayed, _Counts, score
 from odds_analytics.candidate_model import Refit, Tuning
 from odds_analytics.candidate_parity import DecisionParity, ParityReport, ParityStatus
 from odds_analytics.candidate_report import Verdict
@@ -44,6 +44,12 @@ def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return directory
 
 
+def no_bets(candidate: MechanicalCandidate, counts: _Counts, events: int) -> Replayed:
+    """A replay of ``candidate``'s one league that decided ``events`` and placed no bet."""
+    (league,) = candidate.sports
+    return Replayed([], {league: counts}, {league: events}, 0, None, (), False)
+
+
 def fake_replay(monkeypatch: pytest.MonkeyPatch) -> list[MechanicalCandidate]:
     seen: list[MechanicalCandidate] = []
     only: list[object] = []
@@ -58,18 +64,10 @@ def fake_replay(monkeypatch: pytest.MonkeyPatch) -> list[MechanicalCandidate]:
     ):
         seen.append(candidate)
         only.append(only_events)
-        coverage = Coverage(
-            events=10,
-            decisions=10,
-            with_input=9,
-            with_exchange=8,
-            with_polymarket=0,
-            with_retail=9,
-            with_bet=0,
-            bets=0,
-            bets_with_close=0,
+        counts = _Counts(
+            decisions=10, with_input=9, with_exchange=8, with_polymarket=0, with_retail=9
         )
-        result = score(candidate, start, end, [], coverage, k, NOW, N_BOOT, 0)
+        result = score(candidate, start, end, no_bets(candidate, counts, 10), k, NOW, N_BOOT, 0)
         if candidate.rule != "retail_ev_model":
             return result
         return dataclasses.replace(
@@ -359,23 +357,13 @@ class TestBacktestVerdictWording:
         from odds_cli.commands.candidates import _backtest_tables
         from rich.console import Console
 
-        cov = Coverage(
-            events=1,
-            decisions=1,
-            with_input=1,
-            with_exchange=1,
-            with_polymarket=0,
-            with_retail=1,
-            with_bet=0,
-            bets=0,
-            bets_with_close=0,
-        )
+        candidate = MechanicalCandidate.model_validate(MECHANICAL)
+        counts = _Counts(decisions=1, with_input=1, with_exchange=1, with_retail=1)
         result = score(
-            MechanicalCandidate.model_validate(MECHANICAL),
+            candidate,
             date(2025, 8, 1),
             date(2025, 9, 1),
-            [],
-            cov,
+            no_bets(candidate, counts, 1),
             1,
             NOW,
             N_BOOT,
@@ -397,3 +385,28 @@ class TestBacktestVerdictWording:
     @pytest.mark.parametrize("verdict", [Verdict.KILL, Verdict.CONTINUE, Verdict.NOT_YET])
     def test_other_verdicts_are_shown_as_is(self, verdict: Verdict) -> None:
         assert verdict.value in self.tables(verdict)
+
+
+class TestPerLeagueTable:
+    def test_a_pooled_backtest_prints_each_leagues_coverage_and_bets_for_information(
+        self,
+    ) -> None:
+        from io import StringIO
+
+        from odds_analytics.candidate_report import LeagueBreakdown
+        from odds_cli.commands.candidates import _league_table
+        from rich.console import Console
+
+        epl = LeagueBreakdown("soccer_epl", 3, 2, 0.05, 1.5)
+        cov = Coverage(4, 8, 6, 6, 0, 6, 3, 3, 2)
+        empty = Coverage(2, 2, 0, 0, 0, 0, 0, 0, 0)
+        table = _league_table(
+            "pooled v1", (epl,), {"soccer_epl": cov, "soccer_italy_serie_a": empty}
+        )
+        out = StringIO()
+        Console(file=out, width=250).print(table)
+        text = out.getvalue()
+
+        assert "the verdict is the pooled series'" in text
+        assert "soccer_epl" in text and "+0.0500" in text and "+1.50" in text
+        assert "soccer_italy_serie_a" in text

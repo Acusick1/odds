@@ -320,8 +320,9 @@ async def run_rule(
 
 
 def candidate_leagues(candidate: MechanicalCandidate) -> tuple[str, ...]:
-    """The leagues whose kick-offs a candidate's rule counts as concurrent: its own sport's."""
-    return (candidate.sport,)
+    """The leagues whose kick-offs a candidate's rule counts as concurrent: every league it bets
+    in."""
+    return tuple(candidate.sports)
 
 
 async def add_fixture_context(
@@ -394,24 +395,28 @@ def resolve_rule(candidate: MechanicalCandidate) -> tuple[RuleSpec | ModelRuleSp
             f"candidate {candidate.name!r}: unknown rule {candidate.rule!r}, "
             f"known rules {sorted(RULES)}"
         )
-    sport_markets = SPORT_MARKETS.get(candidate.sport, frozenset())
-    if candidate.market not in sport_markets:
-        raise ValueError(
-            f"candidate {candidate.name!r}: no rule decides market {candidate.market.value!r} "
-            f"for sport {candidate.sport!r}, its markets {sorted(m.value for m in sport_markets)}"
-        )
+    for sport in candidate.sports:
+        sport_markets = SPORT_MARKETS.get(sport, frozenset())
+        if candidate.market not in sport_markets:
+            raise ValueError(
+                f"candidate {candidate.name!r}: no rule decides market "
+                f"{candidate.market.value!r} for sport {sport!r}, its markets "
+                f"{sorted(m.value for m in sport_markets)}"
+            )
     if isinstance(spec, ModelRuleSpec) and candidate.market not in spec.markets:
         raise ValueError(
             f"candidate {candidate.name!r}: rule {candidate.rule!r} has no model for market "
             f"{candidate.market.value!r}, model markets {sorted(m.value for m in spec.markets)}"
         )
-    if candidate.market in spec.also_markets or not spec.also_markets <= sport_markets:
-        raise ValueError(
-            f"candidate {candidate.name!r}: rule {candidate.rule!r} also reads "
-            f"{sorted(m.value for m in spec.also_markets)}, which must be markets other than "
-            f"{candidate.market.value!r} that sport {candidate.sport!r} decides, "
-            f"{sorted(m.value for m in sport_markets)}"
-        )
+    for sport in candidate.sports:
+        sport_markets = SPORT_MARKETS.get(sport, frozenset())
+        if candidate.market in spec.also_markets or not spec.also_markets <= sport_markets:
+            raise ValueError(
+                f"candidate {candidate.name!r}: rule {candidate.rule!r} also reads "
+                f"{sorted(m.value for m in spec.also_markets)}, which must be markets other than "
+                f"{candidate.market.value!r} that sport {sport!r} decides, "
+                f"{sorted(m.value for m in sport_markets)}"
+            )
     try:
         params = spec.params_model.model_validate(candidate.params)
     except ValidationError as exc:
@@ -422,8 +427,8 @@ def resolve_rule(candidate: MechanicalCandidate) -> tuple[RuleSpec | ModelRuleSp
 
 
 def decision_leads(candidates: Sequence[Candidate], sport: str) -> list[timedelta]:
-    """How long before kick-off the active mechanical candidates of ``sport`` decide, one
-    lead per decision time.
+    """How long before kick-off the active mechanical candidates that bet in ``sport`` decide,
+    one lead per decision time.
 
     A candidate whose rule or params do not resolve is left out; the run-candidates job
     alerts on it.
@@ -432,7 +437,7 @@ def decision_leads(candidates: Sequence[Candidate], sport: str) -> list[timedelt
     for candidate in candidates:
         if (
             not isinstance(candidate, MechanicalCandidate)
-            or candidate.sport != sport
+            or sport not in candidate.sports
             or candidate.status != CandidateStatus.ACTIVE
         ):
             continue

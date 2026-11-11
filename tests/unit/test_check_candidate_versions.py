@@ -113,6 +113,59 @@ class TestCheckCandidateVersions:
         assert result.returncode == 1 and "non-integer" in result.stderr
 
 
+class TestLeagueField:
+    """A one-league `sport` reads as `sports: [it]`: the rename alone is no change."""
+
+    @pytest.fixture
+    def repo(self, candidates_repo: Path) -> Path:
+        (candidates_repo / "candidates" / "back-longest.yaml").write_text(
+            BASE_YAML + "sport: soccer_epl\n"
+        )
+        git(candidates_repo, "add", "candidates")
+        git(candidates_repo, "commit", "-q", "-m", "base")
+        return candidates_repo
+
+    def write(self, repo: Path, sports: str, version: int = 2) -> None:
+        path = repo / "candidates" / "back-longest.yaml"
+        path.write_text(
+            BASE_YAML.replace("version: 2", f"version: {version}") + f"sports: {sports}\n"
+        )
+
+    def errors(self, repo: Path) -> list[str]:
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--base", "HEAD"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+        return result.stderr.splitlines()
+
+    def test_renaming_sport_to_a_one_league_list_passes(self, repo: Path) -> None:
+        self.write(repo, "[soccer_epl]")
+        assert self.errors(repo) == []
+
+    def test_renaming_to_another_league_fails(self, repo: Path) -> None:
+        self.write(repo, "[soccer_italy_serie_a]")
+        (error,) = self.errors(repo)
+        assert "sports changed without a version bump" in error
+
+    def test_adding_a_league_without_a_bump_fails(self, repo: Path) -> None:
+        self.write(repo, "[soccer_epl, soccer_italy_serie_a]")
+        (error,) = self.errors(repo)
+        assert "sports changed without a version bump" in error
+
+    def test_adding_a_league_with_a_bump_passes(self, repo: Path) -> None:
+        self.write(repo, "[soccer_epl, soccer_italy_serie_a]", version=3)
+        assert self.errors(repo) == []
+
+    def test_dropping_a_league_without_a_bump_fails(self, repo: Path) -> None:
+        self.write(repo, "[soccer_epl, soccer_italy_serie_a]", version=3)
+        git(repo, "commit", "-qam", "pooled")
+        self.write(repo, "[soccer_epl]", version=3)
+        (error,) = self.errors(repo)
+        assert "sports changed without a version bump" in error
+
+
 class TestUnstartedCandidates:
     @pytest.fixture
     def repo(self, candidates_repo: Path) -> Path:

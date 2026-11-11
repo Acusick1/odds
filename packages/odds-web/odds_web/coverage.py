@@ -66,7 +66,7 @@ class CoverageRow:
 class CandidateCoverage:
     name: str
     version: int
-    sport: str
+    sports: tuple[str, ...]
     market: str
     inputs: tuple[str, ...]
     minutes: list[int]
@@ -124,7 +124,7 @@ class _EventInputs:
 async def candidate_coverage(
     session: AsyncSession, candidate: MechanicalCandidate, now: datetime
 ) -> CandidateCoverage:
-    """The candidate's coverage over its sport's events kicking off from ``PAST`` before
+    """The candidate's coverage over its leagues' events kicking off from ``PAST`` before
     ``now`` to ``UPCOMING`` after it.
 
     Per event, one ``rule_quotes`` read over every bucket's window, then ``build_market_state``
@@ -140,7 +140,7 @@ async def candidate_coverage(
         await session.scalars(
             select(Event)
             .where(
-                col(Event.sport_key) == candidate.sport,
+                col(Event.sport_key).in_(candidate.sports),
                 col(Event.commence_time) >= now - PAST,
                 col(Event.commence_time) <= now + UPCOMING,
                 col(Event.status).notin_((EventStatus.POSTPONED, EventStatus.CANCELLED)),
@@ -192,7 +192,7 @@ async def candidate_coverage(
     return CandidateCoverage(
         name=candidate.name,
         version=candidate.version,
-        sport=candidate.sport,
+        sports=candidate.sports,
         market=candidate.market.value,
         inputs=(RETAIL, *(i.value for i in sorted(spec.sharp_inputs))),
         minutes=minutes,

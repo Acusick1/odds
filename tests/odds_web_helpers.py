@@ -31,6 +31,7 @@ def bet(index: int, ev: float, *, name: str = "gap", p_close: bool = True) -> Sc
         p_close=(1 + ev) / 3 if p_close else None,
         placed_at=LONG_AGO + timedelta(minutes=index),
         close_grace=timedelta(0),
+        sport_key="soccer_epl",
     )
 
 
@@ -40,7 +41,7 @@ def mechanical(
     return MechanicalCandidate(
         name=name,
         description="d",
-        sport=sport,
+        sports=(sport,),
         version=1,
         issue=1,
         start_date="2026-01-01",
@@ -56,7 +57,7 @@ def agent(name: str = "mlb-agent") -> AgentCandidate:
     return AgentCandidate(
         name=name,
         description="d",
-        sport="baseball_mlb",
+        sports=("baseball_mlb",),
         version=1,
         issue=1,
         start_date="2026-01-01",

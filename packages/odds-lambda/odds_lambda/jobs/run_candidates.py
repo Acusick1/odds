@@ -1,4 +1,5 @@
-"""Run the active mechanical candidates of one sport at their decision times.
+"""Run the active mechanical candidates that bet in one sport at their decision times, on that
+sport's events.
 
 Each run takes every decision that is due, then settles paper trades, and books the next
 run at the earliest future decision time (at most ``MAX_WAIT`` away, to pick up new
@@ -92,7 +93,7 @@ async def _alert_invalid(name: str, error: ValueError) -> None:
 
 
 async def runnable_candidates(sport: SportKey, today: datetime) -> list[RunnableCandidate]:
-    """Active mechanical candidates of ``sport`` that have started and validate.
+    """Active mechanical candidates that bet in ``sport``, have started and validate.
 
     An invalid candidate, or one whose rule needs a fitted model (which only a replay fits), is
     skipped with one alert per ``stale_reminder_interval``; an unreadable registry skips them
@@ -109,7 +110,7 @@ async def runnable_candidates(sport: SportKey, today: datetime) -> list[Runnable
     for candidate in loaded:
         if (
             not isinstance(candidate, MechanicalCandidate)
-            or candidate.sport != sport
+            or sport not in candidate.sports
             or candidate.status != CandidateStatus.ACTIVE
             or candidate.start_date > today.date()
         ):

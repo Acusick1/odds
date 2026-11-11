@@ -20,7 +20,7 @@ def _write_candidate(directory: Path, **fields: object) -> None:
         "name": "cand",
         "description": "d",
         "kind": "agent",
-        "sport": "soccer_epl",
+        "sports": ["soccer_epl"],
         "version": 2,
         "issue": 1,
         "start_date": (datetime.now(UTC) - timedelta(days=1)).date().isoformat(),
@@ -130,7 +130,7 @@ class TestPlaceTradeCandidate:
     async def test_candidate_sport_must_match_the_event(
         self, test_session, event, registry
     ) -> None:
-        _write_candidate(registry, sport="baseball_mlb")
+        _write_candidate(registry, sports=["baseball_mlb"])
         with pytest.raises(ValueError, match="is for baseball_mlb, not soccer_epl"):
             await self._place(test_session, candidate_name="cand", candidate_version=2)
 

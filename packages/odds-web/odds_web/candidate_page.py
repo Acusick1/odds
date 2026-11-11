@@ -16,6 +16,7 @@ from odds_analytics.candidate_report import (
     CandidateSummary,
     Checkpoint,
     CheckpointProgress,
+    LeagueBreakdown,
     RunningScore,
     checkpoints_through_next,
 )
@@ -104,6 +105,8 @@ class CandidatePage:
     settled_bets: int
     pending_bets: int
     series: Series | None
+    # Shown only for a version that bet in more than one league; it never changes the verdict.
+    leagues: tuple[LeagueBreakdown, ...]
     decisions: DecisionHistory | None
     ledger: LedgerPage
 
@@ -170,6 +173,7 @@ def build_candidate_page(
         settled_bets=summary.settled_bets,
         pending_bets=summary.pending_bets,
         series=build_series(summary, running) if summary.bets_with_close else None,
+        leagues=summary.leagues if len(summary.leagues) > 1 else (),
         decisions=shown_decisions(entry, decisions),
         ledger=ledger,
     )

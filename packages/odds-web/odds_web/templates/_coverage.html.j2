@@ -5,7 +5,7 @@
 {% if coverage.value is not none %}
 <div class="{{ 'stale' if coverage.failure }}">
 {% for c in coverage.value %}
-<h3>{{ c.name }} <span class="sub num">v{{ c.version }}</span> <span class="sub">{{ c.sport }} · {{ c.market }} · inputs {{ c.inputs | join(', ') }}</span></h3>
+<h3>{{ c.name }} <span class="sub num">v{{ c.version }}</span> <span class="sub">{{ c.sports | join(', ') }} · {{ c.market }} · inputs {{ c.inputs | join(', ') }}</span></h3>
 {% if c.rows %}
 {% set height = rh * c.rows | length %}
 <svg class="heat" width="{{ lw + cw * c.minutes | length }}" height="{{ height + 18 }}" role="img" aria-label="decision-window coverage of {{ c.name }}">

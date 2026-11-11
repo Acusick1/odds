@@ -6,8 +6,13 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import pytest
-from odds_analytics.candidate_backtest import HashStatus, replay
-from odds_analytics.candidate_report import candidate_report, load_decision_starts
+from odds_analytics.candidate_backtest import BacktestResult, HashStatus, collect, replay
+from odds_analytics.candidate_report import (
+    candidate_report,
+    family_size_at,
+    family_starts,
+    load_decision_starts,
+)
 from odds_core.candidates import MechanicalCandidate
 from odds_core.models import EventStatus
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade, TradeResult
@@ -42,7 +47,7 @@ def candidate(**overrides: Any) -> MechanicalCandidate:
         "description": "d",
         "kind": "mechanical",
         "market": "1x2",
-        "sport": "soccer_epl",
+        "sports": ["soccer_epl"],
         "version": 1,
         "issue": 626,
         "start_date": "2026-01-01",
@@ -90,6 +95,7 @@ async def add_event(
     close: tuple[float, float, float] | None = EXCHANGE,
     snapshot_offset: timedelta = timedelta(0),
     scores: tuple[int, int] | None = (2, 1),
+    sport: str = "soccer_epl",
     **fields: Any,
 ) -> None:
     """An event with an OddsPortal snapshot of its retail and exchange prices 5 minutes before
@@ -103,6 +109,7 @@ async def add_event(
         away_score=scores[1] if scores else None,
         **fields,
     )
+    event.sport_key = sport
     session.add(event)
     teams = {"home_team": event.home_team, "away_team": event.away_team}
     books = [
@@ -318,7 +325,7 @@ class TestReplay:
         )
         await session.commit()
 
-        result = await run(session, candidate(market="h2h", sport="basketball_nba"))
+        result = await run(session, candidate(market="h2h", sports=["basketball_nba"]))
 
         assert result.coverage.bets == 1 and result.coverage.bets_with_close == 1
         # The home side won at 2.2.
@@ -416,6 +423,94 @@ class TestFamilySize:
             ("gap", 3): 2,
             ("sibling", 1): 2,
         }
+
+
+# The five leagues' 2025-26 season is sealed, so the pooled tests replay EPL and Serie A 2024-25.
+POOLED_KICKOFF = datetime(2025, 4, 10, 15, 0, tzinfo=UTC)
+
+
+class TestPooledLeagues:
+    pooled = candidate(name="pooled", sports=["soccer_epl", "soccer_italy_serie_a"])
+
+    async def add_two_leagues(self, session: Any) -> None:
+        await add_event(session, 1, POOLED_KICKOFF)
+        await add_event(
+            session, 2, POOLED_KICKOFF + timedelta(hours=1), sport="soccer_italy_serie_a"
+        )
+        await add_event(
+            session,
+            3,
+            POOLED_KICKOFF + timedelta(days=1),
+            sport="soccer_italy_serie_a",
+            retail=None,
+        )
+        await add_event(session, 4, POOLED_KICKOFF, sport="soccer_efl_champ")
+
+    async def replay(self, session: Any, k: int = 1) -> BacktestResult:
+        return await replay(
+            session, self.pooled, date(2025, 4, 1), date(2025, 4, 30), k, now=NOW, n_boot=N_BOOT
+        )
+
+    async def test_overlapping_day_ranges_are_refused(self, pglite_async_session) -> None:
+        ranges = {
+            "soccer_epl": [
+                (date(2025, 4, 1), date(2025, 4, 10)),
+                (date(2025, 4, 10), date(2025, 4, 30)),
+            ]
+        }
+        with pytest.raises(ValueError, match="soccer_epl: day ranges overlap on 2025-04-10"):
+            await collect(pglite_async_session, self.pooled, ranges)
+
+    async def test_a_pooled_draft_backtests_its_leagues_as_one_series(
+        self, pglite_async_session
+    ) -> None:
+        await self.add_two_leagues(pglite_async_session)
+
+        result = await self.replay(pglite_async_session)
+
+        assert result.coverage.events == 3 and result.coverage.bets == 2
+        assert [b.sport_key for b in result.summary.leagues] == [
+            "soccer_epl",
+            "soccer_italy_serie_a",
+        ]
+        assert all(b.bets_with_close == 1 for b in result.summary.leagues)
+        assert result.overall is not None and result.overall.n == 2
+        assert result.league_coverage is not None
+        epl, serie_a = (result.league_coverage[s] for s in self.pooled.sports)
+        assert (epl.events, epl.decisions, epl.bets) == (1, 1, 1)
+        assert (serie_a.events, serie_a.with_input, serie_a.bets) == (2, 1, 1)
+
+    async def test_its_k_counts_the_single_league_versions_it_intersects(
+        self, pglite_async_session
+    ) -> None:
+        session = pglite_async_session
+        await self.add_two_leagues(session)
+        decided = POOLED_KICKOFF - timedelta(minutes=60)
+        for name in ("epl-only", "champ-only"):
+            session.add(
+                CandidateDecision(
+                    candidate_name=name,
+                    candidate_version=1,
+                    event_id=1,
+                    minutes_before_kickoff=60,
+                    decision_time=decided,
+                    kickoff_at_decision=POOLED_KICKOFF,
+                    known_at=decided,
+                )
+            )
+        await session.commit()
+        registry = [
+            candidate(name="epl-only"),
+            candidate(name="champ-only", sports=["soccer_efl_champ"]),
+        ]
+
+        starts = family_starts(
+            self.pooled, registry, await load_decision_starts(session), ("pooled", 1), NOW
+        )
+        k = family_size_at(starts, NOW)
+
+        assert k == 2
+        assert (await self.replay(session, k)).summary.family_versions == 2
 
 
 def model_candidate(**params: Any) -> MechanicalCandidate:

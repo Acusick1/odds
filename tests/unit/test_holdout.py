@@ -46,7 +46,7 @@ def git(root: Path, *args: str) -> str:
 def draft(**changes: object) -> MechanicalCandidate:
     data = {
         **{k: v for k, v in MECHANICAL.items() if k != "rule_sha256"},
-        "sport": "soccer_spain_la_liga",
+        "sports": ["soccer_spain_la_liga"],
         "params": dict(HOLDOUT_CELL),
         **changes,
     }
@@ -64,14 +64,28 @@ def checkpoint(n: int, mean_ev: float, low: float, high: float) -> Checkpoint:
     )
 
 
-def scored_bet(event_id: int, p_close: float, year: int) -> ScoredBet:
+def scored_bet(
+    event_id: int, p_close: float, year: int, sport: str = "soccer_spain_la_liga"
+) -> ScoredBet:
     when = datetime(year, 9, 1, tzinfo=UTC)
-    return ScoredBet("back-longest", 1, event_id, when, 1.0, 0.0, 2.0, p_close, when, timedelta(0))
+    return ScoredBet(
+        "back-longest", 1, event_id, when, 1.0, 0.0, 2.0, p_close, when, timedelta(0), sport
+    )
+
+
+# The leagues of the draft collected, its day ranges per league and the leagues it had access to.
+Collected = tuple[tuple[str, ...], dict[str, list[tuple[date, date]]], tuple[str, ...]]
 
 
 def replayed(bets: list[ScoredBet]) -> bt.Replayed:
-    counts = bt._Counts(decisions=len(bets), with_input=len(bets), with_bet=len(bets))
-    return bt.Replayed(bets, counts, len(bets), len(bets), None, (), False)
+    sports = sorted({b.sport_key for b in bets})
+    counts = {
+        sport: bt._Counts(decisions=n, with_input=n, with_bet=n)
+        for sport in sports
+        if (n := sum(b.sport_key == sport for b in bets))
+    }
+    events = {sport: c.decisions for sport, c in counts.items()}
+    return bt.Replayed(bets, counts, events, len(bets), None, (), False)
 
 
 class TestSealInTheLibrary:
@@ -128,7 +142,7 @@ class TestSealInTheLibrary:
         monkeypatch.setattr("odds_cli.commands.candidates.async_session_maker", session)
         monkeypatch.setattr("odds_cli.commands.candidates.load_decision_starts", starts)
         primary, other = tmp_path / "epl.yaml", tmp_path / "laliga.yaml"
-        primary.write_text(yaml.safe_dump(draft(sport="soccer_epl").model_dump(mode="json")))
+        primary.write_text(yaml.safe_dump(draft(sports=["soccer_epl"]).model_dump(mode="json")))
         other.write_text(yaml.safe_dump(draft(issue=999).model_dump(mode="json")))
 
         result = RUNNER.invoke(
@@ -554,17 +568,21 @@ def result_row() -> holdout.HoldoutResult:
 
 class TestRun:
     @pytest.fixture
-    def collected(self, monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, date, date, bool]]:
+    def collected(self, monkeypatch: pytest.MonkeyPatch) -> list[Collected]:
         """Stub the replay: la Liga's holdout bets are good, the Bundesliga's bad."""
-        calls: list[tuple[str, date, date, bool]] = []
+        calls: list[Collected] = []
 
         async def collect(
-            _session: object, candidate: MechanicalCandidate, start: date, end: date, **kw: Any
+            _session: object,
+            candidate: MechanicalCandidate,
+            ranges: dict[str, list[tuple[date, date]]],
+            **kw: Any,
         ) -> bt.Replayed:
-            calls.append((candidate.sport, start, end, kw["access"] is not None))
-            p_close = 0.6 if candidate.sport == "soccer_spain_la_liga" else 0.3
+            granted = tuple(a.window.sport for a in kw["access"])
+            calls.append((candidate.sports, dict(ranges), granted))
             return replayed(
-                [scored_bet(i + (0 if p_close > 0.5 else 100), p_close, 2025) for i in range(40)]
+                [scored_bet(i, 0.6, 2025, "soccer_spain_la_liga") for i in range(40)]
+                + [scored_bet(100 + i, 0.3, 2025, "soccer_germany_bundesliga") for i in range(40)]
             )
 
         async def no_backfill(_session: object) -> None:
@@ -578,14 +596,17 @@ class TestRun:
         path = directory / "selections" / f"{STEM}.yaml"
         return asyncio.run(holdout_run.run_holdout(None, path, directory, NOW))  # type: ignore[arg-type]
 
-    def test_replays_each_leagues_window_with_access_and_pools_one_gate(
-        self, holdout_repo: Path, collected: list[tuple[str, date, date, bool]]
+    def test_replays_one_pooled_draft_on_each_leagues_window_and_judges_one_gate(
+        self, holdout_repo: Path, collected: list[Collected]
     ) -> None:
         done = self.run(holdout_repo)
 
-        assert collected == [
-            ("soccer_spain_la_liga", date(2025, 8, 1), date(2026, 7, 31), True),
-            ("soccer_germany_bundesliga", date(2025, 8, 1), date(2026, 7, 31), True),
+        leagues = ("soccer_spain_la_liga", "soccer_germany_bundesliga")
+        window = [(date(2025, 8, 1), date(2026, 7, 31))]
+        assert collected == [(leagues, dict.fromkeys(leagues, window), leagues)]
+        assert [(r.window.sport, r.coverage.bets) for r in done.leagues] == [
+            ("soccer_spain_la_liga", 40),
+            ("soccer_germany_bundesliga", 40),
         ]
         reserved, result = holdout.load_ledger(holdout_repo)
         assert isinstance(reserved, holdout.Reserved) and isinstance(result, holdout.HoldoutResult)
@@ -595,7 +616,7 @@ class TestRun:
         assert done.row == result
 
     def test_a_second_run_is_refused_without_reading_any_holdout_data(
-        self, holdout_repo: Path, collected: list[tuple[str, date, date, bool]]
+        self, holdout_repo: Path, collected: list[Collected]
     ) -> None:
         self.run(holdout_repo)
         git_commit(holdout_repo.parent)
@@ -607,7 +628,7 @@ class TestRun:
     def test_a_failure_after_reserving_spends_the_run(
         self,
         holdout_repo: Path,
-        collected: list[tuple[str, date, date, bool]],
+        collected: list[Collected],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         async def boom(*_a: object, **_k: object) -> bt.Replayed:
@@ -623,7 +644,7 @@ class TestRun:
             self.run(holdout_repo)
 
     def test_a_bad_cell_params_cost_no_run(
-        self, holdout_repo: Path, collected: list[tuple[str, date, date, bool]]
+        self, holdout_repo: Path, collected: list[Collected]
     ) -> None:
         path = holdout_repo / "selections" / f"{STEM}.yaml"
         grid_file = holdout_repo / "preregistrations" / f"{STEM}.yaml"
@@ -644,18 +665,17 @@ class TestRun:
     def test_the_gate_is_the_holdouts_alone_not_a_mix_with_development(self) -> None:
         candidate = draft()
         bets = [scored_bet(i, 0.7 if i < 70 else 0.4, 2024 if i < 70 else 2025) for i in range(100)]
-        coverage = bt.Coverage(100, 100, 100, 100, 0, 100, 100, 100, 100)
         mixed = bt.score(
-            candidate, date(2024, 8, 1), date(2026, 7, 31), bets, coverage, 1, NOW, 1000, 0
+            candidate, date(2024, 8, 1), date(2026, 7, 31), replayed(bets), 1, NOW, 1000, 0
         )
-        pure = bt.score(candidate, START, END, bets[70:], coverage, 1, NOW, 1000, 0)
+        pure = bt.score(candidate, START, END, replayed(bets[70:]), 1, NOW, 1000, 0)
         assert holdout.gate(mixed.overall).verdict is holdout.GateVerdict.PASS
         assert holdout.gate(pure.overall).verdict is holdout.GateVerdict.FAIL
 
     def test_the_command_prints_the_gate_and_refuses_a_second_run(
         self,
         holdout_repo: Path,
-        collected: list[tuple[str, date, date, bool]],
+        collected: list[Collected],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         @asynccontextmanager
