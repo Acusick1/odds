@@ -208,11 +208,13 @@ async def check_parity(
         (
             await session.execute(
                 # The recorded fixture is read only for a rule with fixture inputs, below, so a
-                # database not yet migrated to hold it can still be checked for other rules.
+                # database not yet migrated to hold it can still be checked for other rules. The
+                # league set is never read: parity replays the candidate file's rule.
                 select(CandidateDecision)
                 .options(
                     defer(CandidateDecision.input_event_ids),  # type: ignore[arg-type]
                     defer(CandidateDecision.input_fixture),  # type: ignore[arg-type]
+                    defer(CandidateDecision.sports),  # type: ignore[arg-type]
                 )
                 .where(
                     CandidateDecision.candidate_name == candidate.name,

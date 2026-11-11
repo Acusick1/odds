@@ -18,6 +18,7 @@ from sqlalchemy import (
     Index,
     Integer,
     Numeric,
+    String,
     UniqueConstraint,
     text,
 )
@@ -65,6 +66,13 @@ class CandidateDecision(SQLModel, table=True):
     candidate_name: str = Field(index=True)
     candidate_version: int
     event_id: int = Field(sa_type=BigInteger, foreign_key="events.id", index=True)
+    sports: list[str] = Field(
+        sa_column=Column(ARRAY(String), nullable=False),
+        description=(
+            "The league keys the candidate version listed when it decided, which its "
+            "family is counted by: a later version may list others"
+        ),
+    )
     minutes_before_kickoff: int = Field(
         sa_column=Column(Integer, nullable=False),
         description="The entry of the rule's minutes_before_kickoff this decision is for",

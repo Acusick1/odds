@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from functools import partial
+from typing import NamedTuple
 
 import numpy as np
 from odds_core.candidates import Candidate, CandidateStatus, MechanicalCandidate
@@ -217,33 +218,43 @@ def promote_level(family_versions: int) -> float:
     return 1 - PROMOTE_ERROR / family_versions
 
 
-def in_family(a: MechanicalCandidate, b: MechanicalCandidate) -> bool:
-    """Whether ``a`` and ``b`` share a family: the same rule and market and a league in common.
+class DecisionStart(NamedTuple):
+    """A candidate version's first recorded decision and the leagues it listed when deciding."""
 
-    Not transitive: a pooled {EPL, Serie A} shares a family with EPL alone and with Serie A
-    alone, which do not share one with each other.
-    """
-    return a.rule == b.rule and a.market == b.market and not set(a.sports).isdisjoint(b.sports)
+    first: datetime
+    sports: frozenset[str]
 
 
 def family_starts(
     candidate: MechanicalCandidate,
     registry: Sequence[Candidate],
-    decision_starts: Mapping[tuple[str, int], datetime],
+    decisions: Mapping[tuple[str, int], DecisionStart],
     draft: tuple[str, int] | None = None,
     draft_start: datetime | None = None,
 ) -> list[datetime]:
     """When each version in ``candidate``'s family took its first look, sorted.
 
-    A version counts from its first recorded decision in ``decision_starts``, for names whose
-    registry entry is in the family (``in_family``): a version with no decision has taken no
-    look, and a ``start_date`` can be back-dated where a decision cannot. An unregistered
-    ``draft`` counts from ``draft_start``, unless it already has a decision.
+    A version counts from its first recorded decision in ``decisions`` when its name's registry
+    entry has ``candidate``'s rule and market and the leagues the version decided with
+    intersect ``candidate.sports``: not transitive, so a pooled {EPL, Serie A} shares a family
+    with EPL alone and with Serie A alone, which do not share one with each other. A version
+    with no decision has taken no look, and a ``start_date`` can be back-dated where a decision
+    cannot. An unregistered ``draft`` counts from ``draft_start``, unless it already has a
+    decision.
     """
+    # A name's rule and market never change across versions (the version check refuses it), so
+    # its current entry gives every historical version's rule and market.
     members = {
-        c.name for c in registry if isinstance(c, MechanicalCandidate) and in_family(c, candidate)
+        c.name
+        for c in registry
+        if isinstance(c, MechanicalCandidate)
+        and (c.rule, c.market) == (candidate.rule, candidate.market)
     }
-    starts = {key: first for key, first in decision_starts.items() if key[0] in members}
+    starts = {
+        key: d.first
+        for key, d in decisions.items()
+        if key[0] in members and not d.sports.isdisjoint(candidate.sports)
+    }
     if draft is not None and draft_start is not None:
         starts.setdefault(draft, draft_start)
     return sorted(starts.values())
@@ -446,25 +457,29 @@ def summarize_candidates(
     trades: Sequence[ScoredBet],
     registry: Sequence[Candidate],
     now: datetime,
-    decision_starts: Mapping[tuple[str, int], datetime] | None = None,
+    decision_starts: Mapping[tuple[str, int], DecisionStart] | None = None,
     n_boot: int = DEFAULT_BOOTSTRAP_SAMPLES,
     seed: int = BOOTSTRAP_SEED,
 ) -> list[CandidateSummary]:
     """One summary per (candidate, version) with trades, plus each registered candidate's version.
 
     ``trades`` must be in placement order. A version other than the registry's has no registry entry.
-    Every version of a name takes the family of the registry's entry for that name; a name
-    absent from the registry, and an agent, has a family of one. ``decision_starts`` is as in
-    ``family_starts``.
+    A version takes the family of the leagues it decided with (``decisions``), or of the
+    registry's entry for its name when it has no decision; a name absent from the registry, and
+    an agent, has a family of one. ``decisions`` is as in ``family_starts``.
     """
+    decisions = decision_starts or {}
     registered = {(c.name, c.version): c for c in registry}
     current = {c.name: c for c in registry}
 
-    def family_size(name: str) -> Callable[[datetime], int]:
+    def family_size(name: str, version: int) -> Callable[[datetime], int]:
         entry = current.get(name)
         if not isinstance(entry, MechanicalCandidate):
             return lambda _: 1
-        starts = family_starts(entry, registry, decision_starts or {})
+        recorded = decisions.get((name, version))
+        if recorded is not None:
+            entry = entry.model_copy(update={"sports": tuple(recorded.sports)})
+        starts = family_starts(entry, registry, decisions)
         return lambda when: family_size_at(starts, when)
 
     return [
@@ -474,7 +489,7 @@ def summarize_candidates(
             registered.get((name, version)),
             versioned,
             now,
-            family_size(name),
+            family_size(name, version),
             n_boot,
             seed,
         )
@@ -486,7 +501,7 @@ def report_candidates(
     trades: Sequence[ScoredBet],
     registry: Sequence[Candidate],
     now: datetime,
-    decision_starts: Mapping[tuple[str, int], datetime] | None = None,
+    decision_starts: Mapping[tuple[str, int], DecisionStart] | None = None,
     n_boot: int = DEFAULT_BOOTSTRAP_SAMPLES,
     seed: int = BOOTSTRAP_SEED,
 ) -> CandidateReport:
@@ -558,14 +573,29 @@ async def load_scored_trades(session: AsyncSession) -> list[ScoredBet]:
     return scored
 
 
-async def load_decision_starts(session: AsyncSession) -> dict[tuple[str, int], datetime]:
-    """The first recorded decision time of every candidate version that has one."""
+async def load_decision_starts(session: AsyncSession) -> dict[tuple[str, int], DecisionStart]:
+    """The first recorded decision time of every candidate version that has one, with the
+    leagues it listed. A version's league set is the same on every decision it took."""
     name = col(CandidateDecision.candidate_name)
     version = col(CandidateDecision.candidate_version)
+    unnested = select(
+        name.label("name"),
+        version.label("version"),
+        col(CandidateDecision.decision_time).label("decision_time"),
+        func.unnest(CandidateDecision.sports).label("sport"),
+    ).subquery()
     rows = await session.execute(
-        select(name, version, func.min(CandidateDecision.decision_time)).group_by(name, version)
+        select(
+            unnested.c.name,
+            unnested.c.version,
+            func.min(unnested.c.decision_time),
+            func.array_agg(func.distinct(unnested.c.sport)),
+        ).group_by(unnested.c.name, unnested.c.version)
     )
-    return {(name, version): first for name, version, first in rows.all()}
+    return {
+        (name, version): DecisionStart(first, frozenset(sports))
+        for name, version, first, sports in rows.all()
+    }
 
 
 async def candidate_report(

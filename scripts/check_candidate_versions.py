@@ -3,7 +3,8 @@
 A candidate whose start_date at the base is later than today (UTC) has made no
 decisions yet, so it may change in place at the same version. A file is compared with its
 one league `sport: X` read as `sports: [X]`, so the rename of that field alone is no change;
-adding or dropping a league is. A rule_sha256 may also
+adding or dropping a league is. The rule and market of a name never change, with or without a
+bump. A rule_sha256 may also
 change in place when the rule and both hashes are a complete row of the rehash ledger,
 candidates/rehashes.jsonl. The hook checks a row's shape only: the ledger is a record the
 rehash command makes, and nothing here re-runs the replay it records.
@@ -34,6 +35,9 @@ import yaml
 CANDIDATES_DIR = "candidates"
 # Neither changes what a candidate bets on.
 UNVERSIONED_KEYS = frozenset({"status", "description"})
+# Fixed per name even across versions: a version's family is read from the name's current rule
+# and market.
+IDENTITY_KEYS = ("rule", "market")
 REHASH_LEDGER = "rehashes.jsonl"
 HOLDOUT_LEDGER = "holdout.jsonl"
 SEALED_DIRS = ("preregistrations", "selections")
@@ -188,6 +192,14 @@ def check(base: str, today: date | None = None) -> list[str]:
             reason = getattr(exc, "problem", None) or str(exc).splitlines()[0]
             errors.append(f"{rel}: invalid YAML ({reason})")
             continue
+        if not _not_started(old, today):
+            moved = [k for k in IDENTITY_KEYS if old.get(k) != new.get(k)]
+            if moved:
+                errors.append(
+                    f"{rel}: {', '.join(moved)} changed. A different rule or market is a "
+                    "different candidate: register it under a new name, even with a version bump"
+                )
+                continue
         old_version, new_version = old.get("version"), new.get("version")
         if isinstance(old_version, int) and isinstance(new_version, int):
             if new_version < old_version:
