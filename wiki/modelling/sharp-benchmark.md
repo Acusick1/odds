@@ -3,6 +3,9 @@ type: explanation
 title: Sharp references and retail-sharp divergence
 description: Which sharp price each use reads (the scoring close, the retail-EV model, the mechanical rules, the tabular features and the agent tools), the priority semantics of the Pinnacle-first lists, the divergence feature and screener, and how the code copies differ.
 sources:
+  - odds_analytics.retail_ev.build_event_rows
+  - odds_analytics.candidate_model.state_inputs
+  - odds_analytics.candidate_model.training_rows
   - odds_analytics.feature_extraction.TabularFeatureExtractor
   - odds_analytics.feature_extraction.select_sharp_quotes
   - odds_analytics.feature_extraction.DEFAULT_RETAIL_BOOKMAKERS
@@ -30,8 +33,10 @@ A sharp reference is the price treated as closest to fair. The project has no si
 
 | Use | Sharp reference | Code |
 |---|---|---|
-| Scoring: a candidate's EV and the `retail_ev` target's close | The Betfair Exchange close, from the direct Betfair feed; a football league falls back to FDUK's Betfair Exchange close and NBA `h2h` to Polymarket, and MLB has none. Defined on [CLV and the training target](clv-target.md#the-retail-ev-target) | `odds_core.close.event_close` |
-| Retail-EV model: baseline and sharp features | The Betfair Exchange price at t, from the direct Betfair feed or an FDUK opening snapshot, never from the Odds API's Betfair rows; the optional `polymarket_at_t` group adds Polymarket ([retail-EV features](clv-target-functions.md#retail-ev-features)) | `odds_analytics.retail_ev.EXCHANGE_SOURCES` |
+| Scoring: a candidate's EV | The Betfair Exchange close, from the direct Betfair feed; a football league falls back to FDUK's Betfair Exchange close and NBA `h2h` to Polymarket, and MLB has none. Defined on [CLV and the training target](clv-target.md#the-retail-ev-target) | `odds_core.close.event_close` |
+| The `retail_ev` training target's close | The same Betfair close and FDUK fallback, without Polymarket: the builder leaves Polymarket out of its close inputs, so an NBA match closed only by Polymarket gives no rows | `odds_analytics.retail_ev.build_event_rows` |
+| Retail-EV training pipeline: baseline and sharp features | The Betfair Exchange price at t, from the direct Betfair feed or an FDUK opening snapshot, never from the Odds API's Betfair rows; the optional `polymarket_at_t` group adds Polymarket ([retail-EV features](clv-target-functions.md#retail-ev-features)) | `odds_analytics.retail_ev.EXCHANGE_SOURCES` |
+| The `odds_lambda.candidate_rules.rules.retail_ev_model` candidate | The Betfair Exchange price in its own co-timed retail snapshot, from the Odds API or OddsPortal, as inputs; trained only on matches with a live Betfair close | `odds_analytics.candidate_model.state_inputs`, `odds_analytics.candidate_model.training_rows` |
 | Mechanical rules | `odds_lambda.candidate_rules.rules.exchange_gap`: the Betfair Exchange price in the rule's own retail snapshot, from the Odds API or OddsPortal; `odds_lambda.candidate_rules.rules.polymarket_gap`: Polymarket ([gap rules](../evaluation/candidate-rules.md#the-gap-rules)) | `odds_lambda.candidate_rules.inputs.RETAIL_SOURCES` |
 | Tabular features of a `raw` config | `sharp_bookmakers`, Pinnacle alone by default; a config may list `[pinnacle, betfair_exchange]` | `odds_analytics.training.config.FeatureConfig.sharp_bookmakers` |
 | Agent tools: the retail screener, match-brief stamps and paper-trade sharp fields | Pinnacle, then Betfair Exchange | `odds_core.bookmakers.SHARP_BOOKMAKERS` |
