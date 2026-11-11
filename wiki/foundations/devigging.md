@@ -1,7 +1,7 @@
 ---
 type: explanation
 title: Devigging and vig-inclusive prices
-description: What vig and proportional devigging are here, which consumers devig and which stay vig-inclusive, and what that means for comparing prices.
+description: What vig, proportional and power devigging are here, which consumers devig and which stay vig-inclusive, and what that means for comparing prices.
 sources:
   - odds_core.odds_math.devig_probabilities
   - odds_core.odds_math.decimal_to_implied_probability
@@ -10,6 +10,8 @@ sources:
   - odds_analytics.feature_groups._compute_target
   - odds_mcp.server.find_retail_edges
   - odds_mcp.prices.selection_sharp_reading
+mentions:
+  - odds_analytics.candidate_report.power_devig
 status: stable
 ---
 
@@ -19,7 +21,7 @@ Bookmaker prices sum to more than 1 once converted to implied probability (`odds
 
 ## What exists
 
-Only proportional (multiplicative) devigging exists: `odds_core.odds_math.devig_probabilities` divides each implied probability by their sum, for 2-way and 3-way markets. No power, Shin or additive method is implemented. Devigging is per bookmaker. Two consumers below then combine books: the retail consensus of the candidate rules and the sharp reading of an agent's paper trade.
+Proportional (multiplicative) devigging is the method every score and model uses: `odds_core.odds_math.devig_probabilities` divides each implied probability by their sum, for 2-way and 3-way markets. A power devig, `odds_analytics.candidate_report.power_devig`, which raises each implied probability to the one power that makes them sum to 1, scores candidate bets against the close for information only ([report](../evaluation/candidate-registry.md#odds-candidates-report), [#770](https://github.com/Acusick1/odds/issues/770)). No Shin or additive method is implemented. Devigging is per bookmaker. Two consumers below then combine books: the retail consensus of the candidate rules and the sharp reading of an agent's paper trade.
 
 There are three consumers. The first is the `retail_ev` target, and the [retail-EV model rule](../evaluation/candidate-rules.md#the-retail-ev-model-rule) that trains on it. `odds_analytics.retail_ev` devigs every outcome of the exchange (with `odds_core.exchange_price.devig`, which `odds_core.exchange_price.exchange_price` also applies to the Betfair Exchange backs on one line of a retail snapshot, the over/under pair of a totals line, for the [candidate rules' market state](../evaluation/candidate-rules.md#market-state)), Polymarket (through `odds_core.book_price.polymarket_price`) and book prices, proportionally and per snapshot, for the events that have kicked off and have a close (a fully priced live Betfair snapshot or, for a football league, FDUK's close; an NBA event closed by Polymarket's fallback, or an event whose sport and market have no close in `odds_core.close.CLOSES`, such as MLB h2h, gives it no rows), reading their price rows through `odds_core.quotes.quotes` (`odds_analytics.retail_ev.load_retail_ev_dataset`). `odds_analytics.feature_groups.prepare_training_data`, whose `raw` target compares a decision snapshot, sampled only of the sources whose close has a sharp book, with its own source's close, hands `retail_ev` configs on to `odds_analytics.retail_ev.prepare_retail_ev_training_data`, so they never reach `odds_analytics.feature_groups._compute_target`, and `odds_analytics.training.config.FeatureConfig.retail_ev_arm` does not change how they devig ([CLV target](../modelling/clv-target.md#the-retail-ev-target), [target functions](../modelling/clv-target-functions.md#retail-ev-rows)).
 

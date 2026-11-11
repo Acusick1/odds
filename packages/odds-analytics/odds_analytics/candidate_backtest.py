@@ -84,7 +84,8 @@ class BacktestResult:
     rule's hyperparameters chosen on that prefix and its fits, and ``library_versions`` the
     versions of the libraries that fitted and tuned it. ``league_coverage`` is the coverage of
     each league the candidate bets in, for information: the verdict is the pooled series'.
-    ``comparison`` is another candidate replayed on the same decided events."""
+    ``comparison`` is another candidate replayed on the same decided events, and ``bets`` every
+    bet placed, in placement order."""
 
     name: str
     version: int
@@ -102,6 +103,7 @@ class BacktestResult:
     library_versions: dict[str, str] | None = None
     league_coverage: dict[str, Coverage] | None = None
     comparison: BacktestResult | None = None
+    bets: tuple[ScoredBet, ...] = ()
 
     @property
     def decided_event_ids(self) -> tuple[int, ...] | None:
@@ -204,6 +206,13 @@ async def _decide(
         for event, t, intents in decided:
             assert event.home_score is not None and event.away_score is not None  # noqa: S101
             for intent in intents:
+                p_close = selection_close_probability(
+                    market,
+                    intent.outcome.value,
+                    intent.line,
+                    event,
+                    closes.get(event.id, []),
+                )
                 bets.append(
                     ScoredBet(
                         candidate_name=candidate.name,
@@ -222,16 +231,14 @@ async def _decide(
                             ),
                         ),
                         price_decimal=intent.price_decimal,
-                        p_close=selection_close_probability(
-                            market,
-                            intent.outcome.value,
-                            intent.line,
-                            event,
-                            closes.get(event.id, []),
-                        ),
+                        p_close=None if p_close is None else p_close.proportional,
                         placed_at=t,
                         close_grace=close_grace(event.sport_key, market),
                         sport_key=event.sport_key,
+                        selection=intent.outcome.value,
+                        line=intent.line,
+                        bookmaker=intent.bookmaker,
+                        p_close_power=None if p_close is None else p_close.power,
                     )
                 )
     return bets
@@ -471,4 +478,5 @@ def score(
         refits=replayed.refits,
         library_versions=library_versions() if replayed.model else None,
         league_coverage=league_coverage(replayed),
+        bets=tuple(bets),
     )

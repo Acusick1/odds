@@ -4,6 +4,7 @@ over the pre-registered leagues, each on its sealed window, and judge the pooled
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -21,7 +22,7 @@ from odds_analytics.candidate_report import BOOTSTRAP_SEED, DEFAULT_BOOTSTRAP_SA
 from odds_analytics.holdout import (
     HoldoutRefused,
     HoldoutResult,
-    Plan,
+    Preregistration,
     Window,
     exclusive_lock,
     gate,
@@ -43,23 +44,28 @@ class HoldoutRun:
     leagues: list[LeagueRun]
 
 
-def pooled_draft(plan: Plan, today: date) -> MechanicalCandidate:
-    """The pre-registered strategy as one draft over its leagues that have a sealed window, with
-    the selected cell's params."""
-    prereg = plan.prereg
+def pooled_draft(
+    prereg: Preregistration,
+    cell: dict[str, object],
+    today: date,
+    purpose: str,
+    leagues: Sequence[str] | None = None,
+) -> MechanicalCandidate:
+    """The pre-registered strategy as one draft over ``leagues`` (by default all its leagues),
+    with ``cell`` as params."""
     return MechanicalCandidate.model_validate(
         {
             "name": prereg.name,
-            "description": f"Holdout run of #{prereg.issue}",
+            "description": f"{purpose} of #{prereg.issue}",
             "kind": "mechanical",
             "market": prereg.market,
-            "sports": plan.holdout_leagues,
+            "sports": list(leagues) if leagues is not None else prereg.leagues,
             "version": prereg.version,
             "issue": prereg.issue,
             "start_date": today,
             "status": CandidateStatus.ACTIVE,
             "rule": prereg.rule,
-            "params": plan.cell,
+            "params": cell,
         }
     )
 
@@ -88,7 +94,7 @@ async def run_holdout(
     plan = load_plan(path, directory)
     prereg = plan.prereg
     try:
-        draft = pooled_draft(plan, now.date())
+        draft = pooled_draft(prereg, plan.cell, now.date(), "Holdout run", plan.holdout_leagues)
         resolve_rule(draft)
     except ValueError as exc:
         raise HoldoutRefused(str(exc)) from exc

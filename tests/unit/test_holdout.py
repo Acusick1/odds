@@ -69,7 +69,21 @@ def scored_bet(
 ) -> ScoredBet:
     when = datetime(year, 9, 1, tzinfo=UTC)
     return ScoredBet(
-        "back-longest", 1, event_id, when, 1.0, 0.0, 2.0, p_close, when, timedelta(0), sport
+        "back-longest",
+        1,
+        event_id,
+        when,
+        1.0,
+        0.0,
+        2.0,
+        p_close,
+        when,
+        timedelta(0),
+        sport,
+        "home",
+        None,
+        "bet365",
+        p_close,
     )
 
 

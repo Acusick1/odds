@@ -32,6 +32,10 @@ def bet(index: int, ev: float, *, name: str = "gap", p_close: bool = True) -> Sc
         placed_at=LONG_AGO + timedelta(minutes=index),
         close_grace=timedelta(0),
         sport_key="soccer_epl",
+        selection="home",
+        line=None,
+        bookmaker="bet365",
+        p_close_power=None,
     )
 
 

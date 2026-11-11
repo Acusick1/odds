@@ -89,7 +89,7 @@ async def load_ledger_page(
             result=trade.result,
             pnl=trade.pnl,
             placed_at=trade.placed_at,
-            p_close=p_close,
+            p_close=None if p_close is None else p_close.proportional,
         )
         for (trade, event), p_close in zip(found, p_closes, strict=True)
     ]

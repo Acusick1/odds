@@ -38,8 +38,9 @@ BET_FIELDS = (
     "close_grace",
 )
 # Summary fields that only some revisions have, or that restate the candidate file (whose
-# league field is named differently across revisions), rather than what the replay decided.
-SUMMARY_DROPPED = ("hash_status", "league_coverage")
+# league field is named differently across revisions) or the bets above, rather than what the
+# replay decided.
+SUMMARY_DROPPED = ("hash_status", "league_coverage", "bets")
 CANDIDATE_SUMMARY_DROPPED = ("registered", "leagues")
 
 
