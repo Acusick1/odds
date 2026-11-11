@@ -19,10 +19,12 @@ from odds_core.config import get_settings
 from odds_core.time import parse_api_datetime
 from odds_core.utils import relabel_three_way_markets
 from tenacity import (
+    AsyncRetrying,
     retry,
     retry_if_exception,
     stop_after_attempt,
     wait_exponential,
+    wait_random_exponential,
 )
 
 logger = structlog.get_logger()
@@ -34,6 +36,11 @@ def canonicalize_bookmaker_keys(raw_events_data: list[dict[str, Any]]) -> None:
             bookmaker["key"] = ODDS_API_BOOKMAKER_KEY_MAP.get(bookmaker["key"], bookmaker["key"])
 
 
+TOO_MANY_REQUESTS = 429
+# Jittered so parallel processes rate-limited together do not retry together.
+RATE_LIMIT_WAIT = wait_random_exponential(multiplier=1, max=30)
+
+
 def _is_transient_error(exc: BaseException) -> bool:
     """Connection failures, timeouts and 5xx are worth retrying; other HTTP errors are not.
 
@@ -42,6 +49,10 @@ def _is_transient_error(exc: BaseException) -> bool:
     if isinstance(exc, aiohttp.ClientResponseError):
         return exc.status >= 500
     return isinstance(exc, aiohttp.ClientError | TimeoutError)
+
+
+def _is_rate_limited(exc: BaseException) -> bool:
+    return isinstance(exc, aiohttp.ClientResponseError) and exc.status == TOO_MANY_REQUESTS
 
 
 def _header_int(headers: Mapping[str, str], name: str) -> int | None:
@@ -56,14 +67,24 @@ def _optional_datetime(value: str | None) -> datetime | None:
 class TheOddsAPIClient:
     """Client for interacting with The Odds API."""
 
-    def __init__(self, api_key: str | None = None, base_url: str | None = None):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        rate_limit_attempts: int = 1,
+    ):
         """
         Initialize API client.
 
         Args:
             api_key: API key for every sport (defaults to the sport's key in settings)
             base_url: Base URL (defaults to settings)
+            rate_limit_attempts: Attempts at a request the API answers with 429, waiting a
+                jittered exponential backoff (``RATE_LIMIT_WAIT``) between them; 1 never
+                retries a 429
         """
+        if rate_limit_attempts < 1:
+            raise ValueError(f"rate_limit_attempts must be at least 1, got {rate_limit_attempts}")
         app_settings = get_settings()
         self._explicit_key = api_key
         self._api = app_settings.api
@@ -71,6 +92,7 @@ class TheOddsAPIClient:
             raise ValueError("No Odds API key configured: set ODDS_API_KEYS or ODDS_API_KEY")
 
         self.base_url = base_url or app_settings.api.base_url
+        self.rate_limit_attempts = rate_limit_attempts
         self.session: aiohttp.ClientSession | None = None
         self._quota_remaining: int | None = None
         self._quota_used: int | None = None
@@ -116,13 +138,25 @@ class TheOddsAPIClient:
             Tuple of (response data, response time in ms)
 
         Raises:
-            aiohttp.ClientResponseError: On a non-retryable HTTP error (a 401 or 429 is not
-                retried on another key: each sport spends its own)
+            aiohttp.ClientResponseError: On a non-retryable HTTP error, or a 429 after
+                ``rate_limit_attempts`` (neither is retried on another key: each sport spends
+                its own)
             aiohttp.ClientError, TimeoutError: On transient failures that outlast the retries
         """
         api_key = self._explicit_key or self._api.key_for(sport)
         try:
-            return await self._send(endpoint, {**(params or {}), "apiKey": api_key})
+            async for attempt in AsyncRetrying(
+                retry=retry_if_exception(_is_rate_limited),
+                stop=stop_after_attempt(self.rate_limit_attempts),
+                wait=RATE_LIMIT_WAIT,
+                before_sleep=lambda state: logger.warning(
+                    "api_rate_limited", endpoint=endpoint, attempt=state.attempt_number
+                ),
+                reraise=True,
+            ):
+                with attempt:
+                    return await self._send(endpoint, {**(params or {}), "apiKey": api_key})
+            raise AssertionError("unreachable: the retry loop returns or raises")
         except aiohttp.ClientResponseError as e:
             logger.error(
                 "api_request_failed",

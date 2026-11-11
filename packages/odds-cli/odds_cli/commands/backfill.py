@@ -160,6 +160,9 @@ def execute_backfill(
         min=1,
         help="Stop after this many consecutive calls with no events or a required book missing",
     ),
+    pause: float = typer.Option(
+        0.0, "--pause", min=0.0, help="Seconds to wait after each paid call"
+    ),
 ):
     """
     Make the Odds API historical calls an acquisition manifest plans and store what they return.
@@ -167,7 +170,8 @@ def execute_backfill(
     Spends paid quota on the acquisition key (ODDS_API_ACQUISITION_KEY_INDEX, required). Use --dry-run first to count the calls, and run `odds backfill probe` before the first real run.
     Stops when a call's billed units differ from the manifest's, when a call returns a snapshot
     other than the planned one, when the next call would pass --max-units, and after
-    --max-consecutive-gaps consecutive sparse responses.
+    --max-consecutive-gaps consecutive sparse responses. A call the API rate-limits (429) is
+    retried with backoff.
 
     Example:
         odds backfill execute --manifest backfills/odds-api-epl-2022-26.yaml --season 2024-25 --dry-run
@@ -176,7 +180,7 @@ def execute_backfill(
     seasons = _select_seasons(manifest, season)
     asyncio.run(
         _execute_backfill_async(
-            manifest, seasons, dry_run, skip_existing, max_units, max_consecutive_gaps
+            manifest, seasons, dry_run, skip_existing, max_units, max_consecutive_gaps, pause
         )
     )
 
@@ -188,6 +192,7 @@ async def _execute_backfill_async(
     skip_existing: bool,
     max_units: int | None,
     max_consecutive_gaps: int,
+    pause: float,
 ) -> None:
     if not dry_run:
         _require_acquisition_key()
@@ -220,6 +225,7 @@ async def _execute_backfill_async(
         dry_run=dry_run,
         max_units=max_units,
         max_consecutive_gaps=max_consecutive_gaps,
+        pause_seconds=pause,
     ) as executor:
         with Progress(
             SpinnerColumn(),
@@ -289,6 +295,9 @@ def probe_backfill(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="List the calls the probe would make without making any"
     ),
+    pause: float = typer.Option(
+        0.0, "--pause", min=0.0, help="Seconds to wait after each paid call"
+    ),
 ):
     """
     Request a manifest's probe snapshots and check what comes back against the manifest.
@@ -319,7 +328,7 @@ def probe_backfill(
         console.print("[red]Aborted[/red]")
         raise typer.Exit(0)
     try:
-        checks = asyncio.run(_probe_backfill_async(manifest))
+        checks = asyncio.run(_probe_backfill_async(manifest, pause))
     except Exception as e:
         console.print(f"[red]Probe stopped: {type(e).__name__}: {e}[/red]")
         raise typer.Exit(1) from e
@@ -328,13 +337,13 @@ def probe_backfill(
         raise typer.Exit(1)
 
 
-async def _probe_backfill_async(manifest: Manifest) -> list[ResponseCheck]:
-    async with BackfillExecutor(manifest) as executor:
+async def _probe_backfill_async(manifest: Manifest, pause: float) -> list[ResponseCheck]:
+    async with BackfillExecutor(manifest, pause_seconds=pause) as executor:
         return await executor.probe()
 
 
 def _probe_table(manifest: Manifest, checks: list[ResponseCheck]) -> Table:
-    table = Table(title=f"Probe, {manifest.probe.units_per_call} units expected per call")
+    table = Table(title=f"Probe, {manifest.units_per_call} units expected per call")
     for column in (
         "Snapshot",
         "Lag",

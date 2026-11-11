@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Any
 
 from odds_core.vocabulary import Market, MarketStatus, PriceOutcome, Side, Source
+from odds_lambda.data_fetcher import canonicalize_bookmaker_keys
 from odds_lambda.price_rows import (
     ExpandedEnvelope,
     MarketSnapshot,
@@ -16,6 +17,13 @@ from odds_lambda.price_rows import (
 )
 
 HOME, AWAY = "Arsenal", "Chelsea"
+# Every book the Odds API's uk region returned on historical h2h, across the probed sports.
+UK_REGION_BOOKS = (
+    "paddypower", "smarkets", "betway", "sport888", "williamhill", "boylesports",
+    "betfair_ex_uk", "leovegas", "virginbet", "unibet_uk", "casumo", "livescorebet",
+    "grosvenor", "betvictor", "coral", "ladbrokes_uk", "betfair_sb_uk", "skybet", "matchbook",
+    "mrgreen",
+)  # fmt: skip
 
 
 def _expand(raw_data: dict[str, Any], source: Source) -> ExpandedEnvelope:
@@ -406,6 +414,18 @@ class TestOddsApi:
             ("home", Decimal("-0.5")),
             ("away", Decimal("0.5")),
         }
+
+    def test_every_uk_region_book_is_stored_under_its_own_key(self) -> None:
+        h2h = {"key": "1x2", "outcomes": [{"name": n, "price": 200} for n in (HOME, "Draw", AWAY)]}
+        raw = {"id": "abc", "bookmakers": [{"key": k, "markets": [h2h]} for k in UK_REGION_BOOKS]}
+        canonicalize_bookmaker_keys([raw])
+
+        expanded = _expand(raw, Source.ODDS_API)
+
+        assert _issue_types(expanded) == []
+        books = {p.bookmaker for p in expanded.markets[0].prices}
+        assert len(books) == len(UK_REGION_BOOKS)
+        assert {"betfair_exchange", "betfair_sportsbook", "ladbrokes", "888sport"} <= books
 
     def test_american_prices_become_decimal_and_us_betmgm_is_aliased(self) -> None:
         one_x_two = _expand(self._raw(), Source.ODDS_API).markets[0]

@@ -44,8 +44,12 @@ ACQUISITION_KEY = "purchased"
 class _ReplayClient(TheOddsAPIClient):
     """The real client over a recorded HTTP session."""
 
-    def __init__(self, api_key: str, http: ReplayHttpSession) -> None:
-        super().__init__(api_key=api_key, base_url="http://example.invalid")
+    def __init__(self, api_key: str, http: ReplayHttpSession, rate_limit_attempts: int) -> None:
+        super().__init__(
+            api_key=api_key,
+            base_url="http://example.invalid",
+            rate_limit_attempts=rate_limit_attempts,
+        )
         self._http = http
 
     async def __aenter__(self) -> _ReplayClient:
@@ -135,13 +139,14 @@ class BackfillReplay:
                 patch.object(
                     backfill_executor,
                     "TheOddsAPIClient",
-                    lambda api_key: _ReplayClient(api_key, http),
+                    lambda api_key, rate_limit_attempts: _ReplayClient(
+                        api_key, http, rate_limit_attempts
+                    ),
                 ),
             ):
                 async with BackfillExecutor(
                     manifest,
                     session_factory=lambda: AsyncSession(self._engine, expire_on_commit=False),
-                    rate_limit_seconds=0,
                     **options,
                 ) as executor:
                     yield executor
@@ -180,7 +185,10 @@ CUBS, CARDINALS = "Chicago Cubs", "St. Louis Cardinals"
 YANKEES, RED_SOX = "New York Yankees", "Boston Red Sox"
 
 HOME_PRICE = -120
-STORED_BOOKS = {"pinnacle", "williamhill", "ladbrokes", "betfair_exchange"}
+# The Odds API keys a listing quotes, and the book keys its rows are stored under: the exchange
+# and the Betfair sportsbook stay apart, and a key with no alias is stored as given.
+LISTED_BOOKS = ("betfair_ex_uk", "betfair_sb_uk", "williamhill", "ladbrokes_uk", "leovegas")
+STORED_BOOKS = {"betfair_exchange", "betfair_sportsbook", "williamhill", "ladbrokes", "leovegas"}
 
 
 def load_manifest(sport: SportKey) -> Manifest:
@@ -199,7 +207,7 @@ class Listed:
     sport_title: str
 
     def listing(self, stamp: datetime, *, home_price: int = HOME_PRICE) -> dict[str, Any]:
-        """The game's h2h quoted by four books, each with ``home_price`` on the home side."""
+        """The game's h2h quoted by ``LISTED_BOOKS``, each with ``home_price`` on the home side."""
         sport: SportKey = self.event.sport_key
         at = stamp.isoformat().replace("+00:00", "Z")
         prices = {self.home: home_price, self.away: 100}
@@ -213,7 +221,7 @@ class Listed:
             self.home,
             self.away,
             self.start,
-            dict.fromkeys(("pinnacle", "williamhill", "ladbrokes_uk", "betfair_ex_uk"), [h2h]),
+            dict.fromkeys(LISTED_BOOKS, [h2h]),
             at,
         )
 

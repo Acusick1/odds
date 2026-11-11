@@ -66,7 +66,6 @@ def manifest(sport: SportKey) -> Manifest:
                 "snapshots": ["2024-09-14T12:00:00Z"],
                 "min_fixture_lead_hours": 12,
                 "required_bookmakers": {},
-                "units_per_call": 10,
             },
         }
     )
@@ -152,7 +151,6 @@ async def run_calls(
         client=client,
         session_factory=SessionFactory(session),
         skip_existing=False,
-        rate_limit_seconds=0,
     ) as executor:
         return await executor.execute(calls)
 

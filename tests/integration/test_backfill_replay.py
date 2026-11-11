@@ -116,10 +116,12 @@ class TestManifestsAreReplayed:
         assert {p.values[0] for p in REPLAYS} == set(MANIFEST_FILES)
 
     @pytest.mark.parametrize("sport", MANIFEST_FILES)
-    def test_manifest_requests_h2h_from_its_bookmakers(self, sport: SportKey) -> None:
+    def test_manifest_requests_uk_h2h_with_the_exchange_required(self, sport: SportKey) -> None:
         manifest = load_manifest(sport)
         assert [str(m) for m in manifest.markets] == ["h2h"]
-        assert len(manifest.bookmakers) == 10 and not manifest.regions
+        assert (manifest.regions, manifest.bookmakers) == (("uk",), ())
+        assert manifest.units_per_call == 10
+        assert manifest.probe.required_bookmakers == {Market.H2H: ("betfair_ex_uk",)}
 
 
 @pytest.mark.asyncio
@@ -157,8 +159,8 @@ class TestReplayPerSport:
         for request in replay.requests:
             assert request["apiKey"] == ACQUISITION_KEY
             assert request["markets"] == "h2h"
-            assert request["bookmakers"] == ",".join(manifest.bookmakers)
-            assert "regions" not in request
+            assert request["regions"] == "uk"
+            assert "bookmakers" not in request
         three_way = is_three_way_sport(sport)
         outcomes = {PriceOutcome.HOME, PriceOutcome.AWAY}
         if three_way:
@@ -179,9 +181,9 @@ class TestReplayPerSport:
                 assert {(r[2], r[3]) for r in h2h} == {
                     (book, outcome) for book in STORED_BOOKS for outcome in outcomes
                 }
-                assert {r[5] for r in h2h if r[2] == "pinnacle" and r[3] is PriceOutcome.HOME} == {
-                    Decimal(str(american_to_decimal(home_price)))
-                }
+                assert {
+                    r[5] for r in h2h if r[2] == "williamhill" and r[3] is PriceOutcome.HOME
+                } == {Decimal(str(american_to_decimal(home_price)))}
         fetch_logs = (await session.execute(select(FetchLog))).scalars().all()
         assert [(f.sport_key, f.events_count, f.api_quota_remaining) for f in fetch_logs] == [
             (sport, len(games), None)
@@ -442,7 +444,6 @@ class TestRerunSemantics:
         manifest = nba.model_copy(
             update={
                 "markets": (Market.H2H, Market.TOTALS),
-                "probe": nba.probe.model_copy(update={"units_per_call": 20}),
             }
         )
         [game, _] = await load_nba(session, mlb_schedule)
@@ -468,7 +469,7 @@ class TestRerunSemantics:
         at = game.start - timedelta(hours=2)
         fetched_at = at - timedelta(minutes=2, seconds=21)
         live = game.listing(fetched_at)
-        live["bookmakers"] = [b for b in live["bookmakers"] if b["key"] == "pinnacle"]
+        live["bookmakers"] = [b for b in live["bookmakers"] if b["key"] == "williamhill"]
         await OddsWriter(session).store_envelope(
             event_id=game.event.id,
             envelope=live,
@@ -502,7 +503,7 @@ class TestRerunSemantics:
         [game, _] = await load_nba(session, mlb_schedule)
         at = game.start - timedelta(hours=2)
         narrow = game.listing(at)
-        narrow["bookmakers"] = [b for b in narrow["bookmakers"] if b["key"] == "pinnacle"]
+        narrow["bookmakers"] = [b for b in narrow["bookmakers"] if b["key"] == "williamhill"]
         replay.record(at, [narrow])
         await replay.run(manifest, [replay.call(manifest, at, game.event)])
         held = await stored_rows(session, game.event)

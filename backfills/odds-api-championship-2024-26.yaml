@@ -8,17 +8,9 @@ seasons:
   2025-26: {start: 2025-07-01T00:00:00Z, end: 2026-07-01T00:00:00Z}
 # Totals are not requested: the exchange quotes none in any probed sport or season (#787).
 markets: [h2h]
-bookmakers:
-  - pinnacle
-  - betfair_ex_uk
-  - williamhill
-  - paddypower
-  - skybet
-  - ladbrokes_uk
-  - coral
-  - betfred_uk
-  - betvictor
-  - sport888
+# The uk region bills as one region, 10 units per call, and returns 11 to 20 UK books per
+# sport, Pinnacle not among them (wiki/collection/odds-api-facts.md#coverage).
+regions: [uk]
 # A decision at any whole minute in a band finds a snapshot at most its max age old.
 # Chosen in #740, the far band ending at 4 d since the API lists Championship fixtures only
 # 125-172 h ahead (#787).
@@ -35,7 +27,7 @@ probe:
     - 2025-09-13T09:55:38Z
   # Call sharing needs fixtures as far ahead as the earliest coverage, 4 d plus its 6 h max age.
   min_fixture_lead_hours: 102
-  # The exchange-gap candidates need the exchange; Pinnacle is the sharp reference.
+  # Betfair Exchange is the scoring reference and close (ADR-0012); no current candidate or
+  # model uses Pinnacle.
   required_bookmakers:
-    h2h: [pinnacle, betfair_ex_uk]
-  units_per_call: 10
+    h2h: [betfair_ex_uk]

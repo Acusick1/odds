@@ -53,14 +53,9 @@ def manifest_data(**overrides: Any) -> dict[str, Any]:
             "snapshots": ["2022-09-17T09:55:38Z"],
             "min_fixture_lead_hours": 12,
             "required_bookmakers": {"h2h": ["book0"]},
-            "units_per_call": 20,
         },
     }
     return data | overrides
-
-
-def with_units(data: dict[str, Any], units: int) -> dict[str, Any]:
-    return data | {"probe": data["probe"] | {"units_per_call": units}}
 
 
 @pytest.fixture
@@ -203,10 +198,13 @@ class TestManifest:
         reference = Manifest.load(REPO / "backfills" / "odds-api-epl-2022-26.yaml")
         committed = Manifest.load(path)
 
-        assert committed.bookmakers == reference.bookmakers
+        assert (committed.bookmakers, committed.regions) == (
+            reference.bookmakers,
+            reference.regions,
+        )
+        assert committed.probe.required_bookmakers == reference.probe.required_bookmakers
         assert committed.markets == reference.markets
         assert committed.coverage[0] == reference.coverage[0]
-        assert committed.units_per_call == 10
 
     @pytest.mark.parametrize(
         ("books", "regions", "units"),
@@ -216,7 +214,7 @@ class TestManifest:
         data = manifest_data(bookmakers=[f"book{i}" for i in range(books)], regions=list(regions))
         data["probe"]["required_bookmakers"] = {}
 
-        assert Manifest.model_validate(with_units(data, units)).units_per_call == units
+        assert Manifest.model_validate(data).units_per_call == units
 
     @pytest.mark.parametrize(("books", "regions"), [([], []), (["pinnacle"], ["uk"])])
     def test_names_either_bookmakers_or_regions(self, books: list[str], regions: list[str]) -> None:
@@ -257,11 +255,10 @@ class TestManifest:
         ("markets", "probe", "message"),
         [
             (None, {"min_fixture_lead_hours": 11}, "fixture lead"),
-            (None, {"units_per_call": 10}, "units per call"),
             (None, {"required_bookmakers": {"h2h": ["pinnacle"]}}, "unrequested books"),
             (
                 ["h2h"],
-                {"required_bookmakers": {"totals": ["book0"]}, "units_per_call": 10},
+                {"required_bookmakers": {"totals": ["book0"]}},
                 "unrequested market",
             ),
             (None, {"snapshots": ["2023-09-16T10:00:00Z"]}, "outside every season"),
