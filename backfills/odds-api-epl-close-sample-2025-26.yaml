@@ -1,0 +1,31 @@
+# Odds API Betfair Exchange price near kick-off for EPL 2025-26, the sample that tests it as a
+# substitute backtest close against the FDUK Betfair close (#730). Every 2025-26 fixture has an
+# FDUK Betfair close, and one season gives each probability band well over its 50 rows.
+sport: soccer_epl
+seasons:
+  2025-26: {start: 2025-07-01T00:00:00Z, end: 2026-07-01T00:00:00Z}
+markets: [h2h]
+# The full EPL manifest's books, so its run skips any call the two share.
+bookmakers:
+  - pinnacle
+  - betfair_ex_uk
+  - williamhill
+  - paddypower
+  - skybet
+  - ladbrokes_uk
+  - coral
+  - betfred_uk
+  - betvictor
+  - sport888
+# Snapshots about KO−10 and KO−5: every decision minute to KO−10 has one at most 5 min old.
+coverage:
+  - {min_lead_minutes: 1, max_lead_minutes: 10, max_input_age_minutes: 5}
+snapshot_grid:
+  - {start: 2022-09-01T00:00:38Z, step_minutes: 5}
+probe:
+  snapshots:
+    - 2025-09-13T09:55:38Z
+  min_fixture_lead_hours: 1
+  required_bookmakers:
+    h2h: [pinnacle, betfair_ex_uk]
+  units_per_call: 10

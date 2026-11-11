@@ -15,6 +15,7 @@ sources:
   - backfills/odds-api-championship-2024-26.yaml
   - backfills/odds-api-nba-2024-26.yaml
   - backfills/odds-api-mlb-2024-26.yaml
+  - backfills/odds-api-epl-close-sample-2025-26.yaml
   - odds_analytics.backfill_executor.BackfillExecutor
   - odds_analytics.backfill_executor.BackfillExecutor.execute
   - odds_analytics.backfill_executor.BackfillExecutor.probe
@@ -36,6 +37,8 @@ A manifest in `backfills/` fixes what a historical purchase requests, validated 
 - `odds-api-championship-2024-26.yaml`: the Championship's 2024-25 and 2025-26 league seasons, which holds no play-off fixtures.
 - `odds-api-nba-2024-26.yaml`: NBA 2024-25 and 2025-26, each window starting at opening night so preseason is excluded.
 - `odds-api-mlb-2024-26.yaml`: MLB 2024, 2025 and 2026 as calendar years.
+
+`odds-api-epl-close-sample-2025-26.yaml` buys snapshots from KO−10 to KO−1 at most 5 minutes old for every EPL 2025-26 fixture, the sample that tests the Odds API's `betfair_ex_uk` price near kick-off as a substitute backtest close ([#730](https://github.com/Acusick1/odds/issues/730)). It requests the EPL manifest's books, so that manifest's run skips any call the two share.
 
 The planner prices every stored FINAL event in a window, so the MLB manifest's cost includes the 2026 All-Star Game. `odds backfill plan --manifest M --cost` prints each manifest's cost ([cost and execute a manifest](howto-backfill-odds-api-history.md#cost-and-execute-a-manifest)).
 
