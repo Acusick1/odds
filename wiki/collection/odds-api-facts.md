@@ -35,7 +35,7 @@ Facts about The Odds API itself, as its documentation states them or as the acqu
 
 - Historical snapshots are 10 minutes apart from 2020-06-06 and 5 minutes apart from September 2022 ([historical odds data](https://the-odds-api.com/historical-odds-data/)).
 - A historical request returns "the closest snapshot equal to or earlier than the provided date" ([historical odds](https://the-odds-api.com/liveapi/guides/v4/#get-historical-odds)). The response carries the snapshot's own `timestamp`, and `previous_timestamp` and `next_timestamp` for its neighbours.
-- 5-minute snapshots fall 37 to 42 s past each 5-minute mark, varying by date; 10-minute snapshots fall at 5, 15, 25 minutes past the hour and so on, with no seconds ([#729](https://github.com/Acusick1/odds/issues/729)).
+- 5-minute snapshots fall 37 to 42 s past each 5-minute mark, varying by date; 10-minute snapshots fall at 5, 15, 25 minutes past the hour and so on, with no seconds ([probe results](https://github.com/Acusick1/odds/issues/527#issuecomment-6798104166)).
 
 ## Rate limits
 
@@ -47,10 +47,10 @@ Facts about The Odds API itself, as its documentation states them or as the acqu
 
 Measured on historical `h2h` and `totals` responses.
 
-- **Exchange totals.** No probed sport or season carries `betfair_ex_uk` on `totals` ([#787](https://github.com/Acusick1/odds/issues/787)).
-- **Football totals.** Historical football `totals` carry only Pinnacle and William Hill ([#787](https://github.com/Acusick1/odds/issues/787)).
-- **Exchange start on EPL.** `betfair_ex_uk` on EPL `h2h` is absent on 2023-03-25 and present from 2023-04-01 ([#729](https://github.com/Acusick1/odds/issues/729)).
-- **Fixture horizon.** How far ahead a snapshot lists fixtures ([#787](https://github.com/Acusick1/odds/issues/787)):
+- **Exchange totals.** No probed sport or season carries `betfair_ex_uk` on `totals` ([probe results](https://github.com/Acusick1/odds/issues/527#issuecomment-6798104166)).
+- **Football totals.** Historical football `totals` carry only Pinnacle and William Hill ([probe results](https://github.com/Acusick1/odds/issues/527#issuecomment-6798104166)).
+- **Exchange start on EPL.** `betfair_ex_uk` on EPL `h2h` is absent on 2023-03-25 and present from 2023-04-01 ([probe results](https://github.com/Acusick1/odds/issues/527#issuecomment-6798104166)).
+- **Fixture horizon.** How far ahead a snapshot lists fixtures ([probe results](https://github.com/Acusick1/odds/issues/527#issuecomment-6798104166)):
 
 | Sport | Farthest fixture listed |
 | --- | --- |
