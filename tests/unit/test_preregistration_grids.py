@@ -67,6 +67,19 @@ HAND_ASSERTED: dict[int, dict[str, list[object]]] = {
     842: {"max_input_age_minutes": [60]},
 }
 
+# Round-1 rules not implemented yet.
+PENDING_RULES = {
+    "alternate_totals_left_behind",
+    "crowded_gap",
+    "exchange_implied_alternate_totals",
+    "exchange_steam",
+    "favourite_price",
+    "fixed_totals_side",
+    "last_result_overreaction",
+    "team_news_lag",
+    "totals_implied",
+}
+
 SET = re.compile(r"^(?:- )?(?P<label>.+?) ∈ \{(?P<values>.*)\}")
 FIXED_TIMES = re.compile(r"Decision times? (?:are fixed at )?(?P<value>\[[^\]]*\])")
 AGE = re.compile(r"`max_input_age_minutes`(?: is|:) (?P<value>\d+)")
@@ -186,9 +199,9 @@ class TestPreregistrationFiles:
                 {k: v for k, v in cell.items() if k in RuleParams.model_fields}
             )
 
-    def test_only_issue_842_names_an_existing_rule(self) -> None:
-        existing = {load(p).issue for p in FILES if load(p).rule in RULES}
-        assert existing == {842}
+    @pytest.mark.parametrize("path", FILES, ids=lambda p: p.stem)
+    def test_names_an_existing_or_a_pending_rule(self, path: Path) -> None:
+        assert load(path).rule in RULES.keys() | PENDING_RULES
 
     def test_every_fixture_has_a_file(self) -> None:
         issues = {int(p.stem) for p in FIXTURES.glob("*.md")}

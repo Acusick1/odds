@@ -15,7 +15,10 @@ from pydantic import ValidationError
 
 from odds_lambda.candidate_rules.gap import EXCHANGE_GAP, POLYMARKET_GAP
 from odds_lambda.candidate_rules.retail_ev_model import RETAIL_EV_MODEL
+from odds_lambda.candidate_rules.retail_quorum_lag import RETAIL_QUORUM_LAG
 from odds_lambda.candidate_rules.rules import ModelRuleSpec, RuleParams, RuleSpec
+from odds_lambda.candidate_rules.single_book_outlier import SINGLE_BOOK_OUTLIER
+from odds_lambda.candidate_rules.subsidised_outcome import SUBSIDISED_OUTCOME
 
 _FOOTBALL_MARKETS = frozenset({Market.ONE_X_TWO, Market.TOTALS})
 # The markets a candidate of each sport can decide.
@@ -34,6 +37,9 @@ RULES: dict[str, RuleSpec | ModelRuleSpec] = {
     "exchange_gap": EXCHANGE_GAP,
     "polymarket_gap": POLYMARKET_GAP,
     "retail_ev_model": RETAIL_EV_MODEL,
+    "retail_quorum_lag": RETAIL_QUORUM_LAG,
+    "single_book_outlier": SINGLE_BOOK_OUTLIER,
+    "subsidised_outcome": SUBSIDISED_OUTCOME,
 }
 
 
