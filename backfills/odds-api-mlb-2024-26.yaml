@@ -1,12 +1,14 @@
-# Odds API historical backfill of MLB 2024, 2025 and 2026 (#785, map #774). Never edit once frozen; a
-# top-up is a new manifest. Granularity and billing are unconfirmed until the day-1 probe.
+# Odds API historical backfill of MLB 2024, 2025 and 2026 (#785, map #774).
+# A top-up is a new manifest. Snapshot grid, billing, books and fixture horizon follow the
+# probe (#729, #787).
 sport: baseball_mlb
 # Calendar-year windows: each holds its regular season and post-season; 2026 also holds the All-Star Game.
 seasons:
   "2024": {start: 2024-01-01T00:00:00Z, end: 2025-01-01T00:00:00Z}
   "2025": {start: 2025-01-01T00:00:00Z, end: 2026-01-01T00:00:00Z}
   "2026": {start: 2026-01-01T00:00:00Z, end: 2027-01-01T00:00:00Z}
-markets: [h2h, totals]
+# Totals are not requested: the exchange quotes none in any probed sport or season (#787).
+markets: [h2h]
 bookmakers:
   - pinnacle
   - betfair_ex_uk
@@ -19,22 +21,20 @@ bookmakers:
   - betvictor
   - sport888
 # A decision at any whole minute in a band finds a snapshot at most its max age old.
-# Chosen in #740.
+# Chosen in #740, ending at 8 h since the API lists only about the next 10 h of games (#787).
 coverage:
   - {min_lead_minutes: 1, max_lead_minutes: 120, max_input_age_minutes: 10}
-  - {min_lead_minutes: 121, max_lead_minutes: 1440, max_input_age_minutes: 60}
-  - {min_lead_minutes: 1441, max_lead_minutes: 10080, max_input_age_minutes: 360}
-# 5-minute snapshots throughout, since the Odds API moved from 10 minutes on 2022-09-01.
+  - {min_lead_minutes: 121, max_lead_minutes: 480, max_input_age_minutes: 60}
+# 5-minute snapshots, each about 38 s past its 5-minute mark (probed in #729).
 snapshot_grid:
-  - {start: 2022-09-01T00:00:00Z, step_minutes: 5}
+  - {start: 2022-09-01T00:00:38Z, step_minutes: 5}
 probe:
   snapshots:
-    - 2024-07-20T16:00:00Z
-    - 2026-07-18T16:00:00Z
-  # Call sharing needs fixtures as far ahead as the earliest coverage, 7 d plus its 6 h max age.
-  min_fixture_lead_hours: 174
+    - 2024-07-20T15:55:38Z
+    - 2026-07-18T15:55:38Z
+  # Call sharing needs fixtures as far ahead as the earliest coverage, 8 h plus its 1 h max age.
+  min_fixture_lead_hours: 9
   # MLB's close is out of scope (#774), so only the sharp reference is required.
   required_bookmakers:
     h2h: [pinnacle]
-    totals: [pinnacle]
-  units_per_call: 20
+  units_per_call: 10

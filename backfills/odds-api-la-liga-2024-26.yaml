@@ -1,10 +1,12 @@
-# Odds API historical backfill of La Liga, the 2024-25 and 2025-26 seasons (#785, map #774). Never edit once frozen; a
-# top-up is a new manifest. Granularity and billing are unconfirmed until the day-1 probe.
+# Odds API historical backfill of La Liga, the 2024-25 and 2025-26 seasons (#785, map #774).
+# A top-up is a new manifest. Snapshot grid, billing, books and fixture horizon follow the
+# probe (#729, #787).
 sport: soccer_spain_la_liga
 seasons:
   2024-25: {start: 2024-07-01T00:00:00Z, end: 2025-07-01T00:00:00Z}
   2025-26: {start: 2025-07-01T00:00:00Z, end: 2026-07-01T00:00:00Z}
-markets: [h2h, totals]
+# Totals are not requested: the exchange quotes none in any probed sport or season (#787).
+markets: [h2h]
 bookmakers:
   - pinnacle
   - betfair_ex_uk
@@ -22,17 +24,16 @@ coverage:
   - {min_lead_minutes: 1, max_lead_minutes: 120, max_input_age_minutes: 10}
   - {min_lead_minutes: 121, max_lead_minutes: 1440, max_input_age_minutes: 60}
   - {min_lead_minutes: 1441, max_lead_minutes: 10080, max_input_age_minutes: 360}
-# 5-minute snapshots throughout, since the Odds API moved from 10 minutes on 2022-09-01.
+# 5-minute snapshots, each about 38 s past its 5-minute mark (probed in #729).
 snapshot_grid:
-  - {start: 2022-09-01T00:00:00Z, step_minutes: 5}
+  - {start: 2022-09-01T00:00:38Z, step_minutes: 5}
 probe:
   snapshots:
-    - 2024-09-14T10:00:00Z
-    - 2025-09-13T10:00:00Z
+    - 2024-09-14T09:55:38Z
+    - 2025-09-13T09:55:38Z
   # Call sharing needs fixtures as far ahead as the earliest coverage, 7 d plus its 6 h max age.
   min_fixture_lead_hours: 174
   # The exchange-gap candidates need the exchange; Pinnacle is the sharp reference.
   required_bookmakers:
     h2h: [pinnacle, betfair_ex_uk]
-    totals: [pinnacle, betfair_ex_uk]
-  units_per_call: 20
+  units_per_call: 10

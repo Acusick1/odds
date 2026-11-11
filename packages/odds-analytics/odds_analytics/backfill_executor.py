@@ -29,8 +29,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_analytics.backfill_checks import (
-    BOOK_JUDGED_LEAD,
     ResponseCheck,
+    book_judged_lead,
     check_response,
     stored_market,
 )
@@ -97,7 +97,7 @@ class BackfillExecutor:
             client: API client (one spending ``APIConfig.acquisition_key`` is created and closed
                 with the executor if not given, except in a dry run, which needs none)
             session_factory: Creates database sessions (defaults to ``async_session_maker``)
-            skip_existing: Skip a call when every fixture it serves already has the snapshot it
+            skip_existing: Skip a call when any fixture it serves already has the snapshot it
                 would return
             dry_run: Make no API call and write nothing
             rate_limit_seconds: Pause after each paid call
@@ -239,7 +239,7 @@ class BackfillExecutor:
         manifest = self.manifest
         response = await client.get_historical_odds(
             sport=manifest.sport,
-            date=utc_isoformat(call.time),
+            date=utc_isoformat(manifest.request_time(call.time)),
             markets=[str(market) for market in manifest.markets],
             regions=list(manifest.regions) or None,
             bookmakers=list(manifest.bookmakers) or None,
@@ -307,10 +307,11 @@ class BackfillExecutor:
             quota_remaining=response.quota_remaining,
         )
         served = {target.fixture.event_id for target in call.serves}
+        horizon = book_judged_lead(manifest)
         near = {
             target.fixture.event_id
             for target in call.serves
-            if target.fixture.kickoff - response.snapshot_time <= BOOK_JUDGED_LEAD
+            if target.fixture.kickoff - response.snapshot_time <= horizon
         }
         judged = (
             response.raw_events_data
@@ -348,15 +349,17 @@ class BackfillExecutor:
     async def _already_stored(self, call: Call) -> bool:
         """Whether any fixture the call serves already has a historical Odds API snapshot
         (``source_stamped``, never a live fetch) of a requested market in
-        ``(call time - grid step, call time]``. A served fixture the response does not list is one
-        the API did not list at that time, and fetching again will not change that."""
+        ``(request time - grid step, request time]``, where the snapshot the request returns
+        falls. A served fixture the response does not list is one the API did not list at that
+        time, and fetching again will not change that."""
         wanted = {target.fixture.event_id for target in call.serves}
         if not wanted:
             return True
         markets = {stored_market(self.manifest, market) for market in self.manifest.markets}
         step = self.manifest.grid_step_at(call.time)
+        requested = self.manifest.request_time(call.time)
         async with self._session_factory() as session:
-            stored = await _stored_markets(session, wanted, call.time - step, call.time)
+            stored = await _stored_markets(session, wanted, requested - step, requested)
         return any(markets & stored.get(event_id, set()) for event_id in wanted)
 
 

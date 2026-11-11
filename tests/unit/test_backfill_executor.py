@@ -20,7 +20,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.test_helpers import add_event, make_epl_event
 
-T0 = datetime(2026, 4, 18, 10, 0, tzinfo=UTC)
+T0 = datetime(2026, 4, 18, 9, 55, 38, tzinfo=UTC)
+# The provider's snapshot drifts seconds from its grid time.
+SNAPSHOT = T0 + timedelta(seconds=3)
 KICKOFF = datetime(2026, 4, 18, 15, 0, tzinfo=UTC)
 
 
@@ -31,9 +33,9 @@ def manifest(**overrides: Any) -> Manifest:
         "markets": ["h2h", "totals"],
         "bookmakers": ["pinnacle", "williamhill"],
         "coverage": [{"min_lead_minutes": 1, "max_lead_minutes": 120, "max_input_age_minutes": 10}],
-        "snapshot_grid": [{"start": "2020-06-06T00:00:00Z", "step_minutes": 10}],
+        "snapshot_grid": [{"start": "2022-09-01T00:00:38Z", "step_minutes": 5}],
         "probe": {
-            "snapshots": ["2026-04-18T10:00:00Z"],
+            "snapshots": ["2026-04-18T09:55:38Z"],
             "min_fixture_lead_hours": 12,
             "required_bookmakers": {},
             "units_per_call": 20,
@@ -68,7 +70,7 @@ def response(*api_ids: str, units: int | None = 20, quota: int | None = 1000) ->
         response_time_ms=5,
         quota_remaining=quota,
         quota_used=4000,
-        snapshot_time=T0 - timedelta(minutes=5),
+        snapshot_time=SNAPSHOT,
         units_used=units,
     )
 
@@ -177,7 +179,9 @@ async def seed_snapshot(
 
 @pytest.mark.asyncio
 class TestBackfillExecutor:
-    async def test_the_request_comes_from_the_manifest(self, test_session, writer) -> None:
+    async def test_the_request_comes_from_the_manifest_half_a_step_after_the_snapshot(
+        self, test_session, writer
+    ) -> None:
         client = FakeClient(response("e1"))
 
         async with executor(client, test_session, skip_existing=False) as ex:
@@ -186,7 +190,7 @@ class TestBackfillExecutor:
         assert client.requests == [
             {
                 "sport": "soccer_epl",
-                "date": "2026-04-18T10:00:00Z",
+                "date": "2026-04-18T09:58:08Z",
                 "markets": ["h2h", "totals"],
                 "regions": None,
                 "bookmakers": ["pinnacle", "williamhill"],
@@ -203,8 +207,8 @@ class TestBackfillExecutor:
             result = await ex.execute([call(T0, 1, 2)], progress.append)
 
         assert [(s["event_id"], s["snapshot_time"]) for s in writer.stored] == [
-            (1, T0 - timedelta(minutes=5)),
-            (2, T0 - timedelta(minutes=5)),
+            (1, SNAPSHOT),
+            (2, SNAPSHOT),
         ]
         assert {(s["shape"].source, s["shape"].time_basis) for s in writer.stored} == {
             (Source.ODDS_API, TimeBasis.SOURCE_STAMPED)
@@ -221,7 +225,7 @@ class TestBackfillExecutor:
         )
 
         async with executor(client, test_session, skip_existing=False) as ex:
-            result = await ex.execute([call(T0, 1), call(T0 + timedelta(minutes=10), 1)])
+            result = await ex.execute([call(T0, 1), call(T0 + timedelta(minutes=5), 1)])
 
         assert (result.calls_made, result.units_used, result.quota_remaining) == (2, 40, 960)
 
@@ -230,7 +234,7 @@ class TestBackfillExecutor:
     ) -> None:
         for event_id in (1, 2):
             await add_event(test_session, make_epl_event(event_id, KICKOFF))
-            await seed_snapshot(test_session, event_id, T0 - timedelta(minutes=5), Source.ODDS_API)
+            await seed_snapshot(test_session, event_id, SNAPSHOT, Source.ODDS_API)
         client = FakeClient()
 
         async with executor(client, test_session) as ex:
@@ -244,7 +248,7 @@ class TestBackfillExecutor:
     ) -> None:
         for event_id in (1, 2):
             await add_event(test_session, make_epl_event(event_id, KICKOFF))
-        await seed_snapshot(test_session, 1, T0 - timedelta(minutes=5), Source.ODDS_API)
+        await seed_snapshot(test_session, 1, SNAPSHOT, Source.ODDS_API)
         client = FakeClient()
 
         async with executor(client, test_session) as ex:
@@ -256,9 +260,7 @@ class TestBackfillExecutor:
         self, test_session, writer
     ) -> None:
         await add_event(test_session, make_epl_event(1, KICKOFF))
-        await seed_snapshot(
-            test_session, 1, T0 - timedelta(minutes=5), Source.ODDS_API, (Market.H2H,)
-        )
+        await seed_snapshot(test_session, 1, SNAPSHOT, Source.ODDS_API, (Market.H2H,))
         client = FakeClient(response("e1"))
 
         async with executor(client, test_session) as ex:
@@ -267,14 +269,18 @@ class TestBackfillExecutor:
         assert (result.calls_made, result.calls_skipped) == (1, 0)
 
     @pytest.mark.parametrize(
-        ("offset_minutes", "source"),
-        [(10, Source.ODDS_API), (-1, Source.ODDS_API), (5, Source.POLYMARKET)],
+        ("offset", "source"),
+        [
+            (timedelta(minutes=-2, seconds=-30), Source.ODDS_API),
+            (timedelta(minutes=2, seconds=31), Source.ODDS_API),
+            (timedelta(0), Source.POLYMARKET),
+        ],
     )
     async def test_a_snapshot_outside_the_step_or_of_another_source_does_not_count(
-        self, test_session, writer, offset_minutes: int, source: Source
+        self, test_session, writer, offset: timedelta, source: Source
     ) -> None:
         await add_event(test_session, make_epl_event(1, KICKOFF))
-        await seed_snapshot(test_session, 1, T0 - timedelta(minutes=offset_minutes), source)
+        await seed_snapshot(test_session, 1, T0 + offset, source)
         client = FakeClient(response("e1"))
 
         async with executor(client, test_session) as ex:
@@ -288,7 +294,7 @@ class TestBackfillExecutor:
 
         async with executor(client, test_session, dry_run=True) as ex:
             result = await ex.execute(
-                [call(T0, 1), call(T0 + timedelta(minutes=10), 1)], progress.append
+                [call(T0, 1), call(T0 + timedelta(minutes=5), 1)], progress.append
             )
 
         assert client.requests == []
@@ -299,7 +305,7 @@ class TestBackfillExecutor:
     async def test_an_exception_stops_the_run(self, test_session, writer) -> None:
         client = FakeClient(response("e1"), RuntimeError("quota exhausted"), response("e1"))
         progress: list[CallProgress] = []
-        calls = [call(T0 + timedelta(minutes=10 * i), 1) for i in range(3)]
+        calls = [call(T0 + timedelta(minutes=5 * i), 1) for i in range(3)]
 
         async with executor(client, test_session, skip_existing=False) as ex:
             with pytest.raises(RuntimeError, match="quota exhausted"):
@@ -314,7 +320,7 @@ class TestBackfillExecutor:
 
         async with executor(client, test_session, skip_existing=False) as ex:
             with pytest.raises(RuntimeError):
-                await ex.execute([call(T0, 1), call(T0 + timedelta(minutes=10), 1)])
+                await ex.execute([call(T0, 1), call(T0 + timedelta(minutes=5), 1)])
 
         assert len(client.requests) == 1
         assert [
@@ -331,7 +337,7 @@ class TestBackfillExecutor:
 
         async with executor(client, test_session, skip_existing=False) as ex:
             with pytest.raises(RuntimeError, match="store failed"):
-                await ex.execute([call(T0, 1), call(T0 + timedelta(minutes=10), 1)])
+                await ex.execute([call(T0, 1), call(T0 + timedelta(minutes=5), 1)])
 
         assert len(client.requests) == 1
         assert [(log.success, log.api_quota_remaining) for log in writer.fetch_logs] == [
@@ -359,7 +365,7 @@ class _KeyRecordingResponse:
         return None
 
     async def json(self) -> dict[str, Any]:
-        return {"timestamp": "2026-04-18T09:55:00Z", "data": []}
+        return {"timestamp": "2026-04-18T09:55:41Z", "data": []}
 
     async def __aenter__(self) -> _KeyRecordingResponse:
         return self

@@ -687,9 +687,9 @@ def _manifest() -> Manifest:
             "coverage": [
                 {"min_lead_minutes": 1, "max_lead_minutes": 120, "max_input_age_minutes": 10}
             ],
-            "snapshot_grid": [{"start": "2020-06-06T00:00:00Z", "step_minutes": 10}],
+            "snapshot_grid": [{"start": "2022-09-01T00:00:00Z", "step_minutes": 5}],
             "probe": {
-                "snapshots": ["2026-04-18T10:00:00Z"],
+                "snapshots": ["2026-04-18T09:55:00Z"],
                 "min_fixture_lead_hours": 12,
                 "required_bookmakers": {},
                 "units_per_call": 20,
@@ -714,7 +714,7 @@ class TestBackfill:
         await _sync(session, listed)
 
         manifest = _manifest()
-        requested = datetime(2026, 4, 18, 10, 0, tzinfo=UTC)
+        requested = datetime(2026, 4, 18, 9, 55, tzinfo=UTC)
         band = manifest.coverage[0]
         call = Call(
             requested,
@@ -737,7 +737,7 @@ class TestBackfill:
         ) as executor:
             result = await executor.execute([call])
 
-        assert [r["date"] for r in http.requests] == ["2026-04-18T10:00:00Z"]
+        assert [r["date"] for r in http.requests] == ["2026-04-18T09:57:30Z"]
         assert http.requests[0]["regions"] == "uk"
         assert "bookmakers" not in http.requests[0]
         assert http.requests[0]["markets"] == "h2h,totals"

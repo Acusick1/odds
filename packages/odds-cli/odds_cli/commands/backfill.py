@@ -48,7 +48,7 @@ def plan_backfill(
     serves.
 
     Example:
-        odds backfill plan --manifest backfills/odds-api-epl-2020-26.yaml --cost
+        odds backfill plan --manifest backfills/odds-api-epl-2022-26.yaml --cost
     """
     manifest = Manifest.load(Path(manifest_file))
     seasons = _select_seasons(manifest, season)
@@ -169,7 +169,7 @@ def execute_backfill(
     --max-units, and after --max-consecutive-gaps consecutive sparse responses.
 
     Example:
-        odds backfill execute --manifest backfills/odds-api-epl-2020-26.yaml --season 2024-25 --dry-run
+        odds backfill execute --manifest backfills/odds-api-epl-2022-26.yaml --season 2024-25 --dry-run
     """
     manifest = Manifest.load(Path(manifest_file))
     seasons = _select_seasons(manifest, season)
@@ -297,7 +297,7 @@ def probe_backfill(
     checks and exits non-zero if any fails. A call that errors stops the probe.
 
     Example:
-        odds backfill probe --manifest backfills/odds-api-epl-2020-26.yaml --dry-run
+        odds backfill probe --manifest backfills/odds-api-epl-2022-26.yaml --dry-run
     """
     manifest = Manifest.load(Path(manifest_file))
     units = manifest.units_per_call
@@ -306,7 +306,10 @@ def probe_backfill(
     console.print(f"[bold]Estimated units:[/bold] {len(snapshots) * units:,}")
     if dry_run:
         for snapshot in snapshots:
-            console.print(f"  would fetch {utc_isoformat(snapshot)}  {units} units")
+            console.print(
+                f"  would fetch {utc_isoformat(manifest.request_time(snapshot))} for the "
+                f"{utc_isoformat(snapshot)} snapshot  {units} units"
+            )
         console.print("\n[yellow]DRY RUN - No API calls will be made[/yellow]")
         return
     _require_acquisition_key()
