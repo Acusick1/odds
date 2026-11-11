@@ -372,6 +372,15 @@ class TestHoldoutLedgerHook:
             f.write(self.OTHER + "\n")
         assert self.errors(repo) == []
 
+    def test_appending_a_result_row_with_its_windowless_leagues_passes(
+        self, repo: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(repo)
+        result = {"kind": "result", "issue": 1, "market": "1x2", "version": 1}
+        with (repo / "candidates" / "holdout.jsonl").open("a") as f:
+            f.write(json.dumps({**result, "leagues_without_window": ["soccer_epl"]}) + "\n")
+        assert self.errors(repo) == []
+
     def test_removing_a_committed_row_fails(
         self, repo: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -15,6 +15,7 @@ Backtests replay a strategy over stored events. The experiment pages record what
 - [Experiment scripts and artifacts](experiment-scripts.md) — Layout of experiments/, config and script conventions, the verification artifact files, and the inventory of scripts.
 - [Parity check](candidate-parity.md) — What odds candidates parity replays, how it rebuilds each decision from its recorded input snapshots and events, how it reports data differences from the current database, and its exit code.
 - [Replay backtest](candidate-backtest.md) — What odds candidates backtest replays, the decision state and timing it uses, how a model rule is tuned and refitted during the replay, the comparison candidate, how bets are scored, the coverage it reports and its JSON output.
+- [Substitute-close comparison](substitute-close-comparison.md) — What the substitute-close comparison script compares (the Odds API's Betfair Exchange price near kick-off against FDUK's Betfair Exchange close), the pass thresholds, the report it prints and writes, and how its prices are chosen.
 - [The run-candidates job](run-candidates-job.md) — How the scheduled run-candidates job takes each active mechanical candidate's decisions at their decision times, what it records, when it records a decision as missed, and how it books its next run.
 
 ### Explanation
