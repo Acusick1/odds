@@ -241,6 +241,44 @@ class TestPreregistration:
             holdout.Preregistration.model_validate(preregistration(**changes))
 
 
+class TestPreregisteredCells:
+    CELLS: list[dict[str, object]] = [
+        {"side": "under", "minutes_before_kickoff": [1440], "max_input_age_minutes": 60},
+        {"side": "under", "minutes_before_kickoff": [60], "max_input_age_minutes": 10},
+    ]
+
+    def listed(self) -> holdout.Preregistration:
+        return holdout.Preregistration.model_validate(preregistration(grid=None, cells=self.CELLS))
+
+    def test_a_listed_cells_file_pre_registers_exactly_those_cells(self) -> None:
+        assert self.listed().candidate_cells() == self.CELLS
+
+    def test_a_grid_pre_registers_its_cartesian_product(self) -> None:
+        prereg = holdout.Preregistration.model_validate(preregistration())
+        assert len(prereg.candidate_cells()) == 4
+        assert HOLDOUT_CELL in prereg.candidate_cells()
+
+    def test_a_cell_is_checked_against_the_list(self) -> None:
+        holdout.check_cell(self.listed(), self.CELLS[1])
+        mixed = {**self.CELLS[0], "max_input_age_minutes": 10}
+        with pytest.raises(ValueError, match="not one of"):
+            holdout.check_cell(self.listed(), mixed)
+
+    @pytest.mark.parametrize(
+        "changes",
+        [
+            {"cells": [{"side": "under"}]},
+            {"grid": None, "cells": []},
+            {"grid": None, "cells": [{}]},
+            {"grid": None, "cells": [{"a": 1}, {"b": 1}]},
+            {"grid": None, "cells": [{"a": 1}, {"a": 1}]},
+        ],
+    )
+    def test_exactly_one_of_grid_and_cells_is_required(self, changes: dict[str, object]) -> None:
+        with pytest.raises(ValueError):
+            holdout.Preregistration.model_validate(preregistration(**changes))
+
+
 class TestPlan:
     def plan(self, directory: Path) -> holdout.Plan:
         return holdout.load_plan(directory / "selections" / f"{STEM}.yaml", directory)

@@ -11,9 +11,9 @@ leagues:
   - soccer_france_ligue_one
   - soccer_efl_champ
 grid:
-  lookback_minutes: [15, 25]
-  m: [0.01, 0.02]
-  g: [0, 0.01]
-  decision_times: [[50, 40]]
+  lookbacks: [[{"minutes_before_decision": 15, "max_input_age_minutes": 10}], [{"minutes_before_decision": 25, "max_input_age_minutes": 10}]]
+  min_rise: [0.01, 0.02]
+  gap: [0, 0.01]
+  minutes_before_kickoff: [[50, 40]]
   max_input_age_minutes: [10]
 selection_rule: https://github.com/Acusick1/odds/issues/821#issuecomment-6769611091

@@ -1,4 +1,5 @@
-"""Round 1's committed pre-registration files match the grid sections of their idea issues.
+"""Round 1's committed pre-registration files match the grid sections of their idea issues and
+are params their rules take.
 
 ``tests/fixtures/preregistration_grids/<issue>.md`` holds each issue's "Pre-registered backtest
 grid" section as it stood when the files were committed. The parser reads the parameter sets
@@ -8,13 +9,15 @@ in ``HAND_ASSERTED``.
 
 from __future__ import annotations
 
-import math
+import itertools
+import json
 import re
 from pathlib import Path
 
 import pytest
 import yaml
 from odds_analytics.holdout import Preregistration
+from odds_lambda.candidate_rules.rules import RULES, RuleParams
 
 ROOT = Path(__file__).resolve().parents[2]
 FILES = sorted((ROOT / "candidates" / "preregistrations").glob("*.yaml"))
@@ -30,26 +33,25 @@ FOOTBALL = {
 }
 SELECTION_RULE = "https://github.com/Acusick1/odds/issues/821#issuecomment-6769611091"
 
-# The grid key each label in an issue's `label ∈ {...}` sets stands for.
-LABELS = {
-    "m": "m",
-    "g": "g",
-    "r": "r",
-    "o": "o",
-    "t": "t",
-    "N": "n",
-    "L": "lookback_minutes",
-    "lookback": "lookback_minutes",
-    "p_min": "p_min",
-    "ρ": "rho",
-    "τ": "tau",
-    "side": "side",
-    "threshold": "threshold",
-    "consensus-EV threshold": "threshold",
-    "EV threshold": "threshold",
-    "decision time": "decision_times",
-    "decision times": "decision_times",
-    "decision": "decision_times",
+# The real param name each label in an issue's `label ∈ {...}` sets stands for, by issue. A rule
+# that does not exist yet takes exactly these names in its params model.
+DECISION = "minutes_before_kickoff"
+COMMON = {"decision time": DECISION, "decision times": DECISION, "decision": DECISION}
+LABELS: dict[int, dict[str, str]] = {
+    771: {"m": "min_rise", "lookback": "lookbacks", "g": "gap"},
+    772: {"ρ": "rho", "threshold": "threshold"},
+    831: {"lookback": "lookbacks", "consensus-EV threshold": "threshold"},
+    832: {"L": "lookbacks", "m": "min_rise", "g": "gap"},
+    833: {"r": "min_ratio", "g": "gap"},
+    834: {"threshold": "threshold", "o": "min_overround"},
+    835: {"p_min": "min_probability", "threshold": "threshold"},
+    836: {"side": "side"},
+    837: {"threshold": "threshold"},
+    838: {"lookback": "lookbacks", "EV threshold": "threshold"},
+    839: {"τ": "min_over_probability", "threshold": "threshold"},
+    840: {"N": "min_concurrent_kickoffs", "threshold": "threshold"},
+    841: {"m": "min_margin"},
+    842: {"t": "threshold"},
 }
 
 # Facts the prose states in a shape the parser does not read, by issue.
@@ -60,8 +62,8 @@ HAND_ASSERTED: dict[int, dict[str, list[object]]] = {
     839: {"outcome": ["favourite"]},
     # "Lines are fixed at {1.5, 3.5}. ... absent or within 2 pp of the model."
     837: {"lines": [[1.5, 3.5]], "exchange_tolerance": [0.02]},
-    # "The draft's `max_input_age_minutes` is 60 ... A registered version uses 10"
-    842: {"max_input_age_minutes": [10]},
+    # "the draft's `max_input_age_minutes` is 60": the backtest and holdout reach the hourly band
+    842: {"max_input_age_minutes": [60]},
 }
 
 SET = re.compile(r"^(?:- )?(?P<label>.+?) ∈ \{(?P<values>.*)\}")
@@ -95,43 +97,60 @@ def minutes(text: str) -> list[int]:
     return [int(x) for x in text.strip("[]").split(",")]
 
 
-def parse_grid(text: str) -> tuple[dict[str, list[object]], int]:
-    """The grid the issue text states, and its stated cell count."""
-    grid: dict[str, list[object]] = {}
-    pairs: list[object] = []
+def parse_cells(issue: int, text: str) -> tuple[list[dict[str, object]], int]:
+    """The cells the issue text states, in the real param names, and its stated cell count."""
+    labels = {**COMMON, **LABELS[issue]}
+    base_age = AGE.search(text)
+    lookback_age = LOOKBACK_AGE.search(text)
+    both_points = "at both points" in text
+    params: dict[str, list[object]] = {}
+    coupled: list[dict[str, object]] | None = None
     for line in text.splitlines():
         for piece in line.split(" × "):
             match = SET.match(piece.strip())
             if match is None:
                 continue
-            label = match["label"].split(" (")[0]
-            key = LABELS[label]
+            key = labels[match["label"].split(" (")[0]]
             items = split_top_level(match["values"])
             if all(PAIR.match(item) for item in items):
-                pairs = [
-                    {
-                        "decision_times": [int(PAIR.match(item)["time"])],  # type: ignore[index]
-                        "max_input_age_minutes": int(PAIR.match(item)["age"]),  # type: ignore[index]
-                    }
+                coupled = [
+                    {DECISION: [int(m["time"])], "max_input_age_minutes": int(m["age"])}
+                    for item in items
+                    if (m := PAIR.match(item))
+                ]
+            elif key == DECISION:
+                params[key] = [minutes(item) for item in items]
+            elif key == "lookbacks":
+                age = int((lookback_age or base_age)["value"])  # type: ignore[index]
+                assert lookback_age or both_points
+                params[key] = [
+                    [{"minutes_before_decision": number(item), "max_input_age_minutes": age}]
                     for item in items
                 ]
-                grid["decision"] = pairs
-            elif key == "decision_times":
-                grid[key] = [minutes(item) for item in items]
             else:
-                grid[key] = [item if item.isalpha() else number(item) for item in items]
-    if "decision_times" not in grid and "decision" not in grid:
-        fixed = FIXED_TIMES.search(text)
-        assert fixed, "no decision times in the text"
-        grid["decision_times"] = [minutes(fixed["value"])]
-    if "decision" not in grid:
-        age = AGE.search(text)
-        assert age, "no input age in the text"
-        grid["max_input_age_minutes"] = [int(age["value"])]
-    lookback_age = LOOKBACK_AGE.search(text)
-    if lookback_age:
-        grid["lookback_max_input_age_minutes"] = [int(lookback_age["value"])]
-    return grid, int(CELLS.search(text)["count"])  # type: ignore[index]
+                params[key] = [item if item.isalpha() else number(item) for item in items]
+    if coupled is None:
+        if DECISION not in params:
+            fixed = FIXED_TIMES.search(text)
+            assert fixed, "no decision times in the text"
+            params[DECISION] = [minutes(fixed["value"])]
+        assert base_age, "no input age in the text"
+        params["max_input_age_minutes"] = [int(base_age["value"])]
+    params.update(HAND_ASSERTED.get(issue, {}))
+    cells = [
+        dict(zip(params, values, strict=True)) for values in itertools.product(*params.values())
+    ]
+    if coupled is not None:
+        cells = [{**cell, **pair} for cell in cells for pair in coupled]
+    return cells, int(CELLS.search(text)["count"])  # type: ignore[index]
+
+
+def by_content(cells: list[dict[str, object]]) -> list[str]:
+    return sorted(json.dumps(cell, sort_keys=True) for cell in cells)
+
+
+def load(path: Path) -> Preregistration:
+    return Preregistration.model_validate(yaml.safe_load(path.read_text()))
 
 
 class TestPreregistrationFiles:
@@ -147,12 +166,28 @@ class TestPreregistrationFiles:
         assert prereg.selection_rule == SELECTION_RULE
 
     @pytest.mark.parametrize("path", FILES, ids=lambda p: p.stem)
-    def test_grid_matches_the_issue_text(self, path: Path) -> None:
-        prereg = Preregistration.model_validate(yaml.safe_load(path.read_text()))
-        parsed, cells = parse_grid((FIXTURES / f"{prereg.issue}.md").read_text())
-        parsed.update(HAND_ASSERTED.get(prereg.issue, {}))
-        assert prereg.grid == parsed
-        assert math.prod(len(values) for values in prereg.grid.values()) == cells
+    def test_cells_match_the_issue_text(self, path: Path) -> None:
+        prereg = load(path)
+        parsed, count = parse_cells(prereg.issue, (FIXTURES / f"{prereg.issue}.md").read_text())
+        assert len(parsed) == count
+        assert by_content(prereg.candidate_cells()) == by_content(parsed)
+
+    @pytest.mark.parametrize("path", FILES, ids=lambda p: p.stem)
+    def test_every_cell_is_params_the_rule_takes(self, path: Path) -> None:
+        prereg = load(path)
+        spec = RULES.get(prereg.rule)
+        for cell in prereg.candidate_cells():
+            if spec is not None:
+                spec.params_model.model_validate(cell)
+                continue
+            assert {DECISION, "max_input_age_minutes"} <= cell.keys()
+            RuleParams.model_validate(
+                {k: v for k, v in cell.items() if k in RuleParams.model_fields}
+            )
+
+    def test_only_issue_842_names_an_existing_rule(self) -> None:
+        existing = {load(p).issue for p in FILES if load(p).rule in RULES}
+        assert existing == {842}
 
     def test_every_fixture_has_a_file(self) -> None:
         issues = {int(p.stem) for p in FIXTURES.glob("*.md")}

@@ -10,10 +10,14 @@ leagues:
   - soccer_germany_bundesliga
   - soccer_france_ligue_one
   - soccer_efl_champ
-grid:
-  m: [2, 3, 4]
-  decision:
-    - {"decision_times": [4320], "max_input_age_minutes": 360}
-    - {"decision_times": [1440], "max_input_age_minutes": 60}
-    - {"decision_times": [360], "max_input_age_minutes": 60}
+cells:
+  - {"min_margin": 2, "minutes_before_kickoff": [4320], "max_input_age_minutes": 360}
+  - {"min_margin": 2, "minutes_before_kickoff": [1440], "max_input_age_minutes": 60}
+  - {"min_margin": 2, "minutes_before_kickoff": [360], "max_input_age_minutes": 60}
+  - {"min_margin": 3, "minutes_before_kickoff": [4320], "max_input_age_minutes": 360}
+  - {"min_margin": 3, "minutes_before_kickoff": [1440], "max_input_age_minutes": 60}
+  - {"min_margin": 3, "minutes_before_kickoff": [360], "max_input_age_minutes": 60}
+  - {"min_margin": 4, "minutes_before_kickoff": [4320], "max_input_age_minutes": 360}
+  - {"min_margin": 4, "minutes_before_kickoff": [1440], "max_input_age_minutes": 60}
+  - {"min_margin": 4, "minutes_before_kickoff": [360], "max_input_age_minutes": 60}
 selection_rule: https://github.com/Acusick1/odds/issues/821#issuecomment-6769611091

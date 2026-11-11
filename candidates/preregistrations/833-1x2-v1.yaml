@@ -11,8 +11,8 @@ leagues:
   - soccer_france_ligue_one
   - soccer_efl_champ
 grid:
-  r: [1.03, 1.05, 1.08]
-  g: [0, 0.01]
-  decision_times: [[60, 30]]
+  min_ratio: [1.03, 1.05, 1.08]
+  gap: [0, 0.01]
+  minutes_before_kickoff: [[60, 30]]
   max_input_age_minutes: [10]
 selection_rule: https://github.com/Acusick1/odds/issues/821#issuecomment-6769611091

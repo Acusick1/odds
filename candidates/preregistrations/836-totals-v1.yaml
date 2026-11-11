@@ -10,10 +10,11 @@ leagues:
   - soccer_germany_bundesliga
   - soccer_france_ligue_one
   - soccer_efl_champ
-grid:
-  side: ["under", "over"]
-  decision:
-    - {"decision_times": [1440], "max_input_age_minutes": 60}
-    - {"decision_times": [360], "max_input_age_minutes": 60}
-    - {"decision_times": [60], "max_input_age_minutes": 10}
+cells:
+  - {"side": "under", "minutes_before_kickoff": [1440], "max_input_age_minutes": 60}
+  - {"side": "under", "minutes_before_kickoff": [360], "max_input_age_minutes": 60}
+  - {"side": "under", "minutes_before_kickoff": [60], "max_input_age_minutes": 10}
+  - {"side": "over", "minutes_before_kickoff": [1440], "max_input_age_minutes": 60}
+  - {"side": "over", "minutes_before_kickoff": [360], "max_input_age_minutes": 60}
+  - {"side": "over", "minutes_before_kickoff": [60], "max_input_age_minutes": 10}
 selection_rule: https://github.com/Acusick1/odds/issues/821#issuecomment-6769611091

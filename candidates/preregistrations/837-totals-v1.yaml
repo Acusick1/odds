@@ -12,7 +12,7 @@ leagues:
   - soccer_efl_champ
 grid:
   threshold: [0.01, 0.02, 0.03]
-  decision_times: [[60, 30], [120, 60, 30]]
+  minutes_before_kickoff: [[60, 30], [120, 60, 30]]
   lines: [[1.5, 3.5]]
   exchange_tolerance: [0.02]
   max_input_age_minutes: [10]
