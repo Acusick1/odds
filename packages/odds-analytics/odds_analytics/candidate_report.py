@@ -22,11 +22,12 @@ from typing import NamedTuple
 import numpy as np
 from odds_core.candidates import Candidate, CandidateStatus, MechanicalCandidate
 from odds_core.close import close_grace, close_quotes, event_close
+from odds_core.exchange_price import ExchangePrice
 from odds_core.market_prices import Outcome
 from odds_core.models import Event
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade, TradeResult
 from odds_core.quotes import Quote
-from odds_core.vocabulary import Market
+from odds_core.vocabulary import Market, Source
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -60,7 +61,8 @@ def expected_value(p_close: float, price_decimal: float) -> float:
 @dataclass(frozen=True)
 class ScoredBet:
     """A non-void candidate bet, a paper trade or a replayed one, with the devigged close
-    probability of its selection."""
+    probability of its selection: ``p_close`` devigged proportionally, the score, and
+    ``p_close_power`` by the power method, for information (``CloseProbability``)."""
 
     candidate_name: str
     candidate_version: int
@@ -74,6 +76,10 @@ class ScoredBet:
     # How long after kick-off a missing close may still arrive (``odds_core.close.close_grace``).
     close_grace: timedelta
     sport_key: str
+    selection: str
+    line: float | None
+    bookmaker: str
+    p_close_power: float | None
 
     @property
     def settled(self) -> bool:
@@ -82,6 +88,12 @@ class ScoredBet:
     @property
     def ev(self) -> float | None:
         return None if self.p_close is None else expected_value(self.p_close, self.price_decimal)
+
+    @property
+    def ev_power(self) -> float | None:
+        if self.p_close_power is None:
+            return None
+        return expected_value(self.p_close_power, self.price_decimal)
 
 
 @dataclass(frozen=True)
@@ -173,9 +185,45 @@ class CandidateReport:
     running: dict[tuple[str, int], RunningScore]
 
 
+def power_devig(implied: Sequence[float]) -> tuple[float, ...]:
+    """The power devig of implied probabilities: each raised to the one power ``k`` that makes
+    them sum to 1, found by bisection. ``ValueError`` unless each is in (0, 1)."""
+    if not implied or any(not 0 < q < 1 for q in implied):
+        raise ValueError(f"implied probabilities must be in (0, 1), got {list(implied)}")
+    low, high = 0.0, 1.0
+    while sum(q**high for q in implied) > 1:
+        low, high = high, high * 2
+    for _ in range(100):
+        k = (low + high) / 2
+        if sum(q**k for q in implied) > 1:
+            low = k
+        else:
+            high = k
+    k = (low + high) / 2
+    return tuple(q**k for q in implied)
+
+
+class CloseProbability(NamedTuple):
+    """A selection's close probability devigged proportionally (the score) and by the power
+    method (#770, for information); ``power`` is None for a Polymarket close."""
+
+    proportional: float
+    power: float | None
+
+
+def _power_fair(close: ExchangePrice) -> dict[Outcome, float] | None:
+    # Polymarket's overround is its asks', not that of the mids it devigs, so its implied
+    # probabilities cannot be recovered from ``fair`` and ``overround``.
+    if close.source is Source.POLYMARKET:
+        return None
+    outcomes = list(close.fair)
+    implied = power_devig([close.fair[o] * (1 + close.overround) for o in outcomes])
+    return dict(zip(outcomes, implied, strict=True))
+
+
 def selection_close_probability(
     market: Market, selection: str, line: float | None, event: Event, quoted: Sequence[Quote]
-) -> float | None:
+) -> CloseProbability | None:
     """Close probability of the selection on ``line`` from the event's close quotes
     (``odds_core.close.close_quotes``), the close on that line; None where no close is
     defined (``odds_core.close.CLOSES``) or exists.
@@ -183,7 +231,9 @@ def selection_close_probability(
     close = event_close(quoted, event.commence_time, event.sport_key, market, line=line)
     if close is None:
         return None
-    return close.fair[Outcome(selection)]
+    outcome = Outcome(selection)
+    power = _power_fair(close)
+    return CloseProbability(close.fair[outcome], None if power is None else power[outcome])
 
 
 @dataclass(frozen=True)
@@ -518,7 +568,7 @@ def report_candidates(
 
 async def close_probabilities(
     session: AsyncSession, rows: Sequence[tuple[PaperTrade, Event]]
-) -> list[float | None]:
+) -> list[CloseProbability | None]:
     """The close probability of each trade's selection on its line, in ``rows`` order; None
     where no close is defined or exists (``selection_close_probability``)."""
     events: dict[str, dict[int, Event]] = defaultdict(dict)
@@ -564,10 +614,14 @@ async def load_scored_trades(session: AsyncSession) -> list[ScoredBet]:
                 stake=trade.stake,
                 pnl=trade.pnl,
                 price_decimal=trade.price_decimal,
-                p_close=p_close,
+                p_close=None if p_close is None else p_close.proportional,
                 placed_at=trade.placed_at,
                 close_grace=close_grace(event.sport_key, trade.market),
                 sport_key=event.sport_key,
+                selection=trade.selection,
+                line=trade.line,
+                bookmaker=trade.bookmaker,
+                p_close_power=None if p_close is None else p_close.power,
             )
         )
     return scored

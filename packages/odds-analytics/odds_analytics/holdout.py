@@ -52,7 +52,7 @@ MIN_GATE_BETS = 30
 EPL_2022_24_SEALED = True
 
 # Seasons run 1 August to 31 July.
-_FIVE_LEAGUES = (
+FIVE_LEAGUES = (
     "soccer_efl_champ",
     "soccer_spain_la_liga",
     "soccer_italy_serie_a",
@@ -77,9 +77,7 @@ class Window(BaseModel):
 
 
 def holdout_windows() -> list[Window]:
-    windows = [
-        Window(sport=s, start=date(2025, 8, 1), end=date(2026, 7, 31)) for s in _FIVE_LEAGUES
-    ]
+    windows = [Window(sport=s, start=date(2025, 8, 1), end=date(2026, 7, 31)) for s in FIVE_LEAGUES]
     if EPL_2022_24_SEALED:
         windows.append(Window(sport="soccer_epl", start=date(2022, 8, 1), end=date(2024, 7, 31)))
     return windows
@@ -418,6 +416,16 @@ def check_cell(prereg: Preregistration, cell: dict[str, object]) -> None:
             raise ValueError(f"the cell's {key}={value!r} is not in the grid {prereg.grid[key]!r}")
 
 
+def load_preregistration(path: Path, directory: Path) -> Preregistration:
+    """The grid file at ``path``, which must be in ``directory/preregistrations`` and named by
+    its identity."""
+    prereg = _load_file(path, directory, PREREGISTRATION_DIR, Preregistration)
+    assert isinstance(prereg, Preregistration)  # noqa: S101
+    if path.name != f"{prereg.stem}.yaml":
+        raise HoldoutRefused(f"{path.name} must be named {prereg.stem}.yaml")
+    return prereg
+
+
 def load_plan(selection_path: Path, directory: Path) -> Plan:
     """The selection at ``selection_path`` and the grid file of its identity, checked: file
     names are the identity, the selection's ``grid_sha256`` is the grid file's content, the cell
@@ -429,10 +437,7 @@ def load_plan(selection_path: Path, directory: Path) -> Plan:
     grid_path = directory / PREREGISTRATION_DIR / f"{selection.stem}.yaml"
     if not grid_path.is_file():
         raise HoldoutRefused(f"no pre-registration {PREREGISTRATION_DIR}/{grid_path.name}")
-    prereg = _load_file(grid_path, directory, PREREGISTRATION_DIR, Preregistration)
-    assert isinstance(prereg, Preregistration)  # noqa: S101
-    if prereg.stem != selection.stem:
-        raise HoldoutRefused(f"{grid_path.name} is for {prereg.stem}, not {selection.stem}")
+    prereg = load_preregistration(grid_path, directory)
     if hashlib.sha256(grid_path.read_bytes()).hexdigest() != selection.grid_sha256:
         raise HoldoutRefused(f"{selection_path.name} was selected from another grid file")
     try:

@@ -18,8 +18,10 @@ from odds_analytics.candidate_report import (
     judge,
     league_breakdown,
     next_checkpoint,
+    power_devig,
     promote_level,
     report_candidates,
+    selection_close_probability,
     summarize_candidates,
 )
 from odds_cli.main import app
@@ -27,7 +29,8 @@ from odds_core.candidates import AgentCandidate, CandidateStatus
 from odds_core.close import close_quotes, event_close
 from odds_core.models import Event, EventStatus
 from odds_core.paper_trade_models import PaperTrade, TradeResult
-from odds_core.quotes import quotes
+from odds_core.quotes import Quote, quotes
+from odds_core.vocabulary import Market, PriceOutcome, Side, Source, TimeBasis
 from sqlalchemy.ext.asyncio import AsyncSession
 from typer.testing import CliRunner
 
@@ -77,6 +80,10 @@ def trade(
         placed_at=LONG_AGO + timedelta(minutes=index),
         close_grace=close_grace,
         sport_key=sport_key,
+        selection="home",
+        line=None,
+        bookmaker="bet365",
+        p_close_power=None,
     )
 
 
@@ -119,11 +126,94 @@ class TestEv:
             placed_at=LONG_AGO,
             close_grace=FDUK_GRACE,
             sport_key="soccer_epl",
+            selection="home",
+            line=None,
+            bookmaker="bet365",
+            p_close_power=0.45,
         )
         assert t.ev == pytest.approx(0.25)
+        assert t.ev_power == pytest.approx(0.125)
 
     def test_no_close_has_no_ev(self) -> None:
         assert trade(0, ev=None).ev is None
+        assert trade(0, ev=None).ev_power is None
+
+
+class TestPowerDevig:
+    def test_recovers_the_probabilities_a_known_power_put_the_vig_on(self) -> None:
+        fair = (0.5, 0.3, 0.2)
+        implied = [p ** (1 / 1.2) for p in fair]
+
+        assert power_devig(implied) == pytest.approx(fair, abs=1e-12)
+
+    def test_shades_a_longshot_more_than_proportional_devigging(self) -> None:
+        implied = (0.7, 0.25, 0.1)
+        proportional = [q / sum(implied) for q in implied]
+
+        power = power_devig(implied)
+
+        assert sum(power) == pytest.approx(1.0)
+        assert power[2] < proportional[2] and power[0] > proportional[0]
+
+    def test_an_underround_book_is_scaled_up(self) -> None:
+        assert power_devig((0.45, 0.45)) == pytest.approx((0.5, 0.5))
+
+    @pytest.mark.parametrize("implied", [(), (0.5, 1.0), (0.0, 0.6)])
+    def test_rejects_probabilities_outside_zero_to_one(self, implied: tuple[float, ...]) -> None:
+        with pytest.raises(ValueError, match="in \\(0, 1\\)"):
+            power_devig(implied)
+
+    def test_a_betfair_close_carries_both_devigs_of_the_selection(self) -> None:
+        event = make_epl_event(1, LONG_AGO, status=EventStatus.FINAL, home_score=1, away_score=0)
+        prices = {"home": 1.5, "draw": 4.5, "away": 8.0}
+        quoted = close_quotes_of(Source.BETFAIR, "betfair_exchange", Side.BACK, prices)
+
+        close = selection_close_probability(Market.ONE_X_TWO, "away", None, event, quoted)
+
+        implied = [1 / p for p in prices.values()]
+        assert close is not None
+        assert close.proportional == pytest.approx(implied[2] / sum(implied))
+        assert close.power == pytest.approx(power_devig(implied)[2])
+
+    def test_a_polymarket_close_has_no_power_devig(self) -> None:
+        event = make_nba_event(1, LONG_AGO, status=EventStatus.FINAL, home_score=101, away_score=99)
+        prices = {"home": 1.8, "away": 2.2}
+        quoted = close_quotes_of(Source.POLYMARKET, "polymarket", Side.MID, prices)
+
+        close = selection_close_probability(Market.H2H, "home", None, event, quoted)
+
+        assert close is not None and close.power is None
+
+
+def close_quotes_of(
+    source: Source, bookmaker: str, side: Side, prices: dict[str, float]
+) -> list[Quote]:
+    """One snapshot of ``bookmaker``'s ``side`` prices two minutes before ``LONG_AGO``."""
+    at = LONG_AGO - timedelta(minutes=2)
+    return [
+        Quote(
+            snapshot_id=1,
+            event_id=1,
+            snapshot_time=at,
+            created_at=at,
+            source=source,
+            market=Market.ONE_X_TWO if len(prices) == 3 else Market.H2H,
+            time_basis=TimeBasis.OBSERVED,
+            in_play=False,
+            market_status=None,
+            total_matched=None,
+            market_start_time=None,
+            bookmaker=bookmaker,
+            outcome=PriceOutcome(outcome),
+            line=None,
+            side=side,
+            price=price,
+            size=None,
+            matched=None,
+            changed_at=None,
+        )
+        for outcome, price in prices.items()
+    ]
 
 
 class TestCheckpoint:

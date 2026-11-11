@@ -4,12 +4,13 @@ import asyncio
 import dataclasses
 import json
 import subprocess
+from collections.abc import Collection
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated, Any, cast
 
 import typer
-from odds_analytics import holdout, holdout_run
+from odds_analytics import cell_selection, holdout, holdout_run
 from odds_analytics.candidate_backtest import BacktestResult, Coverage, HashStatus, replay
 from odds_analytics.candidate_parity import ParityReport, ParityStatus, check_parity
 from odds_analytics.candidate_rehash import rehash as record_rehash
@@ -17,6 +18,7 @@ from odds_analytics.candidate_report import (
     CandidateSummary,
     Checkpoint,
     LeagueBreakdown,
+    ScoredBet,
     Verdict,
     candidate_report,
     family_size_at,
@@ -37,6 +39,7 @@ from odds_lambda.candidate_rules.pinning import rule_sha256, validate_candidate_
 from odds_lambda.candidate_rules.registry import RULES
 from rich.console import Console
 from rich.table import Table
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 app = typer.Typer()
@@ -113,15 +116,32 @@ def _backtest_verdict(verdict: Verdict) -> str:
     return "meets_promote_bar" if verdict is Verdict.PROMOTE else verdict.value
 
 
+def _bet_json(bet: ScoredBet) -> dict[str, Any]:
+    """A placed bet as ``--json`` writes it; ``p_close`` and ``ev`` are null without a close."""
+    return {
+        "event_id": bet.event_id,
+        "league": bet.sport_key,
+        "kickoff": bet.commence_time,
+        "decision_time": bet.placed_at,
+        "outcome": bet.selection,
+        "line": bet.line,
+        "bookmaker": bet.bookmaker,
+        "price": bet.price_decimal,
+        "p_close": bet.p_close,
+        "ev": bet.ev,
+    }
+
+
 def _backtest_json(result: BacktestResult) -> dict[str, Any]:
     """The ``--json`` payload: each summary carries its registry ``status`` and a backtest
-    verdict, not the ``registered`` entry the status comes from."""
-    payload = dataclasses.asdict(dataclasses.replace(result, comparison=None))
+    verdict, not the ``registered`` entry the status comes from, and each placed bet."""
+    payload = dataclasses.asdict(dataclasses.replace(result, comparison=None, bets=()))
     summary = payload["summary"]
     del summary["registered"]
     summary["status"] = result.summary.status
     summary["verdict"] = _backtest_verdict(result.summary.verdict)
     payload["comparison"] = None if result.comparison is None else _backtest_json(result.comparison)
+    payload["bets"] = [_bet_json(b) for b in result.bets]
     return payload
 
 
@@ -536,6 +556,146 @@ def holdout_command(
             soft_wrap=True,
         )
     _print_gate(done.row)
+
+
+@app.command("select")
+def select_command(
+    preregistration: Annotated[
+        Path,
+        typer.Argument(help="candidates/preregistrations/<issue>-<market>-v<version>.yaml"),
+    ],
+    json_path: Annotated[
+        Path | None,
+        typer.Option("--json", help="Write every cell's score and placed bets to this file"),
+    ] = None,
+) -> None:
+    """Pick a pre-registered grid's cell on development data by round 1's selection rule.
+
+    Replays every cell as one pooled draft over the file's leagues on each development block,
+    prints each cell's score and, when a cell is eligible, writes the picked cell to
+    candidates/selections/ under the grid file's name. No eligible cell kills the idea, and
+    nothing is written. Reads the database only.
+    """
+    directory = candidates_dir()
+    today = datetime.now(UTC).date()
+
+    async def run() -> cell_selection.GridSelection:
+        async with async_session_maker() as session:
+            await session.execute(text("SET TRANSACTION READ ONLY"))
+            return await cell_selection.select_cell(session, preregistration, directory, today)
+
+    try:
+        result = asyncio.run(run())
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
+    console.print(_selection_table(result))
+    if json_path is not None:
+        payload = _selection_json(result)
+        json_path.write_text(json.dumps(payload, indent=2, default=str) + "\n")
+    prereg, picked, chosen = result.prereg, result.picked, result.selection
+    if picked is None or chosen is None:
+        console.print(
+            f"[red]No eligible cell: #{prereg.issue} {prereg.name} v{prereg.version} is killed on "
+            "development data and gets no holdout run.[/red]",
+            soft_wrap=True,
+        )
+        return
+    try:
+        path = cell_selection.write_selection(chosen, directory)
+    except FileExistsError as exc:
+        raise _fail(f"{exc.filename} already exists; a selection is never changed") from exc
+    console.print(
+        f"[green]Picked cell {picked.index + 1}: {_cell_label(picked.cell)}[/green]. Wrote "
+        f"{path}: commit it alone, then run `odds candidates holdout {path}`.",
+        soft_wrap=True,
+    )
+
+
+def _cell_label(cell: dict[str, object], keys: Collection[str] | None = None) -> str:
+    """``cell`` as ``key=value`` pairs, of ``keys`` only when given."""
+    return " ".join(
+        f"{k}={json.dumps(v, separators=(',', ':'))}"
+        for k, v in cell.items()
+        if keys is None or k in keys
+    )
+
+
+def _ev(value: float | None) -> str:
+    return "-" if value is None else f"{value:+.4f}"
+
+
+def _selection_table(result: cell_selection.GridSelection) -> Table:
+    prereg = result.prereg
+    cells = [s.cell for s in result.scores]
+    varying = {k for k in cells[0] if any(c[k] != cells[0][k] for c in cells)}
+    fixed = {k for k in cells[0] if k not in varying}
+    table = Table(
+        title=(
+            f"#{prereg.issue} {prereg.name} v{prereg.version} ({prereg.rule}, {prereg.market}): "
+            "bets with a close per cell on development data"
+            + (f", every cell {_cell_label(cells[0], fixed)}" if fixed else "")
+        )
+    )
+    for column in ("#", "Cell", "Bets", "Events"):
+        table.add_column(column, justify="left" if column == "Cell" else "right")
+    for block in result.blocks:
+        table.add_column(f"{block.name}\nbets / mean EV", justify="right")
+    table.add_column("Mean EV", justify="right")
+    table.add_column(f"{cell_selection.INTERVAL_LEVEL:.0%} lower", justify="right")
+    if result.longshots:
+        table.add_column("Power-devig mean EV", justify="right")
+    table.add_column("Eligible")
+    for score in result.scores:
+        picked = result.picked is not None and score.index == result.picked.index
+        row = [
+            str(score.index + 1),
+            _cell_label(score.cell, varying),
+            str(score.bets),
+            str(score.events),
+            *(f"{b.bets} / {_ev(b.mean_ev)}" for b in score.blocks),
+            _ev(score.mean_ev),
+            _ev(score.lower_bound),
+            *([_ev(score.power_mean_ev)] if result.longshots else []),
+            "picked" if picked else "yes" if score.eligible else "no",
+        ]
+        table.add_row(*row, style="green" if picked else None)
+    table.caption = (
+        f"Eligible: at least {cell_selection.MIN_BETS} bets in {cell_selection.MIN_EVENTS} "
+        f"events, mean EV above 0 in every block with {cell_selection.MIN_BLOCK_BETS} or more"
+        + (
+            f". The power-devig mean EV is for information (bets above "
+            f"{cell_selection.LONGSHOT_PRICE}) and never changes the pick"
+            if result.longshots
+            else ""
+        )
+    )
+    return table
+
+
+def _selection_json(result: cell_selection.GridSelection) -> dict[str, Any]:
+    """The ``select --json`` payload: every cell's score in grid order with its placed bets,
+    each labelled with its block."""
+    cells = []
+    for score, cell in zip(result.scores, result.replays, strict=True):
+        cells.append(
+            {
+                **dataclasses.asdict(score),
+                "placed": [
+                    {"block": block.name, **_bet_json(bet)}
+                    for block, bets in cell.blocks
+                    for bet in bets
+                ],
+            }
+        )
+    return {
+        "preregistration": result.prereg.stem,
+        "grid_sha256": result.grid_sha256,
+        "selection_rule": result.prereg.selection_rule,
+        "blocks": [dataclasses.asdict(b) for b in result.blocks],
+        "longshots": result.longshots,
+        "picked": None if result.picked is None else result.picked.index,
+        "cells": cells,
+    }
 
 
 def _print_gate(row: holdout.HoldoutResult) -> None:
