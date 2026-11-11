@@ -124,3 +124,40 @@ class TestUnsettledEvents:
 
         assert issues == []
         send.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_alerts_per_football_league(self, pglite_async_session) -> None:
+        session = pglite_async_session
+        session.add_all(
+            [
+                _event(13, NOW - timedelta(days=3), sport_key="soccer_spain_la_liga"),
+                _event(14, NOW - timedelta(days=3), sport_key="soccer_efl_champ"),
+            ]
+        )
+        await session.flush()
+
+        issues, send = await _check(session)
+
+        assert len(issues) == 2
+        assert sorted(call.kwargs["alert_type"] for call in send.await_args_list) == [
+            "unsettled_events:soccer_efl_champ",
+            "unsettled_events:soccer_spain_la_liga",
+        ]
+
+
+class TestCheckedSports:
+    def test_every_football_league_is_checked_for_unsettled_events_and_betfair_closes(
+        self,
+    ) -> None:
+        from odds_lambda.health_monitor import BETFAIR_CLOSE_SPORTS, UNSETTLED_SPORTS
+
+        football = {
+            "soccer_epl",
+            "soccer_efl_champ",
+            "soccer_spain_la_liga",
+            "soccer_italy_serie_a",
+            "soccer_germany_bundesliga",
+            "soccer_france_ligue_one",
+        }
+        assert set(BETFAIR_CLOSE_SPORTS) == football
+        assert set(UNSETTLED_SPORTS) == football | {"baseball_mlb", "basketball_nba"}

@@ -246,6 +246,44 @@ class TestProcessResults:
         assert stats.events_updated == 1
 
     @pytest.mark.asyncio
+    async def test_a_football_league_settles_from_its_own_results_page(self, test_session) -> None:
+        test_session.add(
+            _make_event(
+                home_team="Borussia Monchengladbach",
+                away_team="Schalke",
+                sport_key="soccer_germany_bundesliga",
+            )
+        )
+        test_session.add(
+            _make_event(event_id=2, home_team="Borussia Monchengladbach", away_team="Schalke")
+        )
+        await test_session.commit()
+        client = MagicMock()
+        client.fetch_results = AsyncMock(
+            return_value=_fetched(_make_match(home_team="B. Monchengladbach", away_team="Schalke"))
+        )
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=None)
+
+        with (
+            patch(
+                "odds_lambda.jobs.fetch_oddsportal_results.async_session_maker",
+                _session_maker(test_session),
+            ),
+            patch(
+                "odds_lambda.jobs.fetch_oddsportal_results.OddsPortalClient", return_value=client
+            ),
+        ):
+            stats = await process_results(sport="soccer_germany_bundesliga")
+
+        client.fetch_results.assert_awaited_once_with(
+            "/football/germany/bundesliga/results/", since=KICKOFF - timedelta(hours=2)
+        )
+        assert (stats.events_updated, stats.events_unresolved) == (1, 0)
+        assert (await _stored(test_session, 1)).status == EventStatus.FINAL
+        assert (await _stored(test_session, 2)).status == EventStatus.SCHEDULED
+
+    @pytest.mark.asyncio
     async def test_no_pending_events_skips_the_fetch(self, test_session) -> None:
         with (
             patch(

@@ -94,6 +94,11 @@ JOB_SPECS: Mapping[str, JobSpec] = MappingProxyType(
                 Heartbeat("fetch-oddsportal-epl", 11, "soccer_epl"),
                 Heartbeat("fetch-oddsportal-mlb", 12, "baseball_mlb"),
                 Heartbeat("fetch-oddsportal-nba", 11, "basketball_nba"),
+                Heartbeat("fetch-oddsportal-championship", 11, "soccer_efl_champ"),
+                Heartbeat("fetch-oddsportal-laliga", 11, "soccer_spain_la_liga"),
+                Heartbeat("fetch-oddsportal-seriea", 11, "soccer_italy_serie_a"),
+                Heartbeat("fetch-oddsportal-bundesliga", 11, "soccer_germany_bundesliga"),
+                Heartbeat("fetch-oddsportal-ligue1", 11, "soccer_france_ligue_one"),
             ),
             cadence=Cadence(
                 closing=0.5,
@@ -108,8 +113,22 @@ JOB_SPECS: Mapping[str, JobSpec] = MappingProxyType(
         "fetch-oddsportal-results": JobSpec(
             module="odds_lambda.jobs.fetch_oddsportal_results",
             per_sport=True,
-            sports=("soccer_epl",),
-            heartbeats=(Heartbeat("fetch-oddsportal-results-epl", 26, "soccer_epl"),),
+            sports=(
+                "soccer_epl",
+                "soccer_efl_champ",
+                "soccer_spain_la_liga",
+                "soccer_italy_serie_a",
+                "soccer_germany_bundesliga",
+                "soccer_france_ligue_one",
+            ),
+            heartbeats=(
+                Heartbeat("fetch-oddsportal-results-epl", 26, "soccer_epl"),
+                Heartbeat("fetch-oddsportal-results-championship", 26, "soccer_efl_champ"),
+                Heartbeat("fetch-oddsportal-results-laliga", 26, "soccer_spain_la_liga"),
+                Heartbeat("fetch-oddsportal-results-seriea", 26, "soccer_italy_serie_a"),
+                Heartbeat("fetch-oddsportal-results-bundesliga", 26, "soccer_germany_bundesliga"),
+                Heartbeat("fetch-oddsportal-results-ligue1", 26, "soccer_france_ligue_one"),
+            ),
         ),
         "fetch-mlb-results": JobSpec(
             module="odds_lambda.jobs.fetch_mlb_results",
@@ -156,6 +175,11 @@ JOB_SPECS: Mapping[str, JobSpec] = MappingProxyType(
                 Heartbeat("fetch-betfair-exchange-epl", 10, "soccer_epl"),
                 Heartbeat("fetch-betfair-exchange-mlb", 11, "baseball_mlb"),
                 Heartbeat("fetch-betfair-exchange-nba", 11, "basketball_nba"),
+                Heartbeat("fetch-betfair-exchange-championship", 10, "soccer_efl_champ"),
+                Heartbeat("fetch-betfair-exchange-laliga", 10, "soccer_spain_la_liga"),
+                Heartbeat("fetch-betfair-exchange-seriea", 10, "soccer_italy_serie_a"),
+                Heartbeat("fetch-betfair-exchange-bundesliga", 10, "soccer_germany_bundesliga"),
+                Heartbeat("fetch-betfair-exchange-ligue1", 10, "soccer_france_ligue_one"),
             ),
             cadence=Cadence(
                 closing=0.25,

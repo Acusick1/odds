@@ -1,4 +1,4 @@
-"""Settle EPL events from OddsPortal's results pages.
+"""Settle football events from OddsPortal's results pages.
 
 Reads finished matches over HTTP from the results page's archive feed (no
 browser; see docs/adr/0009-oddsportal-feed-client.md) and sets matching

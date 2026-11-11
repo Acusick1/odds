@@ -44,7 +44,7 @@ status: stable
 
 # Scheduling decision engine
 
-`odds_lambda.scheduling.decision` maps proximity to a polling interval and a run/skip gate. Each function returns a frozen `odds_lambda.scheduling.decision.ScheduleDecision(should_execute, reason, next_execution, tier)`. Jobs call it as the first step of [self-scheduling](self-scheduling.md).
+`odds_lambda.scheduling.decision` maps proximity to a polling interval and a run/skip gate. Each function returns a frozen `odds_lambda.scheduling.decision.ScheduleDecision(should_execute, reason, next_execution, tier)`. Collection jobs call it as the first step of [self-scheduling](self-scheduling.md).
 
 ## Helpers
 
@@ -89,7 +89,7 @@ Hours per tier:
 | `fetch-polymarket-odds` | 0.083 | 0.25 | 0.25 | 0.5 | 1 | 6 |
 | `agent-run` | 1 | 4 | 4 | 12 | 24 | 12 |
 
-Values come from the `odds_core.job_specs.JobSpec` records in `odds_core.job_specs.JOB_SPECS`, selected by `odds_core.job_specs.job_cadence` and exposed through each runtime module's cadence constant (`odds_lambda.jobs.fetch_odds.CADENCE`, `odds_lambda.jobs.fetch_odds.NBA_CADENCE`, `odds_lambda.jobs.fetch_oddsportal.CADENCE`, `odds_lambda.jobs.fetch_betfair_exchange.CADENCE`, `odds_lambda.jobs.fetch_polymarket_odds.CADENCE`, `odds_lambda.jobs.agent_run.CADENCE`); they replace the `interval_hours` argument of `odds_lambda.scheduling.helpers.self_schedule`, which is only logged. `odds_lambda.scheduling.decision.CadenceConfig.interval_for` maps `IN_PLAY` to `closing`. Scores: 3-day window, 6 h active, 12 h idle. Status: 4 h window, 1 h active, 6 h idle.
+Values come from the `cadence` and `sport_cadences` of the `odds_core.job_specs.JobSpec` records in `odds_core.job_specs.JOB_SPECS`, selected by `odds_core.job_specs.job_cadence` and exposed through each runtime module's cadence constant (`odds_lambda.jobs.fetch_odds.CADENCE`, `odds_lambda.jobs.fetch_odds.NBA_CADENCE`, `odds_lambda.jobs.fetch_oddsportal.CADENCE`, `odds_lambda.jobs.fetch_betfair_exchange.CADENCE`, `odds_lambda.jobs.fetch_polymarket_odds.CADENCE`, `odds_lambda.jobs.agent_run.CADENCE`); they replace the `interval_hours` argument of `odds_lambda.scheduling.helpers.self_schedule`, which is only logged. `odds_lambda.scheduling.decision.CadenceConfig.interval_for` maps `IN_PLAY` to `closing`. Scores: 3-day window, 6 h active, 12 h idle. Status: 4 h window, 1 h active, 6 h idle.
 
 ## Lead runs
 
@@ -103,7 +103,7 @@ Three jobs pass leads:
 
 ## Overnight windows
 
-`odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS` suppresses runs in `soccer_epl` 22:00-06:00 UTC, `baseball_mlb` 05:00-14:00 UTC and `basketball_nba` 07:00-15:00 UTC (the last tip-off is about 03:30 UTC and the game ends by about 06:00; the earliest weekend tip-offs are about 16:00 UTC) via `odds_lambda.scheduling.helpers.apply_overnight_skip`, which pushes a candidate time to the resume hour and never raises. It applies only if the caller passes `overnight`: the fetch-oddsportal job indexes the map by its `odds_lambda.jobs.fetch_oddsportal.LeagueSpec` sport, Betfair and Polymarket odds look the sport up with `.get()` (no window for a sport missing from the map), `agent-run` indexes the map and raises `ValueError` for a sport missing from it (`odds_lambda.jobs.agent_run.schedule_next`), `fetch-odds` passes `odds_lambda.jobs.fetch_odds.NBA_QUIET_HOURS` (00:00-10:00 UTC) for NBA only, so its morning run is the first cadence run after the late games, and scores, status and EPL's `fetch-odds` pass none.
+`odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS` suppresses runs in each football league (`soccer_epl`, `soccer_efl_champ`, `soccer_spain_la_liga`, `soccer_italy_serie_a`, `soccer_germany_bundesliga`, `soccer_france_ligue_one`) 22:00-06:00 UTC (the latest kick-off, in La Liga and Ligue 1, is 20:00 UTC), `baseball_mlb` 05:00-14:00 UTC and `basketball_nba` 07:00-15:00 UTC (the last tip-off is about 03:30 UTC and the game ends by about 06:00; the earliest weekend tip-offs are about 16:00 UTC) via `odds_lambda.scheduling.helpers.apply_overnight_skip`, which pushes a candidate time to the resume hour and never raises. It applies only if the caller passes `overnight`: the fetch-oddsportal job indexes the map by its `odds_lambda.jobs.fetch_oddsportal.LeagueSpec` sport, Betfair and Polymarket odds look the sport up with `.get()` (no window for a sport missing from the map), `agent-run` indexes the map and raises `ValueError` for a sport missing from it (`odds_lambda.jobs.agent_run.schedule_next`), `fetch-odds` passes `odds_lambda.jobs.fetch_odds.NBA_QUIET_HOURS` (00:00-10:00 UTC) for NBA only, so its morning run is the first cadence run after the late games, and scores, status and EPL's `fetch-odds` pass none.
 
 `lookahead_days` comes from `odds_core.config.SchedulerConfig.lookahead_days` in `fetch-odds`, from `odds_lambda.scheduling.decision.DORMANCY_HORIZON_DAYS` in the three collectors, and is the function default of 7 elsewhere. Only an active run applies the overnight skip; a dormant check-in does not.
 

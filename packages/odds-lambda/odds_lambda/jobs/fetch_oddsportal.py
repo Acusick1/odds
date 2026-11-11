@@ -66,9 +66,11 @@ logger = structlog.get_logger()
 # 12h+ to kickoff all poll at 2h, matching the previous "far" band.
 CADENCE = CadenceConfig(**asdict(job_cadence("fetch-oddsportal")))
 
-# An EPL or MLB scrape takes about a minute (two minutes at most, October 2026), so a run
-# this long before a decision time has stored its snapshots by then. An NBA scrape with its
-# ladders took about 6 minutes (22 games), so an NBA candidate needs a longer lead.
+# An EPL or MLB scrape alone takes about a minute (two minutes at most, October 2026), so a
+# run this long before a decision time has stored its snapshots by then. Runs sharing the
+# process's request pacer take turns: the six football leagues together took 4 minutes
+# (November 2026). An NBA scrape with its ladders took about 6 minutes (22 games), so an NBA
+# candidate needs a longer lead.
 SCRAPE_LEAD = timedelta(minutes=5)
 
 
@@ -93,6 +95,46 @@ LEAGUE_SPECS: list[LeagueSpec] = [
         listing_path="/football/england/premier-league/",
         sport_key="soccer_epl",
         sport_title="EPL",
+        fixture_horizon=timedelta(hours=48),
+        markets=["1x2", "over_under_2_5"],
+    ),
+    LeagueSpec(
+        league="england-championship",
+        listing_path="/football/england/championship/",
+        sport_key="soccer_efl_champ",
+        sport_title="Championship",
+        fixture_horizon=timedelta(hours=48),
+        markets=["1x2", "over_under_2_5"],
+    ),
+    LeagueSpec(
+        league="spain-laliga",
+        listing_path="/football/spain/laliga/",
+        sport_key="soccer_spain_la_liga",
+        sport_title="La Liga",
+        fixture_horizon=timedelta(hours=48),
+        markets=["1x2", "over_under_2_5"],
+    ),
+    LeagueSpec(
+        league="italy-serie-a",
+        listing_path="/football/italy/serie-a/",
+        sport_key="soccer_italy_serie_a",
+        sport_title="Serie A",
+        fixture_horizon=timedelta(hours=48),
+        markets=["1x2", "over_under_2_5"],
+    ),
+    LeagueSpec(
+        league="germany-bundesliga",
+        listing_path="/football/germany/bundesliga/",
+        sport_key="soccer_germany_bundesliga",
+        sport_title="Bundesliga",
+        fixture_horizon=timedelta(hours=48),
+        markets=["1x2", "over_under_2_5"],
+    ),
+    LeagueSpec(
+        league="france-ligue-1",
+        listing_path="/football/france/ligue-1/",
+        sport_key="soccer_france_ligue_one",
+        sport_title="Ligue 1",
         fixture_horizon=timedelta(hours=48),
         markets=["1x2", "over_under_2_5"],
     ),

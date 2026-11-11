@@ -15,7 +15,8 @@ import hashlib
 import json
 import math
 import re
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from types import TracebackType
@@ -528,11 +529,37 @@ async def _sleep(seconds: float) -> None:
     await asyncio.sleep(seconds)
 
 
-class OddsPortalClient:
-    """Async client owning one HTTP session. Use as ``async with``."""
+class RequestPacer:
+    """Spaces the starts of the requests of every client that shares it."""
 
-    def __init__(self, request_delay: float = 1.0) -> None:
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
+        self._next_slot = -math.inf
+
+    async def wait(self, spacing: float) -> None:
+        """Wait for the next free slot, then hold the slots ``spacing`` seconds after it."""
+        now = self._clock()
+        slot = max(now, self._next_slot)
+        self._next_slot = slot + spacing
+        if slot > now:
+            await _sleep(slot - now)
+
+
+# One pacer per process: the scheduler scrapes several leagues concurrently, and OddsPortal sees
+# them all as one caller.
+_PROCESS_PACER = RequestPacer()
+
+
+class OddsPortalClient:
+    """Async client owning one HTTP session. Use as ``async with``.
+
+    Each request starts at least ``request_delay`` seconds after the previous request of any
+    client sharing ``pacer`` (by default every client in the process).
+    """
+
+    def __init__(self, request_delay: float = 1.0, pacer: RequestPacer | None = None) -> None:
         self._request_delay = request_delay
+        self._pacer = pacer if pacer is not None else _PROCESS_PACER
         self._session: aiohttp.ClientSession | None = None
 
     async def __aenter__(self) -> OddsPortalClient:
@@ -570,6 +597,7 @@ class OddsPortalClient:
         try:
             async for attempt in retrying:
                 with attempt:
+                    await self._pacer.wait(self._request_delay)
                     status, text = await self._fetch_text(url, headers)
                     if status == 429 or status >= 500:
                         raise _TransientError(f"HTTP {status}")
@@ -637,7 +665,6 @@ class OddsPortalClient:
             ):
                 return FetchedResults(matches, rows_seen, complete=True, cancelled=cancelled)
             page += 1
-            await _sleep(self._request_delay)
 
     async def fetch_bookmaker_context(self) -> BookmakerContext:
         home = await self._get_json(f"{BASE_URL}/proxy/api/home-data", _XHR_HEADERS)
@@ -680,7 +707,6 @@ class OddsPortalClient:
         self, url: str, headers: dict[str, str], event: ListingEvent, market_key: str
     ) -> dict[str, Any]:
         for attempt in range(_FEED_ERROR_MAX_RETRIES + 1):
-            await _sleep(self._request_delay)
             feed = await self._get_json(url, headers)
             data = feed.get("d") if isinstance(feed, dict) else None
             if not isinstance(data, dict):

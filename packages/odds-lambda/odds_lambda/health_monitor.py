@@ -19,7 +19,13 @@ from typing import NamedTuple, Protocol
 
 import structlog
 from odds_core.alerts import job_outage_alerted_at, send_recorded_alert
-from odds_core.close import LIVE_CLOSE_WINDOW, CloseKind, close_status, live_close_quotes
+from odds_core.close import (
+    CLOSES,
+    LIVE_CLOSE_WINDOW,
+    CloseKind,
+    close_status,
+    live_close_quotes,
+)
 from odds_core.config import Settings, get_settings
 from odds_core.database import async_session_maker
 from odds_core.market_prices import THREE_WAY_MARKET, TOTALS_MARKET
@@ -56,14 +62,32 @@ from odds_lambda.storage.unsettled_events import find_unsettled_events
 
 logger = structlog.get_logger()
 
-LEAGUE_SPORTS: tuple[str, ...] = ("soccer_epl",)
-UNSETTLED_SPORTS: tuple[str, ...] = ("soccer_epl", "baseball_mlb", "basketball_nba")
+# Football leagues where a home and away pair meets once a season. The Championship's
+# play-off semi-finals repeat league pairings, so it is checked for twins only.
+LEAGUE_SPORTS: tuple[str, ...] = (
+    "soccer_epl",
+    "soccer_spain_la_liga",
+    "soccer_italy_serie_a",
+    "soccer_germany_bundesliga",
+    "soccer_france_ligue_one",
+)
+UNSETTLED_SPORTS: tuple[str, ...] = (
+    *LEAGUE_SPORTS,
+    "soccer_efl_champ",
+    "baseball_mlb",
+    "basketball_nba",
+)
 UNSETTLED_AGE = timedelta(hours=24)
 EVENT_IDS_SHOWN = 10
 UNSETTLED_ALERT_MINUTES = 24 * 60
 GAME_PK_GRACE = timedelta(hours=24)
 GAME_PK_ALERT_INTERVAL = timedelta(hours=24)
-BETFAIR_CLOSE_SPORT = "soccer_epl"
+# The sports whose three-way market closes at the live Betfair price.
+BETFAIR_CLOSE_SPORTS: tuple[str, ...] = tuple(
+    sport
+    for (sport, market), spec in CLOSES.items()
+    if market is Market.ONE_X_TWO and spec is not None
+)
 BETFAIR_CLOSE_JOB = "fetch-betfair-exchange"
 BETFAIR_HISTORY_WINDOW = timedelta(hours=72)
 BETFAIR_CLOSE_ALERT_TYPE = "missing_betfair_close"
@@ -101,10 +125,11 @@ class StaleSource:
 
 @dataclass(frozen=True, slots=True)
 class MissingBetfairClose:
-    """A played EPL event with no live Betfair close in the window before kick-off: on the
-    three-way market, or on the line of a totals paper trade."""
+    """A played football event with no live Betfair close in the window before kick-off: on
+    the three-way market, or on the line of a totals paper trade."""
 
     event_id: int
+    sport_key: str
     home_team: str
     away_team: str
     commence_time: datetime
@@ -115,7 +140,7 @@ class MissingBetfairClose:
         missing = ["1x2"] if self.three_way else []
         missing += [f"totals {line:g}" for line in self.totals_lines]
         return (
-            f"{self.home_team} v {self.away_team} "
+            f"{self.sport_key} {self.home_team} v {self.away_team} "
             f"({self.commence_time:%Y-%m-%d %H:%M} UTC, {self.event_id}; no close on "
             f"{', '.join(missing)})"
         )
@@ -260,11 +285,12 @@ class HealthMonitor:
     async def check_missing_betfair_closes(
         self, now: datetime | None = None
     ) -> list[MissingBetfairClose]:
-        """Find recent EPL events whose ADR-0012 live Betfair close was never collected.
+        """Find recent events of ``BETFAIR_CLOSE_SPORTS`` whose ADR-0012 live Betfair close
+        was never collected.
 
         An event is checked from its kick-off until ``betfair_close_lookback_hours``
-        later, when the Betfair job is bootstrapped and has written EPL snapshots
-        before. It is skipped when its status is postponed or cancelled, or when it
+        later, when the Betfair job is bootstrapped for its sport and has written snapshots
+        of that sport before. It is skipped when its status is postponed or cancelled, or when it
         has no live Betfair snapshot in the ``BETFAIR_HISTORY_WINDOW`` before
         kick-off (a ghost, a twin that carries the prices, or an unannounced
         postponement). It is missing when ``odds_core.close.close_status`` over its
@@ -278,22 +304,24 @@ class HealthMonitor:
             or BETFAIR_CLOSE_JOB not in self.settings.scheduler.bootstrap_jobs
         ):
             return []
-        if BETFAIR_CLOSE_SPORT not in resolve_target_sports(
-            BETFAIR_CLOSE_JOB, self.settings.data_collection.sports
-        ):
-            return []
-        betfair_history = (
-            await self.session.execute(
-                select(OddsSnapshot.id)
-                .join(Event, Event.id == OddsSnapshot.event_id)  # type: ignore[arg-type]
-                .where(
-                    Event.sport_key == BETFAIR_CLOSE_SPORT, OddsSnapshot.source == Source.BETFAIR
+        targets = resolve_target_sports(BETFAIR_CLOSE_JOB, self.settings.data_collection.sports)
+        sports: list[str] = []
+        for sport in BETFAIR_CLOSE_SPORTS:
+            if sport not in targets:
+                continue
+            betfair_history = (
+                await self.session.execute(
+                    select(OddsSnapshot.id)
+                    .join(Event, Event.id == OddsSnapshot.event_id)  # type: ignore[arg-type]
+                    .where(Event.sport_key == sport, OddsSnapshot.source == Source.BETFAIR)
+                    .limit(1)
                 )
-                .limit(1)
-            )
-        ).first()
-        if betfair_history is None:
-            logger.info("betfair_close_no_history", sport=BETFAIR_CLOSE_SPORT)
+            ).first()
+            if betfair_history is None:
+                logger.info("betfair_close_no_history", sport=sport)
+                continue
+            sports.append(sport)
+        if not sports:
             return []
         lookback = timedelta(hours=self.settings.alerts.betfair_close_lookback_hours)
         events = (
@@ -301,7 +329,7 @@ class HealthMonitor:
                 await self.session.execute(
                     select(Event)
                     .where(
-                        Event.sport_key == BETFAIR_CLOSE_SPORT,
+                        Event.sport_key.in_(sports),  # type: ignore[attr-defined]
                         Event.commence_time <= moment,
                         Event.commence_time > moment - lookback,
                         Event.status.notin_((EventStatus.POSTPONED, EventStatus.CANCELLED)),  # type: ignore[attr-defined]
@@ -349,7 +377,7 @@ class HealthMonitor:
                 continue
             closes = await live_close_quotes(self.session, [event.id], THREE_WAY_MARKET)
             three_way_missing = (
-                close_status(closes, kickoff, BETFAIR_CLOSE_SPORT, THREE_WAY_MARKET, moment).kind
+                close_status(closes, kickoff, event.sport_key, THREE_WAY_MARKET, moment).kind
                 is not CloseKind.LIVE
             )
             totals_closes = await live_close_quotes(self.session, [event.id], TOTALS_MARKET)
@@ -357,7 +385,7 @@ class HealthMonitor:
                 line
                 for line in totals_lines.get(event.id, [])
                 if close_status(
-                    totals_closes, kickoff, BETFAIR_CLOSE_SPORT, TOTALS_MARKET, moment, line=line
+                    totals_closes, kickoff, event.sport_key, TOTALS_MARKET, moment, line=line
                 ).kind
                 is not CloseKind.LIVE
             )
@@ -366,6 +394,7 @@ class HealthMonitor:
             missing.append(
                 MissingBetfairClose(
                     event_id=event.id,
+                    sport_key=event.sport_key,
                     home_team=event.home_team,
                     away_team=event.away_team,
                     commence_time=kickoff,
@@ -668,7 +697,7 @@ class HealthMonitor:
 
         Checks:
         1. Stale data per source (no rows within the source's cadence while fixtures are scheduled),
-           and EPL events with no live Betfair close
+           and football events with no live Betfair close
         2. API quota levels
         3. Data quality issues
         4. Job heartbeats (missing completions)
@@ -704,7 +733,7 @@ class HealthMonitor:
             if missing_closes:
                 listing = "; ".join(close.describe() for close in missing_closes)
                 issue = (
-                    f"{len(missing_closes)} {BETFAIR_CLOSE_SPORT} events have no live Betfair "
+                    f"{len(missing_closes)} events have no live Betfair "
                     f"snapshot within {LIVE_CLOSE_WINDOW} before kick-off: {listing}"
                 )
                 issues_detected.append(issue)

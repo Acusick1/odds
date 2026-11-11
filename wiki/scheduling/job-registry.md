@@ -19,7 +19,7 @@ status: stable
 
 # Job registry
 
-`odds_core.job_specs.JOB_SPECS` contains immutable `odds_core.job_specs.JobSpec` records. Each record owns the entry point, sport routing (`fetch-espn-fixtures` lists seven sports), bootstrap default and override, smoke side effects, forward cadence, static cron and heartbeat identifiers. Core stores module names without importing runtime code; `odds_lambda.scheduling.jobs` resolves names and imports entry points lazily. [Where each job runs](job-deployment-matrix.md#where-each-job-runs) covers deployment.
+`odds_core.job_specs.JOB_SPECS` contains immutable `odds_core.job_specs.JobSpec` records. Each record owns the entry point, sport routing (`fetch-espn-fixtures` lists seven sports; `fetch-oddsportal-results` lists the six football leagues, and `fetch-oddsportal` and `fetch-betfair-exchange` carry a heartbeat for each league they collect), bootstrap default and override, smoke side effects, forward cadence, static cron and heartbeat identifiers. Core stores module names without importing runtime code; `odds_lambda.scheduling.jobs` resolves names and imports entry points lazily. [Where each job runs](job-deployment-matrix.md#where-each-job-runs) covers deployment.
 
 ## Registry
 

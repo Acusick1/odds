@@ -670,6 +670,7 @@ class TestCheckMissingBetfairCloses:
             kickoff: datetime,
             snapshots: tuple[tuple[datetime, dict[str, Any]], ...],
             status: EventStatus = EventStatus.FINAL,
+            sport_key: str = "soccer_epl",
         ) -> int:
             nonlocal counter
             counter += 1
@@ -677,8 +678,8 @@ class TestCheckMissingBetfairCloses:
             pglite_async_session.add(
                 Event(
                     id=event_id,
-                    sport_key="soccer_epl",
-                    sport_title="EPL",
+                    sport_key=sport_key,
+                    sport_title=sport_key,
                     commence_time=kickoff,
                     home_team="Home FC",
                     away_team="Away FC",
@@ -955,6 +956,45 @@ class TestCheckMissingBetfairCloses:
         monitor = HealthMonitor(pglite_async_session, settings)
 
         assert await monitor.check_missing_betfair_closes(NOW) == []
+
+    async def test_each_configured_football_league_is_checked(
+        self, pglite_async_session: Any, seed_event: Callable[..., Any]
+    ) -> None:
+        la_liga = await seed_event(
+            self.KICKOFF,
+            (self._earlier_betfair(self.KICKOFF), self._op(self.KICKOFF)),
+            sport_key="soccer_spain_la_liga",
+        )
+        await seed_event(
+            self.KICKOFF,
+            (self._earlier_betfair(self.KICKOFF), self._op(self.KICKOFF)),
+            sport_key="soccer_italy_serie_a",
+        )
+        settings = self._settings()
+        settings.data_collection.sports = ["soccer_epl", "soccer_spain_la_liga"]
+
+        missing = await HealthMonitor(pglite_async_session, settings).check_missing_betfair_closes(
+            NOW
+        )
+
+        assert [(m.event_id, m.sport_key) for m in missing] == [(la_liga, "soccer_spain_la_liga")]
+        assert missing[0].describe().startswith("soccer_spain_la_liga Home FC v Away FC")
+
+    async def test_a_league_betfair_never_wrote_is_not_checked_beside_one_it_did(
+        self, pglite_async_session: Any, seed_event: Callable[..., Any]
+    ) -> None:
+        epl = await seed_event(
+            self.KICKOFF, (self._earlier_betfair(self.KICKOFF), self._op(self.KICKOFF))
+        )
+        await seed_event(self.KICKOFF, (self._op(self.KICKOFF),), sport_key="soccer_efl_champ")
+        settings = self._settings()
+        settings.data_collection.sports = ["soccer_epl", "soccer_efl_champ"]
+
+        missing = await HealthMonitor(pglite_async_session, settings).check_missing_betfair_closes(
+            NOW
+        )
+
+        assert [m.event_id for m in missing] == [epl]
 
     async def test_betfair_source_that_never_wrote_is_not_checked(
         self, pglite_async_session: Any, seed_event: Callable[..., Any]

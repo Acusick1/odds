@@ -87,9 +87,27 @@ class TestLeagueSpecs:
 
         assert paths == {
             "england-premier-league": "/football/england/premier-league/",
+            "england-championship": "/football/england/championship/",
+            "spain-laliga": "/football/spain/laliga/",
+            "italy-serie-a": "/football/italy/serie-a/",
+            "germany-bundesliga": "/football/germany/bundesliga/",
+            "france-ligue-1": "/football/france/ligue-1/",
             "mlb": "/baseball/usa/mlb/",
             "nba": "/basketball/usa/nba/",
         }
+
+    def test_football_leagues_scrape_the_three_way_and_the_2_5_goals_line(self) -> None:
+        football = [s for s in LEAGUE_SPECS if s.listing_path.startswith("/football/")]
+
+        assert [s.sport_key for s in football] == [
+            "soccer_epl",
+            "soccer_efl_champ",
+            "soccer_spain_la_liga",
+            "soccer_italy_serie_a",
+            "soccer_germany_bundesliga",
+            "soccer_france_ligue_one",
+        ]
+        assert {tuple(s.markets) for s in football} == {("1x2", "over_under_2_5")}
 
     def test_nba_spec_is_two_way_h2h_with_ladders_and_a_daytime_overnight_window(self) -> None:
         spec = LEAGUE_SPEC_BY_NAME["nba"]
