@@ -29,7 +29,7 @@ Before anything is replayed, `odds_analytics.cell_selection.load_selectable` ref
 - a file outside `candidates/preregistrations/`, or one not named by its own issue, market and version (`odds_analytics.holdout.load_preregistration`);
 - a file whose `selection_rule` is not `odds_analytics.cell_selection.ROUND_ONE_RULE`;
 - a grid whose selection file already exists, since a selection is never changed;
-- any cell that does not resolve as a pooled draft: a rule that is not registered (the error lists the registered rules), a market a league has no rule for, or params the rule rejects (`odds_lambda.candidate_rules.rules.resolve_rule`).
+- any cell that does not resolve as a pooled draft: a rule that is not registered (the error lists the registered rules), a market a league has no rule for, or params the rule rejects (`odds_lambda.candidate_rules.registry.resolve_rule`).
 
 ## Replay
 
