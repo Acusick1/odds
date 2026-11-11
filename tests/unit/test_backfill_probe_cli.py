@@ -16,6 +16,12 @@ class TestProbeDryRun:
         result = RUNNER.invoke(app, ["backfill", "probe", "--manifest", str(MANIFEST), "--dry-run"])
 
         assert result.exit_code == 0, result.output
-        assert "Estimated units: 40" in result.output
-        assert "would fetch 2024-07-20T16:00:00Z  20 units" in result.output
-        assert "would fetch 2026-07-18T16:00:00Z  20 units" in result.output
+        assert "Estimated units: 20" in result.output
+        assert (
+            "would fetch 2024-07-20T15:58:08Z for the 2024-07-20T15:55:38Z snapshot  10 units"
+            in result.output
+        )
+        assert (
+            "would fetch 2026-07-18T15:58:08Z for the 2026-07-18T15:55:38Z snapshot  10 units"
+            in result.output
+        )

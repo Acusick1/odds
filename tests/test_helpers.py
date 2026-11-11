@@ -626,18 +626,6 @@ def odds_api_h2h(prices: dict[str, int], stamp: str) -> dict[str, Any]:
     )
 
 
-def odds_api_totals(line: float, over: int, under: int, stamp: str) -> dict[str, Any]:
-    """The totals market at one line, as a book returns it."""
-    return odds_api_quote(
-        "totals",
-        [
-            {"name": "Over", "price": over, "point": line},
-            {"name": "Under", "price": under, "point": line},
-        ],
-        stamp,
-    )
-
-
 def odds_api_game(
     api_id: str,
     sport: SportKey,

@@ -84,7 +84,8 @@ class Band(_Frozen):
 
 
 class GridStep(_Frozen):
-    """Snapshots every ``step_minutes`` from ``start``, until the next step starts."""
+    """Snapshots every ``step_minutes`` from ``start``, until the next step starts. ``start``
+    carries the provider's phase to the second, so the grid's times are the snapshots' own."""
 
     start: AwareDatetime
     step_minutes: PositiveInt
@@ -222,6 +223,21 @@ class Manifest(_Frozen):
         size = timedelta(minutes=step.step_minutes)
         return step.start + (t - step.start) // size * size
 
+    def request_time(self, snapshot: datetime) -> datetime:
+        """The time to request so the API, which returns the latest snapshot at or before it,
+        returns the snapshot at ``snapshot``: half a step later, clear of the seconds by which
+        a snapshot's time drifts either side of the grid."""
+        return snapshot + self.grid_step_at(snapshot) / 2
+
+
+def floor_minute(t: datetime) -> datetime:
+    return t.replace(second=0, microsecond=0)
+
+
+def ceil_minute(t: datetime) -> datetime:
+    floored = floor_minute(t)
+    return floored if floored == t else floored + MINUTE
+
 
 @dataclass(frozen=True)
 class Fixture:
@@ -250,7 +266,8 @@ class Target:
 
 @dataclass(frozen=True)
 class Call:
-    """One historical odds request at ``time`` and the fixture bands it gives inputs to."""
+    """One historical odds request for the grid snapshot at ``time`` and the fixture bands it
+    gives inputs to."""
 
     time: datetime
     serves: tuple[Target, ...]
@@ -300,7 +317,7 @@ def plan(manifest: Manifest, fixtures: Sequence[Fixture]) -> list[Call]:
         t = start
         while t < end:
             if times and times[-1] >= t - age:
-                t = times[-1] + age + MINUTE
+                t = floor_minute(times[-1] + age) + MINUTE
                 continue
             call = manifest.floor_to_grid(t)
             if call < t - age:

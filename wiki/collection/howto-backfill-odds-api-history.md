@@ -19,37 +19,38 @@ Costs a historical purchase before it is bought, buys it, and fills scores. Exec
 ## Cost and execute a manifest
 
 1. Write or pick a manifest in `backfills/` ([acquisition manifests](odds-api-backfill.md#acquisition-manifests)).
-   - List market keys only (`markets: [h2h, totals]`); a call stores every line the books return.
-   - Put each probe snapshot inside a season and on the snapshot grid; loading the manifest rejects one that is not.
+   - List market keys only (`markets: [h2h]`); a call stores every line the books return.
+   - Put each probe snapshot inside a season and on the snapshot grid, seconds included (such as `2025-09-13T09:55:38Z`); loading the manifest rejects one that is not.
 2. Make sure the manifest's seasons are stored as FINAL events; the planner reads fixtures from the database, and the executor stores prices only on stored events. `odds discover games --start D --end D --sport S` stores the events the Odds API lists for a window, spending sport S's key, resolving each to an existing event or creating a SCHEDULED one at its pre-game start; a game a snapshot lists already under way is skipped, since the API lists it at its actual start ([commands](odds-api-backfill.md#commands)). For MLB, `odds events sync-mlb-seasons --season YEAR` stores every played game as a FINAL event from the free MLB Stats API instead ([MLB season load](mlb-season-load.md)).
 3. Print the cost.
    ```bash
-   uv run odds backfill plan --manifest backfills/odds-api-epl-2020-26.yaml --cost
+   uv run odds backfill plan --manifest backfills/odds-api-epl-2022-26.yaml --cost
    ```
    - It makes no API call. Add `--season 2024-25` to cost one season, and drop `--cost` to list the planned calls.
    - A band's row is what that band adds to the others, so dropping it saves that many calls.
    - The caption is the sport's key balance left after the whole plan, or says the balance is unknown when no recent fetch recorded a quota.
 4. Dry-run the execution.
    ```bash
-   uv run odds backfill execute --manifest backfills/odds-api-epl-2020-26.yaml --season 2024-25 --dry-run
+   uv run odds backfill execute --manifest backfills/odds-api-epl-2022-26.yaml --season 2024-25 --dry-run
    ```
    - It makes no API call. It prints the calls, the units they would cost and the acquisition key's balance (unknown when no recent fetch recorded a quota), and counts the calls a backfill already stored as skipped; live Odds API snapshots do not count.
 5. Probe the manifest.
    ```bash
-   uv run odds backfill probe --manifest backfills/odds-api-epl-2020-26.yaml --dry-run
-   uv run odds backfill probe --manifest backfills/odds-api-epl-2020-26.yaml
+   uv run odds backfill probe --manifest backfills/odds-api-epl-2022-26.yaml --dry-run
+   uv run odds backfill probe --manifest backfills/odds-api-epl-2022-26.yaml
    ```
-   - The dry run lists the calls and their units without a key or a database; the real run spends them on the acquisition key and stores what comes back.
-   - It exits non-zero if the snapshot lag, the billed units, the grid gaps, the farthest fixture's lead, the required books or how far ahead they are listed disagree with the manifest ([probe](odds-api-backfill.md#probing-a-manifest)). Fix the manifest, or stop, before executing.
+   - The dry run lists each call's request time, the snapshot it requests and its units, without a key or a database; the real run spends them on the acquisition key and stores what comes back.
+   - It exits non-zero if the returned snapshot is not the requested one, or the billed units, the grid gaps, the farthest fixture's lead, the required books or how far ahead they are listed disagree with the manifest ([probe](odds-api-backfill.md#probing-a-manifest)). Fix the manifest, or stop, before executing.
 6. Execute.
    ```bash
-   uv run odds backfill execute --manifest backfills/odds-api-epl-2020-26.yaml --season 2024-25
+   uv run odds backfill execute --manifest backfills/odds-api-epl-2022-26.yaml --season 2024-25
    ```
    > [!WARNING]
    > `odds backfill execute` spends paid historical quota on the acquisition key (`ODDS_API_ACQUISITION_KEY_INDEX`, which must be set), whatever the manifest's sport, 10 units per region per market per call. Confirm the prompt only when the estimated units fit the key's balance.
 
-   - Add `--max-units N` to cap the units the run may bill. The run also stops when a call's billed units differ from the manifest's or several consecutive calls are sparse (no events, none of their fixtures stored, or a required book missing on a fixture within a day of kick-off; `--max-consecutive-gaps`) ([guards](odds-api-backfill.md#executing-calls)).
+   - Add `--max-units N` to cap the units the run may bill. The run also stops when a call's billed units differ from the manifest's, when a call returns a snapshot other than the planned one, or when several consecutive calls are sparse (no events, none of their fixtures stored, or a required book missing on a fixture near kick-off; `--max-consecutive-gaps`) ([guards](odds-api-backfill.md#executing-calls)).
    - A guard that stops the run exits non-zero with its reason, and so does a call that fails. Rerun the same command: calls with a stored snapshot for any fixture they serve are skipped, unless you pass `--no-skip-existing`.
+   - A snapshot stop is the exception: the mismatched call's snapshot is stored, so an unchanged rerun skips it and carries on with the wrong grid. Correct the manifest's `snapshot_grid` to the returned snapshot's phase before rerunning.
    - Each call logs its real cost, and the run ends with the key's remaining quota. Backfill calls record no quota in `fetch_logs`, so `odds status quota` does not show their spend.
    - The summary's dropped games are distinct games the calls listed but no stored event took ([historical listings](../storage/event-matching.md#historical-odds-api-listings)); an `id_refused` drop names a second event holding the game's Odds API id.
 

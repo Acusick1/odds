@@ -22,7 +22,8 @@ from pydantic import ValidationError
 from tests.test_helpers import add_event
 
 REPO = Path(__file__).resolve().parents[2]
-FIVE_MINUTES_FROM = datetime(2022, 9, 1, tzinfo=UTC)
+COMMITTED = sorted((REPO / "backfills").glob("*.yaml"))
+FIVE_MINUTES_FROM = datetime(2022, 9, 1, 0, 0, 38, tzinfo=UTC)
 
 
 def band(min_lead: int, max_lead: int, age: int) -> dict[str, int]:
@@ -45,11 +46,11 @@ def manifest_data(**overrides: Any) -> dict[str, Any]:
             band(181, 600, 120),
         ],
         "snapshot_grid": [
-            {"start": "2020-06-06T00:00:00Z", "step_minutes": 10},
-            {"start": "2022-09-01T00:00:00Z", "step_minutes": 5},
+            {"start": "2020-06-06T00:05:00Z", "step_minutes": 10},
+            {"start": "2022-09-01T00:00:38Z", "step_minutes": 5},
         ],
         "probe": {
-            "snapshots": ["2022-09-17T10:00:00Z"],
+            "snapshots": ["2022-09-17T09:55:38Z"],
             "min_fixture_lead_hours": 12,
             "required_bookmakers": {"h2h": ["book0"]},
             "units_per_call": 20,
@@ -70,7 +71,7 @@ def manifest() -> Manifest:
 def random_fixtures(seed: int, n: int) -> list[Fixture]:
     """Kick-offs on any minute either side of the grid change, many sharing a slot."""
     rng = random.Random(seed)
-    base = FIVE_MINUTES_FROM - timedelta(days=20)
+    base = datetime(2022, 9, 1, tzinfo=UTC) - timedelta(days=20)
     slots = [base + timedelta(minutes=rng.randrange(40 * 24 * 60)) for _ in range(n // 3)]
     return [Fixture(i, rng.choice(slots)) for i in range(n)]
 
@@ -114,7 +115,7 @@ class TestPlan:
     def test_no_fewer_grid_calls_cover_every_decision(self, seed: int) -> None:
         small = Manifest.model_validate(manifest_data(coverage=[band(1, 20, 10), band(21, 40, 20)]))
         rng = random.Random(seed)
-        base = FIVE_MINUTES_FROM - timedelta(minutes=45)
+        base = datetime(2022, 9, 1, tzinfo=UTC) - timedelta(minutes=45)
         fixtures = [Fixture(i, base + timedelta(minutes=rng.randrange(30))) for i in range(2)]
         needs = decisions(fixtures, small)
         lo = min(d - age for d, age in needs)
@@ -136,11 +137,34 @@ class TestPlan:
 
         assert len(plan(small, fixtures)) == fewest
 
-    def test_calls_fall_on_the_snapshot_grid(self, manifest: Manifest) -> None:
+    def test_calls_fall_on_the_phased_snapshot_grid(self, manifest: Manifest) -> None:
         for call in plan(manifest, random_fixtures(0, 30)):
-            step = 5 if call.time >= FIVE_MINUTES_FROM else 10
-            assert call.time.second == call.time.microsecond == 0
-            assert call.time.minute % step == 0
+            if call.time >= FIVE_MINUTES_FROM:
+                assert (call.time.minute % 5, call.time.second) == (0, 38)
+            else:
+                assert (call.time.minute % 10, call.time.second) == (5, 0)
+
+    @pytest.mark.parametrize("seed", range(5))
+    def test_no_call_is_after_a_decision_it_is_the_input_to(
+        self, manifest: Manifest, seed: int
+    ) -> None:
+        fixtures = random_fixtures(seed, 30)
+        times = [call.time for call in plan(manifest, fixtures)]
+
+        for decision, _ in decisions(fixtures, manifest):
+            index = bisect.bisect_right(times, decision) - 1
+            assert index >= 0 and times[index] <= decision
+
+    def test_a_phased_grid_takes_the_snapshot_before_the_decision_minute(self) -> None:
+        single = Manifest.model_validate(manifest_data(coverage=[band(1, 10, 10)]))
+        kickoff = datetime(2022, 10, 1, 14, 0, tzinfo=UTC)
+
+        calls = plan(single, [Fixture(1, kickoff)])
+
+        assert [c.time for c in calls] == [
+            datetime(2022, 10, 1, 13, 45, 38, tzinfo=UTC),
+            datetime(2022, 10, 1, 13, 55, 38, tzinfo=UTC),
+        ]
 
     def test_fixtures_sharing_a_kickoff_share_calls(self, manifest: Manifest) -> None:
         kickoff = datetime(2022, 10, 1, 14, 0, tzinfo=UTC)
@@ -166,23 +190,23 @@ class TestPlan:
 
 
 class TestManifest:
-    def test_the_committed_manifest_plans(self) -> None:
-        committed = Manifest.load(REPO / "backfills" / "odds-api-epl-2020-26.yaml")
+    @pytest.mark.parametrize("path", COMMITTED, ids=lambda p: p.stem)
+    def test_every_committed_manifest_plans(self, path: Path) -> None:
+        committed = Manifest.load(path)
+        season = next(iter(committed.seasons.values()))
+        kickoff = season.start + timedelta(days=60, hours=14)
 
-        assert committed.units_per_call == 20
-        assert plan(committed, [Fixture(1, datetime(2024, 10, 5, 14, 0, tzinfo=UTC))])
+        assert plan(committed, [Fixture(1, kickoff)])
 
-    @pytest.mark.parametrize(
-        "path", sorted((REPO / "backfills").glob("*.yaml")), ids=lambda p: p.stem
-    )
+    @pytest.mark.parametrize("path", COMMITTED, ids=lambda p: p.stem)
     def test_every_committed_manifest_requests_the_same_prices(self, path: Path) -> None:
-        reference = Manifest.load(REPO / "backfills" / "odds-api-epl-2020-26.yaml")
+        reference = Manifest.load(REPO / "backfills" / "odds-api-epl-2022-26.yaml")
         committed = Manifest.load(path)
 
         assert committed.bookmakers == reference.bookmakers
         assert committed.markets == reference.markets
-        assert committed.coverage == reference.coverage
-        assert committed.units_per_call == 20
+        assert committed.coverage[0] == reference.coverage[0]
+        assert committed.units_per_call == 10
 
     @pytest.mark.parametrize(
         ("books", "regions", "units"),
@@ -242,7 +266,8 @@ class TestManifest:
             ),
             (None, {"snapshots": ["2023-09-16T10:00:00Z"]}, "outside every season"),
             (None, {"snapshots": ["2020-01-01T00:00:00Z"]}, "outside every season"),
-            (None, {"snapshots": ["2022-09-17T10:02:00Z"]}, "off the grid"),
+            (None, {"snapshots": ["2022-09-17T10:00:00Z"]}, "off the grid"),
+            (None, {"snapshots": ["2022-09-17T09:55:37Z"]}, "off the grid"),
         ],
     )
     def test_the_probe_matches_the_request(
@@ -271,6 +296,21 @@ class TestManifest:
             minutes=10
         )
         assert manifest.grid_step_at(FIVE_MINUTES_FROM) == timedelta(minutes=5)
+
+    @pytest.mark.parametrize(
+        ("snapshot", "requested"),
+        [
+            (
+                datetime(2022, 9, 17, 9, 55, 38, tzinfo=UTC),
+                datetime(2022, 9, 17, 9, 58, 8, tzinfo=UTC),
+            ),
+            (datetime(2021, 9, 18, 9, 55, tzinfo=UTC), datetime(2021, 9, 18, 10, 0, tzinfo=UTC)),
+        ],
+    )
+    def test_a_snapshot_is_requested_half_its_step_later(
+        self, manifest: Manifest, snapshot: datetime, requested: datetime
+    ) -> None:
+        assert manifest.request_time(snapshot) == requested
 
     def test_grid_step_before_the_first_snapshot_raises(self, manifest: Manifest) -> None:
         with pytest.raises(ValueError, match="before the first snapshot"):

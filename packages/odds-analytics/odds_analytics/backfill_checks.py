@@ -17,15 +17,23 @@ from odds_core.time import parse_api_datetime
 from odds_core.utils import is_three_way_sport
 from odds_core.vocabulary import Market
 
-from odds_analytics.backfill_plan import Manifest
+from odds_analytics.backfill_plan import Manifest, ceil_minute, floor_minute
 
 # The provider stamps snapshots to the second, so a neighbour is one grid step away to within
-# this, and a returned snapshot is the requested time to within it.
+# this.
 TIMESTAMP_TOLERANCE = timedelta(seconds=60)
 # A call's required books are judged on fixtures at most this far from kick-off, so a call that
 # lists only games days ahead, as across a break, is not judged on books that are not posted
-# that early (inferred). The probe checks that each required book appears this far ahead.
-BOOK_JUDGED_LEAD = timedelta(hours=24)
+# that early (inferred).
+MAX_BOOK_JUDGED_LEAD = timedelta(hours=24)
+
+
+def book_judged_lead(manifest: Manifest) -> timedelta:
+    """How far from kick-off a call's required books are judged: at most
+    ``MAX_BOOK_JUDGED_LEAD``, and no farther than the manifest needs fixtures listed, for a
+    sport whose fixtures are listed only hours ahead. The probe checks that each required book
+    appears this far ahead."""
+    return min(MAX_BOOK_JUDGED_LEAD, timedelta(hours=manifest.probe.min_fixture_lead_hours))
 
 
 def stored_market(manifest: Manifest, market: Market) -> Market:
@@ -38,7 +46,8 @@ def stored_market(manifest: Manifest, market: Market) -> Market:
 
 @dataclass(frozen=True)
 class ResponseCheck:
-    """What a response returned, against what the manifest expects of it.
+    """What a response returned, against what the manifest expects of it: ``modelled`` is the
+    grid snapshot the call requested and ``snapshot_time`` the one the provider returned.
 
     ``book_events`` counts, for each required (market, bookmaker), the events judged that carry
     it; it is empty when no event was judged. ``book_leads`` is the farthest lead, kick-off less
@@ -47,7 +56,7 @@ class ResponseCheck:
     """
 
     manifest: Manifest
-    lag: timedelta
+    modelled: datetime
     snapshot_time: datetime
     units: int | None
     events: int
@@ -68,10 +77,17 @@ class ResponseCheck:
         return self.units == self.manifest.probe.units_per_call
 
     @property
+    def lag(self) -> timedelta:
+        return self.modelled - self.snapshot_time
+
+    @property
     def lag_ok(self) -> bool:
-        """The snapshot is the requested grid time, which the planner's coverage and
-        skip-existing assume."""
-        return self.lag <= TIMESTAMP_TOLERANCE
+        """The snapshot is an input to the same whole-minute decisions, at any whole-minute max
+        age, as the modelled one the planner's coverage assumes: it falls within the modelled
+        time's whole minute, or exactly on the next minute."""
+        return ceil_minute(self.snapshot_time) <= ceil_minute(self.modelled) and floor_minute(
+            self.snapshot_time
+        ) >= floor_minute(self.modelled)
 
     @property
     def grid_ok(self) -> bool:
@@ -102,10 +118,11 @@ class ResponseCheck:
 
     @property
     def horizon_ok(self) -> bool:
-        """Each required book is listed at least ``BOOK_JUDGED_LEAD`` ahead of kick-off, so a
+        """Each required book is listed at least ``book_judged_lead`` ahead of kick-off, so a
         run's book judging, which stops there, never rests on a book not yet posted. A book with
         no events at all fails ``books_ok`` instead."""
-        return all(lead >= BOOK_JUDGED_LEAD for lead in self.book_leads.values())
+        horizon = book_judged_lead(self.manifest)
+        return all(lead >= horizon for lead in self.book_leads.values())
 
     @property
     def sparse_reason(self) -> str | None:
@@ -135,14 +152,14 @@ class ResponseCheck:
 def check_response(
     manifest: Manifest,
     response: HistoricalOddsResponse,
-    requested: datetime,
+    modelled: datetime,
     *,
     judged_events: Sequence[Mapping[str, Any]] | None,
     served: int = 0,
     served_stored: int = 0,
 ) -> ResponseCheck:
-    """``response`` to a request for ``requested``, with its required books counted over
-    ``judged_events`` (None: no event is fit to judge them on)."""
+    """``response`` to a request for the grid snapshot at ``modelled``, with its required books
+    counted over ``judged_events`` (None: no event is fit to judge them on)."""
     snapshot = response.snapshot_time
     required: dict[tuple[Market, str], int] = {}
     if judged_events is not None:
@@ -164,7 +181,7 @@ def check_response(
             leads[key] = max(lead, leads.get(key, lead))
     return ResponseCheck(
         manifest=manifest,
-        lag=requested - snapshot,
+        modelled=modelled,
         snapshot_time=snapshot,
         units=response.units_used,
         events=len(response.events),

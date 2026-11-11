@@ -11,6 +11,7 @@ from odds_analytics.backfill_executor import BackfillExecutor, BackfillResult
 from odds_analytics.backfill_plan import Call, Fixture, Manifest, Target
 from odds_core.models import DataQualityLog, Event, EventExternalId, EventStatus, OddsSnapshot
 from odds_core.sports import SportKey
+from odds_core.time import utc_isoformat
 from odds_core.vocabulary import Source
 from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.live_events import DroppedGame, LiveEventFinder, SkipReason
@@ -27,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tests.test_helpers import (
     LEAGUE_FIXTURES,
     LeagueFixture,
-    RecordedHttpSession,
+    ReplayHttpSession,
     SessionFactory,
     load_fduk_fixture,
 )
@@ -122,16 +123,18 @@ async def run_calls(
     listings: list[dict[str, Any]],
     serves: tuple[Event, ...] = (),
 ) -> BackfillResult:
-    """One run of planned calls at ``times``, each answered with the response for the first."""
-    at = times[0]
-    snapshot_time = at - timedelta(minutes=5)
-    http = RecordedHttpSession(
-        {"timestamp": snapshot_time.isoformat().replace("+00:00", "Z"), "data": listings},
+    """One run of planned calls at ``times``, each answered with its planned snapshot listing
+    ``listings``."""
+    m = manifest(sport)
+    http = ReplayHttpSession(
+        {
+            utc_isoformat(m.request_time(t)): {"timestamp": utc_isoformat(t), "data": listings}
+            for t in times
+        },
         {"x-requests-last": "10", "x-requests-remaining": "1000", "x-requests-used": "10"},
     )
     client = TheOddsAPIClient(api_key="k", base_url="http://example.invalid")
     client.session = http  # type: ignore[assignment]
-    m = manifest(sport)
     band = m.coverage[0]
     calls = [
         Call(
@@ -193,7 +196,7 @@ class TestHistoricalFixtureAttach:
 
         assert [e.id for e in await events_of(session, league.sport)] == [loaded.id]
         assert await odds_api_ids(session, loaded) == ["api-1"]
-        assert await snapshot_times(session, loaded) == {at - timedelta(minutes=5)}
+        assert await snapshot_times(session, loaded) == {at}
         assert (loaded.status, loaded.commence_time) == (EventStatus.FINAL, league.kickoff)
         assert (result.fixtures_stored, result.dropped_games) == (1, {})
 
@@ -264,7 +267,7 @@ class TestHistoricalFixtureAttach:
 
         assert [e.id for e in await events_of(session, fixture.sport)] == [loaded.id]
         assert await odds_api_ids(session, loaded) == ["vr"]
-        assert await snapshot_times(session, loaded) == {after - timedelta(minutes=5)}
+        assert await snapshot_times(session, loaded) == {after}
         assert (loaded.status, loaded.commence_time) == (EventStatus.FINAL, fixture.kickoff)
         for result in (first, rerun):
             assert [d.reason for d in result.dropped_games] == [SkipReason.NO_EVENT]
@@ -359,8 +362,8 @@ class TestHistoricalFixtureAttach:
         assert [e.id for e in await events_of(session, fixture.sport)] == [loaded.id]
         assert await odds_api_ids(session, loaded) == ["api-1"]
         assert await snapshot_times(session, loaded) == {
-            early - timedelta(minutes=5),
-            late - timedelta(minutes=5),
+            early,
+            late,
         }
 
 

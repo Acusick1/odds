@@ -35,7 +35,6 @@ from tests.test_helpers import (
     mlb_game,
     odds_api_game,
     odds_api_h2h,
-    odds_api_totals,
     with_game_pk,
 )
 
@@ -64,9 +63,9 @@ class BackfillReplay:
     def __init__(self, engine: AsyncEngine, session: AsyncSession) -> None:
         self._engine = engine
         self._session = session
-        self._responses: dict[str, dict[str, Any]] = {}
+        self._responses: dict[datetime, dict[str, Any]] = {}
         self.requests: list[dict[str, Any]] = []
-        self._billing: dict[str, tuple[int | None, bool]] = {}
+        self._billing: dict[datetime, tuple[int | None, bool]] = {}
 
     def record(
         self,
@@ -79,19 +78,20 @@ class BackfillReplay:
         billed: int | None = None,
         bill_header: bool = True,
     ) -> None:
-        """The response a call at ``at`` gets: the provider's snapshot, by default 5 minutes
-        earlier, with ``games`` and the neighbouring snapshots ``previous_gap`` before and
-        ``next_gap`` after it (None leaves that timestamp out). The call is billed ``billed`` units
-        in ``x-requests-last``: by default the manifest's for a response with games and nothing
-        for an empty one, which the API does not count; ``bill_header=False`` sends no header."""
-        taken = snapshot or at - timedelta(minutes=5)
+        """The response a call for the grid snapshot at ``at`` gets, at the time the manifest
+        requests it: the provider's snapshot, by default ``at`` itself, with ``games`` and the
+        neighbouring snapshots ``previous_gap`` before and ``next_gap`` after it (None leaves that
+        timestamp out). The call is billed ``billed`` units in ``x-requests-last``: by default the
+        manifest's for a response with games and nothing for an empty one, which the API does not
+        count; ``bill_header=False`` sends no header."""
+        taken = snapshot or at
         response: dict[str, Any] = {"timestamp": utc_isoformat(taken), "data": games}
         if previous_gap is not None:
             response["previous_timestamp"] = utc_isoformat(taken - previous_gap)
         if next_gap is not None:
             response["next_timestamp"] = utc_isoformat(taken + next_gap)
-        self._responses[utc_isoformat(at)] = response
-        self._billing[utc_isoformat(at)] = (billed, bill_header)
+        self._responses[at] = response
+        self._billing[at] = (billed, bill_header)
 
     @staticmethod
     def call(manifest: Manifest, at: datetime, *serves: Event) -> Call:
@@ -112,13 +112,16 @@ class BackfillReplay:
     ) -> AsyncIterator[BackfillExecutor]:
         """An executor building its client from the acquisition key, as a real run does."""
         headers = {"x-requests-remaining": "4900000", "x-requests-used": "100000"}
+        responses: dict[str, dict[str, Any]] = {}
         by_date: dict[str, dict[str, str]] = {}
-        for date, (billed, bill_header) in self._billing.items():
+        for at, (billed, bill_header) in self._billing.items():
+            date = utc_isoformat(manifest.request_time(at))
+            responses[date] = self._responses[at]
             units = billed
             if units is None:
-                units = manifest.units_per_call if self._responses[date]["data"] else 0
+                units = manifest.units_per_call if responses[date]["data"] else 0
             by_date[date] = {"x-requests-last": str(units)} if bill_header else {}
-        http = ReplayHttpSession(self._responses, headers, by_date)
+        http = ReplayHttpSession(responses, headers, by_date)
         settings = Settings(
             api=APIConfig(
                 keys=f"live,nba-live,{ACQUISITION_KEY}", acquisition_key_index=2, _env_file=None
@@ -161,7 +164,7 @@ class BackfillReplay:
 # Shared by the backfill replay and guard tests.
 BACKFILLS = Path(__file__).resolve().parents[2] / "backfills"
 MANIFEST_FILES: dict[SportKey, str] = {
-    "soccer_epl": "odds-api-epl-2020-26.yaml",
+    "soccer_epl": "odds-api-epl-2022-26.yaml",
     "soccer_spain_la_liga": "odds-api-la-liga-2024-26.yaml",
     "soccer_italy_serie_a": "odds-api-serie-a-2024-26.yaml",
     "soccer_germany_bundesliga": "odds-api-bundesliga-2024-26.yaml",
@@ -176,23 +179,12 @@ MLB = "baseball_mlb"
 CUBS, CARDINALS = "Chicago Cubs", "St. Louis Cardinals"
 YANKEES, RED_SOX = "New York Yankees", "Boston Red Sox"
 
-# Every game's quotes: Pinnacle and William Hill each quote their own totals line, and two books
-# quote only h2h. The totals lines are (Pinnacle, William Hill, Pinnacle after it moves).
-TOTALS_LINES: dict[str, tuple[float, float, float]] = {
-    "soccer": (2.5, 2.75, 3.0),
-    NBA: (224.5, 225.0, 226.5),
-    MLB: (8.5, 9.0, 9.5),
-}
 HOME_PRICE = -120
 STORED_BOOKS = {"pinnacle", "williamhill", "ladbrokes", "betfair_exchange"}
 
 
 def load_manifest(sport: SportKey) -> Manifest:
     return Manifest.load(BACKFILLS / MANIFEST_FILES[sport])
-
-
-def totals_lines(sport: SportKey) -> tuple[float, float, float]:
-    return TOTALS_LINES["soccer" if is_three_way_sport(sport) else sport]
 
 
 @dataclass(frozen=True)
@@ -206,13 +198,13 @@ class Listed:
     start: datetime
     sport_title: str
 
-    def listing(self, stamp: datetime, *, totals_moved: bool = False) -> dict[str, Any]:
+    def listing(self, stamp: datetime, *, home_price: int = HOME_PRICE) -> dict[str, Any]:
+        """The game's h2h quoted by four books, each with ``home_price`` on the home side."""
         sport: SportKey = self.event.sport_key
-        pinnacle, william_hill, moved = totals_lines(sport)
         at = stamp.isoformat().replace("+00:00", "Z")
-        prices = {self.home: HOME_PRICE, self.away: 100}
+        prices = {self.home: home_price, self.away: 100}
         if is_three_way_sport(sport):
-            prices = {self.home: HOME_PRICE, self.away: 330, "Draw": 260}
+            prices = {self.home: home_price, self.away: 330, "Draw": 260}
         h2h = odds_api_h2h(prices, at)
         return odds_api_game(
             self.api_id,
@@ -221,15 +213,7 @@ class Listed:
             self.home,
             self.away,
             self.start,
-            {
-                "pinnacle": [
-                    h2h,
-                    odds_api_totals(moved if totals_moved else pinnacle, -110, -105, at),
-                ],
-                "williamhill": [h2h, odds_api_totals(william_hill, -115, -105, at)],
-                "ladbrokes_uk": [h2h],
-                "betfair_ex_uk": [h2h],
-            },
+            dict.fromkeys(("pinnacle", "williamhill", "ladbrokes_uk", "betfair_ex_uk"), [h2h]),
             at,
         )
 

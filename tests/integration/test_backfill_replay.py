@@ -53,7 +53,6 @@ from tests.integration.backfill_replay_helpers import (
     load_manifest,
     load_mlb,
     load_nba,
-    totals_lines,
 )
 from tests.test_helpers import (
     LEAGUE_FIXTURES,
@@ -117,9 +116,9 @@ class TestManifestsAreReplayed:
         assert {p.values[0] for p in REPLAYS} == set(MANIFEST_FILES)
 
     @pytest.mark.parametrize("sport", MANIFEST_FILES)
-    def test_manifest_requests_h2h_and_totals_from_its_bookmakers(self, sport: SportKey) -> None:
+    def test_manifest_requests_h2h_from_its_bookmakers(self, sport: SportKey) -> None:
         manifest = load_manifest(sport)
-        assert [str(m) for m in manifest.markets] == ["h2h", "totals"]
+        assert [str(m) for m in manifest.markets] == ["h2h"]
         assert len(manifest.bookmakers) == 10 and not manifest.regions
 
 
@@ -141,10 +140,9 @@ class TestReplayPerSport:
         scored = {e.id: (e.status, e.home_score, e.away_score, e.completed_at) for e in events}
         first = min(g.start for g in games) - timedelta(hours=2)
         second = first + timedelta(hours=1)
-        replay.record(first, [g.listing(first) for g in games], snapshot=first)
-        replay.record(
-            second, [g.listing(second, totals_moved=True) for g in games], snapshot=second
-        )
+        moved = HOME_PRICE - 10
+        replay.record(first, [g.listing(first) for g in games])
+        replay.record(second, [g.listing(second, home_price=moved) for g in games])
         calls = [replay.call(manifest, at, *events) for at in (first, second)]
 
         result = await replay.run(manifest, calls)
@@ -158,10 +156,9 @@ class TestReplayPerSport:
         assert result.quota_remaining == 4900000
         for request in replay.requests:
             assert request["apiKey"] == ACQUISITION_KEY
-            assert request["markets"] == "h2h,totals"
+            assert request["markets"] == "h2h"
             assert request["bookmakers"] == ",".join(manifest.bookmakers)
             assert "regions" not in request
-        pinnacle, william_hill, moved = totals_lines(sport)
         three_way = is_three_way_sport(sport)
         outcomes = {PriceOutcome.HOME, PriceOutcome.AWAY}
         if three_way:
@@ -176,24 +173,14 @@ class TestReplayPerSport:
             ) == scored[event.id]
             assert await odds_api_ids(session, event) == [game.api_id]
             rows = await stored_rows(session, event)
-            assert {r[1] for r in rows} == {
-                Market.ONE_X_TWO if three_way else Market.H2H,
-                Market.TOTALS,
-            }
-            for at, line in ((first, pinnacle), (second, moved)):
-                h2h = {r for r in rows if r[0] == at and r[1] != Market.TOTALS}
+            assert {r[1] for r in rows} == {Market.ONE_X_TWO if three_way else Market.H2H}
+            for at, home_price in ((first, HOME_PRICE), (second, moved)):
+                h2h = {r for r in rows if r[0] == at}
                 assert {(r[2], r[3]) for r in h2h} == {
                     (book, outcome) for book in STORED_BOOKS for outcome in outcomes
                 }
                 assert {r[5] for r in h2h if r[2] == "pinnacle" and r[3] is PriceOutcome.HOME} == {
-                    Decimal(str(american_to_decimal(HOME_PRICE)))
-                }
-                totals = {r[2:5] for r in rows if r[0] == at and r[1] == Market.TOTALS}
-                assert totals == {
-                    ("pinnacle", PriceOutcome.OVER, Decimal(str(line))),
-                    ("pinnacle", PriceOutcome.UNDER, Decimal(str(line))),
-                    ("williamhill", PriceOutcome.OVER, Decimal(str(william_hill))),
-                    ("williamhill", PriceOutcome.UNDER, Decimal(str(william_hill))),
+                    Decimal(str(american_to_decimal(home_price)))
                 }
         fetch_logs = (await session.execute(select(FetchLog))).scalars().all()
         assert [(f.sport_key, f.events_count, f.api_quota_remaining) for f in fetch_logs] == [
@@ -239,7 +226,7 @@ class TestMlbReplay:
         manifest = load_manifest(MLB)
         game_one, game_two, other = await load_mlb(session, mlb_schedule)
         at = AFTERNOON - timedelta(hours=2)
-        replay.record(at, [g.listing(at) for g in (game_two, other, game_one)], snapshot=at)
+        replay.record(at, [g.listing(at) for g in (game_two, other, game_one)])
 
         result = await replay.run(manifest, [replay.call(manifest, at, game_one.event)])
 
@@ -271,8 +258,8 @@ class TestMlbReplay:
         after = Listed(played, "mlb-813001", YANKEES, RED_SOX, EVENING, "MLB")
         at_before = original - timedelta(hours=3)
         at_after = EVENING - timedelta(hours=3)
-        replay.record(at_before, [before.listing(at_before)], snapshot=at_before)
-        replay.record(at_after, [after.listing(at_after)], snapshot=at_after)
+        replay.record(at_before, [before.listing(at_before)])
+        replay.record(at_after, [after.listing(at_after)])
 
         result = await replay.run(
             manifest,
@@ -299,7 +286,7 @@ class TestMlbReplay:
             game_one.event, "mlb-9", "Seattle Mariners", "Texas Rangers", EVENING, "MLB"
         )
         at = AFTERNOON - timedelta(hours=2)
-        replay.record(at, [game_one.listing(at), stranger.listing(at)], snapshot=at)
+        replay.record(at, [game_one.listing(at), stranger.listing(at)])
 
         result = await replay.run(manifest, [replay.call(manifest, at, game_one.event)])
 
@@ -330,7 +317,7 @@ class TestNbaReplay:
             "NBA",
         )
         at = regular.start - timedelta(hours=2)
-        replay.record(at, [regular.listing(at), preseason.listing(at)], snapshot=at)
+        replay.record(at, [regular.listing(at), preseason.listing(at)])
 
         result = await replay.run(manifest, [replay.call(manifest, at, regular.event)])
 
@@ -355,7 +342,7 @@ class TestRerunSemantics:
         games = await load_nba(session, mlb_schedule)
         events = tuple(g.event for g in games)
         at = games[0].start - timedelta(hours=2)
-        replay.record(at, [g.listing(at) for g in games], snapshot=at)
+        replay.record(at, [g.listing(at) for g in games])
         call = replay.call(manifest, at, *events)
         store = OddsWriter.store_envelope
         stored: list[int] = []
@@ -396,7 +383,7 @@ class TestRerunSemantics:
         manifest = load_manifest(NBA)
         early, late = await load_nba(session, mlb_schedule)
         at = early.start - timedelta(hours=2)
-        replay.record(at, [early.listing(at)], snapshot=at)
+        replay.record(at, [early.listing(at)])
         call = replay.call(manifest, at, early.event, late.event)
 
         first = await replay.run(manifest, [call])
@@ -419,7 +406,7 @@ class TestRerunSemantics:
         early, late = await load_nba(session, mlb_schedule)
         times = [early.start - timedelta(hours=3) + timedelta(hours=i) for i in range(3)]
         for at in times:
-            replay.record(at, [early.listing(at)], snapshot=at)
+            replay.record(at, [early.listing(at)])
         calls = [replay.call(manifest, at, early.event, late.event) for at in times]
         store = OddsWriter.store_envelope
         stored: list[int] = []
@@ -451,13 +438,16 @@ class TestRerunSemantics:
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
         session = pglite_async_session
-        manifest = load_manifest(NBA)
+        nba = load_manifest(NBA)
+        manifest = nba.model_copy(
+            update={
+                "markets": (Market.H2H, Market.TOTALS),
+                "probe": nba.probe.model_copy(update={"units_per_call": 20}),
+            }
+        )
         [game, _] = await load_nba(session, mlb_schedule)
         at = game.start - timedelta(hours=2)
-        listing = game.listing(at)
-        for book in listing["bookmakers"]:
-            book["markets"] = [m for m in book["markets"] if m["key"] == "h2h"]
-        replay.record(at, [listing], snapshot=at)
+        replay.record(at, [game.listing(at)])
         call = replay.call(manifest, at, game.event)
 
         await replay.run(manifest, [call])
@@ -486,7 +476,7 @@ class TestRerunSemantics:
             shape=SnapshotShape(Source.ODDS_API, TimeBasis.OBSERVED, None),
         )
         await session.commit()
-        replay.record(at, [game.listing(at)], snapshot=at)
+        replay.record(at, [game.listing(at)])
 
         result = await replay.run(manifest, [replay.call(manifest, at, game.event)])
 
@@ -513,11 +503,11 @@ class TestRerunSemantics:
         at = game.start - timedelta(hours=2)
         narrow = game.listing(at)
         narrow["bookmakers"] = [b for b in narrow["bookmakers"] if b["key"] == "pinnacle"]
-        replay.record(at, [narrow], snapshot=at)
+        replay.record(at, [narrow])
         await replay.run(manifest, [replay.call(manifest, at, game.event)])
         held = await stored_rows(session, game.event)
         # A later request at another time returns the same provider snapshot with every book.
-        later = at + timedelta(minutes=1)
+        later = at + timedelta(seconds=30)
         replay.record(later, [game.listing(at)], snapshot=at)
 
         skipped = await replay.run(manifest, [replay.call(manifest, later, game.event)])
@@ -533,4 +523,4 @@ class TestRerunSemantics:
                 DataQualityLog.issue_type == RowIssueType.SNAPSHOT_KEY_CONFLICT.value
             )
         )
-        assert len(logged.scalars().all()) == 2
+        assert len(logged.scalars().all()) == 1
