@@ -50,6 +50,7 @@ Costs a historical purchase before it is bought, buys it, and fills scores. Exec
 
    - Add `--max-units N` to cap the units the run may bill. The run also stops when a call's billed units differ from the manifest's, when a call returns a snapshot other than the planned one, or when several consecutive calls are sparse (no events, none of their fixtures stored, or a required book missing on a fixture near kick-off; `--max-consecutive-gaps`) ([guards](odds-api-backfill.md#executing-calls)).
    - A guard that stops the run exits non-zero with its reason, and so does a call that fails. Rerun the same command: calls with a stored snapshot for any fixture they serve are skipped, unless you pass `--no-skip-existing`.
+   - A snapshot stop is the exception: the mismatched call's snapshot is stored, so an unchanged rerun skips it and carries on with the wrong grid. Correct the manifest's `snapshot_grid` to the returned snapshot's phase before rerunning.
    - Each call logs its real cost, and the run ends with the key's remaining quota. Backfill calls record no quota in `fetch_logs`, so `odds status quota` does not show their spend.
    - The summary's dropped games are distinct games the calls listed but no stored event took ([historical listings](../storage/event-matching.md#historical-odds-api-listings)); an `id_refused` drop names a second event holding the game's Odds API id.
 
