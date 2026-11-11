@@ -17,8 +17,8 @@ from odds_core.models import Event, EventStatus
 from odds_core.vocabulary import Market
 from odds_lambda.betfair import constants as betfair_constants
 from odds_lambda.betfair.constants import EVENT_TYPE_SOCCER, BetfairMarketSpec, SportBetfairConfig
-from odds_lambda.candidate_rules import resolve_rule
 from odds_lambda.candidate_rules.pinning import rule_sha256
+from odds_lambda.candidate_rules.registry import resolve_rule
 from odds_lambda.jobs import fetch_betfair_exchange, fetch_oddsportal
 from odds_lambda.jobs.fetch_betfair_exchange import betfair_collection
 from odds_lambda.jobs.fetch_oddsportal import LeagueSpec, league_collection

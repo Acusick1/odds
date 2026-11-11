@@ -147,22 +147,24 @@ def _known_result(
     previous: Event, team: str, decision_time: datetime, known_at: datetime | None
 ) -> PreviousResult | None:
     """``previous``'s result for ``team`` when it was known at the decision time: the event is
-    FINAL with both scores, kicked off at least ``RESULT_LAG`` before it, and was completed
-    (``completed_at``) by the decision time and by ``known_at`` when that is given.
+    FINAL with both scores and kicked off at least ``RESULT_LAG`` before it, and, when
+    ``known_at`` is given, was completed (``completed_at``) by the decision time and by
+    ``known_at``.
 
-    ``completed_at`` is the time of the latest FINAL write, so a corrected score postdates the
-    first result: a replay treats a corrected match as unknown before the correction, never
-    as known earlier than it was.
+    ``completed_at`` is when the database learnt the result, which bounds what a run knew; a
+    replay has no ``known_at`` because backfilled results were stored long after their matches,
+    so it sees a score corrected after the decision as known at full time.
     """
-    stored_by = decision_time if known_at is None else min(decision_time, known_at)
     if (
         previous.id is None
         or previous.status != EventStatus.FINAL
         or previous.home_score is None
         or previous.away_score is None
         or previous.commence_time + RESULT_LAG > decision_time
-        or previous.completed_at is None
-        or previous.completed_at > stored_by
+    ):
+        return None
+    if known_at is not None and (
+        previous.completed_at is None or previous.completed_at > min(decision_time, known_at)
     ):
         return None
     home = previous.home_team == team

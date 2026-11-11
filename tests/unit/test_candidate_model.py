@@ -24,7 +24,8 @@ from odds_core.market_prices import Outcome, market_outcomes
 from odds_core.models import Event
 from odds_core.quotes import Quote
 from odds_core.vocabulary import Source, TimeBasis
-from odds_lambda.candidate_rules import RetailEvModelParams, SharpInput, build_market_state
+from odds_lambda.candidate_rules import SharpInput, build_market_state
+from odds_lambda.candidate_rules.retail_ev_model import RetailEvModelParams
 
 from tests.test_helpers import (
     betfair_exchange_bookmaker,

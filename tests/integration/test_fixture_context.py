@@ -19,7 +19,6 @@ from odds_core.market_prices import Outcome
 from odds_core.models import Event, EventStatus
 from odds_core.paper_trade_models import CandidateDecision
 from odds_lambda.candidate_rules import (
-    RULES,
     FixtureContext,
     FixtureInput,
     PreviousResult,
@@ -28,7 +27,7 @@ from odds_lambda.candidate_rules import (
     run_rule,
 )
 from odds_lambda.candidate_rules.fixture_context import RESULT_STORE_LAG
-from odds_lambda.candidate_rules.rules import resolve_rule
+from odds_lambda.candidate_rules.registry import RULES, resolve_rule
 from odds_lambda.jobs.run_candidates import candidate_events, run_decisions, runnable_candidates
 from odds_lambda.storage.event_merge import EventMerger
 from odds_lambda.storage.writers import OddsWriter
@@ -243,28 +242,31 @@ class TestNoLookAhead:
         event = await add_match(2, SIX_DAYS_BEFORE, "Arsenal", "Everton", score=(3, 0))
         event.completed_at = None
 
-        fixture = await load(pglite_async_session, PREVIOUS, known_at=T)
+        run = await load(pglite_async_session, PREVIOUS, known_at=T)
+        replay = await load(pglite_async_session, PREVIOUS)
 
-        assert fixture.unknown_results == (Outcome.HOME,)
-        assert (await load(pglite_async_session, PREVIOUS)).unknown_results == (Outcome.HOME,)
+        assert run.unknown_results == (Outcome.HOME,)
+        assert replay.unknown_results == () and replay.previous[Outcome.HOME] is not None
 
-    async def test_a_backtest_does_not_read_a_result_first_stored_after_the_decision(
+    async def test_a_replay_counts_a_result_stored_days_after_the_decision(
         self, add_match: AddMatch, match: Event, pglite_async_session: AsyncSession
     ) -> None:
+        # A backfill stores results long after their matches.
         await add_match(
             2,
-            T - timedelta(hours=4),
+            SIX_DAYS_BEFORE,
             "Arsenal",
             "Everton",
             score=(0, 3),
-            completed_at=T + timedelta(hours=1),
+            completed_at=T + timedelta(days=30),
         )
 
-        live = await load(pglite_async_session, PREVIOUS, known_at=T)
-        backtest = await load(pglite_async_session, PREVIOUS, known_at=None)
+        run = await load(pglite_async_session, PREVIOUS, known_at=T)
+        replay = await load(pglite_async_session, PREVIOUS, known_at=None)
 
-        assert live.unknown_results == backtest.unknown_results == (Outcome.HOME,)
-        assert backtest.previous[Outcome.HOME] is None
+        assert run.unknown_results == (Outcome.HOME,)
+        assert replay.unknown_results == ()
+        assert replay.previous[Outcome.HOME] == PreviousResult(2, SIX_DAYS_BEFORE, 0, 3)
 
     async def test_a_match_finishing_after_the_decision_is_not_known(
         self, add_match: AddMatch, match: Event, pglite_async_session: AsyncSession
@@ -666,7 +668,7 @@ class TestReplayAndParity:
 def home_won_big(monkeypatch: pytest.MonkeyPatch) -> None:
     """A rule that bets ``exchange_gap``'s bets only when the home team's previous match was
     won by 3 goals and two kick-offs share the match's slot."""
-    from odds_lambda.candidate_rules import GapParams, exchange_gap
+    from odds_lambda.candidate_rules.gap import GapParams, exchange_gap
 
     def rule(state: Any, params: GapParams) -> Any:
         previous = state.fixture.previous[Outcome.HOME]

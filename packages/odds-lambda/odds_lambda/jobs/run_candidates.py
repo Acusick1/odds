@@ -34,7 +34,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.candidate_rules import (
-    RULES,
     ModelRuleSpec,
     RuleParams,
     RuleSpec,
@@ -44,6 +43,7 @@ from odds_lambda.candidate_rules import (
     run_rule,
 )
 from odds_lambda.candidate_rules.pinning import validate_candidate_rules
+from odds_lambda.candidate_rules.registry import RULES
 from odds_lambda.paper_trading import place_trade, settle_trades
 from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport

@@ -10,7 +10,6 @@ import pytest
 from odds_core.market_prices import Outcome
 from odds_core.time import season_start
 from odds_lambda.candidate_rules import (
-    RULES,
     BetIntent,
     FixtureContext,
     FixtureInput,
@@ -21,6 +20,7 @@ from odds_lambda.candidate_rules import (
     apply_rule,
 )
 from odds_lambda.candidate_rules.pinning import rule_sha256
+from odds_lambda.candidate_rules.registry import RULES
 
 BOTH = frozenset({FixtureInput.PREVIOUS_RESULT, FixtureInput.CONCURRENT_KICKOFFS})
 KICKOFF = datetime(2026, 4, 10, 15, 0, tzinfo=UTC)

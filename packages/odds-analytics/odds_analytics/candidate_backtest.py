@@ -19,18 +19,17 @@ from odds_core.close import close_grace, close_quotes
 from odds_core.models import Event, EventStatus
 from odds_core.odds_math import calculate_profit_from_decimal, selection_won
 from odds_lambda.candidate_rules import (
-    RULES,
     ModelRuleSpec,
-    RetailEvModelParams,
     RuleParams,
     RuleSpec,
     Selection,
     candidate_leagues,
     decision_times,
-    resolve_rule,
     run_rule,
 )
 from odds_lambda.candidate_rules.pinning import rule_sha256
+from odds_lambda.candidate_rules.registry import RULES, resolve_rule
+from odds_lambda.candidate_rules.retail_ev_model import RetailEvModelParams
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 

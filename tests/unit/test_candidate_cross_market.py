@@ -11,16 +11,15 @@ from odds_core.market_prices import Outcome
 from odds_core.quotes import Quote
 from odds_core.vocabulary import Market
 from odds_lambda.candidate_rules import (
-    RULES,
     MarketState,
     RuleSpec,
     SharpInput,
     apply_rule,
     build_market_state,
-    exchange_gap,
-    resolve_rule,
 )
+from odds_lambda.candidate_rules.gap import exchange_gap
 from odds_lambda.candidate_rules.pinning import rule_sha256
+from odds_lambda.candidate_rules.registry import RULES, resolve_rule
 
 from tests.test_helpers import make_epl_event
 from tests.unit.conftest import CROSS_KICKOFF, CROSS_T, RunQuotes
@@ -199,21 +198,25 @@ class TestDeclaration:
     def test_the_declaration_is_part_of_the_rule_hash(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from odds_lambda.candidate_rules import rules
+        from odds_lambda.candidate_rules import registry
 
         before = rule_sha256("exchange_gap")
         monkeypatch.setitem(
-            rules.RULES, "exchange_gap", replace(rules.RULES["exchange_gap"], also_markets=TOTALS)
+            registry.RULES,
+            "exchange_gap",
+            replace(registry.RULES["exchange_gap"], also_markets=TOTALS),
         )
         assert rule_sha256("exchange_gap") != before
 
     def test_a_rule_cannot_also_read_the_candidates_own_market(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from odds_lambda.candidate_rules import rules
+        from odds_lambda.candidate_rules import registry
 
         monkeypatch.setitem(
-            rules.RULES, "exchange_gap", replace(rules.RULES["exchange_gap"], also_markets=TOTALS)
+            registry.RULES,
+            "exchange_gap",
+            replace(registry.RULES["exchange_gap"], also_markets=TOTALS),
         )
         resolve_rule(self._candidate("1x2"))
         with pytest.raises(ValueError, match="also reads"):
@@ -222,12 +225,12 @@ class TestDeclaration:
     def test_a_rule_cannot_also_read_a_market_the_sport_does_not_decide(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from odds_lambda.candidate_rules import rules
+        from odds_lambda.candidate_rules import registry
 
         monkeypatch.setitem(
-            rules.RULES,
+            registry.RULES,
             "exchange_gap",
-            replace(rules.RULES["exchange_gap"], also_markets=frozenset({Market.H2H})),
+            replace(registry.RULES["exchange_gap"], also_markets=frozenset({Market.H2H})),
         )
         with pytest.raises(ValueError, match="also reads"):
             resolve_rule(self._candidate("1x2"))

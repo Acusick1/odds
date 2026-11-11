@@ -10,7 +10,8 @@ import pytest
 from odds_analytics.candidate_backtest import replay
 from odds_analytics.candidate_parity import ParityStatus, check_parity
 from odds_core.vocabulary import Market
-from odds_lambda.candidate_rules import RULES, MarketState, SharpInput, load_market_state
+from odds_lambda.candidate_rules import MarketState, SharpInput, load_market_state
+from odds_lambda.candidate_rules.registry import RULES
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.integration.conftest import CrossMarketRun

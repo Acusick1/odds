@@ -33,7 +33,7 @@ from odds_core.database import async_session_maker
 from odds_core.job_specs import job_cadence
 from odds_core.vocabulary import Market, Source, TimeBasis
 
-from odds_lambda.candidate_rules import decision_leads
+from odds_lambda.candidate_rules.registry import decision_leads
 from odds_lambda.collection_calendar import (
     CollectionSource,
     SportCollection,

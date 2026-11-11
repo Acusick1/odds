@@ -13,7 +13,8 @@ from odds_core.candidates import Candidate, MechanicalCandidate
 from odds_core.close import CLOSES
 
 from odds_lambda.candidate_rules.code_hash import code_sha256
-from odds_lambda.candidate_rules.rules import RULES, ModelRuleSpec, resolve_rule, run_rule
+from odds_lambda.candidate_rules.registry import RULES, resolve_rule
+from odds_lambda.candidate_rules.rules import ModelRuleSpec, run_rule
 
 # Imported by every rule's decision: the market state, rule and once-per-selection filter, and
 # the alias maps by which the writers give price rows the book keys the state selects.
