@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Candidate rules
-description: The market state and fixture context a mechanical rule reads at decision time, the bets it returns, the rule registry and module layout, decision times and the once-per-selection rule, maximum input age, params validation, rule pinning, the one-bet helper, the exchange-gap and Polymarket-gap rules, the retail-consensus rules (retail-quorum lag, subsidised outcome and single-book outlier) and the retail-EV model rule.
+description: The market state and fixture context a mechanical rule reads at decision time, the bets it returns, the rule registry and module layout, decision times and the once-per-selection rule, maximum input age, params validation, rule pinning, the one-bet helper, the exchange-gap and Polymarket-gap rules, the exchange-steam rule, the retail-consensus rules (retail-quorum lag, subsidised outcome and single-book outlier) and the retail-EV model rule.
 sources:
   - odds_lambda.candidate_rules
   - odds_lambda.candidate_rules.fixture_context
@@ -151,6 +151,19 @@ Both gap rules take params `odds_lambda.candidate_rules.gap.GapParams`: `thresho
 
 - **`odds_lambda.candidate_rules.gap.exchange_gap`.** It serves every rule market. Its sharp input is `odds_lambda.candidate_rules.inputs.SharpInput.EXCHANGE`, and its fair price is each line's exchange price. It returns no bets when the state has no exchange price.
 - **`odds_lambda.candidate_rules.gap.polymarket_gap`.** It has the sharp input `odds_lambda.candidate_rules.inputs.SharpInput.POLYMARKET`, and its fair price is each line's Polymarket price. It returns no bets when the state has no Polymarket price. Its retail snapshot need not carry an exchange price.
+
+### The exchange-steam rule
+
+`odds_lambda.candidate_rules.exchange_steam.exchange_steam` backs the longest UK retail price on an outcome whose exchange fair probability has risen, while that price still beats the exchange fair price now. It is registered under two names, exchange steam ([#771](https://github.com/Acusick1/odds/issues/771)) and team-news lag ([#832](https://github.com/Acusick1/odds/issues/832)), the `rule` of `candidates/preregistrations/771-1x2-v1.yaml` and `candidates/preregistrations/832-1x2-v1.yaml`, which share one function, params model and spec (`odds_lambda.candidate_rules.exchange_steam.EXCHANGE_STEAM`) and so one [hash](#rule-pinning); each idea is its own family, and its frozen grid in `candidates/preregistrations/` binds to the params model's names. Its sharp input is `odds_lambda.candidate_rules.inputs.SharpInput.EXCHANGE`.
+
+Its params model, `odds_lambda.candidate_rules.exchange_steam.ExchangeSteamParams`, adds to the base params `min_rise` (> 0), `gap` (≥ 0) and `lookbacks`, which must hold exactly one [lookback point](#lookback-points). It has no `stake`: every bet is one unit.
+
+For each line of the decision's exchange price that the lookback point's exchange price also has, and each outcome with a retail price, the outcome qualifies when:
+
+- its exchange fair probability now minus its fair probability at the lookback point is at least `min_rise`, and
+- with `p` the longest retail price of the outcome (`odds_lambda.candidate_rules.rules.longest_retail`), `fair_now × p − 1` is greater than `gap`.
+
+The qualifying outcome's estimated EV is `fair_now × p − 1`, and the rule passes the qualifying bets to `odds_lambda.candidate_rules.best_bet`, so a decision bets at most one outcome. A decision without an exchange price at the decision or at the lookback point bets nothing; a lookback point with no snapshot quoting both the exchange and a UK retail book leaves the state without inputs ([lookback points](#lookback-points)).
 
 ### The retail-consensus rules
 

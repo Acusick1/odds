@@ -72,11 +72,9 @@ PENDING_RULES = {
     "alternate_totals_left_behind",
     "crowded_gap",
     "exchange_implied_alternate_totals",
-    "exchange_steam",
     "favourite_price",
     "fixed_totals_side",
     "last_result_overreaction",
-    "team_news_lag",
     "totals_implied",
 }
 
@@ -199,9 +197,9 @@ class TestPreregistrationFiles:
                 {k: v for k, v in cell.items() if k in RuleParams.model_fields}
             )
 
-    @pytest.mark.parametrize("path", FILES, ids=lambda p: p.stem)
-    def test_names_an_existing_or_a_pending_rule(self, path: Path) -> None:
-        assert load(path).rule in RULES.keys() | PENDING_RULES
+    def test_every_file_names_an_implemented_rule_or_a_pending_one(self) -> None:
+        named = {load(p).rule for p in FILES}
+        assert {rule for rule in named if rule not in RULES} == PENDING_RULES
 
     def test_every_fixture_has_a_file(self) -> None:
         issues = {int(p.stem) for p in FIXTURES.glob("*.md")}

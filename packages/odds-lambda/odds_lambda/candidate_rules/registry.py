@@ -13,6 +13,7 @@ from odds_core.sports import SportKey
 from odds_core.vocabulary import Market
 from pydantic import ValidationError
 
+from odds_lambda.candidate_rules.exchange_steam import EXCHANGE_STEAM
 from odds_lambda.candidate_rules.gap import EXCHANGE_GAP, POLYMARKET_GAP
 from odds_lambda.candidate_rules.retail_ev_model import RETAIL_EV_MODEL
 from odds_lambda.candidate_rules.retail_quorum_lag import RETAIL_QUORUM_LAG
@@ -35,6 +36,8 @@ SPORT_MARKETS: dict[SportKey, frozenset[Market]] = {
 
 RULES: dict[str, RuleSpec | ModelRuleSpec] = {
     "exchange_gap": EXCHANGE_GAP,
+    "exchange_steam": EXCHANGE_STEAM,
+    "team_news_lag": EXCHANGE_STEAM,
     "polymarket_gap": POLYMARKET_GAP,
     "retail_ev_model": RETAIL_EV_MODEL,
     "retail_quorum_lag": RETAIL_QUORUM_LAG,
