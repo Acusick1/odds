@@ -56,6 +56,11 @@ OvernightWindow = tuple[int, int]
 # → suppress 07:00-15:00, so the first run is an hour before the earliest tip-off.
 OVERNIGHT_WINDOWS: dict[str, OvernightWindow] = {
     "soccer_epl": (22, 6),
+    "soccer_efl_champ": (22, 6),
+    "soccer_spain_la_liga": (22, 6),
+    "soccer_italy_serie_a": (22, 6),
+    "soccer_germany_bundesliga": (22, 6),
+    "soccer_france_ligue_one": (22, 6),
     "baseball_mlb": (5, 14),
     "basketball_nba": (7, 15),
 }

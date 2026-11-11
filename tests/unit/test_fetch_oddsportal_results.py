@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -246,6 +246,44 @@ class TestProcessResults:
         assert stats.events_updated == 1
 
     @pytest.mark.asyncio
+    async def test_a_football_league_settles_from_its_own_results_page(self, test_session) -> None:
+        test_session.add(
+            _make_event(
+                home_team="Borussia Monchengladbach",
+                away_team="Schalke",
+                sport_key="soccer_germany_bundesliga",
+            )
+        )
+        test_session.add(
+            _make_event(event_id=2, home_team="Borussia Monchengladbach", away_team="Schalke")
+        )
+        await test_session.commit()
+        client = MagicMock()
+        client.fetch_results = AsyncMock(
+            return_value=_fetched(_make_match(home_team="B. Monchengladbach", away_team="Schalke"))
+        )
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=None)
+
+        with (
+            patch(
+                "odds_lambda.jobs.fetch_oddsportal_results.async_session_maker",
+                _session_maker(test_session),
+            ),
+            patch(
+                "odds_lambda.jobs.fetch_oddsportal_results.OddsPortalClient", return_value=client
+            ),
+        ):
+            stats = await process_results(sport="soccer_germany_bundesliga")
+
+        client.fetch_results.assert_awaited_once_with(
+            "/football/germany/bundesliga/results/", since=KICKOFF - timedelta(hours=2)
+        )
+        assert (stats.events_updated, stats.events_unresolved) == (1, 0)
+        assert (await _stored(test_session, 1)).status == EventStatus.FINAL
+        assert (await _stored(test_session, 2)).status == EventStatus.SCHEDULED
+
+    @pytest.mark.asyncio
     async def test_no_pending_events_skips_the_fetch(self, test_session) -> None:
         with (
             patch(
@@ -355,17 +393,17 @@ class TestProcessResults:
         assert stats.events_unresolved == 1
 
     @pytest.mark.asyncio
-    async def test_events_older_than_the_lookback_are_left_unless_it_is_lifted(
-        self, test_session
-    ) -> None:
+    async def test_events_before_since_are_left_unless_it_is_lifted(self, test_session) -> None:
         test_session.add(_make_event(commence_time=KICKOFF - timedelta(days=30)))
         await test_session.commit()
         old = _make_match(start_time=KICKOFF - timedelta(days=30))
 
         maker = _session_maker(test_session)
         with patch("odds_lambda.jobs.fetch_oddsportal_results.async_session_maker", maker):
-            within = await process_results(fetched=_fetched(old))
-            lifted = await process_results(lookback=None, fetched=_fetched(old))
+            within = await process_results(
+                since=KICKOFF - timedelta(days=14), fetched=_fetched(old)
+            )
+            lifted = await process_results(fetched=_fetched(old))
 
         assert (within.events_updated, lifted.events_updated) == (0, 1)
 
@@ -382,6 +420,42 @@ class TestProcessResults:
 
     def test_default_sport_key_is_epl(self) -> None:
         assert DEFAULT_SPORT_KEY == "soccer_epl"
+
+
+class TestMainRecovery:
+    @pytest.mark.asyncio
+    async def test_an_event_missed_for_weeks_is_retried_until_the_season_ends(self) -> None:
+        from odds_lambda.jobs import fetch_oddsportal_results
+        from odds_lambda.scheduling.jobs import JobContext
+
+        calls: list[dict[str, object]] = []
+
+        async def recording_process_results(**kwargs: object) -> ResultsStats:
+            calls.append(kwargs)
+            return ResultsStats()
+
+        async def run_settle(
+            _job: str, _sport: str, settle: Callable[[], Awaitable[ResultsStats]], **_kw: object
+        ) -> None:
+            await settle()
+
+        now = datetime(2026, 11, 11, 9, 0, tzinfo=UTC)
+        with (
+            patch.object(
+                fetch_oddsportal_results, "process_results", side_effect=recording_process_results
+            ),
+            patch.object(fetch_oddsportal_results, "datetime", wraps=datetime) as clock,
+            patch(
+                "odds_lambda.jobs.fetch_oddsportal_results.run_daily_results_job",
+                new=run_settle,
+            ),
+        ):
+            clock.now.return_value = now
+            await fetch_oddsportal_results.main(JobContext(sport="soccer_spain_la_liga"))
+
+        assert calls == [
+            {"sport": "soccer_spain_la_liga", "since": datetime(2026, 8, 1, tzinfo=UTC)}
+        ]
 
 
 class TestMainSelfSchedules:

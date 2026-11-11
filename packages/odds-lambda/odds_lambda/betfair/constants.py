@@ -76,6 +76,22 @@ class SportBetfairConfig:
         return next((m for m in self.markets if m.market_type_code == market_type_code), None)
 
 
+def _football_league(
+    sport_key: SportKey, sport_title: str, competition_id: str, competition_name: str
+) -> SportBetfairConfig:
+    """A football league collected like the EPL: match odds and the 2.5 goals line."""
+    return SportBetfairConfig(
+        sport_key=sport_key,
+        sport_title=sport_title,
+        event_type_id=EVENT_TYPE_SOCCER,
+        match_odds=BetfairMarketSpec("MATCH_ODDS", Market.ONE_X_TWO),
+        competition_id=competition_id,
+        fixture_horizon=timedelta(hours=72),
+        competition_name_hints=(competition_name,),
+        other_markets=(BetfairMarketSpec("OVER_UNDER_25", Market.TOTALS, Decimal("2.5")),),
+    )
+
+
 SPORT_CONFIG: dict[SportKey, SportBetfairConfig] = {
     "soccer_epl": SportBetfairConfig(
         sport_key="soccer_epl",
@@ -86,6 +102,24 @@ SPORT_CONFIG: dict[SportKey, SportBetfairConfig] = {
         fixture_horizon=timedelta(hours=72),
         competition_name_hints=EPL_COMPETITION_NAME_HINTS,
         other_markets=(BetfairMarketSpec("OVER_UNDER_25", Market.TOTALS, Decimal("2.5")),),
+    ),
+    # Competition ids from listCompetitions (2026-11-10). The hints are Betfair's full names:
+    # shorter ones also match other competitions ("Scottish Championship", the women's
+    # "French Premiere Ligue").
+    "soccer_efl_champ": _football_league(
+        "soccer_efl_champ", "Championship", "7129730", "English Sky Bet Championship"
+    ),
+    "soccer_spain_la_liga": _football_league(
+        "soccer_spain_la_liga", "La Liga", "117", "Spanish La Liga"
+    ),
+    "soccer_italy_serie_a": _football_league(
+        "soccer_italy_serie_a", "Serie A", "81", "Italian Serie A"
+    ),
+    "soccer_germany_bundesliga": _football_league(
+        "soccer_germany_bundesliga", "Bundesliga", "59", "German Bundesliga"
+    ),
+    "soccer_france_ligue_one": _football_league(
+        "soccer_france_ligue_one", "Ligue 1", "55", "French Ligue 1"
     ),
     "baseball_mlb": SportBetfairConfig(
         sport_key="baseball_mlb",

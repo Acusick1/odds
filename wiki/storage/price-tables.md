@@ -47,7 +47,7 @@ status: stable
 
 | Writer | `time_basis` | Payload |
 |---|---|---|
-| OddsPortal live (`odds_lambda.jobs.fetch_oddsportal.ingest_league`) | `observed` | a list of the run's envelopes, one payload per league run |
+| OddsPortal live (`odds_lambda.jobs.fetch_oddsportal.ingest_league`) | `observed` | a list of the run's envelopes, one payload per league run (a pre-decision run's holds only the matches awaiting the decision) |
 | Betfair (`odds_lambda.jobs.fetch_betfair_exchange.ingest_sport`) | `observed` | a list of the run's envelopes (one per event, all its markets), one payload per sport run (EPL, MLB and NBA) |
 | Polymarket live (`odds_lambda.jobs.fetch_polymarket_odds.ingest_sport`, EPL `1x2` and NBA `h2h`) | `observed` | a list of the run's envelopes |
 | Odds API ingestion (`odds_lambda.ingestion.OddsIngestionService.ingest_sport`) | `observed` | the response's list of event envelopes, one payload per run, written with the first event that stores a snapshot (none when every game is dropped), beside its `fetch_logs` row |

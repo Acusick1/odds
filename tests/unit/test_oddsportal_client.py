@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 from collections.abc import Callable
@@ -19,6 +20,7 @@ from odds_lambda.oddsportal_client import (
     ListingEvent,
     OddsPortalClient,
     OddsPortalError,
+    RequestPacer,
     decrypt_payload,
     extract_market,
     parse_archive_path,
@@ -253,8 +255,10 @@ class TestExtractMarket:
 class FakeClient(OddsPortalClient):
     """Client whose HTTP layer replays scripted ``(status, body)`` responses."""
 
-    def __init__(self, responses: list[Any], request_delay: float = 0.0) -> None:
-        super().__init__(request_delay=request_delay)
+    def __init__(
+        self, responses: list[Any], request_delay: float = 0.0, pacer: RequestPacer | None = None
+    ) -> None:
+        super().__init__(request_delay=request_delay, pacer=pacer)
         self.responses = list(responses)
         self.requests: list[tuple[str, dict[str, str]]] = []
 
@@ -269,14 +273,30 @@ class FakeClient(OddsPortalClient):
 PROXY_503 = "URL:/ajax-sport-country-tournament-archive_/1/SY30SsKF/X0X1/1/0/page/1/ Status: 503"
 
 
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
 @pytest.fixture
-def sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+def clock() -> FakeClock:
+    return FakeClock()
+
+
+@pytest.fixture
+def sleeps(monkeypatch: pytest.MonkeyPatch, clock: FakeClock) -> list[float]:
+    """Sleeps recorded instead of slept, advancing ``clock``, with a fresh process pacer on it."""
     recorded: list[float] = []
 
     async def fake_sleep(seconds: float) -> None:
         recorded.append(seconds)
+        clock.now += seconds
 
     monkeypatch.setattr(oddsportal_client, "_sleep", fake_sleep)
+    monkeypatch.setattr(oddsportal_client, "_PROCESS_PACER", RequestPacer(clock=clock))
     return recorded
 
 
@@ -304,7 +324,6 @@ class TestClientRequests:
         assert headers["Accept"] == "*/*"
         assert headers["Accept-Language"] == "en-GB"
         assert "Chrome/" in headers["User-Agent"]
-        assert sleeps == [1.5]
 
     async def test_over_under_url(self, encrypt_payload: Encrypt, sleeps: list[float]) -> None:
         feed = _feed({"odds": {}}, key="E-2-2-0-2.5-0")
@@ -545,6 +564,105 @@ class TestResultsParsing:
             parse_results_page(feed)
 
 
+class TestRequestPacing:
+    async def test_requests_of_one_client_start_request_delay_apart(
+        self, encrypt_payload: Encrypt, sleeps: list[float], clock: FakeClock
+    ) -> None:
+        feed = (200, encrypt_payload(_feed({"odds": {"16": [2.0, 3.0, 4.0]}, "act": {"16": True}})))
+        client = FakeClient([feed, feed], request_delay=1.5)
+
+        await client.fetch_market(EVENT, "1x2", CONTEXT)
+        clock.now += 0.5
+        await client.fetch_market(EVENT, "1x2", CONTEXT)
+
+        assert sleeps == [1.0]
+
+    async def test_clients_in_one_process_share_the_spacing(
+        self, encrypt_payload: Encrypt, sleeps: list[float]
+    ) -> None:
+        feed = (200, encrypt_payload(_feed({"odds": {"16": [2.0, 3.0, 4.0]}, "act": {"16": True}})))
+        first = FakeClient([feed], request_delay=1.0)
+        second = FakeClient([feed], request_delay=1.0)
+
+        await first.fetch_market(EVENT, "1x2", CONTEXT)
+        await second.fetch_market(EVENT, "1x2", CONTEXT)
+
+        assert sleeps == [1.0]
+
+    async def test_concurrent_requests_take_successive_slots(
+        self, sleeps: list[float], clock: FakeClock
+    ) -> None:
+        pacer = RequestPacer(clock=clock)
+        started: list[float] = []
+
+        async def request() -> None:
+            await pacer.wait(1.0)
+            started.append(clock.now)
+
+        await asyncio.gather(request(), request(), request())
+
+        assert started == [0.0, 1.0, 2.0]
+
+    async def test_a_priority_request_takes_the_next_slot_before_waiting_ones(
+        self, sleeps: list[float], clock: FakeClock
+    ) -> None:
+        pacer = RequestPacer(clock=clock)
+        order: list[str] = []
+
+        async def request(name: str, priority: bool = False) -> None:
+            await pacer.wait(1.0, priority=priority)
+            order.append(name)
+
+        await asyncio.gather(
+            request("first"), request("normal 1"), request("normal 2"), request("urgent", True)
+        )
+
+        assert order == ["first", "urgent", "normal 1", "normal 2"]
+
+    async def test_a_cancelled_request_gives_up_its_slot(
+        self, sleeps: list[float], clock: FakeClock
+    ) -> None:
+        pacer = RequestPacer(clock=clock)
+        await pacer.wait(1.0)
+        cancelled = asyncio.ensure_future(pacer.wait(1.0))
+        await asyncio.sleep(0)
+        cancelled.cancel()
+
+        await pacer.wait(1.0)
+
+        assert clock.now == 1.0
+
+    async def test_a_prioritised_client_goes_first(
+        self, encrypt_payload: Encrypt, sleeps: list[float], clock: FakeClock
+    ) -> None:
+        feed = (200, encrypt_payload(_feed({"odds": {"16": [2.0, 3.0, 4.0]}, "act": {"16": True}})))
+        normal = FakeClient([feed, feed], request_delay=1.0)
+        urgent = FakeClient([feed], request_delay=1.0)
+        urgent.prioritise()
+        finished: list[tuple[str, float]] = []
+
+        async def scrape(name: str, client: FakeClient, markets: int) -> None:
+            for _ in range(markets):
+                await client.fetch_market(EVENT, "1x2", CONTEXT)
+            finished.append((name, clock.now))
+
+        await asyncio.gather(scrape("normal", normal, 2), scrape("urgent", urgent, 1))
+
+        assert finished == [("urgent", 1.0), ("normal", 2.0)]
+
+    async def test_a_separate_pacer_does_not_wait(
+        self, encrypt_payload: Encrypt, sleeps: list[float], clock: FakeClock
+    ) -> None:
+        feed = (200, encrypt_payload(_feed({"odds": {"16": [2.0, 3.0, 4.0]}, "act": {"16": True}})))
+        first = FakeClient([feed], request_delay=1.0)
+        second = FakeClient([feed], request_delay=1.0, pacer=RequestPacer(clock=clock))
+
+        await first.fetch_market(EVENT, "1x2", CONTEXT)
+        await second.fetch_market(EVENT, "1x2", CONTEXT)
+
+        assert sleeps == []
+
+
 class TestFetchResults:
     async def test_pages_until_the_page_holding_since(
         self, encrypt_payload: Encrypt, sleeps: list[float]
@@ -570,7 +688,7 @@ class TestFetchResults:
             f"https://www.oddsportal.com/proxy/{ARCHIVE}/page/1/",
             f"https://www.oddsportal.com/proxy/{ARCHIVE}/page/2/",
         ]
-        assert sleeps == [0.5]
+        assert sleeps == [0.5, 0.5]
 
     async def test_stops_at_the_last_page(
         self, encrypt_payload: Encrypt, sleeps: list[float]

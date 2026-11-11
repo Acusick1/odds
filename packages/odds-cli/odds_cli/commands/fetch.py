@@ -1,7 +1,7 @@
 """CLI commands for fetching odds data."""
 
 import asyncio
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import structlog
 import typer
@@ -100,7 +100,9 @@ def fetch_results(
         stats = asyncio.run(fetch_mlb_results.process_results(lookback=lookback))
     else:
         stats = asyncio.run(
-            fetch_oddsportal_results.process_results(sport=sport, lookback=lookback)
+            fetch_oddsportal_results.process_results(
+                sport=sport, since=datetime.now(UTC) - lookback if lookback is not None else None
+            )
         )
     console.print(
         f"fetched={stats.matches_fetched} updated={stats.events_updated} "

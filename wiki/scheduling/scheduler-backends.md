@@ -84,7 +84,7 @@ EventBridge delivers the target `Input` written by the AWS backend or by Terrafo
 `job` may be a compound name (`fetch-odds-epl`). The handler:
 
 1. Raises `ValueError` if `job` is missing.
-2. Calls `odds_lambda.scheduling.jobs.resolve_job_name` to split it into base job and suffix-derived sport, consulting each `odds_core.job_specs.JobSpec` in `odds_core.job_specs.JOB_SPECS` for per-sport routing (suffixes such as `laliga` map to sports through `odds_lambda.scheduling.jobs._SPORT_SUFFIX_MAP`). An explicit `sport` in the payload wins over the suffix.
+2. Calls `odds_lambda.scheduling.jobs.resolve_job_name` to split it into base job and suffix-derived sport, consulting each `odds_core.job_specs.JobSpec` in `odds_core.job_specs.JOB_SPECS` for per-sport routing (its `sports` allowlist) (suffixes such as `laliga` map to sports through `odds_lambda.scheduling.jobs._SPORT_SUFFIX_MAP`). An explicit `sport` in the payload wins over the suffix.
 3. Binds `job`, `request_id` and `sport` into structlog context so CloudWatch can filter on them (`configure_logging(..., json_output=True)` runs at import).
 4. Builds `odds_lambda.scheduling.jobs.JobContext.from_payload` from every payload key except `job`, then runs `get_job_function(base)(ctx)` under `asyncio.run`.
 5. Returns `{"statusCode": 200, "body": ...}`, or 500 with `error` and `error_type` on any exception.

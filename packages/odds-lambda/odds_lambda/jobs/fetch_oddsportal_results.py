@@ -1,4 +1,4 @@
-"""Settle EPL events from OddsPortal's results pages.
+"""Settle football events from OddsPortal's results pages.
 
 Reads finished matches over HTTP from the results page's archive feed (no
 browser; see docs/adr/0009-oddsportal-feed-client.md) and sets matching
@@ -13,12 +13,13 @@ without scores are pending, so re-runs after settling find nothing to process.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 import structlog
 from odds_core.database import async_session_maker
 from odds_core.models import EventStatus
 from odds_core.team import normalize_team_name
+from odds_core.time import season_start
 
 from odds_lambda.jobs.fetch_oddsportal import _LEAGUE_SPEC_BY_SPORT
 from odds_lambda.mlb_game_resolver import MLB_SPORT_KEY
@@ -30,7 +31,6 @@ from odds_lambda.oddsportal_client import (
     OddsPortalError,
 )
 from odds_lambda.results_run import (
-    SCHEDULED_LOOKBACK,
     STALE_AFTER,
     PendingEvent,
     ResultsStats,
@@ -59,7 +59,7 @@ def _raise_if_feed_parsed_nothing(fetched: FetchedResults, pending: list[Pending
 
 async def process_results(
     sport: str | None = None,
-    lookback: timedelta | None = SCHEDULED_LOOKBACK,
+    since: datetime | None = None,
     fetched: FetchedResults | None = None,
 ) -> ResultsStats:
     """Set pending events FINAL with the scores of their finished matches.
@@ -74,7 +74,7 @@ async def process_results(
 
     Args:
         sport: Sport key (e.g. "soccer_epl"). Defaults to DEFAULT_SPORT_KEY.
-        lookback: How far back pending events are considered; None for all of them.
+        since: The earliest kick-off of the pending events considered; None for all of them.
         fetched: Results replacing the fetch. For testing.
     """
     stats = ResultsStats()
@@ -91,7 +91,6 @@ async def process_results(
         )
         return stats
 
-    since = datetime.now(UTC) - lookback if lookback is not None else None
     async with async_session_maker() as session:
         pending_events = await get_pending_events(session, sport_key=sport_key, since=since)
 
@@ -190,11 +189,17 @@ async def process_results(
 
 
 async def main(ctx: JobContext) -> None:
-    """Settle the sport's events, then book tomorrow's run at 08:00 UTC whatever the outcome."""
+    """Settle the season's pending events of the sport, then book tomorrow's run at 08:00 UTC
+    whatever the outcome.
+
+    The results pages list the current season only, so an event missed on earlier runs is
+    retried until the season ends, and the pages are read back to the oldest such event.
+    """
     sport = require_sport(ctx, "fetch-oddsportal-results")
+    since = season_start(datetime.now(UTC), sport)
     await run_daily_results_job(
         make_compound_job_name("fetch-oddsportal-results", sport),
         sport,
-        lambda: process_results(sport=sport),
+        lambda: process_results(sport=sport, since=since),
         schedule_sport=sport,
     )

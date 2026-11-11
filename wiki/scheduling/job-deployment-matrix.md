@@ -24,20 +24,20 @@ Job records and operator overrides decide what the production scheduler runs:
 
 - `odds_core.config.SchedulerConfig.bootstrap_jobs` names the jobs `odds scheduler start` bootstraps. `agent-run` has `bootstrap=False` in `odds_core.job_specs.JOB_SPECS`, so it runs only when added to `SCHEDULER_BOOTSTRAP_JOBS`.
 - `odds_core.job_specs.JOB_SPECS` gives the jobs installed as a fixed cron: `fetch-espn-fixtures`, `fetch-mlb-probables` and `backup-database`. Every other bootstrapped job self-schedules ([Self-scheduling](self-scheduling.md)); a restart keeps its pending run, and only a job without one runs its bootstrap function ([bootstrap](local-scheduler.md#bootstrap-jobs-and-cron-table)).
-- `odds_core.job_specs.JOB_SPECS` limits a per-sport job, cron or self-scheduling, to the configured sports in its allowlist (`fetch-espn-fixtures` lists EPL, NBA, the Championship, La Liga, Serie A, the Bundesliga and Ligue 1, one cron run per sport). A per-sport job with no sport allowlist runs for every sport in `data_collection.sports` (`odds_lambda.scheduling.jobs.resolve_target_sports`).
+- `odds_core.job_specs.JOB_SPECS` limits a per-sport job, cron or self-scheduling, to the configured sports in its allowlist (`fetch-espn-fixtures` lists EPL, NBA, the Championship, La Liga, Serie A, the Bundesliga and Ligue 1, one cron run per sport; `fetch-oddsportal-results` the six football leagues). A per-sport job with no sport allowlist runs for every sport in `data_collection.sports` (`odds_lambda.scheduling.jobs.resolve_target_sports`).
 
 | Job | Bootstrapped by default | Sports | Schedule |
 |---|---|---|---|
 | `fetch-odds` | yes | EPL and NBA (allowlist; Odds API quota, one key each) | self-scheduling by [tier](../storage/fetch-tier.md), 2 h to 48 h for EPL, per slate for NBA ([NBA schedule](../collection/fetch-odds-job.md#nba-schedule)) |
 | `fetch-scores` | yes | EPL (allowlist; Odds API quota) | self-scheduling, game activity |
 | `update-status`, `check-health` | yes | global | self-scheduling; health every 60 min |
-| `fetch-oddsportal` | yes | every configured sport (EPL, MLB, NBA) | proximity (30 min to 2 h), dormant with no fixture in 28 days |
-| `fetch-oddsportal-results` | yes | EPL (allowlist) | daily 08:00 UTC |
+| `fetch-oddsportal` | yes | every configured sport (the six football leagues, MLB, NBA) | proximity (30 min to 2 h), dormant with no fixture in 28 days |
+| `fetch-oddsportal-results` | yes | the six football leagues (allowlist) | daily 08:00 UTC |
 | `fetch-mlb-results` | yes | MLB (not per sport) | daily 08:00 UTC |
-| `fetch-betfair-exchange` | yes | every Betfair-supported sport (EPL, MLB, NBA) | self-scheduling, 15 min to 2 h, plus a run 5 min before each kickoff, dormant with no fixture in 28 days ([Betfair job](../collection/betfair-exchange.md#flow)) |
+| `fetch-betfair-exchange` | yes | every Betfair-supported sport (the six football leagues, MLB, NBA) | self-scheduling, 15 min to 2 h, plus a run 5 min before each kickoff, dormant with no fixture in 28 days ([Betfair job](../collection/betfair-exchange.md#flow)) |
 | `fetch-polymarket-odds` | yes ([ADR-0013](../../docs/adr/0013-collect-polymarket-epl-as-sharp-reference.md)) | every key of `odds_lambda.polymarket_sports.POLYMARKET_SPORTS` (EPL, NBA) that is in `data_collection.sports` | self-scheduling, 5 min to 2 h, dormant with no event in 28 days ([Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md#the-fetch-polymarket-odds-job)) |
-| `run-candidates` | yes | every configured sport (NBA has no candidates, so it only settles trades) | self-scheduling, at the next decision time of an active mechanical candidate, at most 30 min apart ([run-candidates job](../evaluation/run-candidates-job.md#next-run)) |
-| `fetch-espn-fixtures` | yes | EPL (fixtures table) and NBA (creates and settles events, [NBA schedule](../collection/polymarket-odds-snapshots.md#nba-schedule-from-espn)) | cron `0 6 * * *` |
+| `run-candidates` | yes | every configured sport (NBA and the five football leagues other than the EPL have no candidates, so they only settle trades) | self-scheduling, at the next decision time of an active mechanical candidate, at most 30 min apart ([run-candidates job](../evaluation/run-candidates-job.md#next-run)) |
+| `fetch-espn-fixtures` | yes | EPL (fixtures table), NBA (creates and settles events, [NBA schedule](../collection/polymarket-odds-snapshots.md#nba-schedule-from-espn)) and the five other football leagues (creates events, [ESPN football schedule](../collection/espn-football-schedule.md)) | cron `0 6 * * *` |
 | `fetch-mlb-probables` | yes | MLB | cron `0 6 * * *` |
 | `backup-database` | yes; does nothing until `BACKUP_REMOTE` is set | global | cron `0 5 * * *` |
 | `fetch-injuries` | yes | NBA (allowlist; the only league with the report) | self-scheduling, every 6 h plus runs 2 h and 30 min before each kickoff, dormant with no stored game in 28 days ([NBA injury job](../collection/nba-injuries-and-stats.md#the-fetch-injuries-job)) |

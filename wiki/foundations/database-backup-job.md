@@ -14,7 +14,7 @@ status: draft
 
 # Nightly database backup job
 
-`backup-database` (`odds_lambda.jobs.backup_database.main`) dumps the production database every night and copies the dump off the production host with [rclone](https://rclone.org/docs/), to an S3-compatible object store. It is a global job (not `per_sport`) with the cron `0 5 * * *` in its `odds_core.job_specs.JOB_SPECS` record, and it is in the default `odds_core.config.SchedulerConfig.bootstrap_jobs`, so the production scheduler runs it ([Where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs)). Restoring a dump is on [Back up and restore](howto-back-up-production-database.md#restore-from-the-off-host-copy).
+`backup-database` (`odds_lambda.jobs.backup_database.main`) dumps the production database every night and copies the dump off the production host with [rclone](https://rclone.org/docs/), to an S3-compatible object store. It is a global job (not `per_sport`) with the cron `0 5 * * *` in its `odds_core.job_specs.JOB_SPECS` `cron` field, and it is in the default `odds_core.config.SchedulerConfig.bootstrap_jobs`, so the production scheduler runs it ([Where each job runs](../scheduling/job-deployment-matrix.md#where-each-job-runs)). Restoring a dump is on [Back up and restore](howto-back-up-production-database.md#restore-from-the-off-host-copy).
 
 ## Flow
 

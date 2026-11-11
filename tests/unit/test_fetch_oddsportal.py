@@ -2,26 +2,32 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import patch
 
 import pytest
+from odds_lambda import oddsportal_client
 from odds_lambda.jobs.fetch_oddsportal import (
     LEAGUE_SPEC_BY_NAME,
     LEAGUE_SPECS,
+    SCRAPE_LEAD,
     LeagueScrape,
     LeagueSpec,
+    awaiting_decision,
     ingest_league,
     scrape_league,
 )
 from odds_lambda.oddsportal_client import (
+    FEED_MARKETS,
     BookmakerContext,
     BookmakerPrices,
     ListingEvent,
     OddsPortalError,
+    RequestPacer,
 )
-from odds_lambda.scheduling.decision import OVERNIGHT_WINDOWS
+from odds_lambda.scheduling.decision import OVERNIGHT_WINDOWS, Lead
 from odds_lambda.scheduling.helpers import apply_overnight_skip
 
 
@@ -43,12 +49,16 @@ class FakeOddsPortalClient:
         self.events = events
         self.failing = failing
         self.context_fetches = 0
+        self.prioritised = False
 
     async def __aenter__(self) -> FakeOddsPortalClient:
         return self
 
     async def __aexit__(self, *args: object) -> None:
         return None
+
+    def prioritise(self) -> None:
+        self.prioritised = True
 
     async def fetch_listing(self, path: str) -> list[ListingEvent]:
         return self.events
@@ -87,9 +97,27 @@ class TestLeagueSpecs:
 
         assert paths == {
             "england-premier-league": "/football/england/premier-league/",
+            "england-championship": "/football/england/championship/",
+            "spain-laliga": "/football/spain/laliga/",
+            "italy-serie-a": "/football/italy/serie-a/",
+            "germany-bundesliga": "/football/germany/bundesliga/",
+            "france-ligue-1": "/football/france/ligue-1/",
             "mlb": "/baseball/usa/mlb/",
             "nba": "/basketball/usa/nba/",
         }
+
+    def test_football_leagues_scrape_the_three_way_and_the_2_5_goals_line(self) -> None:
+        football = [s for s in LEAGUE_SPECS if s.listing_path.startswith("/football/")]
+
+        assert [s.sport_key for s in football] == [
+            "soccer_epl",
+            "soccer_efl_champ",
+            "soccer_spain_la_liga",
+            "soccer_italy_serie_a",
+            "soccer_germany_bundesliga",
+            "soccer_france_ligue_one",
+        ]
+        assert {tuple(s.markets) for s in football} == {("1x2", "over_under_2_5")}
 
     def test_nba_spec_is_two_way_h2h_with_ladders_and_a_daytime_overnight_window(self) -> None:
         spec = LEAGUE_SPEC_BY_NAME["nba"]
@@ -171,7 +199,7 @@ class TestIngestLeague:
         ) as mock_scrape:
             stats = await ingest_league(spec)
 
-        mock_scrape.assert_awaited_once_with(spec)
+        mock_scrape.assert_awaited_once_with(spec, ())
         assert stats.matches_scraped == 0
 
 
@@ -223,3 +251,109 @@ class TestApplyOvernightSkip:
         dt = datetime(2026, 6, 16, 4, 30, tzinfo=UTC)
         result = apply_overnight_skip(dt, overnight_start_utc=5, overnight_resume_utc=14)
         assert result == dt
+
+
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+class PacedClient:
+    """An OddsPortal client whose requests wait on a shared pacer and return scripted prices."""
+
+    def __init__(self, listings: dict[str, list[ListingEvent]], pacer: RequestPacer) -> None:
+        self.listings = listings
+        self.pacer = pacer
+        self.priority = False
+
+    async def __aenter__(self) -> PacedClient:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+    def prioritise(self) -> None:
+        self.priority = True
+
+    async def _request(self) -> None:
+        await self.pacer.wait(1.0, priority=self.priority)
+
+    async def fetch_listing(self, path: str) -> list[ListingEvent]:
+        await self._request()
+        return self.listings[path]
+
+    async def fetch_bookmaker_context(self) -> BookmakerContext:
+        await self._request()
+        await self._request()
+        return BookmakerContext("h", "GB", {"16": "bet365"})
+
+    async def fetch_market(
+        self, event: ListingEvent, market: str, context: BookmakerContext
+    ) -> list[BookmakerPrices]:
+        for _ in FEED_MARKETS[market].scopes:
+            await self._request()
+        prices = (2.0, 3.0, 4.0) if market == "1x2" else (2.0, 1.8)
+        return [BookmakerPrices("16", "bet365", prices, None, None)]
+
+
+class TestPreDecisionRuns:
+    LEADS = [
+        Lead(timedelta(minutes=65), until=timedelta(minutes=60)),
+        Lead(timedelta(minutes=35), until=timedelta(minutes=30)),
+    ]
+
+    def test_only_matches_awaiting_a_decision_time_this_run_serves_qualify(self) -> None:
+        now = datetime(2026, 11, 21, 13, 55, tzinfo=UTC)
+
+        assert awaiting_decision(now + timedelta(minutes=65), now, self.LEADS)
+        assert awaiting_decision(now + timedelta(minutes=66), now, self.LEADS)
+        assert awaiting_decision(now + timedelta(minutes=31), now, self.LEADS)
+        assert not awaiting_decision(now + timedelta(minutes=60), now, self.LEADS)
+        assert not awaiting_decision(now + timedelta(minutes=50), now, self.LEADS)
+        assert not awaiting_decision(now + timedelta(hours=3), now, self.LEADS)
+        assert not awaiting_decision(now + timedelta(minutes=65), now, [])
+
+    @pytest.mark.parametrize("decision_minutes", [60, 30])
+    async def test_a_pre_decision_run_stores_before_its_decision_under_contention(
+        self, monkeypatch: pytest.MonkeyPatch, decision_minutes: int
+    ) -> None:
+        clock = FakeClock()
+
+        async def fake_sleep(seconds: float) -> None:
+            clock.now += seconds
+
+        monkeypatch.setattr(oddsportal_client, "_sleep", fake_sleep)
+        pacer = RequestPacer(clock=clock)
+        now = datetime.now(UTC)
+
+        def listing(prefix: str, count: int, first: timedelta) -> list[ListingEvent]:
+            return [_event(f"{prefix}{i}", now + first + timedelta(hours=i)) for i in range(count)]
+
+        # Three EPL rounds listed, five matches kicking off at the decision's lead.
+        kickoff = timedelta(minutes=decision_minutes + 5)
+        epl = [_event(f"epl-now{i}", now + kickoff) for i in range(5)]
+        epl += listing("epl-later", 25, timedelta(hours=4))
+        football = [s for s in LEAGUE_SPECS if s.sport_key not in ("soccer_epl",)]
+        listings = {EPL.listing_path: epl}
+        for spec in football:
+            count = 15 if spec.sport_key in ("baseball_mlb", "basketball_nba") else 21
+            listings[spec.listing_path] = listing(spec.league, count, timedelta(minutes=50))
+        monkeypatch.setattr(
+            "odds_lambda.jobs.fetch_oddsportal.OddsPortalClient",
+            lambda: PacedClient(listings, pacer),
+        )
+        finished: dict[str, float] = {}
+
+        async def run(spec: LeagueSpec, leads: list[Lead]) -> None:
+            scrape = await scrape_league(spec, leads)
+            finished[spec.sport_key] = clock.now
+            assert scrape.matches
+
+        await asyncio.gather(run(EPL, self.LEADS), *(run(spec, []) for spec in football))
+
+        # The run starts SCRAPE_LEAD before the decision time and stores once its scrape ends.
+        assert finished["soccer_epl"] < SCRAPE_LEAD.total_seconds() / 2
+        assert max(finished.values()) > SCRAPE_LEAD.total_seconds()

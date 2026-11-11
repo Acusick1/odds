@@ -23,6 +23,7 @@ decision time, so the decision reads a snapshot taken just before it.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -52,6 +53,7 @@ from odds_lambda.oddsportal_adapter import MatchOdds, convert_market
 from odds_lambda.oddsportal_client import FEED_MARKETS, OddsPortalClient, OddsPortalError
 from odds_lambda.scheduling.collection import CollectionResult, run_collection
 from odds_lambda.scheduling.decision import (
+    MIN_LEAD_RUN_GAP,
     OVERNIGHT_WINDOWS,
     CadenceConfig,
     Lead,
@@ -66,9 +68,11 @@ logger = structlog.get_logger()
 # 12h+ to kickoff all poll at 2h, matching the previous "far" band.
 CADENCE = CadenceConfig(**asdict(job_cadence("fetch-oddsportal")))
 
-# An EPL or MLB scrape takes about a minute (two minutes at most, October 2026), so a run
-# this long before a decision time has stored its snapshots by then. An NBA scrape with its
-# ladders took about 6 minutes (22 games), so an NBA candidate needs a longer lead.
+# An EPL or MLB scrape alone takes about a minute (two minutes at most, October 2026), so a
+# run this long before a decision time has stored its snapshots by then. Runs sharing the
+# process's request pacer take turns: the six football leagues together took 4 minutes
+# (November 2026). An NBA scrape with its ladders took about 6 minutes (22 games), so an NBA
+# candidate needs a longer lead.
 SCRAPE_LEAD = timedelta(minutes=5)
 
 
@@ -93,6 +97,46 @@ LEAGUE_SPECS: list[LeagueSpec] = [
         listing_path="/football/england/premier-league/",
         sport_key="soccer_epl",
         sport_title="EPL",
+        fixture_horizon=timedelta(hours=48),
+        markets=["1x2", "over_under_2_5"],
+    ),
+    LeagueSpec(
+        league="england-championship",
+        listing_path="/football/england/championship/",
+        sport_key="soccer_efl_champ",
+        sport_title="Championship",
+        fixture_horizon=timedelta(hours=48),
+        markets=["1x2", "over_under_2_5"],
+    ),
+    LeagueSpec(
+        league="spain-laliga",
+        listing_path="/football/spain/laliga/",
+        sport_key="soccer_spain_la_liga",
+        sport_title="La Liga",
+        fixture_horizon=timedelta(hours=48),
+        markets=["1x2", "over_under_2_5"],
+    ),
+    LeagueSpec(
+        league="italy-serie-a",
+        listing_path="/football/italy/serie-a/",
+        sport_key="soccer_italy_serie_a",
+        sport_title="Serie A",
+        fixture_horizon=timedelta(hours=48),
+        markets=["1x2", "over_under_2_5"],
+    ),
+    LeagueSpec(
+        league="germany-bundesliga",
+        listing_path="/football/germany/bundesliga/",
+        sport_key="soccer_germany_bundesliga",
+        sport_title="Bundesliga",
+        fixture_horizon=timedelta(hours=48),
+        markets=["1x2", "over_under_2_5"],
+    ),
+    LeagueSpec(
+        league="france-ligue-1",
+        listing_path="/football/france/ligue-1/",
+        sport_key="soccer_france_ligue_one",
+        sport_title="Ligue 1",
         fixture_horizon=timedelta(hours=48),
         markets=["1x2", "over_under_2_5"],
     ),
@@ -190,8 +234,19 @@ def _game_row(match: MatchOdds) -> GameRow:
     return GameRow(match.home_team, match.away_team, match.match_date)
 
 
-async def scrape_league(spec: LeagueSpec) -> LeagueScrape:
+def awaiting_decision(start_time: datetime, now: datetime, leads: Sequence[Lead]) -> bool:
+    """Whether a match kicking off at ``start_time`` has a decision time this run serves: one
+    of ``leads`` whose run window, give or take ``MIN_LEAD_RUN_GAP``, holds ``now``."""
+    to_kickoff = start_time - now
+    return any(lead.until < to_kickoff <= lead.before + MIN_LEAD_RUN_GAP for lead in leads)
+
+
+async def scrape_league(spec: LeagueSpec, leads: Sequence[Lead] = ()) -> LeagueScrape:
     """Read upcoming events and their odds for a league from OddsPortal.
+
+    When a listed match is awaiting one of ``leads``' decision times, the run is a
+    pre-decision run: it scrapes only those matches, and its requests go ahead of other runs'
+    at the process's request pacer, so their snapshots are stored before the decision time.
 
     Listing and bookmaker-context failures propagate. A failure for one event
     and market is recorded in ``errors`` and the scrape continues.
@@ -206,6 +261,11 @@ async def scrape_league(spec: LeagueSpec) -> LeagueScrape:
         scrape.upcoming_listed = len(upcoming)
         if not upcoming:
             return scrape
+        deciding = [e for e in upcoming if awaiting_decision(e.start_time, now, leads)]
+        if deciding:
+            upcoming = deciding
+            client.prioritise()
+            logger.info("oddsportal_pre_decision_run", league=spec.league, events=len(deciding))
 
         context = await client.fetch_bookmaker_context()
         fetched = 0
@@ -233,12 +293,15 @@ async def scrape_league(spec: LeagueSpec) -> LeagueScrape:
 async def ingest_league(
     spec: LeagueSpec,
     *,
+    leads: Sequence[Lead] = (),
     scraped: LeagueScrape | None = None,
 ) -> IngestionStats:
     """Scrape and ingest a single league.
 
     Args:
         spec: League configuration.
+        leads: The candidate leads of the league, which make a run before a decision time a
+            pre-decision run (``scrape_league``).
         scraped: Pre-scraped data (skips the network). For testing.
 
     Returns:
@@ -248,7 +311,7 @@ async def ingest_league(
 
     if scraped is None:
         logger.info("scraping_league", league=spec.league, sport_key=spec.sport_key)
-        scraped = await scrape_league(spec)
+        scraped = await scrape_league(spec, leads)
 
     stats.events_listed = scraped.events_listed
     stats.upcoming_listed = scraped.upcoming_listed
@@ -365,7 +428,7 @@ async def main(ctx: JobContext) -> None:
         )
 
         try:
-            stats = await ingest_league(spec)
+            stats = await ingest_league(spec, leads=leads)
         except Exception as e:
             logger.error(
                 "league_failed",
