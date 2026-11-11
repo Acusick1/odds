@@ -590,19 +590,65 @@ class TestRequestPacing:
         assert sleeps == [1.0]
 
     async def test_concurrent_requests_take_successive_slots(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, sleeps: list[float], clock: FakeClock
     ) -> None:
-        pacer = RequestPacer(clock=lambda: 0.0)
-        waits: list[float] = []
+        pacer = RequestPacer(clock=clock)
+        started: list[float] = []
 
-        async def fake_sleep(seconds: float) -> None:
-            waits.append(seconds)
-            await asyncio.sleep(0)
+        async def request() -> None:
+            await pacer.wait(1.0)
+            started.append(clock.now)
 
-        monkeypatch.setattr(oddsportal_client, "_sleep", fake_sleep)
-        await asyncio.gather(pacer.wait(1.0), pacer.wait(1.0), pacer.wait(1.0))
+        await asyncio.gather(request(), request(), request())
 
-        assert sorted(waits) == [1.0, 2.0]
+        assert started == [0.0, 1.0, 2.0]
+
+    async def test_a_priority_request_takes_the_next_slot_before_waiting_ones(
+        self, sleeps: list[float], clock: FakeClock
+    ) -> None:
+        pacer = RequestPacer(clock=clock)
+        order: list[str] = []
+
+        async def request(name: str, priority: bool = False) -> None:
+            await pacer.wait(1.0, priority=priority)
+            order.append(name)
+
+        await asyncio.gather(
+            request("first"), request("normal 1"), request("normal 2"), request("urgent", True)
+        )
+
+        assert order == ["first", "urgent", "normal 1", "normal 2"]
+
+    async def test_a_cancelled_request_gives_up_its_slot(
+        self, sleeps: list[float], clock: FakeClock
+    ) -> None:
+        pacer = RequestPacer(clock=clock)
+        await pacer.wait(1.0)
+        cancelled = asyncio.ensure_future(pacer.wait(1.0))
+        await asyncio.sleep(0)
+        cancelled.cancel()
+
+        await pacer.wait(1.0)
+
+        assert clock.now == 1.0
+
+    async def test_a_prioritised_client_goes_first(
+        self, encrypt_payload: Encrypt, sleeps: list[float], clock: FakeClock
+    ) -> None:
+        feed = (200, encrypt_payload(_feed({"odds": {"16": [2.0, 3.0, 4.0]}, "act": {"16": True}})))
+        normal = FakeClient([feed, feed], request_delay=1.0)
+        urgent = FakeClient([feed], request_delay=1.0)
+        urgent.prioritise()
+        finished: list[tuple[str, float]] = []
+
+        async def scrape(name: str, client: FakeClient, markets: int) -> None:
+            for _ in range(markets):
+                await client.fetch_market(EVENT, "1x2", CONTEXT)
+            finished.append((name, clock.now))
+
+        await asyncio.gather(scrape("normal", normal, 2), scrape("urgent", urgent, 1))
+
+        assert finished == [("urgent", 1.0), ("normal", 2.0)]
 
     async def test_a_separate_pacer_does_not_wait(
         self, encrypt_payload: Encrypt, sleeps: list[float], clock: FakeClock

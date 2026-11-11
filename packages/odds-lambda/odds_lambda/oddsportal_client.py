@@ -16,6 +16,7 @@ import json
 import math
 import re
 import time
+from collections import deque
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -529,20 +530,69 @@ async def _sleep(seconds: float) -> None:
     await asyncio.sleep(seconds)
 
 
+@dataclass
+class _Waiter:
+    granted: asyncio.Future[None]
+    spacing: float
+
+
 class RequestPacer:
-    """Spaces the starts of the requests of every client that shares it."""
+    """Spaces the starts of the requests of every client that shares it.
+
+    Each request starts at least the previous request's ``spacing`` after it. While requests
+    wait, a priority request takes the next slot before any other, and requests of one level
+    keep their order.
+    """
 
     def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
         self._clock = clock
         self._next_slot = -math.inf
+        self._priority: deque[_Waiter] = deque()
+        self._normal: deque[_Waiter] = deque()
+        self._dispatcher: asyncio.Task[None] | None = None
 
-    async def wait(self, spacing: float) -> None:
-        """Wait for the next free slot, then hold the slots ``spacing`` seconds after it."""
+    async def wait(self, spacing: float, priority: bool = False) -> None:
+        """Wait for a slot, then hold the next ``spacing`` seconds."""
         now = self._clock()
-        slot = max(now, self._next_slot)
-        self._next_slot = slot + spacing
-        if slot > now:
-            await _sleep(slot - now)
+        if not self._priority and not self._normal and now >= self._next_slot:
+            self._next_slot = now + spacing
+            return
+        loop = asyncio.get_running_loop()
+        waiter = _Waiter(loop.create_future(), spacing)
+        (self._priority if priority else self._normal).append(waiter)
+        if (
+            self._dispatcher is None
+            or self._dispatcher.done()
+            or self._dispatcher.get_loop() is not loop
+        ):
+            self._dispatcher = loop.create_task(self._dispatch())
+        await waiter.granted
+
+    async def _dispatch(self) -> None:
+        while self._has_waiters():
+            delay = self._next_slot - self._clock()
+            if delay > 0:
+                await _sleep(delay)
+            # Chosen after the wait, so a priority request that arrived during it goes first.
+            waiter = self._take_waiter()
+            if waiter is None:
+                return
+            self._next_slot = self._clock() + waiter.spacing
+            waiter.granted.set_result(None)
+            # Let the granted request start before the next wait begins.
+            await asyncio.sleep(0)
+
+    def _has_waiters(self) -> bool:
+        for queue in (self._priority, self._normal):
+            # A cancelled request gives up its place.
+            while queue and queue[0].granted.done():
+                queue.popleft()
+        return bool(self._priority or self._normal)
+
+    def _take_waiter(self) -> _Waiter | None:
+        if not self._has_waiters():
+            return None
+        return (self._priority or self._normal).popleft()
 
 
 # One pacer per process: the scheduler scrapes several leagues concurrently, and OddsPortal sees
@@ -554,13 +604,19 @@ class OddsPortalClient:
     """Async client owning one HTTP session. Use as ``async with``.
 
     Each request starts at least ``request_delay`` seconds after the previous request of any
-    client sharing ``pacer`` (by default every client in the process).
+    client sharing ``pacer`` (by default every client in the process). After ``prioritise``,
+    its requests are served before the others' waiting requests.
     """
 
     def __init__(self, request_delay: float = 1.0, pacer: RequestPacer | None = None) -> None:
         self._request_delay = request_delay
         self._pacer = pacer if pacer is not None else _PROCESS_PACER
+        self._priority = False
         self._session: aiohttp.ClientSession | None = None
+
+    def prioritise(self) -> None:
+        """Serve this client's later requests before other clients' waiting requests."""
+        self._priority = True
 
     async def __aenter__(self) -> OddsPortalClient:
         self._session = aiohttp.ClientSession(
@@ -597,7 +653,7 @@ class OddsPortalClient:
         try:
             async for attempt in retrying:
                 with attempt:
-                    await self._pacer.wait(self._request_delay)
+                    await self._pacer.wait(self._request_delay, priority=self._priority)
                     status, text = await self._fetch_text(url, headers)
                     if status == 429 or status >= 500:
                         raise _TransientError(f"HTTP {status}")

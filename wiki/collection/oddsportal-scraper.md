@@ -48,7 +48,7 @@ One scrape of a league makes these requests, each with a desktop Chrome `User-Ag
 
 ### Request pacing
 
-Every request, retries included, waits for a slot from an `odds_lambda.oddsportal_client.RequestPacer`: it starts at least the client's `request_delay` (1 s by default) after the previous request of any client sharing the pacer. Clients share one pacer per process unless given their own, so the scheduler's concurrent runs of several leagues ([sibling sports](../scheduling/local-scheduler.md#scheduling-primitives)) send OddsPortal one request a second in total, the rate of one league's scrape. Separate processes (the scheduler, `odds scrape upcoming`, the MCP server) each have their own pacer.
+Every request, retries included, waits for a slot from an `odds_lambda.oddsportal_client.RequestPacer`: it starts at least the client's `request_delay` (1 s by default) after the previous request of any client sharing the pacer. Clients share one pacer per process unless given their own, so the scheduler's concurrent runs of several leagues ([sibling sports](../scheduling/local-scheduler.md#scheduling-primitives)) send OddsPortal one request a second in total, the rate of one league's scrape. Waiting requests form two queues: once `odds_lambda.oddsportal_client.OddsPortalClient.prioritise` is called, as a [pre-decision run](fetch-oddsportal-job.md#runs-before-candidate-decisions) does, the client's requests take each next slot before any other client's, and requests of one level keep their order; a cancelled request gives up its place. Separate processes (the scheduler, `odds scrape upcoming`, the MCP server) each have their own pacer.
 
 ### Ladder markets
 
