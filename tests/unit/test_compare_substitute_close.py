@@ -4,10 +4,11 @@ verdicts, and the report."""
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
 import pytest
+from odds_analytics.holdout import HoldoutRefused
 from odds_core.exchange_price import ExchangePrice
 from odds_core.market_prices import Outcome
 from odds_core.quotes import Quote
@@ -282,3 +283,24 @@ class TestReport:
         text = cmp.render(self.report([compared(1, self.FDUK_FAIR, (0.51, 0.295, 0.195), 2)]))
         for expected in ("home", "draw", "away", "<0.25", "0.25-0.5", ">=0.5", "within"):
             assert expected in text
+
+
+class _NoSession:
+    def __getattr__(self, name: str) -> object:
+        raise AssertionError(f"the database was read ({name})")
+
+
+class TestSeal:
+    @pytest.mark.parametrize(
+        ("sport", "start", "end"),
+        [
+            ("soccer_spain_la_liga", date(2025, 8, 1), date(2026, 7, 31)),
+            ("soccer_spain_la_liga", date(2024, 8, 1), date(2026, 7, 31)),
+        ],
+        ids=["sealed", "mixed"],
+    )
+    async def test_a_range_touching_the_holdout_is_refused_before_any_read(
+        self, sport: str, start: date, end: date
+    ) -> None:
+        with pytest.raises(HoldoutRefused):
+            await cmp.load_comparisons(_NoSession(), sport, start, end, None)  # type: ignore[arg-type]

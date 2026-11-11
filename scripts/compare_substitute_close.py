@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from odds_analytics.holdout import require_clear
 from odds_core.as_of import latest_snapshot
 from odds_core.close import FDUK_CLOSE, FDUK_CLOSED_LEAGUES, event_close
 from odds_core.database import async_session_maker
@@ -297,7 +298,10 @@ async def load_comparisons(
     end: date,
     max_age: timedelta | None,
 ) -> list[EventComparison]:
-    """Compare every FINAL event of ``sport`` kicked off on ``start`` to ``end`` (UTC days)."""
+    """Compare every FINAL event of ``sport`` kicked off on ``start`` to ``end`` (UTC days).
+
+    Raises ``HoldoutRefused`` before any read when the range touches the sealed holdout."""
+    require_clear(sport, start, end)
     events = (
         (
             await session.execute(

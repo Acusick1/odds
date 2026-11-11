@@ -18,6 +18,7 @@ mentions:
   - odds_core.exchange_price.MAX_EXCHANGE_OVERROUND
   - odds_core.as_of.latest_snapshot
   - odds_core.quotes.quotes
+  - odds_analytics.holdout.require_clear
 status: stable
 ---
 
@@ -31,7 +32,7 @@ status: stable
 uv run python scripts/compare_substitute_close.py [--sport soccer_epl] [--from 2024-08-01] [--to 2026-07-31] [--max-age-minutes N] [--json report.json]
 ```
 
-`--sport` is one of `odds_core.close.FDUK_CLOSED_LEAGUES` and the market is `1x2`. `--from` and `--to` are inclusive UTC days of kick-off. It prints the tables below and, with `--json`, writes the same figures.
+`--sport` is one of `odds_core.close.FDUK_CLOSED_LEAGUES` and the market is `1x2`. `--from` and `--to` are inclusive UTC days of kick-off; a range that touches the sport's [sealed holdout](candidate-backtest.md#sealed-holdout) is refused before anything is read (`odds_analytics.holdout.require_clear`). It prints the tables below and, with `--json`, writes the same figures.
 
 ## What is compared
 
@@ -61,4 +62,4 @@ Without `--max-age-minutes` the latest snapshot may be days old, so read the age
 
 ## Tests
 
-`tests/unit/test_compare_substitute_close.py` tests the pure functions; `tests/integration/test_compare_substitute_close.py` runs `scripts.compare_substitute_close.load_comparisons` over snapshots on the test database.
+`tests/unit/test_compare_substitute_close.py` tests the pure functions and the refusal of sealed ranges; `tests/integration/test_compare_substitute_close.py` runs `scripts.compare_substitute_close.load_comparisons` over snapshots on the test database.
