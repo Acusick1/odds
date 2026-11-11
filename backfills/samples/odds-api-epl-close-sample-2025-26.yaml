@@ -17,9 +17,10 @@ bookmakers:
   - betfred_uk
   - betvictor
   - sport888
-# Snapshots about KO−10 and KO−5: every decision minute to KO−10 has one at most 5 min old.
+# Two snapshots per kick-off, about KO−9.5 and KO−4.5: every decision minute to KO−5 has one
+# at most 5 min old.
 coverage:
-  - {min_lead_minutes: 1, max_lead_minutes: 10, max_input_age_minutes: 5}
+  - {min_lead_minutes: 1, max_lead_minutes: 5, max_input_age_minutes: 5}
 snapshot_grid:
   - {start: 2022-09-01T00:00:38Z, step_minutes: 5}
 probe:

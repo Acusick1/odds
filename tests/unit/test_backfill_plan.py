@@ -331,6 +331,29 @@ class TestManifest:
         assert [rest for _, rest in single.band_cuts()] == [None]
 
 
+class TestCloseSample:
+    SAMPLE = REPO / "backfills" / "samples" / "odds-api-epl-close-sample-2025-26.yaml"
+
+    def test_requests_the_epl_manifests_prices(self) -> None:
+        reference = Manifest.load(REPO / "backfills" / "odds-api-epl-2022-26.yaml")
+        sample = Manifest.load(self.SAMPLE)
+
+        assert sample.bookmakers == reference.bookmakers
+        assert sample.markets == reference.markets
+        assert sample.snapshot_grid == reference.snapshot_grid
+
+    def test_buys_two_snapshots_per_kickoff_about_ko_minus_10_and_ko_minus_5(self) -> None:
+        sample = Manifest.load(self.SAMPLE)
+        kickoff = datetime(2025, 9, 13, 14, 0, tzinfo=UTC)
+
+        calls = [call.time for call in plan(sample, [Fixture(1, kickoff)])]
+
+        assert calls == [
+            kickoff - timedelta(minutes=9, seconds=22),
+            kickoff - timedelta(minutes=4, seconds=22),
+        ]
+
+
 class TestLoadFixtures:
     async def test_loads_the_seasons_final_events_of_the_sport(self, test_session) -> None:
         season = Season(
