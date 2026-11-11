@@ -692,7 +692,6 @@ def _manifest() -> Manifest:
                 "snapshots": ["2026-04-18T09:55:00Z"],
                 "min_fixture_lead_hours": 12,
                 "required_bookmakers": {},
-                "units_per_call": 20,
             },
         }
     )
@@ -733,7 +732,7 @@ class TestBackfill:
         client.session = http  # type: ignore[assignment]
 
         async with BackfillExecutor(
-            manifest, client=client, session_factory=SessionFactory(session), rate_limit_seconds=0
+            manifest, client=client, session_factory=SessionFactory(session)
         ) as executor:
             result = await executor.execute([call])
 
@@ -762,7 +761,7 @@ class TestBackfill:
         assert result.quota_remaining == 12345
 
         async with BackfillExecutor(
-            manifest, client=client, session_factory=SessionFactory(session), rate_limit_seconds=0
+            manifest, client=client, session_factory=SessionFactory(session)
         ) as executor:
             rerun = await executor.execute([call])
 

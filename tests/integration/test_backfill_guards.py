@@ -215,7 +215,7 @@ class TestRunGuards:
             replay.record(at, [game("mlb-901", AFTERNOON, "williamhill")])
             calls.append(replay.call(manifest, at, games[0].event))
 
-        with pytest.raises(BackfillStopped, match="lacks pinnacle on h2h"):
+        with pytest.raises(BackfillStopped, match="lacks betfair_exchange on h2h"):
             await replay.run(manifest, calls, skip_existing=False, max_consecutive_gaps=3)
 
         assert len(replay.requests) == 3
@@ -248,7 +248,7 @@ class TestRunGuards:
         games = await load_mlb(pglite_async_session, mlb_schedule)
         calls = []
         for at in times(4):
-            replay.record(at, [far_game(at, "pinnacle")])
+            replay.record(at, [far_game(at, "betfair_ex_uk")])
             calls.append(replay.call(manifest, at, games[0].event))
 
         with pytest.raises(BackfillStopped, match="stored none of the 1 fixtures it serves") as e:
@@ -319,7 +319,7 @@ class TestProbe:
     ) -> None:
         manifest = load_manifest(MLB)
         for at in (FIRST_PROBE, SECOND_PROBE):
-            replay.record(at, [far_game(at, "pinnacle", "williamhill")])
+            replay.record(at, [far_game(at, "betfair_ex_uk", "williamhill")])
 
         checks = await replay.probe(manifest)
 
@@ -329,8 +329,8 @@ class TestProbe:
         assert first.lag == timedelta(0)
         assert (first.previous_gap, first.next_gap) == (timedelta(minutes=5),) * 2
         assert first.farthest_lead == timedelta(hours=10)
-        assert first.book_events == {("h2h", "pinnacle"): 1}
-        assert first.book_leads == {("h2h", "pinnacle"): timedelta(hours=10)}
+        assert first.book_events == {("h2h", "betfair_exchange"): 1}
+        assert first.book_leads == {("h2h", "betfair_exchange"): timedelta(hours=10)}
         assert sorted(r["date"] for r in replay.requests) == [
             "2024-07-20T15:58:08Z",
             "2026-07-18T15:58:08Z",
@@ -385,7 +385,7 @@ class TestProbe:
                 [
                     far_game(
                         at,
-                        *setup.get("books", ("pinnacle",)),
+                        *setup.get("books", ("betfair_ex_uk",)),
                         lead_hours=setup.get("lead_hours", 10),
                     )
                 ],
@@ -413,7 +413,7 @@ class TestProbe:
         for at in (FIRST_PROBE, SECOND_PROBE):
             listings = [
                 far_game(at, "williamhill"),
-                game("near", at + timedelta(hours=8), "pinnacle"),
+                game("near", at + timedelta(hours=8), "betfair_ex_uk"),
             ]
             replay.record(at, listings)
 
@@ -421,7 +421,7 @@ class TestProbe:
 
         for check in checks:
             assert (check.books_ok, check.lead_ok, check.horizon_ok) == (True, True, False)
-            assert check.book_leads[("h2h", "pinnacle")] == timedelta(hours=8)
+            assert check.book_leads[("h2h", "betfair_exchange")] == timedelta(hours=8)
             assert check.ok is False
 
     @pytest.mark.parametrize("lag_seconds", [38, 1, -4, -22])
@@ -436,7 +436,7 @@ class TestProbe:
         for at in (FIRST_PROBE, SECOND_PROBE):
             replay.record(
                 at,
-                [far_game(at, "pinnacle")],
+                [far_game(at, "betfair_ex_uk")],
                 snapshot=at - timedelta(seconds=lag_seconds),
                 previous_gap=timedelta(minutes=5, seconds=1),
                 next_gap=timedelta(minutes=4, seconds=1),
@@ -455,7 +455,7 @@ class TestProbe:
     ) -> None:
         session = pglite_async_session
         manifest = load_manifest(MLB)
-        replay.record(FIRST_PROBE, [far_game(FIRST_PROBE, "pinnacle")], snapshot=FIRST_PROBE)
+        replay.record(FIRST_PROBE, [far_game(FIRST_PROBE, "betfair_ex_uk")], snapshot=FIRST_PROBE)
 
         with pytest.raises(AssertionError, match="no recorded response for 2026-07-18T15:58:08Z"):
             await replay.probe(manifest)

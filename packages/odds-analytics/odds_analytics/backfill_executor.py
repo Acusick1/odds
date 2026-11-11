@@ -38,6 +38,10 @@ from odds_analytics.backfill_plan import Call, Manifest
 
 logger = structlog.get_logger()
 
+# Attempts at a call the API rate-limits (429), with backoff between them. A 429 is assumed to
+# bill nothing (unverified), so retrying it costs time only.
+RATE_LIMIT_ATTEMPTS = 6
+
 CallStatus = Literal["fetched", "skipped", "would_fetch", "failed"]
 
 
@@ -87,20 +91,21 @@ class BackfillExecutor:
         session_factory: Callable[[], Any] | None = None,
         skip_existing: bool = True,
         dry_run: bool = False,
-        rate_limit_seconds: float = 1.0,
+        pause_seconds: float = 0.0,
         max_units: int | None = None,
         max_consecutive_gaps: int = 10,
     ):
         """
         Args:
             manifest: Fixes the sport, markets, and bookmakers or regions
-            client: API client (one spending ``APIConfig.acquisition_key`` is created and closed
-                with the executor if not given, except in a dry run, which needs none)
+            client: API client (one spending ``APIConfig.acquisition_key`` and retrying a 429
+                up to ``RATE_LIMIT_ATTEMPTS`` times is created and closed with the executor if
+                not given, except in a dry run, which needs none)
             session_factory: Creates database sessions (defaults to ``async_session_maker``)
             skip_existing: Skip a call when any fixture it serves already has the snapshot it
                 would return
             dry_run: Make no API call and write nothing
-            rate_limit_seconds: Pause after each paid call
+            pause_seconds: Pause after each paid call
             max_units: Stop before a call that would take the run's billed units past this
             max_consecutive_gaps: Stop after this many consecutive fetched calls that return no
                 events or lack a required bookmaker on a market
@@ -113,13 +118,16 @@ class BackfillExecutor:
         self._session_factory = session_factory or async_session_maker
         self.skip_existing = skip_existing
         self.dry_run = dry_run
-        self.rate_limit_seconds = rate_limit_seconds
+        self.pause_seconds = pause_seconds
         self.max_units = max_units
         self.max_consecutive_gaps = max_consecutive_gaps
 
     async def __aenter__(self) -> "BackfillExecutor":
         if self._owns_client and not self.dry_run:
-            self._client = TheOddsAPIClient(api_key=get_settings().api.acquisition_key())
+            self._client = TheOddsAPIClient(
+                api_key=get_settings().api.acquisition_key(),
+                rate_limit_attempts=RATE_LIMIT_ATTEMPTS,
+            )
             await self._client.__aenter__()
         return self
 
@@ -163,8 +171,8 @@ class BackfillExecutor:
                 if check is not None:
                     sparse_streak = sparse_streak + 1 if check.sparse_reason else 0
                     self._guard(check, sparse_streak, result)
-                if progress.status == "fetched":
-                    await asyncio.sleep(self.rate_limit_seconds)
+                if progress.status == "fetched" and self.pause_seconds:
+                    await asyncio.sleep(self.pause_seconds)
         finally:
             await alert_dropped_games("odds-backfill", list(result.dropped_games))
         return result
@@ -173,7 +181,7 @@ class BackfillExecutor:
         if not check.units_ok:
             raise BackfillStopped(
                 f"call billed {check.units} units, expected "
-                f"{'' if check.events else '0 or '}{self.manifest.probe.units_per_call}",
+                f"{'' if check.events else '0 or '}{self.manifest.units_per_call}",
                 result,
             )
         if not check.lag_ok:
@@ -203,7 +211,8 @@ class BackfillExecutor:
                 await self._log_failed_fetch(client, result, e)
                 raise
             checks.append(check)
-            await asyncio.sleep(self.rate_limit_seconds)
+            if self.pause_seconds:
+                await asyncio.sleep(self.pause_seconds)
         await alert_dropped_games("odds-backfill", list(result.dropped_games))
         return checks
 

@@ -38,7 +38,6 @@ def manifest(**overrides: Any) -> Manifest:
             "snapshots": ["2026-04-18T09:55:38Z"],
             "min_fixture_lead_hours": 12,
             "required_bookmakers": {},
-            "units_per_call": 20,
         },
     }
     return Manifest.model_validate(data | overrides)
@@ -154,7 +153,6 @@ def executor(client: FakeClient, session: AsyncSession, **kwargs: Any) -> Backfi
         manifest(),
         client=client,  # type: ignore[arg-type]
         session_factory=Factory(session),
-        rate_limit_seconds=0,
         **kwargs,
     )
 
@@ -231,6 +229,23 @@ class TestBackfillExecutor:
             result = await ex.execute([call(T0, 1), call(T0 + timedelta(minutes=5), 1)])
 
         assert (result.calls_made, result.units_used, result.quota_remaining) == (2, 40, 960)
+
+    @pytest.mark.parametrize(("pause", "sleeps"), [(0.0, []), (0.5, [0.5, 0.5])])
+    async def test_pauses_only_when_asked(
+        self, test_session, writer, monkeypatch: pytest.MonkeyPatch, pause: float, sleeps: list
+    ) -> None:
+        slept: list[float] = []
+
+        async def sleep(seconds: float) -> None:
+            slept.append(seconds)
+
+        monkeypatch.setattr(backfill_executor.asyncio, "sleep", sleep)
+        client = FakeClient(response("e1"), response("e1", at=SNAPSHOT + timedelta(minutes=5)))
+
+        async with executor(client, test_session, skip_existing=False, pause_seconds=pause) as ex:
+            await ex.execute([call(T0, 1), call(T0 + timedelta(minutes=5), 1)])
+
+        assert slept == sleeps
 
     async def test_skips_a_call_whose_fixtures_all_have_its_snapshot(
         self, test_session, writer
@@ -399,12 +414,13 @@ class TestAcquisitionKey:
                 manifest().model_copy(update={"sport": sport}),
                 session_factory=Factory(test_session),
                 skip_existing=False,
-                rate_limit_seconds=0,
             ) as ex:
                 ex._client.session = recorder  # type: ignore[union-attr]
                 await ex.execute([call(T0, 1)])
+                attempts = ex._client.rate_limit_attempts  # type: ignore[union-attr]
 
         assert recorder.api_keys == ["purchased"]
+        assert attempts == backfill_executor.RATE_LIMIT_ATTEMPTS > 1
 
     async def test_an_unset_acquisition_key_stops_a_real_run(self, test_session, writer) -> None:
         settings = Settings(

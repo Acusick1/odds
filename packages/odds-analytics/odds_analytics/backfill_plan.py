@@ -93,13 +93,12 @@ class GridStep(_Frozen):
 
 class Probe(_Frozen):
     """The snapshot times to request before the full run, and what each must return: fixtures
-    at least ``min_fixture_lead_hours`` ahead, ``required_bookmakers`` on each market, and a
-    bill of ``units_per_call``."""
+    at least ``min_fixture_lead_hours`` ahead, ``required_bookmakers`` on each market, and the
+    manifest's ``Manifest.units_per_call`` bill."""
 
     snapshots: tuple[AwareDatetime, ...] = Field(min_length=1)
     min_fixture_lead_hours: PositiveInt
     required_bookmakers: dict[ApiMarket, tuple[str, ...]]
-    units_per_call: PositiveInt
 
 
 class Manifest(_Frozen):
@@ -140,11 +139,6 @@ class Manifest(_Frozen):
         if timedelta(hours=self.probe.min_fixture_lead_hours) < longest:
             raise ValueError(
                 f"the probe's fixture lead is shorter than the earliest coverage, {longest}"
-            )
-        if self.probe.units_per_call != self.units_per_call:
-            raise ValueError(
-                f"the probe expects {self.probe.units_per_call} units per call, "
-                f"the manifest requests {self.units_per_call}"
             )
         for market, books in self.probe.required_bookmakers.items():
             if market not in self.markets:

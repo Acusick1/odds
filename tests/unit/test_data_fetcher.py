@@ -6,7 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
+from odds_lambda import data_fetcher
 from odds_lambda.data_fetcher import TheOddsAPIClient, canonicalize_bookmaker_keys
+from tenacity import wait_none
 
 
 def _event(bookmaker_keys: list[str]) -> dict[str, Any]:
@@ -121,10 +123,11 @@ class _StubSession:
 @pytest.fixture(autouse=True)
 def _no_retry_wait(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(TheOddsAPIClient._send.retry, "sleep", AsyncMock())
+    monkeypatch.setattr(data_fetcher, "RATE_LIMIT_WAIT", wait_none())
 
 
-def _client(statuses: list[int]) -> tuple[TheOddsAPIClient, Any]:
-    client = TheOddsAPIClient(api_key="only")
+def _client(statuses: list[int], rate_limit_attempts: int = 1) -> tuple[TheOddsAPIClient, Any]:
+    client = TheOddsAPIClient(api_key="only", rate_limit_attempts=rate_limit_attempts)
     session = _StubSession(statuses)
     client.session = session  # type: ignore[assignment]
     return client, session
@@ -169,6 +172,40 @@ class TestRequestRetries:
 
         assert data == []
         assert len(session.api_keys) == 2
+
+
+class TestRateLimitRetries:
+    @pytest.mark.asyncio
+    async def test_a_429_is_retried_until_the_request_succeeds(self):
+        client, session = _client([429, 429, 200], rate_limit_attempts=3)
+
+        data, _ = await client._make_request("sports", "soccer_epl")
+
+        assert data == []
+        assert len(session.api_keys) == 3
+
+    @pytest.mark.asyncio
+    async def test_a_429_that_outlasts_the_attempts_is_raised(self):
+        client, session = _client([429, 429, 429], rate_limit_attempts=3)
+
+        with pytest.raises(aiohttp.ClientResponseError) as exc_info:
+            await client._make_request("sports", "soccer_epl")
+
+        assert exc_info.value.status == 429
+        assert len(session.api_keys) == 3
+
+    @pytest.mark.asyncio
+    async def test_other_client_errors_are_not_retried_as_rate_limits(self):
+        client, session = _client([401], rate_limit_attempts=3)
+
+        with pytest.raises(aiohttp.ClientResponseError):
+            await client._make_request("sports", "soccer_epl")
+
+        assert len(session.api_keys) == 1
+
+    def test_attempts_must_be_positive(self):
+        with pytest.raises(ValueError, match="at least 1"):
+            TheOddsAPIClient(api_key="k", rate_limit_attempts=0)
 
 
 class TestHistoricalOddsRequest:

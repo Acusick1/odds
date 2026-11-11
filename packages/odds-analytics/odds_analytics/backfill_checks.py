@@ -73,8 +73,8 @@ class ResponseCheck:
         """The bill is the manifest's. An empty response may also bill nothing, which the API
         does not count against the quota."""
         if self.events == 0:
-            return self.units in (None, 0, self.manifest.probe.units_per_call)
-        return self.units == self.manifest.probe.units_per_call
+            return self.units in (None, 0, self.manifest.units_per_call)
+        return self.units == self.manifest.units_per_call
 
     @property
     def lag(self) -> timedelta:
