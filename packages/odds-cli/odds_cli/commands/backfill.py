@@ -165,8 +165,9 @@ def execute_backfill(
     Make the Odds API historical calls an acquisition manifest plans and store what they return.
 
     Spends paid quota on the acquisition key (ODDS_API_ACQUISITION_KEY_INDEX, required). Use --dry-run first to count the calls, and run `odds backfill probe` before the first real run.
-    Stops when a call's billed units differ from the manifest's, when the next call would pass
-    --max-units, and after --max-consecutive-gaps consecutive sparse responses.
+    Stops when a call's billed units differ from the manifest's, when a call returns a snapshot
+    other than the planned one, when the next call would pass --max-units, and after
+    --max-consecutive-gaps consecutive sparse responses.
 
     Example:
         odds backfill execute --manifest backfills/odds-api-epl-2022-26.yaml --season 2024-25 --dry-run

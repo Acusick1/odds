@@ -62,7 +62,9 @@ def raw_event(api_id: str) -> dict[str, Any]:
     }
 
 
-def response(*api_ids: str, units: int | None = 20, quota: int | None = 1000) -> Any:
+def response(
+    *api_ids: str, units: int | None = 20, quota: int | None = 1000, at: datetime = SNAPSHOT
+) -> Any:
     raws = [raw_event(i) for i in api_ids]
     return HistoricalOddsResponse(
         events=[parse_api_event(r) for r in raws],
@@ -70,7 +72,7 @@ def response(*api_ids: str, units: int | None = 20, quota: int | None = 1000) ->
         response_time_ms=5,
         quota_remaining=quota,
         quota_used=4000,
-        snapshot_time=SNAPSHOT,
+        snapshot_time=at,
         units_used=units,
     )
 
@@ -221,7 +223,8 @@ class TestBackfillExecutor:
 
     async def test_units_and_quota_follow_the_calls(self, test_session, writer) -> None:
         client = FakeClient(
-            response("e1", units=20, quota=980), response("e1", units=20, quota=960)
+            response("e1", units=20, quota=980),
+            response("e1", units=20, quota=960, at=SNAPSHOT + timedelta(minutes=5)),
         )
 
         async with executor(client, test_session, skip_existing=False) as ex:

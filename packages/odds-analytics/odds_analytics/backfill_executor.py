@@ -136,8 +136,11 @@ class BackfillExecutor:
 
         Each call is paid, and a rerun skips the calls already stored, so a failure ends the run
         after reporting it rather than spending on. A guard raises ``BackfillStopped`` when a
-        non-empty call's billed units differ from the manifest's or are missing (an empty one bills nothing), when the next call would
-        pass ``max_units``, or after ``max_consecutive_gaps`` consecutive sparse responses.
+        non-empty call's billed units differ from the manifest's or are missing (an empty one
+        bills nothing), when a call returns a snapshot other than the planned one
+        (``ResponseCheck.lag_ok``), when the next call would pass ``max_units``, or after
+        ``max_consecutive_gaps`` consecutive sparse responses. A call that trips a guard is stored
+        first, since it is paid.
         """
         result = BackfillResult()
         sparse_streak = 0
@@ -171,6 +174,12 @@ class BackfillExecutor:
             raise BackfillStopped(
                 f"call billed {check.units} units, expected "
                 f"{'' if check.events else '0 or '}{self.manifest.probe.units_per_call}",
+                result,
+            )
+        if not check.lag_ok:
+            raise BackfillStopped(
+                f"call for the {utc_isoformat(check.modelled)} snapshot returned the "
+                f"{utc_isoformat(check.snapshot_time)} snapshot",
                 result,
             )
         if sparse_streak >= self.max_consecutive_gaps:

@@ -49,6 +49,10 @@ def far_game(snapshot: datetime, *books: str, lead_hours: int = 10) -> dict[str,
     return game(f"far-{snapshot:%Y%m%d}", snapshot + timedelta(hours=lead_hours), *books)
 
 
+# A planned MLB grid snapshot two hours before the afternoon game.
+PLANNED = datetime(2025, 6, 2, 14, 55, 38, tzinfo=UTC)
+
+
 def times(count_: int) -> list[datetime]:
     return [AFTERNOON - timedelta(hours=2, minutes=5 * i) for i in range(count_)]
 
@@ -132,6 +136,53 @@ class TestRunGuards:
                 await replay.run(manifest, calls, skip_existing=False, max_units=cap)
             assert stop.value.result.units_used == 10 * made
         assert len(replay.requests) == made
+
+    async def test_a_call_returning_another_snapshot_stops_the_run_after_storing_it(
+        self,
+        pglite_async_session: AsyncSession,
+        replay: BackfillReplay,
+        mlb_schedule: type[FakeMlbStatsFetcher],
+    ) -> None:
+        session = pglite_async_session
+        manifest = load_manifest(MLB)
+        games = await load_mlb(session, mlb_schedule)
+        first, second = PLANNED, PLANNED + timedelta(minutes=5)
+        early = first - timedelta(seconds=39)
+        replay.record(first, [g.listing(early) for g in games], snapshot=early)
+        replay.record(second, [g.listing(second) for g in games])
+
+        with pytest.raises(
+            BackfillStopped,
+            match="call for the 2025-06-02T14:55:38Z snapshot returned the "
+            "2025-06-02T14:54:59Z snapshot",
+        ) as e:
+            await replay.run(
+                manifest, [replay.call(manifest, at, games[0].event) for at in (first, second)]
+            )
+
+        assert len(replay.requests) == 1
+        assert e.value.result.fixtures_stored == len(games)
+        assert await count(session, OddsSnapshot) > 0
+
+    @pytest.mark.parametrize("offset_seconds", [-38, 0, 4, 22])
+    async def test_a_call_returning_its_snapshot_with_jitter_does_not_stop_the_run(
+        self,
+        pglite_async_session: AsyncSession,
+        replay: BackfillReplay,
+        mlb_schedule: type[FakeMlbStatsFetcher],
+        offset_seconds: int,
+    ) -> None:
+        manifest = load_manifest(MLB)
+        games = await load_mlb(pglite_async_session, mlb_schedule)
+        calls = []
+        for at in (PLANNED, PLANNED + timedelta(minutes=5)):
+            taken = at + timedelta(seconds=offset_seconds)
+            replay.record(at, [g.listing(taken) for g in games], snapshot=taken)
+            calls.append(replay.call(manifest, at, games[0].event))
+
+        result = await replay.run(manifest, calls)
+
+        assert result.calls_made == 2
 
     async def test_consecutive_empty_calls_stop_the_run(
         self,

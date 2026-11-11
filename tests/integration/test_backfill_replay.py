@@ -507,7 +507,7 @@ class TestRerunSemantics:
         await replay.run(manifest, [replay.call(manifest, at, game.event)])
         held = await stored_rows(session, game.event)
         # A later request at another time returns the same provider snapshot with every book.
-        later = at + timedelta(minutes=1)
+        later = at + timedelta(seconds=30)
         replay.record(later, [game.listing(at)], snapshot=at)
 
         skipped = await replay.run(manifest, [replay.call(manifest, later, game.event)])
