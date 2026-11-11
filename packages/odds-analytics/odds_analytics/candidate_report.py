@@ -242,6 +242,8 @@ def family_starts(
     cannot. An unregistered ``draft`` counts from ``draft_start``, unless it already has a
     decision.
     """
+    # A name's rule and market never change across versions (the version check refuses it), so
+    # its current entry gives every historical version's rule and market.
     members = {
         c.name
         for c in registry

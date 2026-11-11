@@ -87,6 +87,7 @@ It fails when:
 - a file that exists at the base is deleted. A candidate is killed by setting its status to killed. A rename reads as a deletion, so it fails: a renamed candidate is a new candidate;
 - a file is not valid YAML (the error names the file);
 - a file's `version` decreased;
+- the `rule` or `market` of a name changed, with or without a version bump (`IDENTITY_KEYS` in the script): a different rule or market is a different candidate and is registered under a new name, so a name's family is the same at every version. This applies unless the file at the base has a `start_date` later than today (UTC), as below;
 - any key other than the status and `description` changed and the version did not increase. Both sides read a one-league `sport: X` as `sports: [X]` first, the field `sports` replaced, so a file whose only change is that rename passes, while adding, dropping or reordering a league is a change (`UNVERSIONED_KEYS` in the script), unless the file at the base has a `start_date` later than today (UTC). A candidate that has not started has made no decisions, so any key may change at the same version. A missing or non-date `start_date` at the base does not qualify, and deletion and a version decrease still fail.
 
 A new file always passes. The check compares YAML only. A mechanical rule's code is pinned by the `odds_core.candidates.MechanicalCandidate.rule_sha256` in the file ([rule pinning](candidate-rules.md#rule-pinning)), so a code change reaches this check as a change to that key.

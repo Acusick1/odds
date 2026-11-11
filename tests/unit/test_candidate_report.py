@@ -546,6 +546,15 @@ class TestPastVersionLeagues:
         }
 
 
+class TestFamilyUsesTheNamesRuleAndMarket:
+    def test_every_version_of_a_name_takes_the_current_entrys_rule_and_market(self) -> None:
+        # The version check keeps a name's rule and market fixed, so the entry's are every
+        # version's: v1 of "sibling" counts although only v2 is registered.
+        registry = [mechanical("a"), mechanical("sibling", version=2)]
+        decisions = {("a", 1): decided(1), ("sibling", 1): decided(2), ("sibling", 2): decided(3)}
+        assert family_starts(mechanical("a"), registry, decisions) == [at(1), at(2), at(3)]
+
+
 class TestLeagueBreakdown:
     def test_it_splits_the_series_by_league_and_leaves_the_verdict_pooled(self) -> None:
         epl = [trade(i, 0.5, sport_key="soccer_epl") for i in range(0, 120, 2)]

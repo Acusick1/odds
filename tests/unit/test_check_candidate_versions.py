@@ -166,6 +166,47 @@ class TestLeagueField:
         assert "sports changed without a version bump" in error
 
 
+class TestIdentityKeys:
+    """A name's rule and market are fixed: another rule or market is another candidate."""
+
+    YAML = BASE_YAML + "rule: exchange_gap\nmarket: 1x2\nsports: [soccer_epl]\n"
+
+    @pytest.fixture
+    def repo(self, candidates_repo: Path) -> Path:
+        (candidates_repo / "candidates" / "back-longest.yaml").write_text(self.YAML)
+        git(candidates_repo, "add", "candidates")
+        git(candidates_repo, "commit", "-q", "-m", "base")
+        return candidates_repo
+
+    def errors(self, repo: Path, new: str) -> list[str]:
+        (repo / "candidates" / "back-longest.yaml").write_text(new)
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--base", "HEAD"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+        return result.stderr.splitlines()
+
+    def bumped(self, *replacements: tuple[str, str]) -> str:
+        text = self.YAML.replace("version: 2", "version: 3")
+        for old, new in replacements:
+            text = text.replace(old, new)
+        return text
+
+    def test_a_rule_change_is_refused_even_with_a_bump(self, repo: Path) -> None:
+        (error,) = self.errors(repo, self.bumped(("exchange_gap", "polymarket_gap")))
+        assert "rule changed" in error and "new name" in error
+
+    def test_a_market_change_is_refused_even_with_a_bump(self, repo: Path) -> None:
+        (error,) = self.errors(repo, self.bumped(("1x2", "totals")))
+        assert "market changed" in error and "new name" in error
+
+    def test_a_league_change_with_a_bump_passes(self, repo: Path) -> None:
+        added = self.bumped(("[soccer_epl]", "[soccer_epl, soccer_italy_serie_a]"))
+        assert self.errors(repo, added) == []
+
+
 class TestUnstartedCandidates:
     @pytest.fixture
     def repo(self, candidates_repo: Path) -> Path:
