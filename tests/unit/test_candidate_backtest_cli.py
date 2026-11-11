@@ -14,7 +14,7 @@ import yaml
 from odds_analytics.candidate_backtest import Coverage, HashStatus, Replayed, _Counts, score
 from odds_analytics.candidate_model import Refit, Tuning
 from odds_analytics.candidate_parity import DecisionParity, ParityReport, ParityStatus
-from odds_analytics.candidate_report import Verdict
+from odds_analytics.candidate_report import DecisionStart, Verdict
 from odds_cli.main import app
 from odds_core.candidates import MechanicalCandidate
 from typer.testing import CliRunner
@@ -36,7 +36,7 @@ def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     async def session():
         yield None
 
-    async def no_decisions(_session: Any) -> dict[tuple[str, int], datetime]:
+    async def no_decisions(_session: Any) -> dict[tuple[str, int], DecisionStart]:
         return {}
 
     monkeypatch.setattr("odds_cli.commands.candidates.async_session_maker", session)
@@ -212,8 +212,8 @@ class TestBacktestCommand:
         )
 
     def decisions(self, monkeypatch: pytest.MonkeyPatch, *keys: tuple[str, int]) -> None:
-        async def recorded(_session: Any) -> dict[tuple[str, int], datetime]:
-            return dict.fromkeys(keys, NOW)
+        async def recorded(_session: Any) -> dict[tuple[str, int], DecisionStart]:
+            return dict.fromkeys(keys, DecisionStart(NOW, frozenset({"soccer_epl"})))
 
         monkeypatch.setattr("odds_cli.commands.candidates.load_decision_starts", recorded)
 

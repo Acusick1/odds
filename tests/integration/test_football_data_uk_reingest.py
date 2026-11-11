@@ -120,6 +120,7 @@ class TestReplacementRefusal:
             CandidateDecision(
                 candidate_name="c",
                 candidate_version=1,
+                sports=["soccer_epl"],
                 event_id=event.id,
                 kickoff_at_decision=event.commence_time,
                 known_at=event.commence_time,

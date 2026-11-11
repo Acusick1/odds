@@ -166,6 +166,7 @@ def decision(event_id: int, days_ago: float, **fields: object) -> CandidateDecis
     defaults: dict[str, object] = {
         "candidate_name": "gap",
         "candidate_version": 1,
+        "sports": ["soccer_epl"],
         "event_id": event_id,
         "minutes_before_kickoff": 60,
         "decision_time": when,

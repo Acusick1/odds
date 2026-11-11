@@ -164,6 +164,7 @@ class TestDecisionWindowCoverage:
             CandidateDecision(
                 candidate_name="exchange-gap-epl",
                 candidate_version=3,
+                sports=["soccer_epl"],
                 event_id=1,
                 minutes_before_kickoff=30,
                 decision_time=decided,

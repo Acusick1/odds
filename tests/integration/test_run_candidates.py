@@ -324,6 +324,7 @@ class TestDecisions:
                 CandidateDecision(
                     candidate_name="cand",
                     candidate_version=1,
+                    sports=["soccer_epl"],
                     event_id=1,
                     minutes_before_kickoff=60,
                     decision_time=DUE - timedelta(minutes=60),
@@ -861,6 +862,7 @@ class TestFlatStakeTrades:
         decision = CandidateDecision(
             candidate_name="cand",
             candidate_version=1,
+            sports=["soccer_epl"],
             event_id=1,
             minutes_before_kickoff=60,
             decision_time=NOW,
@@ -898,6 +900,7 @@ class TestFlatStakeTrades:
         decision = CandidateDecision(
             candidate_name="cand",
             candidate_version=1,
+            sports=["soccer_epl"],
             event_id=1,
             minutes_before_kickoff=60,
             decision_time=NOW,

@@ -102,6 +102,7 @@ async def add_decision(
     decision = CandidateDecision(
         candidate_name="gap",
         candidate_version=version,
+        sports=["soccer_epl"],
         event_id=1,
         minutes_before_kickoff=int((kickoff - decision_time).total_seconds() // 60),
         decision_time=decision_time,

@@ -137,6 +137,7 @@ async def populated(odds_web_session: AsyncSession) -> AsyncSession:
                 CandidateDecision(
                     candidate_name=candidate.name,
                     candidate_version=candidate.version,
+                    sports=["soccer_epl"],
                     event_id=event_id,
                     minutes_before_kickoff=60,
                     decision_time=PLAYED - timedelta(minutes=60),

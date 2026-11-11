@@ -229,6 +229,7 @@ async def _decide(
     decision = CandidateDecision(
         candidate_name=candidate.name,
         candidate_version=candidate.version,
+        sports=list(candidate.sports),
         event_id=event.id,
         minutes_before_kickoff=minutes,
         decision_time=t,

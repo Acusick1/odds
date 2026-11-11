@@ -419,6 +419,7 @@ class TestMergeRefusesClashingDecisions:
             CandidateDecision(
                 candidate_name="exchange-gap",
                 candidate_version=1,
+                sports=["soccer_epl"],
                 event_id=event_id,
                 minutes_before_kickoff=60,
                 decision_time=AFTERNOON - timedelta(hours=1),

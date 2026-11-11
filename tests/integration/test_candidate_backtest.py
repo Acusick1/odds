@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 from odds_analytics.candidate_backtest import BacktestResult, HashStatus, collect, replay
 from odds_analytics.candidate_report import (
+    DecisionStart,
     candidate_report,
     family_size_at,
     family_starts,
@@ -389,6 +390,30 @@ class TestSharedScoring:
 
 
 class TestFamilySize:
+    async def test_loader_reads_each_versions_own_leagues(self, pglite_async_session) -> None:
+        session = pglite_async_session
+        await add_event(session, 1, KICKOFF)
+        for version, sports in ((1, ["soccer_epl"]), (2, ["soccer_epl", "soccer_italy_serie_a"])):
+            for minutes in (60, 120):
+                session.add(
+                    CandidateDecision(
+                        candidate_name="gap",
+                        candidate_version=version,
+                        sports=sports,
+                        event_id=1,
+                        minutes_before_kickoff=minutes,
+                        decision_time=KICKOFF,
+                        kickoff_at_decision=KICKOFF,
+                        known_at=KICKOFF,
+                    )
+                )
+        await session.commit()
+
+        starts = await load_decision_starts(session)
+
+        assert starts[("gap", 1)].sports == {"soccer_epl"}
+        assert starts[("gap", 2)].sports == {"soccer_epl", "soccer_italy_serie_a"}
+
     async def test_report_counts_versions_from_their_first_decision(
         self, pglite_async_session
     ) -> None:
@@ -404,6 +429,7 @@ class TestFamilySize:
                 CandidateDecision(
                     candidate_name="gap",
                     candidate_version=version,
+                    sports=["soccer_epl"],
                     event_id=event_id,
                     minutes_before_kickoff=60,
                     decision_time=when,
@@ -414,7 +440,10 @@ class TestFamilySize:
         await session.commit()
 
         starts = await load_decision_starts(session)
-        assert starts == {("gap", 1): KICKOFF, ("gap", 2): KICKOFF + timedelta(days=1)}
+        assert starts == {
+            ("gap", 1): DecisionStart(KICKOFF, frozenset({"soccer_epl"})),
+            ("gap", 2): DecisionStart(KICKOFF + timedelta(days=1), frozenset({"soccer_epl"})),
+        }
 
         # The registered gap v3 and the sibling have not decided, so only v1 and v2 count.
         registry = [candidate(version=3), candidate(name="sibling")]
@@ -491,6 +520,7 @@ class TestPooledLeagues:
                 CandidateDecision(
                     candidate_name=name,
                     candidate_version=1,
+                    sports=["soccer_epl" if name == "epl-only" else "soccer_efl_champ"],
                     event_id=1,
                     minutes_before_kickoff=60,
                     decision_time=decided,
