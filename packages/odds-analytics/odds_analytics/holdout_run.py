@@ -11,8 +11,8 @@ from pathlib import Path
 from odds_core.candidates import CandidateStatus, MechanicalCandidate
 from odds_core.models import OddsSnapshot
 from odds_core.vocabulary import Source, TimeBasis
-from odds_lambda.candidate_rules import resolve_rule
 from odds_lambda.candidate_rules.pinning import rule_sha256
+from odds_lambda.candidate_rules.registry import resolve_rule
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 

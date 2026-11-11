@@ -18,7 +18,7 @@ from odds_analytics import candidate_rehash
 from odds_analytics.candidate_rehash import RehashResult, Replay
 from odds_core.candidates import candidates_dir, load_candidates
 from odds_core.rehash_ledger import REHASH_LEDGER, Rehash, load_rehashes
-from odds_lambda.candidate_rules import RULES
+from odds_lambda.candidate_rules.registry import RULES
 
 from scripts import check_candidate_versions as hook
 from tests.unit.conftest import INVALID_LEDGER_ROWS, git_commit, ledger_row

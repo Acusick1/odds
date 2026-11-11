@@ -38,9 +38,9 @@ from odds_lambda.candidate_rules import (
     load_market_state,
     lookback_points,
     max_input_age,
-    resolve_rule,
     run_rule,
 )
+from odds_lambda.candidate_rules.registry import resolve_rule
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import defer

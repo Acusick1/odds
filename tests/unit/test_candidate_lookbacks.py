@@ -10,8 +10,6 @@ from odds_core.market_prices import Outcome
 from odds_core.quotes import Quote
 from odds_core.vocabulary import Market
 from odds_lambda.candidate_rules import (
-    RULES,
-    GapParams,
     Lookback,
     MarketState,
     SharpInput,
@@ -19,6 +17,8 @@ from odds_lambda.candidate_rules import (
     input_window,
     lookback_points,
 )
+from odds_lambda.candidate_rules.gap import GapParams
+from odds_lambda.candidate_rules.registry import RULES
 from pydantic import ValidationError
 
 from tests.test_helpers import make_epl_event

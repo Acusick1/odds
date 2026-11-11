@@ -20,9 +20,9 @@ from odds_lambda.candidate_rules import (
     input_window,
     lookback_points,
     max_input_age,
-    resolve_rule,
 )
 from odds_lambda.candidate_rules.inputs import rule_quotes
+from odds_lambda.candidate_rules.registry import resolve_rule
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col

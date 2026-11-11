@@ -1,4 +1,8 @@
-"""Mechanical candidate rules, shared by the live runner and the replay backtest."""
+"""Mechanical candidate rules, shared by the live runner and the replay backtest.
+
+This package's ``__init__`` is in every rule's hash, so it exports only the framework every
+rule's closure contains: never the registry (``registry``) or a rule module.
+"""
 
 from odds_lambda.candidate_rules.fixture_context import (
     FixtureContext,
@@ -19,38 +23,29 @@ from odds_lambda.candidate_rules.market_state import (
     load_market_state,
 )
 from odds_lambda.candidate_rules.rules import (
-    RULES,
     BetIntent,
     EvPredictor,
-    GapParams,
     LookbackParams,
     ModelRuleSpec,
-    RetailEvModelParams,
     RuleParams,
     RuleSpec,
     Selection,
     add_fixture_context,
     apply_rule,
+    best_bet,
     candidate_leagues,
-    decision_leads,
     decision_times,
-    exchange_gap,
     gap_bets,
     lookback_points,
     max_input_age,
-    polymarket_gap,
-    resolve_rule,
-    retail_ev_model,
     run_rule,
 )
 
 __all__ = [
-    "RULES",
     "BetIntent",
     "EvPredictor",
     "FixtureContext",
     "FixtureInput",
-    "GapParams",
     "LookbackParams",
     "Line",
     "Lookback",
@@ -58,7 +53,6 @@ __all__ = [
     "ModelRuleSpec",
     "PolymarketPrice",
     "PreviousResult",
-    "RetailEvModelParams",
     "RuleParams",
     "RuleSpec",
     "Selection",
@@ -66,11 +60,10 @@ __all__ = [
     "TeamResult",
     "add_fixture_context",
     "apply_rule",
+    "best_bet",
     "candidate_leagues",
     "build_market_state",
-    "decision_leads",
     "decision_times",
-    "exchange_gap",
     "gap_bets",
     "input_window",
     "is_bettable_line",
@@ -78,8 +71,5 @@ __all__ = [
     "load_market_state",
     "lookback_points",
     "max_input_age",
-    "polymarket_gap",
-    "resolve_rule",
-    "retail_ev_model",
     "run_rule",
 ]

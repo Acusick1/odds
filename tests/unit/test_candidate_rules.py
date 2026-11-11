@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -14,28 +15,25 @@ from odds_core.market_prices import Outcome
 from odds_core.quotes import Quote
 from odds_core.vocabulary import Market, Side, Source, TimeBasis
 from odds_lambda.candidate_rules import (
-    RULES,
     BetIntent,
-    GapParams,
     MarketState,
     ModelRuleSpec,
-    RetailEvModelParams,
     RuleSpec,
     SharpInput,
     apply_rule,
+    best_bet,
     build_market_state,
-    decision_leads,
     decision_times,
-    exchange_gap,
     is_bettable_line,
     max_input_age,
     pinning,
-    polymarket_gap,
-    resolve_rule,
-    retail_ev_model,
 )
+from odds_lambda.candidate_rules.code_hash import closure, root_module
+from odds_lambda.candidate_rules.gap import GapParams, exchange_gap, polymarket_gap
 from odds_lambda.candidate_rules.market_state import PolymarketPrice
-from odds_lambda.candidate_rules.pinning import rule_sha256, validate_candidate_rules
+from odds_lambda.candidate_rules.pinning import RULE_ROOTS, rule_sha256, validate_candidate_rules
+from odds_lambda.candidate_rules.registry import RULES, decision_leads, resolve_rule
+from odds_lambda.candidate_rules.retail_ev_model import RetailEvModelParams, retail_ev_model
 from pydantic import ValidationError
 
 from tests.test_helpers import (
@@ -45,7 +43,7 @@ from tests.test_helpers import (
     polymarket_bookmaker,
     three_way_bookmaker,
 )
-from tests.unit.conftest import SourceEdit
+from tests.unit.conftest import FIXTURE_PACKAGE, SourceEdit
 
 KICKOFF = datetime(2026, 11, 7, 15, 0, tzinfo=UTC)
 T = KICKOFF - timedelta(hours=1)
@@ -600,6 +598,33 @@ def _predicting(evs: dict[tuple[Outcome, str], float]) -> Any:
     return predict
 
 
+def _bet(outcome: Outcome, book: str = "bet365", line: float | None = None) -> BetIntent:
+    return BetIntent(outcome, book, 2.0, 1.0, line)
+
+
+class TestBestBet:
+    def test_keeps_the_highest_estimated_ev(self) -> None:
+        scored = [(_bet(HOME), 0.02), (_bet(AWAY), 0.05), (_bet(DRAW), 0.03)]
+        assert best_bet(Market.ONE_X_TWO, scored) == [_bet(AWAY)]
+
+    def test_no_qualifying_bet_gives_none(self) -> None:
+        assert best_bet(Market.ONE_X_TWO, []) == []
+
+    def test_a_tie_goes_to_the_lowest_line(self) -> None:
+        scored = [(_bet(OVER, line=3.5), 0.05), (_bet(UNDER, line=2.5), 0.05)]
+        assert best_bet(Market.TOTALS, scored) == [_bet(UNDER, line=2.5)]
+
+    def test_then_to_the_outcome_first_in_market_order(self) -> None:
+        scored = [(_bet(AWAY), 0.05), (_bet(DRAW), 0.05)]
+        assert best_bet(Market.ONE_X_TWO, scored) == [_bet(DRAW)]
+        totals = [(_bet(UNDER, line=2.5), 0.05), (_bet(OVER, line=2.5), 0.05)]
+        assert best_bet(Market.TOTALS, totals) == [_bet(OVER, line=2.5)]
+
+    def test_then_to_the_first_bookmaker_key(self) -> None:
+        scored = [(_bet(HOME, "williamhill"), 0.05), (_bet(HOME, "betfred"), 0.05)]
+        assert best_bet(Market.ONE_X_TWO, scored) == [_bet(HOME, "betfred")]
+
+
 class TestPolymarketGap:
     def test_bets_the_gap_to_the_polymarket_fair_price(self) -> None:
         state = replace(
@@ -1003,11 +1028,13 @@ class TestRuleSha256:
         assert rule_sha256(rule) != before
 
     def test_covers_the_sharp_inputs(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        from odds_lambda.candidate_rules import rules
+        from odds_lambda.candidate_rules import registry
 
         before = rule_sha256("exchange_gap")
         monkeypatch.setitem(
-            rules.RULES, "exchange_gap", replace(rules.RULES["exchange_gap"], sharp_inputs=BOTH)
+            registry.RULES,
+            "exchange_gap",
+            replace(registry.RULES["exchange_gap"], sharp_inputs=BOTH),
         )
         assert rule_sha256("exchange_gap") != before
 
@@ -1025,3 +1052,48 @@ class TestRuleSha256:
     def test_hash_must_be_64_hex_chars(self) -> None:
         with pytest.raises(ValidationError):
             _candidate(rule_sha256="abc")
+
+
+NEW_RULE = """
+from odds_lambda.candidate_rules import BetIntent, MarketState, RuleParams, RuleSpec, SharpInput
+
+
+def new_rule(state: MarketState, params: RuleParams) -> list[BetIntent]:
+    return []
+
+
+NEW_RULE = RuleSpec(new_rule, RuleParams, frozenset({SharpInput.EXCHANGE}))
+"""
+
+
+class TestRuleIndependence:
+    @pytest.mark.parametrize("rule", MECHANICAL_RULES)
+    def test_no_rule_closure_holds_the_registry_or_another_rule(self, rule: str) -> None:
+        spec = RULES[rule]
+        found = set(closure([spec.function, spec.params_model, *RULE_ROOTS]))
+        rule_modules = {root_module(s.function) for s in RULES.values()}
+        assert "odds_lambda.candidate_rules.registry" not in found
+        assert found & rule_modules == {root_module(spec.function)}
+
+    def test_a_new_rule_module_and_registry_entry_leave_the_other_hashes_unchanged(
+        self,
+        fixture_package: Callable[[dict[str, str]], None],
+        edit_source: SourceEdit,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        before = {rule: rule_sha256(rule) for rule in MECHANICAL_RULES}
+        fixture_package({"new_rule": NEW_RULE})
+        module = importlib.import_module(f"{FIXTURE_PACKAGE}.new_rule")
+        edit_source(
+            "odds_lambda.candidate_rules.registry",
+            lambda source: source.replace(
+                "\nRULES: dict", f"\nfrom {FIXTURE_PACKAGE}.new_rule import NEW_RULE\n\nRULES: dict"
+            ).replace(
+                '"retail_ev_model": RETAIL_EV_MODEL,',
+                '"retail_ev_model": RETAIL_EV_MODEL,\n    "new_rule": NEW_RULE,',
+            ),
+        )
+        monkeypatch.setitem(RULES, "new_rule", module.NEW_RULE)
+
+        assert {rule: rule_sha256(rule) for rule in MECHANICAL_RULES} == before
+        assert rule_sha256("new_rule") not in before.values()

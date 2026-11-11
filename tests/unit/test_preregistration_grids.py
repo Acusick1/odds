@@ -17,7 +17,8 @@ from pathlib import Path
 import pytest
 import yaml
 from odds_analytics.holdout import Preregistration
-from odds_lambda.candidate_rules.rules import RULES, RuleParams
+from odds_lambda.candidate_rules.registry import RULES
+from odds_lambda.candidate_rules.rules import RuleParams
 
 ROOT = Path(__file__).resolve().parents[2]
 FILES = sorted((ROOT / "candidates" / "preregistrations").glob("*.yaml"))

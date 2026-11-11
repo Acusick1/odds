@@ -6,7 +6,7 @@ import pytest
 from odds_core.close import CLOSES
 from odds_core.job_specs import JOB_SPECS
 from odds_core.sports import LEAGUE_TIMEZONES, SUPPORTED_SPORTS
-from odds_lambda.candidate_rules.rules import SPORT_MARKETS
+from odds_lambda.candidate_rules.registry import SPORT_MARKETS
 from odds_lambda.collection_calendar import CollectionSource
 from odds_lambda.health_readers import collection_sources
 from odds_lambda.jobs.fetch_odds import PLANS

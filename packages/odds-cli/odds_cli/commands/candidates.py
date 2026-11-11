@@ -32,8 +32,9 @@ from odds_core.candidates import (
     load_candidates,
 )
 from odds_core.database import async_session_maker
-from odds_lambda.candidate_rules import RULES, ModelRuleSpec
+from odds_lambda.candidate_rules import ModelRuleSpec
 from odds_lambda.candidate_rules.pinning import rule_sha256, validate_candidate_rules
+from odds_lambda.candidate_rules.registry import RULES
 from rich.console import Console
 from rich.table import Table
 from sqlalchemy.ext.asyncio import AsyncSession

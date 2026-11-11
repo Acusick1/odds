@@ -1,28 +1,24 @@
-"""Mechanical betting rules: a market state in, bets out."""
+"""The framework every mechanical rule shares: its params, its bets, its spec, the helpers rules
+bet through, and the one path by which a rule decides.
+
+Rule modules import this; the registry (``odds_lambda.candidate_rules.registry``) imports the rule
+modules, and no rule imports the registry, so adding a rule leaves every other rule's closure
+unchanged.
+"""
 
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from functools import partial
-from typing import Any, Literal
+from typing import Any
 
-from odds_core.candidates import Candidate, CandidateStatus, MechanicalCandidate
+from odds_core.candidates import MechanicalCandidate
 from odds_core.market_prices import Outcome, market_outcomes
 from odds_core.models import Event
-from odds_core.sports import SportKey
 from odds_core.vocabulary import Market
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field,
-    PositiveFloat,
-    PositiveInt,
-    ValidationError,
-    field_validator,
-    model_validator,
-)
+from pydantic import BaseModel, ConfigDict, Field, PositiveInt, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.candidate_rules.fixture_context import FixtureInput, load_fixture_context
@@ -36,18 +32,6 @@ from odds_lambda.candidate_rules.market_state import (
 
 # What a bet is on: an outcome on a line, the line None in a market without lines.
 Selection = tuple[Outcome, Line]
-_FOOTBALL_MARKETS = frozenset({Market.ONE_X_TWO, Market.TOTALS})
-# The markets a candidate of each sport can decide.
-SPORT_MARKETS: dict[SportKey, frozenset[Market]] = {
-    "soccer_epl": _FOOTBALL_MARKETS,
-    "soccer_efl_champ": _FOOTBALL_MARKETS,
-    "soccer_spain_la_liga": _FOOTBALL_MARKETS,
-    "soccer_italy_serie_a": _FOOTBALL_MARKETS,
-    "soccer_germany_bundesliga": _FOOTBALL_MARKETS,
-    "soccer_france_ligue_one": _FOOTBALL_MARKETS,
-    "baseball_mlb": frozenset({Market.H2H, Market.TOTALS}),
-    "basketball_nba": frozenset({Market.H2H}),
-}
 
 
 @dataclass(frozen=True)
@@ -124,11 +108,6 @@ def lookback_points(params: RuleParams) -> tuple[Lookback, ...]:
     )
 
 
-class GapParams(RuleParams):
-    threshold: PositiveFloat
-    stake: PositiveFloat = 1.0
-
-
 def longest_retail(
     retail: Mapping[str, Mapping[Outcome, float]], outcome: Outcome
 ) -> tuple[float, str] | None:
@@ -144,10 +123,11 @@ def longest_retail(
 def gap_bets(
     state: MarketState,
     fairs: Mapping[Line, Mapping[Outcome, float]],
-    params: GapParams,
+    threshold: float,
+    stake: float,
 ) -> list[BetIntent]:
     """On each line of ``fairs``, back the longest UK retail price of each outcome on that line
-    whose EV against the line's fair price exceeds the threshold."""
+    whose EV against the line's fair price exceeds ``threshold``."""
     bets: list[BetIntent] = []
     for line, fair in fairs.items():
         for outcome in market_outcomes(state.market):
@@ -155,19 +135,28 @@ def gap_bets(
             if longest is None:
                 continue
             price, book = longest
-            if fair[outcome] * price - 1 > params.threshold:
-                bets.append(BetIntent(outcome, book, price, params.stake, line))
+            if fair[outcome] * price - 1 > threshold:
+                bets.append(BetIntent(outcome, book, price, stake, line))
     return bets
 
 
-def exchange_gap(state: MarketState, params: GapParams) -> list[BetIntent]:
-    """Bet the gap to the exchange fair price on each line with one."""
-    return gap_bets(state, {line: p.fair for line, p in state.exchange.items()}, params)
+def best_bet(market: Market, scored: Iterable[tuple[BetIntent, float]]) -> list[BetIntent]:
+    """The one bet of ``scored``, qualifying bets in ``market`` with their estimated EV, of the
+    highest EV; empty when there is none. Ties go to the lowest line, then the outcome first in
+    ``market_outcomes`` order, then the first bookmaker key."""
+    order = {outcome: i for i, outcome in enumerate(market_outcomes(market))}
 
+    def rank(item: tuple[BetIntent, float]) -> tuple[float, float, int, str]:
+        bet, ev = item
+        return (
+            -ev,
+            float("-inf") if bet.line is None else bet.line,
+            order[bet.outcome],
+            bet.bookmaker,
+        )
 
-def polymarket_gap(state: MarketState, params: GapParams) -> list[BetIntent]:
-    """Bet the gap to Polymarket's fair price on each line with one."""
-    return gap_bets(state, {line: p.fair for line, p in state.polymarket.items()}, params)
+    best = min(scored, key=rank, default=None)
+    return [] if best is None else [best[0]]
 
 
 @dataclass(frozen=True)
@@ -217,68 +206,6 @@ class ModelRuleSpec:
             self.also_markets,
             self.fixture_inputs,
         )
-
-
-class RetailEvModelParams(RuleParams):
-    """``model`` names the model. A replay leaves the first ``training_matches`` of its range
-    to training only and refits before every ``refit_every_matches`` scored matches.
-
-    Its hyperparameters are tuned once, on the training matches alone: ``tuning_trials``
-    trials seeded with ``tuning_seed`` (also the model's random state), scored on expanding
-    walk-forward folds that first train on ``tuning_min_train_matches`` matches and then
-    validate ``tuning_step_matches`` matches at a time.
-    """
-
-    model: Literal["retail_ev_price_only"]
-    threshold: PositiveFloat
-    training_matches: PositiveInt
-    refit_every_matches: PositiveInt
-    tuning_trials: PositiveInt
-    tuning_seed: int
-    tuning_min_train_matches: PositiveInt
-    tuning_step_matches: PositiveInt
-    stake: PositiveFloat = 1.0
-
-    @model_validator(mode="after")
-    def _folds_fit_the_training_matches(self) -> RetailEvModelParams:
-        if self.tuning_min_train_matches >= self.training_matches:
-            raise ValueError(
-                f"tuning_min_train_matches {self.tuning_min_train_matches} leaves no match of "
-                f"the {self.training_matches} training matches to validate"
-            )
-        return self
-
-
-def retail_ev_model(
-    state: MarketState, params: RetailEvModelParams, predict: EvPredictor
-) -> list[BetIntent]:
-    """Back the longest UK retail price of each outcome whose predicted EV exceeds the threshold."""
-    if None not in state.exchange:
-        return []
-    predicted = predict(state)
-    bets: list[BetIntent] = []
-    for outcome in market_outcomes(state.market):
-        longest = longest_retail(state.retail.get(None, {}), outcome)
-        if longest is None:
-            continue
-        price, book = longest
-        ev = predicted.get((outcome, book))
-        if ev is not None and ev > params.threshold:
-            bets.append(BetIntent(outcome, book, price, params.stake))
-    return bets
-
-
-RULES: dict[str, RuleSpec | ModelRuleSpec] = {
-    "exchange_gap": RuleSpec(exchange_gap, GapParams, frozenset({SharpInput.EXCHANGE})),
-    "polymarket_gap": RuleSpec(polymarket_gap, GapParams, frozenset({SharpInput.POLYMARKET})),
-    "retail_ev_model": ModelRuleSpec(
-        retail_ev_model,
-        RetailEvModelParams,
-        frozenset({SharpInput.EXCHANGE}),
-        ("odds_analytics.candidate_model.ModelReplay",),
-        frozenset({Market.ONE_X_TWO, Market.H2H}),
-    ),
-}
 
 
 async def run_rule(
@@ -382,68 +309,3 @@ def apply_rule(
     if not state.has_input:
         return state, []
     return state, [b for b in spec.function(state, params) if b.selection not in bet_selections]
-
-
-def resolve_rule(candidate: MechanicalCandidate) -> tuple[RuleSpec | ModelRuleSpec, RuleParams]:
-    """The candidate's rule and validated params; ``ValueError`` names what is invalid.
-
-    Does not check ``rule_sha256``, which a draft may lack.
-    """
-    spec = RULES.get(candidate.rule)
-    if spec is None:
-        raise ValueError(
-            f"candidate {candidate.name!r}: unknown rule {candidate.rule!r}, "
-            f"known rules {sorted(RULES)}"
-        )
-    for sport in candidate.sports:
-        sport_markets = SPORT_MARKETS.get(sport, frozenset())
-        if candidate.market not in sport_markets:
-            raise ValueError(
-                f"candidate {candidate.name!r}: no rule decides market "
-                f"{candidate.market.value!r} for sport {sport!r}, its markets "
-                f"{sorted(m.value for m in sport_markets)}"
-            )
-    if isinstance(spec, ModelRuleSpec) and candidate.market not in spec.markets:
-        raise ValueError(
-            f"candidate {candidate.name!r}: rule {candidate.rule!r} has no model for market "
-            f"{candidate.market.value!r}, model markets {sorted(m.value for m in spec.markets)}"
-        )
-    for sport in candidate.sports:
-        sport_markets = SPORT_MARKETS.get(sport, frozenset())
-        if candidate.market in spec.also_markets or not spec.also_markets <= sport_markets:
-            raise ValueError(
-                f"candidate {candidate.name!r}: rule {candidate.rule!r} also reads "
-                f"{sorted(m.value for m in spec.also_markets)}, which must be markets other than "
-                f"{candidate.market.value!r} that sport {sport!r} decides, "
-                f"{sorted(m.value for m in sport_markets)}"
-            )
-    try:
-        params = spec.params_model.model_validate(candidate.params)
-    except ValidationError as exc:
-        raise ValueError(
-            f"candidate {candidate.name!r}: invalid params for rule {candidate.rule!r}: {exc}"
-        ) from exc
-    return spec, params
-
-
-def decision_leads(candidates: Sequence[Candidate], sport: str) -> list[timedelta]:
-    """How long before kick-off the active mechanical candidates that bet in ``sport`` decide,
-    one lead per decision time.
-
-    A candidate whose rule or params do not resolve is left out; the run-candidates job
-    alerts on it.
-    """
-    leads: list[timedelta] = []
-    for candidate in candidates:
-        if (
-            not isinstance(candidate, MechanicalCandidate)
-            or sport not in candidate.sports
-            or candidate.status != CandidateStatus.ACTIVE
-        ):
-            continue
-        try:
-            _, params = resolve_rule(candidate)
-        except ValueError:
-            continue
-        leads.extend(timedelta(minutes=minutes) for minutes in params.minutes_before_kickoff)
-    return leads

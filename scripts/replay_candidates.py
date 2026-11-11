@@ -18,7 +18,6 @@ import yaml
 from odds_analytics.candidate_backtest import _Counts, _decide, final_events, replay
 from odds_core.candidates import MechanicalCandidate
 from odds_core.database import async_session_maker
-from odds_lambda.candidate_rules import resolve_rule
 from sqlalchemy import text
 
 # Fixed so the summary's pending counts do not depend on when it runs.
@@ -51,6 +50,15 @@ def current_rule_sha256(rule: str) -> str:
     except ImportError:
         from odds_lambda.candidate_rules import rule_sha256  # type: ignore[attr-defined,no-redef]
     return rule_sha256(rule)
+
+
+def resolve(candidate: MechanicalCandidate) -> tuple[Any, Any]:
+    """The candidate's rule and params, wherever this revision defines ``resolve_rule``."""
+    try:
+        from odds_lambda.candidate_rules.registry import resolve_rule
+    except ImportError:
+        from odds_lambda.candidate_rules import resolve_rule  # type: ignore[attr-defined,no-redef]
+    return resolve_rule(candidate)
 
 
 def load(path: Path) -> MechanicalCandidate:
@@ -102,7 +110,7 @@ async def dump(
             await session.execute(text(f"SET TRANSACTION SNAPSHOT '{snapshot}'"))
         for path in paths:
             candidate = load(path)
-            spec, params = resolve_rule(candidate)
+            spec, params = resolve(candidate)
             counts = _Counts()
             bets = []
             summaries = []
