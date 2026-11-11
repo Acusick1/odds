@@ -73,7 +73,7 @@ class FeatureEvent(BaseModel):
 # Quote Selection
 # =============================================================================
 
-# The model's sharp reference; differs on purpose from the agent's odds_core SHARP_BOOKMAKERS.
+# The tabular features' sharp book; differs on purpose from the agent's odds_core SHARP_BOOKMAKERS.
 DEFAULT_SHARP_BOOKMAKERS = ["pinnacle"]
 DEFAULT_RETAIL_BOOKMAKERS = ["fanduel", "draftkings", "betmgm_us"]
 

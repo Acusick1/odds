@@ -27,7 +27,7 @@ status: stable
 
 # Betfair Exchange client and job
 
-Package `packages/odds-lambda/odds_lambda/betfair/`, driven by the fetch-betfair-exchange job. It writes snapshots under bookmaker key `betfair_exchange`, so existing readers and the [sharp benchmark](../modelling/sharp-benchmark.md) fallback consume them unchanged. It is the sharp-reference fallback when Pinnacle has no price ([ADR-0003](../../docs/adr/0003-hybrid-sharp-reference.md)).
+Package `packages/odds-lambda/odds_lambda/betfair/`, driven by the fetch-betfair-exchange job. It writes snapshots under bookmaker key `betfair_exchange`, so existing readers consume them unchanged. Its snapshots are the only live close that scores candidates and the `retail_ev` target, and, with FDUK's opening snapshots, the retail-EV model's exchange price at t; in the agent tools' and the tabular features' sharp lists it is the fallback after Pinnacle ([sharp references](../modelling/sharp-benchmark.md#which-reference-is-used-for-what)).
 
 ## Client and adapter
 

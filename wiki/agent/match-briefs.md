@@ -44,7 +44,7 @@ Three MCP tools write and read match briefs (none touches paper trades):
 
 ## Sharp-price stamp
 
-The stamp lets a later wake-up compare the price at brief time with the current price ([sharp benchmark](../modelling/sharp-benchmark.md)). Sharp prices are resolved per outcome, so the stamp can mix Pinnacle and Betfair prices across outcomes ([retail edges](mcp-market-tools.md#retail-edges)). The sharp list is the agent's `odds_core.bookmakers.SHARP_BOOKMAKERS`, which differs on purpose from the feature code's Pinnacle-only default ([code copies](../modelling/sharp-benchmark.md#code-copies)).
+The stamp lets a later wake-up compare the price at brief time with the current price ([sharp references](../modelling/sharp-benchmark.md)). Sharp prices are resolved per outcome, so the stamp can mix Pinnacle and Betfair prices across outcomes ([retail edges](mcp-market-tools.md#retail-edges)). The sharp list is the agent's `odds_core.bookmakers.SHARP_BOOKMAKERS`, which differs on purpose from the feature code's Pinnacle-only default ([code copies](../modelling/sharp-benchmark.md#code-copies)).
 
 ## Related
 

@@ -52,7 +52,7 @@ status: stable
 
 # Polymarket match prices as odds snapshots
 
-Polymarket's EPL and NBA match markets are stored as `odds_core.models.OddsSnapshot` ([columns and constraints](../storage/odds-tables.md#odds_snapshots)) rows with `polymarket` price rows ([price tables](../storage/price-tables.md)), so a training config can list `polymarket` in `sharp_bookmakers` ([sharp benchmark](../modelling/sharp-benchmark.md)). The decision is [ADR-0013](../../docs/adr/0013-collect-polymarket-epl-as-sharp-reference.md), which supersedes [ADR-0007](../../docs/adr/0007-deprioritise-polymarket.md); Polymarket is still not a UK trading venue. NBA is collected the same way, as two-way `h2h`. Why the venue is usable for EPL is in [Polymarket market character](polymarket-market-research.md#market-character-by-sport).
+Polymarket's EPL and NBA match markets are stored as `odds_core.models.OddsSnapshot` ([columns and constraints](../storage/odds-tables.md#odds_snapshots)) rows with `polymarket` price rows ([price tables](../storage/price-tables.md)), so a training config can list `polymarket` in `sharp_bookmakers` ([sharp references](../modelling/sharp-benchmark.md)). The decision is [ADR-0013](../../docs/adr/0013-collect-polymarket-epl-as-sharp-reference.md), which supersedes [ADR-0007](../../docs/adr/0007-deprioritise-polymarket.md); Polymarket is still not a UK trading venue. NBA is collected the same way, as two-way `h2h`. Why the venue is usable for EPL is in [Polymarket market character](polymarket-market-research.md#market-character-by-sport).
 
 ## Client and settings
 
@@ -132,4 +132,4 @@ Its `odds_lambda.jobs.fetch_polymarket_odds.SOURCE` feeds the per-market [stale-
 
 - [Polymarket market character](polymarket-market-research.md)
 - [Odds snapshot tables](../storage/odds-tables.md)
-- [Sharp benchmark](../modelling/sharp-benchmark.md)
+- [Sharp references](../modelling/sharp-benchmark.md)

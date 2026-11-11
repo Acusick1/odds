@@ -1,7 +1,7 @@
 ---
 type: explanation
 title: Data sources
-description: Every odds feed and what each one supplies, bookmaker roles, the Pinnacle coverage gap, and where each feed runs.
+description: Every odds feed and what each one supplies, bookmaker roles, Pinnacle coverage by source, and where each feed runs.
 sources:
   - odds_core.config.DataCollectionConfig
   - odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP
@@ -30,9 +30,13 @@ ESPN and MLB are non-odds feeds: [epl-context-data](epl-context-data.md), [mlb-p
 
 One book has one key whatever the source: the Odds API keys are renamed to the OddsPortal and FDUK keys (`betfair_exchange`, `betfred`, `ladbrokes`, `888sport`), and the Odds API's EPL three-way market is stored as `1x2` with canonical team names, so the same book from two sources shares one slot ([sport-and-market-keys](sport-and-market-keys.md#odds-api-scope)). EPL `1x2` reads therefore see Odds API rows: readers that take the newest price per book, such as `odds_mcp.server.find_retail_edges` and the sharp reading of `odds_mcp.server.paper_bet` (from a shared sharp/retail market window over `prices` rows, [market tools](../agent/mcp-market-tools.md#retail-edges)), take it from whichever source wrote last, and `odds_analytics.feature_groups.TierSampler` with `required_bookmakers` can pick an Odds API snapshot, which carries no bet365, when the Odds API's close has a sharp book (it derives each snapshot's tier with `odds_analytics.feature_groups.tiers_of`, whatever its source).
 
-## Pinnacle coverage gap
+## Pinnacle coverage
 
-Pinnacle's Odds API coverage of EPL stopped in January 2026 (71 events lost; a request on 2026-10-18 returned Pinnacle for all 21 upcoming events), and FDUK's Pinnacle odds are unreliable after July 2025. Betfair Exchange is the sharp fallback ([ADR-0003](../../docs/adr/0003-hybrid-sharp-reference.md)). Event counts and season coverage are data facts the repo cannot confirm; query the database.
+Pinnacle is no scoring reference: the close is Betfair Exchange's, and Pinnacle sits only in the agent tools' and the tabular features' sharp lists ([sharp references](../modelling/sharp-benchmark.md#which-reference-is-used-for-what)). Its EPL coverage, counted on the production database on 2026-11-11 as snapshots holding a `pinnacle` price row:
+
+- **FDUK** prices Pinnacle on every EPL `1x2` closing snapshot up to 2025-12 and on none after kick-offs of 2026-01-08. FDUK takes Pinnacle's odds from Pinnacle's public API, which shut down in January 2026 ([ADR-0003](../../docs/adr/0003-hybrid-sharp-reference.md)).
+- **The Odds API, live** (`fetch-odds`, 2026-04-07 to 2026-11-08): 30,194 of 32,617 snapshots across `1x2`, totals and spreads, and every one of 173 events.
+- **The Odds API, historical**: 11,576 of 11,847 snapshots, and 93 of 94 events, mostly from 2023-03 and 2023-04.
 
 ## Deployed state
 

@@ -1,11 +1,11 @@
 ---
 title: Modelling
-description: The retail-EV target, the feature pipeline, the sharp benchmark, training, cross-validation and tuning.
+description: The retail-EV target, the feature pipeline, the sharp references, training, cross-validation and tuning.
 ---
 
 # Modelling
 
-These pages cover the training targets (the `retail_ev` target and the `raw` line-movement delta), the features, the sharp benchmark, and training, cross-validation and tuning. The decisions behind the current setup are ADRs: [the hybrid sharp reference](../../docs/adr/0003-hybrid-sharp-reference.md) and [a retail bet's EV against the Betfair Exchange close](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md). Results of the retail-EV runs are in [evaluation](../evaluation/index.md).
+These pages cover the training targets (the `retail_ev` target and the `raw` line-movement delta), the features, the [sharp references](sharp-benchmark.md#which-reference-is-used-for-what) each use reads, and training, cross-validation and tuning. The decisions behind the current setup are ADRs: [a retail bet's EV against the Betfair Exchange close](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md), and, for the tabular features of the `raw` target, [the hybrid sharp reference](../../docs/adr/0003-hybrid-sharp-reference.md). Results of the retail-EV runs are in [evaluation](../evaluation/index.md).
 
 <!-- pages:start -->
 ### Reference
@@ -24,7 +24,7 @@ These pages cover the training targets (the `retail_ev` target and the `raw` lin
 
 - [CLV and the training target](clv-target.md) — What CLV means here, the retail-EV target against the Betfair Exchange close and its baseline and weights, the raw close-minus-snapshot delta, and how sampling changes a target.
 - [Decision time and look-ahead bias](look-ahead-bias.md) — The as-of instant for bets and training rows, the no-future-data rule per layer, and where it breaks.
-- [Sharp benchmark and retail-sharp divergence](sharp-benchmark.md) — What the sharp reference is and why, its priority semantics, the divergence feature and screener, and how the three code copies differ.
+- [Sharp references and retail-sharp divergence](sharp-benchmark.md) — Which sharp price each use reads (the scoring close, the retail-EV model, the mechanical rules, the tabular features and the agent tools), the priority semantics of the Pinnacle-first lists, the divergence feature and screener, and how the code copies differ.
 
 ### How-to guides
 
