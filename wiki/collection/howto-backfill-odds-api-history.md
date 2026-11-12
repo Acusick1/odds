@@ -1,7 +1,7 @@
 ---
 type: howto
 title: Backfill Odds API history
-description: Steps to cost an acquisition manifest, execute its calls, and fill scores and check status.
+description: Steps to cost an acquisition manifest, execute its calls, audit what they stored, and fill scores and check status.
 sources:
   - odds_cli.commands.discover
   - odds_cli.commands.events.sync_mlb_seasons
@@ -9,12 +9,15 @@ sources:
   - odds_analytics.backfill_plan.Manifest
   - odds_analytics.backfill_executor.BackfillExecutor
   - odds_analytics.backfill_executor.BackfillExecutor.probe
+  - scripts.audit_backfill.main
+  - scripts.audit_backfill.band_coverage
+  - scripts.audit_backfill.reconcile_calls
 status: stable
 ---
 
 # Backfill Odds API history
 
-Costs a historical purchase before it is bought, buys it, and fills scores. Executing spends paid quota; command behaviour and limits are on [odds-api-backfill](odds-api-backfill.md). Check `odds status quota` first ([odds-api-quota](odds-api-quota.md)).
+Costs a historical purchase before it is bought, buys it, audits what it stored, and fills scores. Executing spends paid quota; command behaviour and limits are on [odds-api-backfill](odds-api-backfill.md). Check `odds status quota` first ([odds-api-quota](odds-api-quota.md)).
 
 ## Cost and execute a manifest
 
@@ -56,6 +59,16 @@ Costs a historical purchase before it is bought, buys it, and fills scores. Exec
    - Manifests of different sports can run at once, one process each ([limits](odds-api-backfill.md#limits)).
    - Each call logs its real cost, and the run ends with the key's remaining quota. Backfill calls record no quota in `fetch_logs`, so `odds status quota` does not show their spend.
    - The summary's dropped games are distinct games the calls listed but no stored event took ([historical listings](../storage/event-matching.md#historical-odds-api-listings)); an `id_refused` drop names a second event holding the game's Odds API id.
+
+## Audit a finished manifest
+
+1. Print the manifest's audit, by season, and commit it beside the manifest as `backfills/<manifest stem>.audit.md`.
+   ```bash
+   uv run python scripts/audit_backfill.py --manifest backfills/odds-api-bundesliga-2024-26.yaml
+   ```
+   - It only reads the database and spends no units; add `--season 2024-25` to audit one season. Other manifests' runs may write to the same tables meanwhile, since it reads only the manifest's sport and seasons.
+   - It reports FINAL fixtures without a stored snapshot, listings in stored responses that attached to no event, each book's fixture coverage, the share of each band's whole-minute decisions served within the band's max age at the snapshots' actual times, the latest Betfair Exchange price at or before kick-off with its age, the provider gaps and off-phase snapshots, and the planned calls against the stored snapshot times.
+   - Its units are distinct stored snapshot times times the manifest's units per call. A call bought twice stores one snapshot time and the database keeps no bill, so take the billed units from `odds backfill execute`'s output: each `fetched` line is one paid call with its units, and each run's summary has its units used.
 
 ## Fill scores
 

@@ -76,7 +76,7 @@ Measured on historical `h2h` and `totals` responses.
 | MLB, 2024-07 | 17 |
 | NBA, 2025-01 | 11 |
 
-- **Betfred.** `betfred_uk` appears in no historical response, by name or in the `uk` region (measured 2026-11-11), so 10 named books including it return 8 or 9.
+- **Betfred.** `betfred_uk` appears in no probe response, by name or in the `uk` region (measured 2026-11-11), so 10 named books including it return 8 or 9. The Bundesliga run's `uk` region responses carry it from 2026-04-13 to the season's end, on 45 of 306 2025-26 fixtures, and on no 2024-25 fixture ([Bundesliga audit](../../backfills/odds-api-bundesliga-2024-26.audit.md#bookmakers-2025-26)).
 - How each key is stored is on [sport, market and bookmaker keys](sport-and-market-keys.md).
 
 ## Throughput
