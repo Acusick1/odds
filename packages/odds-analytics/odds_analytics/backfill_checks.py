@@ -1,7 +1,7 @@
 """A historical response judged against the acquisition manifest that requested it.
 
-The probe reports every check; a run stops on a unit mismatch, on a snapshot other than the
-planned one that is not a provider gap, and on a streak of sparse responses or of gaps.
+The probe reports every check; a run stops on a unit mismatch, on a snapshot later than the
+call requested or stamped for the next grid time, and on a streak of sparse responses or of gaps.
 """
 
 from __future__ import annotations
@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from enum import StrEnum
 from typing import Any
 
 from odds_core.api_models import HistoricalOddsResponse
@@ -37,23 +38,69 @@ def lag_ok(modelled: datetime, snapshot: datetime) -> bool:
     ) >= floor_minute(modelled)
 
 
-def grid_time_of(manifest: Manifest, snapshot: datetime) -> datetime | None:
-    """The grid time ``snapshot`` is stamped for, to within ``TIMESTAMP_TOLERANCE``, or None
-    when it is off the grid's phase or before the grid."""
-    try:
-        grid_time = manifest.floor_to_grid(snapshot + TIMESTAMP_TOLERANCE)
-    except ValueError:
-        return None
-    return grid_time if abs(snapshot - grid_time) <= TIMESTAMP_TOLERANCE else None
+class ReturnedSnapshot(StrEnum):
+    """Where the snapshot a call returned lies against the grid snapshot it requested. The API
+    returns the latest snapshot at or before the request time, so any snapshot at or before it
+    is the provider's own, stored at its own time."""
+
+    # An input to the same whole-minute decisions as the planned snapshot (``lag_ok``).
+    PLANNED = "planned"
+    # The provider's snapshot for the planned grid step, stamped off the grid's phase: from
+    # ``TIMESTAMP_TOLERANCE`` before the planned snapshot to the request time.
+    OFF_PHASE = "off_phase"
+    # The provider has nothing from an earlier snapshot to the request time.
+    PROVIDER_GAP = "provider_gap"
+    # Later than the request time, which the API's contract rules out, or stamped for the next
+    # grid time, so the request or the manifest's grid is wrong.
+    LATER = "later"
 
 
-def is_provider_gap(manifest: Manifest, modelled: datetime, snapshot: datetime) -> bool:
-    """The provider has no snapshot at the ``modelled`` time: it returned an earlier one, on the
-    grid to within ``TIMESTAMP_TOLERANCE`` and at least one step back."""
-    if lag_ok(modelled, snapshot) or snapshot >= modelled:
+def next_grid_time(manifest: Manifest, modelled: datetime) -> datetime:
+    """The grid time after the one the snapshot at ``modelled`` is stamped for, to within
+    ``TIMESTAMP_TOLERANCE``: a step starting within that tolerance after ``modelled``, or the
+    one after the grid time at ``modelled`` plus the tolerance."""
+    tolerance = modelled + TIMESTAMP_TOLERANCE
+    starts = [s.start for s in manifest.snapshot_grid if modelled < s.start <= tolerance]
+    return min(starts, default=manifest.next_grid_time(manifest.floor_to_grid(tolerance)))
+
+
+def classify_snapshot(
+    manifest: Manifest, modelled: datetime, snapshot: datetime
+) -> ReturnedSnapshot:
+    """Where ``snapshot``, returned for the grid snapshot at ``modelled``, lies."""
+    if (
+        snapshot > manifest.request_time(modelled)
+        or snapshot >= next_grid_time(manifest, modelled) - TIMESTAMP_TOLERANCE
+    ):
+        return ReturnedSnapshot.LATER
+    if lag_ok(modelled, snapshot):
+        return ReturnedSnapshot.PLANNED
+    if snapshot >= modelled - TIMESTAMP_TOLERANCE:
+        return ReturnedSnapshot.OFF_PHASE
+    return ReturnedSnapshot.PROVIDER_GAP
+
+
+def gap_covers(
+    manifest: Manifest,
+    modelled: datetime,
+    planned: datetime,
+    returned: datetime,
+    next_snapshot: datetime | None,
+) -> bool:
+    """Whether a call for ``modelled`` would return the snapshot a recorded provider gap
+    returned, as a provider gap: the gap was recorded for ``modelled``, or the gap's
+    ``returned`` snapshot is a provider gap for ``modelled`` and its ``next_snapshot`` is
+    later than the call's request time. The API returns the latest snapshot at or before the
+    request time, so the call would get ``returned``. ``next_snapshot`` is trusted only when
+    later than the gap call's own request time, as that call's response implies."""
+    if modelled == planned:
+        return True
+    if next_snapshot is None or next_snapshot <= manifest.request_time(planned):
         return False
-    grid_time = grid_time_of(manifest, snapshot)
-    return grid_time is not None and grid_time < modelled
+    return (
+        next_snapshot > manifest.request_time(modelled)
+        and classify_snapshot(manifest, modelled, returned) is ReturnedSnapshot.PROVIDER_GAP
+    )
 
 
 def book_judged_lead(manifest: Manifest) -> timedelta:
@@ -116,8 +163,12 @@ class ResponseCheck:
         return lag_ok(self.modelled, self.snapshot_time)
 
     @property
+    def returned(self) -> ReturnedSnapshot:
+        return classify_snapshot(self.manifest, self.modelled, self.snapshot_time)
+
+    @property
     def provider_gap(self) -> bool:
-        return is_provider_gap(self.manifest, self.modelled, self.snapshot_time)
+        return self.returned is ReturnedSnapshot.PROVIDER_GAP
 
     @property
     def grid_ok(self) -> bool:

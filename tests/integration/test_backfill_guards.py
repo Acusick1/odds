@@ -9,12 +9,19 @@ from typing import Any
 
 import pytest
 from odds_analytics import backfill_executor
-from odds_analytics.backfill_checks import ResponseCheck, book_judged_lead
-from odds_analytics.backfill_executor import BackfillExecutor, BackfillStopped
+from odds_analytics.backfill_checks import (
+    ResponseCheck,
+    ReturnedSnapshot,
+    book_judged_lead,
+    gap_covers,
+    next_grid_time,
+)
+from odds_analytics.backfill_executor import BackfillExecutor, BackfillStopped, CallProgress
 from odds_analytics.backfill_plan import GridStep, Manifest
 from odds_core.backfill_models import OddsApiSnapshotGap
 from odds_core.models import FetchLog, OddsSnapshot
 from odds_core.sports import SportKey
+from odds_core.time import utc_isoformat
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -68,6 +75,19 @@ def response_check(manifest: Manifest, planned: datetime, returned: datetime) ->
         farthest_lead=None,
         book_events={},
         book_leads={},
+    )
+
+
+def ten_then_five(boundary: datetime, sport: SportKey = "soccer_epl") -> Manifest:
+    """``sport``'s manifest on 10-minute snapshots at 5, 15, 25 minutes past the hour and so on,
+    then 5-minute ones from ``boundary``."""
+    return load_manifest(sport).model_copy(
+        update={
+            "snapshot_grid": (
+                GridStep(start=datetime(2020, 6, 6, 0, 5, tzinfo=UTC), step_minutes=10),
+                GridStep(start=boundary, step_minutes=5),
+            )
+        }
     )
 
 
@@ -160,7 +180,7 @@ class TestRunGuards:
             assert stop.value.result.units_used == 10 * made
         assert len(replay.requests) == made
 
-    async def test_a_call_returning_another_snapshot_stops_the_run_after_storing_it(
+    async def test_a_call_returning_a_later_snapshot_stops_the_run_after_storing_it(
         self,
         pglite_async_session: AsyncSession,
         replay: BackfillReplay,
@@ -170,14 +190,14 @@ class TestRunGuards:
         manifest = load_manifest(MLB)
         games = await load_mlb(session, mlb_schedule)
         first, second = PLANNED, PLANNED + timedelta(minutes=5)
-        early = first - timedelta(seconds=39)
-        replay.record(first, [g.listing(early) for g in games], snapshot=early)
+        late = first + timedelta(minutes=2, seconds=31)
+        replay.record(first, [g.listing(late) for g in games], snapshot=late)
         replay.record(second, [g.listing(second) for g in games])
 
         with pytest.raises(
             BackfillStopped,
             match="call for the 2025-06-02T14:55:38Z snapshot returned the "
-            "2025-06-02T14:54:59Z snapshot",
+            "2025-06-02T14:58:09Z snapshot, later than its request time 2025-06-02T14:58:08Z",
         ) as e:
             await replay.run(
                 manifest, [replay.call(manifest, at, games[0].event) for at in (first, second)]
@@ -190,12 +210,13 @@ class TestRunGuards:
     @pytest.mark.parametrize(
         ("offset", "returned"),
         [
-            (timedelta(minutes=2, seconds=30), "2025-06-02T14:53:08Z"),
-            (timedelta(minutes=10, seconds=-61), "2025-06-02T14:46:39Z"),
+            # On the grid's phase at the next grid time: the grid's phase is wrong.
             (timedelta(minutes=-5), "2025-06-02T15:00:38Z"),
+            # Off the grid's phase, after the request time.
+            (timedelta(minutes=-3), "2025-06-02T14:58:38Z"),
         ],
     )
-    async def test_a_call_returning_an_off_grid_or_later_snapshot_stops_the_run(
+    async def test_a_call_returning_a_snapshot_after_its_request_time_stops_the_run(
         self,
         pglite_async_session: AsyncSession,
         replay: BackfillReplay,
@@ -360,6 +381,68 @@ class TestRunGuards:
             await replay.run(manifest, [replay.call(manifest, at)], skip_existing=False)
 
 
+class TestOffPhaseSnapshots:
+    @pytest.mark.parametrize(
+        "offset",
+        [
+            # After an outage the provider stamped 2025-10-20 19:42:57 for 19:40:38.
+            timedelta(minutes=2, seconds=19),
+            timedelta(minutes=2, seconds=30),
+            timedelta(seconds=-39),
+            timedelta(seconds=-60),
+        ],
+    )
+    async def test_an_off_phase_snapshot_is_stored_at_its_time_and_the_run_continues(
+        self,
+        pglite_async_session: AsyncSession,
+        replay: BackfillReplay,
+        mlb_schedule: type[FakeMlbStatsFetcher],
+        offset: timedelta,
+    ) -> None:
+        session = pglite_async_session
+        manifest = load_manifest(MLB)
+        games = await load_mlb(session, mlb_schedule)
+        off_phase = PLANNED + offset
+        later = PLANNED + timedelta(minutes=5)
+        replay.record(PLANNED, [g.listing(off_phase) for g in games], snapshot=off_phase)
+        replay.record(later, [g.listing(later) for g in games])
+        calls = [replay.call(manifest, at, games[0].event) for at in (PLANNED, later)]
+        progress: list[CallProgress] = []
+
+        result = await replay.run(manifest, calls, progress_callback=progress.append)
+
+        assert (result.calls_made, result.off_phase_snapshots, result.provider_gaps) == (2, 1, 0)
+        assert progress[0].message == f"off phase: returned the {utc_isoformat(off_phase)} snapshot"
+        times = await session.execute(select(OddsSnapshot.snapshot_time).distinct())
+        assert set(times.scalars()) == {off_phase, later}
+        assert await count(session, OddsApiSnapshotGap) == 0
+        rerun = await replay.run(manifest, calls)
+        assert (rerun.calls_made, rerun.calls_skipped) == (0, 2)
+
+    async def test_a_snapshot_accepted_before_a_step_change_does_not_skip_the_next_call(
+        self,
+        pglite_async_session: AsyncSession,
+        replay: BackfillReplay,
+        mlb_schedule: type[FakeMlbStatsFetcher],
+    ) -> None:
+        session = pglite_async_session
+        # 10-minute snapshots change to 5-minute ones at 14:50, the 14:45 call's request time.
+        first = datetime(2025, 6, 2, 14, 45, tzinfo=UTC)
+        second = datetime(2025, 6, 2, 14, 50, tzinfo=UTC)
+        manifest = ten_then_five(second, MLB)
+        games = await load_mlb(session, mlb_schedule)
+        off_phase = first + timedelta(minutes=3, seconds=59)
+        replay.record(first, [g.listing(off_phase) for g in games], snapshot=off_phase)
+        replay.record(second, [g.listing(second) for g in games])
+        calls = [replay.call(manifest, at, games[0].event) for at in (first, second)]
+
+        result = await replay.run(manifest, calls)
+
+        assert (result.calls_made, result.calls_skipped, result.off_phase_snapshots) == (2, 0, 1)
+        times = await session.execute(select(OddsSnapshot.snapshot_time).distinct())
+        assert set(times.scalars()) == {off_phase, second}
+
+
 class TestProviderGaps:
     async def test_a_gap_is_stored_recorded_and_the_run_continues(
         self,
@@ -436,28 +519,98 @@ class TestProviderGaps:
         assert (result.calls_made, result.calls_skipped, result.provider_gaps) == (2, 1, 1)
         assert len(replay.requests) == 2
 
-    @pytest.mark.parametrize(
-        ("inside", "next_gap"),
-        [
-            # The next snapshot comes before the gap call's own request time.
-            (PLANNED - timedelta(minutes=10), timedelta(minutes=50)),
-            # The next snapshot is off the grid's phase.
-            (PLANNED + timedelta(minutes=5), timedelta(hours=1, minutes=2, seconds=30)),
-        ],
-    )
-    async def test_an_inconsistent_next_snapshot_skips_only_the_planned_call(
+    async def test_a_hole_ending_off_phase_skips_its_calls_until_the_next_snapshot(
         self,
         pglite_async_session: AsyncSession,
         replay: BackfillReplay,
         mlb_schedule: type[FakeMlbStatsFetcher],
-        inside: datetime,
-        next_gap: timedelta,
+    ) -> None:
+        manifest = load_manifest(MLB)
+        games = await load_mlb(pglite_async_session, mlb_schedule)
+        # As on 2025-10-20: the provider has nothing from 16:31:34 until 19:32:57, off the
+        # grid's phase, and the call for 19:30:38 returns 19:32:57.
+        returned = PLANNED - timedelta(minutes=4, seconds=4)
+        resumed = PLANNED + timedelta(minutes=32, seconds=19)
+        replay.record(
+            PLANNED,
+            [g.listing(returned) for g in games],
+            snapshot=returned,
+            next_gap=resumed - returned,
+        )
+        inside = [PLANNED + timedelta(minutes=5 * i) for i in range(1, 6)]
+        first_after = PLANNED + timedelta(minutes=30)
+        replay.record(first_after, [g.listing(resumed) for g in games], snapshot=resumed)
+        calls = [
+            replay.call(manifest, at, games[0].event) for at in (PLANNED, *inside, first_after)
+        ]
+
+        result = await replay.run(manifest, calls)
+
+        assert (result.calls_made, result.calls_skipped, result.provider_gaps) == (2, 5, 1)
+        assert result.off_phase_snapshots == 1
+        assert [r["date"] for r in replay.requests] == [
+            utc_isoformat(manifest.request_time(at)) for at in (PLANNED, first_after)
+        ]
+
+    async def test_a_call_requesting_the_next_snapshots_time_is_made(
+        self,
+        pglite_async_session: AsyncSession,
+        replay: BackfillReplay,
+        mlb_schedule: type[FakeMlbStatsFetcher],
+    ) -> None:
+        manifest = load_manifest(MLB)
+        games = await load_mlb(pglite_async_session, mlb_schedule)
+        returned = PLANNED - timedelta(minutes=5)
+        after = PLANNED + timedelta(minutes=10)
+        resumed = manifest.request_time(after)
+        replay.record(
+            PLANNED,
+            [g.listing(returned) for g in games],
+            snapshot=returned,
+            next_gap=resumed - returned,
+        )
+        replay.record(after, [g.listing(resumed) for g in games], snapshot=resumed)
+        inside = PLANNED + timedelta(minutes=5)
+        calls = [replay.call(manifest, at, games[0].event) for at in (PLANNED, inside, after)]
+
+        result = await replay.run(manifest, calls)
+
+        assert (result.calls_made, result.calls_skipped) == (2, 1)
+
+    async def test_an_earlier_off_phase_snapshot_is_a_gap(
+        self,
+        pglite_async_session: AsyncSession,
+        replay: BackfillReplay,
+        mlb_schedule: type[FakeMlbStatsFetcher],
+    ) -> None:
+        session = pglite_async_session
+        manifest = load_manifest(MLB)
+        games = await load_mlb(session, mlb_schedule)
+        # The provider's last snapshot before a hole was stamped off the grid's phase.
+        returned = PLANNED - timedelta(minutes=2, seconds=41)
+        replay.record(PLANNED, [g.listing(returned) for g in games], snapshot=returned)
+
+        result = await replay.run(manifest, [replay.call(manifest, PLANNED, games[0].event)])
+
+        assert (result.provider_gaps, result.off_phase_snapshots) == (1, 0)
+        gap = (await session.execute(select(OddsApiSnapshotGap))).scalars().one()
+        assert gap.returned_snapshot == returned
+
+    async def test_a_next_snapshot_before_the_gap_calls_request_time_skips_only_the_planned_call(
+        self,
+        pglite_async_session: AsyncSession,
+        replay: BackfillReplay,
+        mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
         manifest = load_manifest(MLB)
         games = await load_mlb(pglite_async_session, mlb_schedule)
         earlier = PLANNED - timedelta(minutes=55)
+        inside = PLANNED - timedelta(minutes=10)
         replay.record(
-            PLANNED, [g.listing(earlier) for g in games], snapshot=earlier, next_gap=next_gap
+            PLANNED,
+            [g.listing(earlier) for g in games],
+            snapshot=earlier,
+            next_gap=timedelta(minutes=50),
         )
         replay.record(inside, [g.listing(inside) for g in games])
         calls = [replay.call(manifest, at, games[0].event) for at in (PLANNED, inside)]
@@ -751,23 +904,128 @@ class TestResponseCheck:
         assert (check.lag_ok, check.provider_gap) == (False, True)
 
     @pytest.mark.parametrize(
-        ("lag", "gap"),
+        ("lag", "returned"),
         [
-            (timedelta(0), False),
-            (timedelta(seconds=39), False),
-            (timedelta(minutes=2, seconds=30), False),
-            (timedelta(minutes=5, seconds=-60), True),
-            (timedelta(minutes=5, seconds=60), True),
-            (timedelta(minutes=5, seconds=61), False),
-            (timedelta(minutes=-5), False),
+            (timedelta(seconds=38), ReturnedSnapshot.PLANNED),
+            (timedelta(0), ReturnedSnapshot.PLANNED),
+            (timedelta(seconds=-22), ReturnedSnapshot.PLANNED),
+            (timedelta(seconds=39), ReturnedSnapshot.OFF_PHASE),
+            (timedelta(seconds=60), ReturnedSnapshot.OFF_PHASE),
+            (timedelta(seconds=-23), ReturnedSnapshot.OFF_PHASE),
+            (timedelta(minutes=-2, seconds=-30), ReturnedSnapshot.OFF_PHASE),
+            (timedelta(seconds=61), ReturnedSnapshot.PROVIDER_GAP),
+            (timedelta(minutes=2, seconds=30), ReturnedSnapshot.PROVIDER_GAP),
+            (timedelta(minutes=5), ReturnedSnapshot.PROVIDER_GAP),
+            (timedelta(minutes=5, seconds=61), ReturnedSnapshot.PROVIDER_GAP),
+            (timedelta(minutes=-2, seconds=-31), ReturnedSnapshot.LATER),
+            (timedelta(minutes=-5), ReturnedSnapshot.LATER),
         ],
     )
-    def test_only_an_earlier_snapshot_on_the_grid_is_a_provider_gap(
-        self, lag: timedelta, gap: bool
+    def test_a_snapshot_is_placed_against_the_planned_one_and_the_request_time(
+        self, lag: timedelta, returned: ReturnedSnapshot
     ) -> None:
         check = response_check(load_manifest(MLB), PLANNED, PLANNED - lag)
 
-        assert check.provider_gap is gap
+        assert check.returned is returned
+        assert check.provider_gap is (returned is ReturnedSnapshot.PROVIDER_GAP)
+
+    @pytest.mark.parametrize(
+        ("modelled", "returned", "next_snapshot", "covered"),
+        [
+            # The call the gap was recorded for, whatever its next snapshot.
+            (PLANNED, PLANNED - timedelta(minutes=5), None, True),
+            (PLANNED + timedelta(minutes=5), PLANNED - timedelta(minutes=5), None, False),
+            # An off-phase next snapshot bounds the hole like an on-phase one.
+            (
+                PLANNED + timedelta(minutes=25),
+                PLANNED - timedelta(minutes=4, seconds=4),
+                PLANNED + timedelta(minutes=32, seconds=19),
+                True,
+            ),
+            (
+                PLANNED + timedelta(minutes=30),
+                PLANNED - timedelta(minutes=4, seconds=4),
+                PLANNED + timedelta(minutes=32, seconds=19),
+                False,
+            ),
+            # A next snapshot at or before the gap call's own request time is not trusted.
+            (
+                PLANNED - timedelta(minutes=5),
+                PLANNED - timedelta(minutes=55),
+                PLANNED + timedelta(minutes=2, seconds=30),
+                False,
+            ),
+            # The returned snapshot is the call's own, not a gap for it.
+            (
+                PLANNED - timedelta(minutes=10),
+                PLANNED - timedelta(minutes=10, seconds=1),
+                PLANNED + timedelta(minutes=5),
+                False,
+            ),
+        ],
+    )
+    def test_a_recorded_gap_covers_a_call_that_would_return_its_snapshot(
+        self,
+        modelled: datetime,
+        returned: datetime,
+        next_snapshot: datetime | None,
+        covered: bool,
+    ) -> None:
+        manifest = load_manifest(MLB)
+
+        assert gap_covers(manifest, modelled, PLANNED, returned, next_snapshot) is covered
+
+    @pytest.mark.parametrize(
+        ("offset", "returned"),
+        [
+            (timedelta(minutes=5), ReturnedSnapshot.OFF_PHASE),
+            (timedelta(minutes=5, seconds=1), ReturnedSnapshot.LATER),
+            (timedelta(minutes=-1, seconds=-1), ReturnedSnapshot.PROVIDER_GAP),
+        ],
+    )
+    def test_a_ten_minute_steps_snapshot_is_placed_against_its_request_time(
+        self, offset: timedelta, returned: ReturnedSnapshot
+    ) -> None:
+        planned = datetime(2021, 6, 2, 14, 5, tzinfo=UTC)
+        manifest = ten_then_five(datetime(2022, 9, 1, 0, 0, 38, tzinfo=UTC))
+
+        assert response_check(manifest, planned, planned + offset).returned is returned
+
+    @pytest.mark.parametrize(
+        ("returned", "kind"),
+        [
+            (datetime(2022, 9, 1, 0, 5, 38, tzinfo=UTC), ReturnedSnapshot.LATER),
+            (datetime(2022, 9, 1, 0, 4, 38, tzinfo=UTC), ReturnedSnapshot.LATER),
+            (datetime(2022, 9, 1, 0, 4, 37, tzinfo=UTC), ReturnedSnapshot.OFF_PHASE),
+        ],
+    )
+    def test_a_step_starting_within_the_tolerance_after_the_planned_snapshot_is_its_next(
+        self, returned: datetime, kind: ReturnedSnapshot
+    ) -> None:
+        planned = datetime(2022, 9, 1, 0, 5, tzinfo=UTC)
+        manifest = ten_then_five(planned + timedelta(seconds=38))
+
+        assert next_grid_time(manifest, planned) == planned + timedelta(seconds=38)
+        assert response_check(manifest, planned, returned).returned is kind
+
+    @pytest.mark.parametrize(
+        ("offset", "returned"),
+        [
+            # The 5-minute step starts at the request time, so its first snapshot, stamped
+            # seconds early, is the next grid time's.
+            (timedelta(minutes=4, seconds=30), ReturnedSnapshot.LATER),
+            (timedelta(minutes=4), ReturnedSnapshot.LATER),
+            (timedelta(minutes=3, seconds=59), ReturnedSnapshot.OFF_PHASE),
+        ],
+    )
+    def test_a_snapshot_stamped_for_a_later_steps_first_grid_time_is_later(
+        self, offset: timedelta, returned: ReturnedSnapshot
+    ) -> None:
+        planned = datetime(2022, 9, 1, 0, 5, tzinfo=UTC)
+        manifest = ten_then_five(planned + timedelta(minutes=5))
+
+        assert manifest.next_grid_time(planned) == manifest.request_time(planned)
+        assert response_check(manifest, planned, planned + offset).returned is returned
 
     def test_the_grid_step_in_force_at_each_neighbour_is_the_expected_gap(self) -> None:
         boundary = datetime(2022, 9, 1, 0, 0, 38, tzinfo=UTC)
