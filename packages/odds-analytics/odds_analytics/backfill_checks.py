@@ -28,6 +28,34 @@ TIMESTAMP_TOLERANCE = timedelta(seconds=60)
 MAX_BOOK_JUDGED_LEAD = timedelta(hours=24)
 
 
+def lag_ok(modelled: datetime, snapshot: datetime) -> bool:
+    """``snapshot`` is an input to the same whole-minute decisions, at any whole-minute max age,
+    as the ``modelled`` one the planner's coverage assumes: it falls within the modelled time's
+    whole minute, or exactly on the next minute."""
+    return ceil_minute(snapshot) <= ceil_minute(modelled) and floor_minute(
+        snapshot
+    ) >= floor_minute(modelled)
+
+
+def grid_time_of(manifest: Manifest, snapshot: datetime) -> datetime | None:
+    """The grid time ``snapshot`` is stamped for, to within ``TIMESTAMP_TOLERANCE``, or None
+    when it is off the grid's phase or before the grid."""
+    try:
+        grid_time = manifest.floor_to_grid(snapshot + TIMESTAMP_TOLERANCE)
+    except ValueError:
+        return None
+    return grid_time if abs(snapshot - grid_time) <= TIMESTAMP_TOLERANCE else None
+
+
+def is_provider_gap(manifest: Manifest, modelled: datetime, snapshot: datetime) -> bool:
+    """The provider has no snapshot at the ``modelled`` time: it returned an earlier one, on the
+    grid to within ``TIMESTAMP_TOLERANCE`` and at least one step back."""
+    if lag_ok(modelled, snapshot) or snapshot >= modelled:
+        return False
+    grid_time = grid_time_of(manifest, snapshot)
+    return grid_time is not None and grid_time < modelled
+
+
 def book_judged_lead(manifest: Manifest) -> timedelta:
     """How far from kick-off a call's required books are judged: at most
     ``MAX_BOOK_JUDGED_LEAD``, and no farther than the manifest needs fixtures listed, for a
@@ -85,23 +113,11 @@ class ResponseCheck:
         """The snapshot is an input to the same whole-minute decisions, at any whole-minute max
         age, as the modelled one the planner's coverage assumes: it falls within the modelled
         time's whole minute, or exactly on the next minute."""
-        return ceil_minute(self.snapshot_time) <= ceil_minute(self.modelled) and floor_minute(
-            self.snapshot_time
-        ) >= floor_minute(self.modelled)
+        return lag_ok(self.modelled, self.snapshot_time)
 
     @property
     def provider_gap(self) -> bool:
-        """The provider has no snapshot at the modelled time: it returned an earlier one, on the
-        grid to within ``TIMESTAMP_TOLERANCE`` and at least one step back."""
-        if self.lag_ok or self.snapshot_time >= self.modelled:
-            return False
-        try:
-            grid_time = self.manifest.floor_to_grid(self.snapshot_time + TIMESTAMP_TOLERANCE)
-        except ValueError:
-            return False
-        return (
-            grid_time < self.modelled and abs(self.snapshot_time - grid_time) <= TIMESTAMP_TOLERANCE
-        )
+        return is_provider_gap(self.manifest, self.modelled, self.snapshot_time)
 
     @property
     def grid_ok(self) -> bool:

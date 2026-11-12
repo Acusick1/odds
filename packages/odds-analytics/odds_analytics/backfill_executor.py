@@ -35,6 +35,8 @@ from odds_analytics.backfill_checks import (
     ResponseCheck,
     book_judged_lead,
     check_response,
+    grid_time_of,
+    is_provider_gap,
     stored_market,
 )
 from odds_analytics.backfill_plan import Call, Manifest
@@ -345,31 +347,37 @@ class BackfillExecutor:
                     response_time_ms=response.response_time_ms,
                 )
             )
-            served = {target.fixture.event_id for target in call.serves}
-            horizon = book_judged_lead(manifest)
-            near = {
-                target.fixture.event_id
-                for target in call.serves
-                if target.fixture.kickoff - response.snapshot_time <= horizon
-            }
-            judged = (
-                response.raw_events_data
-                if judge_every_event
-                else [raw for event_id, raw in attached.items() if event_id in near] or None
-            )
-            check = check_response(
-                manifest,
-                response,
-                call.time,
-                judged_events=judged,
-                served=len(served),
-                served_stored=len(served & attached.keys()),
-            )
-            if check.provider_gap:
-                await self._record_gap(session, call.time, response.next_snapshot_time, check)
-                result.provider_gaps += 1
+            # Only the gap classification runs before the commit, so a check that raises never
+            # discards a paid call's rows.
+            gap = is_provider_gap(manifest, call.time, response.snapshot_time)
+            if gap:
+                await self._record_gap(
+                    session, call.time, response.snapshot_time, response.next_snapshot_time
+                )
             await session.commit()
         result.fixtures_stored += stored
+        if gap:
+            result.provider_gaps += 1
+        served = {target.fixture.event_id for target in call.serves}
+        horizon = book_judged_lead(manifest)
+        near = {
+            target.fixture.event_id
+            for target in call.serves
+            if target.fixture.kickoff - response.snapshot_time <= horizon
+        }
+        judged = (
+            response.raw_events_data
+            if judge_every_event
+            else [raw for event_id, raw in attached.items() if event_id in near] or None
+        )
+        check = check_response(
+            manifest,
+            response,
+            call.time,
+            judged_events=judged,
+            served=len(served),
+            served_stored=len(served & attached.keys()),
+        )
         progress = CallProgress(
             call.time,
             "fetched",
@@ -378,7 +386,7 @@ class BackfillExecutor:
             quota_remaining=response.quota_remaining,
             message=(
                 f"provider gap: returned the {utc_isoformat(response.snapshot_time)} snapshot"
-                if check.provider_gap
+                if gap
                 else None
             ),
         )
@@ -388,8 +396,8 @@ class BackfillExecutor:
         self,
         session: AsyncSession,
         planned: datetime,
+        returned: datetime,
         next_snapshot: datetime | None,
-        check: ResponseCheck,
     ) -> None:
         """Record that the provider has no snapshot at ``planned``, for each requested market, so
         a rerun skips the call."""
@@ -397,7 +405,7 @@ class BackfillExecutor:
             "backfill_provider_gap",
             sport=self.manifest.sport,
             planned_snapshot=utc_isoformat(planned),
-            returned_snapshot=utc_isoformat(check.snapshot_time),
+            returned_snapshot=utc_isoformat(returned),
             next_snapshot=utc_isoformat(next_snapshot) if next_snapshot else None,
         )
         rows = [
@@ -405,7 +413,7 @@ class BackfillExecutor:
                 "sport_key": self.manifest.sport,
                 "market": stored_market(self.manifest, market),
                 "planned_snapshot": planned,
-                "returned_snapshot": check.snapshot_time,
+                "returned_snapshot": returned,
                 "next_snapshot": next_snapshot,
                 "recorded_at": utc_now(),
             }
@@ -445,14 +453,15 @@ class BackfillExecutor:
         """Whether a recorded provider gap of a requested market covers the call: one recorded
         for its snapshot, or a gap whose returned snapshot is earlier, beyond the timestamp
         jitter, and whose next snapshot is later than the call's request time, so the request
-        would return the same earlier snapshot."""
-        markets = {stored_market(self.manifest, market) for market in self.manifest.markets}
+        would return the same earlier snapshot. The second needs a consistent next snapshot:
+        later than the gap's own request time and on the grid's phase."""
+        manifest = self.manifest
+        markets = {stored_market(manifest, market) for market in manifest.markets}
         gap = OddsApiSnapshotGap
-        requested = self.manifest.request_time(call.time)
+        requested = manifest.request_time(call.time)
         async with self._session_factory() as session:
             found = await session.execute(
-                select(gap.planned_snapshot)
-                .where(
+                select(gap.planned_snapshot, gap.next_snapshot).where(
                     gap.sport_key == self.manifest.sport,
                     gap.market.in_(markets),  # type: ignore[attr-defined]
                     or_(
@@ -463,9 +472,16 @@ class BackfillExecutor:
                         ),
                     ),
                 )
-                .limit(1)
             )
-        return found.first() is not None
+        return any(
+            planned == call.time
+            or (
+                next_snapshot is not None
+                and next_snapshot > manifest.request_time(planned)
+                and grid_time_of(manifest, next_snapshot) is not None
+            )
+            for planned, next_snapshot in found.all()
+        )
 
     async def _already_stored(self, call: Call) -> bool:
         """Whether any fixture the call serves already has a historical Odds API snapshot

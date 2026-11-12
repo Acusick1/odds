@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from odds_analytics import backfill_executor
 from odds_analytics.backfill_checks import ResponseCheck, book_judged_lead
 from odds_analytics.backfill_executor import BackfillExecutor, BackfillStopped
 from odds_analytics.backfill_plan import GridStep, Manifest
@@ -434,6 +435,66 @@ class TestProviderGaps:
 
         assert (result.calls_made, result.calls_skipped, result.provider_gaps) == (2, 1, 1)
         assert len(replay.requests) == 2
+
+    @pytest.mark.parametrize(
+        ("inside", "next_gap"),
+        [
+            # The next snapshot comes before the gap call's own request time.
+            (PLANNED - timedelta(minutes=10), timedelta(minutes=50)),
+            # The next snapshot is off the grid's phase.
+            (PLANNED + timedelta(minutes=5), timedelta(hours=1, minutes=2, seconds=30)),
+        ],
+    )
+    async def test_an_inconsistent_next_snapshot_skips_only_the_planned_call(
+        self,
+        pglite_async_session: AsyncSession,
+        replay: BackfillReplay,
+        mlb_schedule: type[FakeMlbStatsFetcher],
+        inside: datetime,
+        next_gap: timedelta,
+    ) -> None:
+        manifest = load_manifest(MLB)
+        games = await load_mlb(pglite_async_session, mlb_schedule)
+        earlier = PLANNED - timedelta(minutes=55)
+        replay.record(
+            PLANNED, [g.listing(earlier) for g in games], snapshot=earlier, next_gap=next_gap
+        )
+        replay.record(inside, [g.listing(inside) for g in games])
+        calls = [replay.call(manifest, at, games[0].event) for at in (PLANNED, inside)]
+        await replay.run(manifest, calls[:1])
+
+        result = await replay.run(manifest, calls)
+
+        assert (result.calls_made, result.calls_skipped) == (1, 1)
+        assert len(replay.requests) == 2
+
+    async def test_a_check_that_raises_keeps_the_paid_calls_rows_and_gap(
+        self,
+        pglite_async_session: AsyncSession,
+        replay: BackfillReplay,
+        mlb_schedule: type[FakeMlbStatsFetcher],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        session = pglite_async_session
+        manifest = load_manifest(MLB)
+        games = await load_mlb(session, mlb_schedule)
+        earlier = PLANNED - timedelta(minutes=10)
+        replay.record(PLANNED, [g.listing(earlier) for g in games], snapshot=earlier)
+        call = replay.call(manifest, PLANNED, games[0].event)
+
+        def fail(*args: Any, **kwargs: Any) -> ResponseCheck:
+            raise KeyError("key")
+
+        with monkeypatch.context() as patched:
+            patched.setattr(backfill_executor, "check_response", fail)
+            with pytest.raises(KeyError):
+                await replay.run(manifest, [call])
+
+        assert await count(session, OddsSnapshot) > 0
+        assert await count(session, OddsApiSnapshotGap) == 1
+        rerun = await replay.run(manifest, [call])
+        assert (rerun.calls_made, rerun.calls_skipped) == (0, 1)
+        assert len(replay.requests) == 1
 
     async def test_the_returned_snapshots_own_grid_time_is_not_inside_the_gap(
         self,
