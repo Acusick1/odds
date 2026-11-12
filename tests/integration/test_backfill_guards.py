@@ -435,6 +435,29 @@ class TestProviderGaps:
         assert (result.calls_made, result.calls_skipped, result.provider_gaps) == (2, 1, 1)
         assert len(replay.requests) == 2
 
+    async def test_the_returned_snapshots_own_grid_time_is_not_inside_the_gap(
+        self,
+        pglite_async_session: AsyncSession,
+        replay: BackfillReplay,
+        mlb_schedule: type[FakeMlbStatsFetcher],
+    ) -> None:
+        manifest = load_manifest(MLB)
+        games = await load_mlb(pglite_async_session, mlb_schedule)
+        own = PLANNED - timedelta(minutes=10)
+        returned = own - timedelta(seconds=1)
+        replay.record(
+            PLANNED,
+            [games[0].listing(returned)],
+            snapshot=returned,
+            next_gap=timedelta(minutes=15),
+        )
+        replay.record(own, [g.listing(returned) for g in games], snapshot=returned)
+        await replay.run(manifest, [replay.call(manifest, PLANNED, games[0].event)])
+
+        result = await replay.run(manifest, [replay.call(manifest, own, games[1].event)])
+
+        assert (result.calls_made, result.calls_skipped) == (1, 0)
+
     async def test_consecutive_gaps_stop_the_run(
         self,
         pglite_async_session: AsyncSession,

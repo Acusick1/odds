@@ -31,6 +31,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_analytics.backfill_checks import (
+    TIMESTAMP_TOLERANCE,
     ResponseCheck,
     book_judged_lead,
     check_response,
@@ -442,9 +443,9 @@ class BackfillExecutor:
 
     async def _recorded_gap(self, call: Call) -> bool:
         """Whether a recorded provider gap of a requested market covers the call: one recorded
-        for its snapshot, or a gap whose returned snapshot is earlier and whose next snapshot is
-        later than the call's request time, so the request would return the same earlier
-        snapshot."""
+        for its snapshot, or a gap whose returned snapshot is earlier, beyond the timestamp
+        jitter, and whose next snapshot is later than the call's request time, so the request
+        would return the same earlier snapshot."""
         markets = {stored_market(self.manifest, market) for market in self.manifest.markets}
         gap = OddsApiSnapshotGap
         requested = self.manifest.request_time(call.time)
@@ -457,7 +458,7 @@ class BackfillExecutor:
                     or_(
                         gap.planned_snapshot == call.time,
                         and_(
-                            gap.returned_snapshot < call.time,
+                            gap.returned_snapshot < call.time - TIMESTAMP_TOLERANCE,
                             gap.next_snapshot > requested,
                         ),
                     ),
