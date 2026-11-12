@@ -181,7 +181,10 @@ class TestCrowdedGap:
         s = state({"coral": {HOME: 2.6}, "betway": {HOME: 2.6}}, self.FAIR, self.crowd(3))
         assert [b.bookmaker for b in crowded_gap(s, self.PARAMS)] == ["betway"]
 
-    @pytest.mark.parametrize("fields", [{"min_concurrent_kickoffs": 0}, {"threshold": -0.01}])
+    @pytest.mark.parametrize(
+        "fields",
+        [{"min_concurrent_kickoffs": 0}, {"threshold": -0.01}, {"threshold": float("inf")}],
+    )
     def test_invalid_params_are_refused(self, fields: dict[str, Any]) -> None:
         with pytest.raises(ValidationError):
             CrowdedGapParams(**{"min_concurrent_kickoffs": 3, "threshold": 0.0, **BASE, **fields})

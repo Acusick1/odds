@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import NonNegativeFloat, PositiveFloat, PositiveInt
+from pydantic import Field, NonNegativeFloat, PositiveFloat, PositiveInt
 
 from odds_lambda.candidate_rules.fixture_context import FixtureInput
 from odds_lambda.candidate_rules.inputs import SharpInput
@@ -12,7 +12,7 @@ from odds_lambda.candidate_rules.rules import BetIntent, RuleParams, RuleSpec, b
 
 class CrowdedGapParams(RuleParams):
     min_concurrent_kickoffs: PositiveInt
-    threshold: NonNegativeFloat
+    threshold: NonNegativeFloat = Field(allow_inf_nan=False)
     stake: PositiveFloat = 1.0
 
 

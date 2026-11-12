@@ -274,6 +274,21 @@ class TestLiveRunner:
         )
         assert decision.missed and decision.bets_placed == 0
 
+    async def test_a_favourite_price_bet_is_placed_and_matches_in_parity(
+        self, pglite_async_session: AsyncSession, registry: Path
+    ) -> None:
+        cand = favourite()
+        register(registry, cand)
+        await seed(pglite_async_session, 1, (1.8, 3.0, 3.0), exchange=HEAVY)
+        await pglite_async_session.commit()
+
+        await decide(pglite_async_session)
+
+        [trade] = (await pglite_async_session.execute(select(PaperTrade))).scalars().all()
+        assert (trade.selection, trade.bookmaker) == ("home", "bet365")
+        report = await check_parity(pglite_async_session, cand)
+        assert [d.status for d in report.decisions] == [ParityStatus.MATCH]
+
     async def test_a_pooled_crowded_decision_matches_in_parity(
         self, pglite_async_session: AsyncSession, add_match: AddMatch, registry: Path
     ) -> None:
