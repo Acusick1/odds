@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from odds_core.bookmakers import (
     NON_BETTABLE_BOOKMAKERS,
+    UK_RETAIL_BOOKMAKERS,
     ZERO_MARGIN_BOOKMAKERS,
     canonical_bookmaker,
 )
@@ -25,6 +26,17 @@ class TestBookmakerRoles:
     def test_pinnacle_keeps_a_margin(self) -> None:
         assert "pinnacle" not in ZERO_MARGIN_BOOKMAKERS
         assert {"polymarket", "betfair_exchange"} <= ZERO_MARGIN_BOOKMAKERS
+
+
+class TestUkRetailRoster:
+    @pytest.mark.parametrize("key", ["casumo", "leovegas", "livescorebet"])
+    def test_uk_licensed_odds_api_books_are_retail(self, key: str) -> None:
+        assert canonical_bookmaker(Source.ODDS_API, key) == key
+        assert key in UK_RETAIL_BOOKMAKERS
+
+    @pytest.mark.parametrize("key", ["virginbet", "grosvenor", "mrgreen"])
+    def test_duplicate_and_unlicensed_books_are_not_retail(self, key: str) -> None:
+        assert canonical_bookmaker(Source.ODDS_API, key) not in UK_RETAIL_BOOKMAKERS
 
 
 class TestLegacyBetfairKey:

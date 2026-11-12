@@ -23,7 +23,7 @@ Each external source has a fetcher, a job (or manual script) that runs it, and a
 - [OddsPortal scraper](oddsportal-scraper.md) — The OddsPortal HTTP feed client, the adapter that converts its prices, the shared oddsportal_common helpers, the results page archive reader, and odds scrape upcoming.
 - [Polymarket match prices as odds snapshots](polymarket-odds-snapshots.md) — The Polymarket client and settings, how Polymarket's match markets (EPL three-way, NBA two-way) become polymarket odds snapshots, the history grid and its drop rules, attaching matches to events, the backfill command and the fetch-polymarket-odds job.
 - [Results and status jobs](results-jobs.md) — update-status, fetch-scores, fetch-oddsportal-results, fetch-mlb-results and odds fetch scores: cadence, flow, heartbeats, failure handling.
-- [Sport, market and bookmaker keys](sport-and-market-keys.md) — SportKey, job-name suffixes, the market-key dialects per writer, bookmaker key maps, and DataCollectionConfig defaults.
+- [Sport, market and bookmaker keys](sport-and-market-keys.md) — SportKey, job-name suffixes, the market-key dialects per writer, bookmaker key maps, the UK retail roster and why three stored books are left out of it, and DataCollectionConfig defaults.
 - [The fetch-odds job](fetch-odds-job.md) — Event sync, gate, pre/post-schedule and log events of odds_lambda.jobs.fetch_odds.
 - [The fetch-oddsportal job](fetch-oddsportal-job.md) — LEAGUE_SPECS, flow, cadence, runs before candidate decision times, alerts, heartbeats of odds_lambda.jobs.fetch_oddsportal.
 - [The Odds API client and per-sport keys](odds-api-client.md) — TheOddsAPIClient methods, retry, the key each sport spends, and unit cost per endpoint.

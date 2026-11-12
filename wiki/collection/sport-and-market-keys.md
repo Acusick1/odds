@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Sport, market and bookmaker keys
-description: SportKey, job-name suffixes, the market-key dialects per writer, bookmaker key maps, and DataCollectionConfig defaults.
+description: SportKey, job-name suffixes, the market-key dialects per writer, bookmaker key maps, the UK retail roster and why three stored books are left out of it, and DataCollectionConfig defaults.
 sources:
   - odds_core.config.DataCollectionConfig
   - odds_core.config.APIConfig
@@ -22,6 +22,7 @@ sources:
   - odds_lambda.scheduling.jobs.make_compound_job_name
   - odds_mcp.server.MarketKey
   - scripts.ingest_football_data_uk.BOOKMAKER_PREFIXES
+  - odds_core.bookmakers.UK_RETAIL_BOOKMAKERS
   - scripts.ingest_football_data_uk.MARKET_KEY
   - scripts.ingest_football_data_uk._ingest_one_match
   - scripts.ingest_oddsportal.MARKET_CONFIGS
@@ -36,7 +37,7 @@ status: stable
 
 - `soccer_epl`: pinnacle, betfair_ex_uk, williamhill, paddypower, skybet, ladbrokes_uk, coral, betfred_uk, betvictor, sport888.
 - `baseball_mlb`: pinnacle, circasports, draftkings, fanduel, betmgm, williamhill_us, betrivers, bovada.
-- `basketball_nba`: pinnacle, williamhill, ladbrokes_uk, coral, sport888, betvictor, paddypower, skybet, unibet_uk, betway. A `uk` region request for NBA on 2026-10-31 (12 games) returned these UK books: betano_uk, betfair_ex_uk, betfair_sb_uk, betvictor, betway, boylesports, casumo, coral, grosvenor, ladbrokes_uk, leovegas, livescorebet, matchbook, paddypower, skybet, smarkets, sport888, unibet_uk, virginbet, williamhill. Only William Hill, Ladbrokes, Coral, 888sport, LeoVegas and Matchbook priced `spreads`; `totals` came from William Hill, Ladbrokes, Coral, 888sport, BetVictor, Betano, LeoVegas, Virgin Bet, LiveScore Bet, Grosvenor, Casumo and Matchbook. The list keeps the UK-licensed retail books in `odds_core.bookmakers.UK_RETAIL_BOOKMAKERS` that priced NBA and the exchanges are left to Betfair and OddsPortal. Pinnacle is not in the `uk` region and is named through `bookmakers` like EPL's, which the API honours whatever the region (EPL's stored Pinnacle prices from the same call shape confirm it; no NBA Pinnacle price was requested in the probe, so its NBA coverage is `(inferred)` until the first scheduled run).
+- `basketball_nba`: pinnacle, williamhill, ladbrokes_uk, coral, sport888, betvictor, paddypower, skybet, unibet_uk, betway. A `uk` region request for NBA on 2026-10-31 (12 games) returned these UK books: betano_uk, betfair_ex_uk, betfair_sb_uk, betvictor, betway, boylesports, casumo, coral, grosvenor, ladbrokes_uk, leovegas, livescorebet, matchbook, paddypower, skybet, smarkets, sport888, unibet_uk, virginbet, williamhill. Only William Hill, Ladbrokes, Coral, 888sport, LeoVegas and Matchbook priced `spreads`; `totals` came from William Hill, Ladbrokes, Coral, 888sport, BetVictor, Betano, LeoVegas, Virgin Bet, LiveScore Bet, Grosvenor, Casumo and Matchbook. The list is ten of the [UK retail](#uk-retail-roster) books that priced NBA, so the request bills as one region, and the exchanges are left to Betfair and OddsPortal. Pinnacle is not in the `uk` region and is named through `bookmakers` like EPL's, which the API honours whatever the region (EPL's stored Pinnacle prices from the same call shape confirm it; no NBA Pinnacle price was requested in the probe, so its NBA coverage is `(inferred)` until the first scheduled run).
 
 The Odds API gives `bookmakers` priority over `regions`, so the region setting has no effect on these requests, and it bills each group of up to 10 named bookmakers as one region ([Odds API v4 guide](https://the-odds-api.com/liveapi/guides/v4/)). The Odds API carries no bet365 for EPL in the `uk` or `eu` region (checked 2026-10-18); bet365 comes from OddsPortal and FDUK.
 
@@ -49,6 +50,20 @@ These filters apply only to Odds API requests ([configuration](../foundations/co
 - OddsPortal names map through `odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP` (32 entries; unmapped names fall back to `odds_lambda.oddsportal_common.slugify`). The map holds Pinnacle, BetMGM, DraftKings, FanDuel, Betfair Exchange, William Hill, Ladbrokes and others.
 - FDUK issues no id of its own for an event ([events](../storage/events.md#external-ids)). Its snapshots carry source `football_data_uk` (the envelope's `source` is the same string), and FDUK maps its column prefixes in `scripts.ingest_football_data_uk.BOOKMAKER_PREFIXES`: pinnacle, bet365, bwin, betfair_exchange (`BFE`), betfair_sportsbook (`BF`), interwetten, williamhill, betvictor (`VC`, `BV`), betfred (`BFD`), paddypower (`PP`), skybet (`SKB`), betmgm (`BMGM`), coral (`CL`), ladbrokes, onexbet, plus pseudo-books `market_max` / `market_avg` (`AGGREGATE_PREFIXES`).
 - Betfair Exchange covers the six football leagues, MLB and NBA (`odds_lambda.betfair.constants.SPORT_CONFIG`): match odds for all of them, and over/under 2.5 goals for each football league (the line is on `odds_lambda.betfair.constants.BetfairMarketSpec`), each sport with its own fixture horizon.
+
+## UK retail roster
+
+`odds_core.bookmakers.UK_RETAIL_BOOKMAKERS` lists, by canonical key, the sportsbooks a UK bettor can take a price from: every rule, model and screen that reads a retail price reads only these books. A book belongs in it when its operator holds a UK Gambling Commission remote betting licence ([public register](https://www.gamblingcommission.gov.uk/public-register/)) and its prices are its own.
+
+Three `uk`-region Odds API keys are stored but left out:
+
+| Key | Why it is left out |
+|---|---|
+| `virginbet` | Its `1x2` and `h2h` back prices equal `livescorebet`'s in 80 to 100% of co-quoted snapshots in every sampled month (first to fourth day) from 2023-05 to 2026-05 except 2024-06 and 2024-07 (3%). Both are LiveScore Group books on Kambi, and the register flags Virgin Bet's domain as a white label ([account 54310](https://www.gamblingcommission.gov.uk/public-register/business/detail/54310)). Counting both would count one price twice in a retail consensus. |
+| `grosvenor` | Its prices equal `casumo`'s in 97 to 99% of co-quoted snapshots from 2025-10 to 2026-05, and in 30 to 98% from 2024-04 to 2025-09 (the first to fourth day of each month sampled), while no book in the roster matches either in more than 16% (in the windows sampled below). Both are Kambi sportsbooks. `casumo` is kept because it covers more EPL fixtures. |
+| `mrgreen` | Mr Green Limited ([account 39264](https://www.gamblingcommission.gov.uk/public-register/business/detail/39264)) holds no remote betting licence, and its UK sportsbook closed in September 2022 ([report](https://www.casino.org/news/mr-green-shutting-down-uk-sportsbook-operations-igaming-safe-for-now/)), so its stored prices (to 2024-11-01) are not prices a UK bettor could take. |
+
+The kept `casumo` ([account 61549](https://www.gamblingcommission.gov.uk/public-register/business/detail/61549)), `leovegas` ([account 39198](https://www.gamblingcommission.gov.uk/public-register/business/detail/39198)) and `livescorebet` ([account 56859](https://www.gamblingcommission.gov.uk/public-register/business/detail/56859)) hold remote betting licences that started before August 2024 (register checked 2026-11-12). Their prices match no book in the roster in more than 5% of co-quoted snapshots (sampled 2024-10-01 to 14, 2025-07-01 to 07 and 2026-03-01 to 14).
 
 ## Sport keys
 

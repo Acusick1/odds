@@ -30,7 +30,9 @@ BOOKMAKER_ALIASES: dict[str, str] = {
     "sport888": "888sport",
     "7betuk": "7bet",
 }
-# UK-licensed sportsbooks a UK bettor can take a price from, by canonical key.
+# UK-licensed sportsbooks a UK bettor can take a price from, by canonical key. The Odds API's
+# virginbet and grosvenor are left out because they mostly quote livescorebet's and casumo's
+# prices, and mrgreen because it holds no UK betting licence.
 UK_RETAIL_BOOKMAKERS: frozenset[str] = frozenset(
     {
         "10bet",
@@ -47,8 +49,11 @@ UK_RETAIL_BOOKMAKERS: frozenset[str] = frozenset(
         "betway",
         "boylesports",
         "bwin",
+        "casumo",
         "coral",
         "ladbrokes",
+        "leovegas",
+        "livescorebet",
         "midnite",
         "paddypower",
         "skybet",

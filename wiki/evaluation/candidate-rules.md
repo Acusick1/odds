@@ -33,7 +33,7 @@ A mechanical candidate records the hash of its rule's code, so the YAML version 
 | `odds_lambda.candidate_rules.MarketState.event_id`, `odds_lambda.candidate_rules.MarketState.sport_key`, `odds_lambda.candidate_rules.MarketState.kickoff`, `odds_lambda.candidate_rules.MarketState.decision_time` | The event (its integer id) and the time of the state |
 | `market` | The candidate's market ([market keys](../collection/sport-and-market-keys.md)) |
 | `odds_lambda.candidate_rules.MarketState.snapshot_id`, `odds_lambda.candidate_rules.MarketState.snapshot_time` | The retail snapshot the state was built from, or `None` when it has no inputs (`odds_lambda.candidate_rules.MarketState.has_input` is false) |
-| `retail` | Per line, decimal back prices per outcome for each UK retail book (`odds_core.bookmakers.UK_RETAIL_BOOKMAKERS`) in that snapshot |
+| `retail` | Per line, decimal back prices per outcome for each UK retail book (`odds_core.bookmakers.UK_RETAIL_BOOKMAKERS`, [roster](../collection/sport-and-market-keys.md#uk-retail-roster)) in that snapshot |
 | `exchange` | Per line, the devigged Betfair Exchange price in that snapshot (`odds_core.exchange_price.ExchangePrice`, with its time, source, time basis and overround); a line without one is absent |
 | `also` | Per extra market the rule declares, that market's own `odds_lambda.candidate_rules.MarketState`; empty for a rule that declares none ([extra markets](#extra-markets)) |
 | `lookbacks` | Per lookback point the rule declares, keyed by its minutes before t, the state as of that point; empty for a rule that declares none ([lookback points](#lookback-points)) |
