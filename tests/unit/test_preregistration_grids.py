@@ -70,11 +70,8 @@ HAND_ASSERTED: dict[int, dict[str, list[object]]] = {
 # Round-1 rules not implemented yet.
 PENDING_RULES = {
     "alternate_totals_left_behind",
-    "crowded_gap",
     "exchange_implied_alternate_totals",
-    "favourite_price",
     "fixed_totals_side",
-    "last_result_overreaction",
     "totals_implied",
 }
 

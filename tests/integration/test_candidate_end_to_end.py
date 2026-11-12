@@ -46,15 +46,19 @@ def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 async def seed(
-    session: Any, event_id: int, retail: tuple[float, float, float], away_team: str = "Chelsea"
+    session: Any,
+    event_id: int,
+    retail: tuple[float, float, float],
+    away_team: str = "Chelsea",
+    exchange: tuple[float, float, float] = EXCHANGE,
 ) -> None:
     session.add(make_epl_event(event_id, KICKOFF, away_team=away_team))
-    books = [three_way_bookmaker("bet365", retail), betfair(EXCHANGE)]
+    books = [three_way_bookmaker("bet365", retail), betfair(exchange)]
     snapshots = [
         make_tagged_snapshot(event_id, T - timedelta(minutes=8), books, "oddsportal_live"),
         make_tagged_snapshot(event_id, T - timedelta(minutes=5), books, "oddsportal_live"),
         make_tagged_snapshot(
-            event_id, T - timedelta(minutes=3), [betfair(EXCHANGE)], "betfair_api"
+            event_id, T - timedelta(minutes=3), [betfair(exchange)], "betfair_api"
         ),
     ]
     for snapshot in snapshots:
