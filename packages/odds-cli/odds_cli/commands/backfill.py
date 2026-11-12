@@ -290,6 +290,7 @@ def _result_table(result: BackfillResult, dry_run: bool, title: str) -> Table:
     table.add_row("Fixtures stored", f"{result.fixtures_stored:,}")
     table.add_row("Snapshots stored", f"{result.snapshots_stored:,}")
     table.add_row("Provider gaps", f"{result.provider_gaps:,}")
+    table.add_row("Off-phase snapshots", f"{result.off_phase_snapshots:,}")
     table.add_row("Dropped games", f"{len(result.dropped_games):,}")
     if result.quota_remaining is not None:
         table.add_row("Key quota remaining", f"{result.quota_remaining:,}")

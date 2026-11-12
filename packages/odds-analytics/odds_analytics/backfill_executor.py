@@ -31,12 +31,12 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_analytics.backfill_checks import (
-    TIMESTAMP_TOLERANCE,
     ResponseCheck,
+    ReturnedSnapshot,
     book_judged_lead,
     check_response,
-    grid_time_of,
-    is_provider_gap,
+    classify_snapshot,
+    gap_covers,
     stored_market,
 )
 from odds_analytics.backfill_plan import Call, Manifest
@@ -54,9 +54,10 @@ CallStatus = Literal["fetched", "skipped", "would_fetch", "failed"]
 class BackfillResult:
     """What a run did: ``calls_made`` paid calls, ``calls_skipped`` calls whose fixtures were
     already stored or that a recorded provider gap covers, ``would_fetch`` calls a dry run did
-    not make, ``provider_gaps`` paid calls that returned an earlier grid snapshot than planned.
-    ``dropped_games`` holds each game the run dropped once, with the number of calls that
-    listed it."""
+    not make, ``provider_gaps`` paid calls that returned a snapshot earlier than the planned
+    grid step, ``off_phase_snapshots`` paid calls that returned the provider's snapshot for the
+    planned grid step stamped off the grid's phase. ``dropped_games`` holds each game the run
+    dropped once, with the number of calls that listed it."""
 
     calls_made: int = 0
     calls_skipped: int = 0
@@ -65,6 +66,7 @@ class BackfillResult:
     snapshots_stored: int = 0
     fixtures_stored: int = 0
     provider_gaps: int = 0
+    off_phase_snapshots: int = 0
     quota_remaining: int | None = None
     dropped_games: dict[DroppedGame, int] = field(default_factory=dict)
 
@@ -162,11 +164,11 @@ class BackfillExecutor:
         Each call is paid, and a rerun skips the calls already stored, so a failure ends the run
         after reporting it rather than spending on. A guard raises ``BackfillStopped`` when a
         non-empty call's billed units differ from the manifest's or are missing (an empty one
-        bills nothing), when a call returns a snapshot other than the planned one
-        (``ResponseCheck.lag_ok``) that is not a provider gap (``ResponseCheck.provider_gap``),
-        when the next call would pass ``max_units``, after ``max_consecutive_gaps`` consecutive
-        sparse responses, or after ``max_consecutive_provider_gaps`` consecutive provider gaps. A
-        call that trips a guard is stored first, since it is paid.
+        bills nothing), when a call returns a snapshot later than its request time
+        (``ReturnedSnapshot.LATER``), when the next call would pass ``max_units``, after
+        ``max_consecutive_gaps`` consecutive sparse responses, or after
+        ``max_consecutive_provider_gaps`` consecutive provider gaps. A call that trips a guard is
+        stored first, since it is paid.
         """
         result = BackfillResult()
         sparse_streak = 0
@@ -206,10 +208,11 @@ class BackfillExecutor:
                 f"{'' if check.events else '0 or '}{self.manifest.units_per_call}",
                 result,
             )
-        if not check.lag_ok and not check.provider_gap:
+        if check.returned is ReturnedSnapshot.LATER:
             raise BackfillStopped(
                 f"call for the {utc_isoformat(check.modelled)} snapshot returned the "
-                f"{utc_isoformat(check.snapshot_time)} snapshot",
+                f"{utc_isoformat(check.snapshot_time)} snapshot, later than its request time "
+                f"{utc_isoformat(self.manifest.request_time(check.modelled))}",
                 result,
             )
         if sparse_streak >= self.max_consecutive_gaps:
@@ -349,7 +352,8 @@ class BackfillExecutor:
             )
             # Only the gap classification runs before the commit, so a check that raises never
             # discards a paid call's rows.
-            gap = is_provider_gap(manifest, call.time, response.snapshot_time)
+            returned = classify_snapshot(manifest, call.time, response.snapshot_time)
+            gap = returned is ReturnedSnapshot.PROVIDER_GAP
             if gap:
                 await self._record_gap(
                     session, call.time, response.snapshot_time, response.next_snapshot_time
@@ -358,6 +362,8 @@ class BackfillExecutor:
         result.fixtures_stored += stored
         if gap:
             result.provider_gaps += 1
+        elif returned is ReturnedSnapshot.OFF_PHASE:
+            result.off_phase_snapshots += 1
         served = {target.fixture.event_id for target in call.serves}
         horizon = book_judged_lead(manifest)
         near = {
@@ -384,11 +390,7 @@ class BackfillExecutor:
             fixtures_stored=stored,
             units_used=response.units_used,
             quota_remaining=response.quota_remaining,
-            message=(
-                f"provider gap: returned the {utc_isoformat(response.snapshot_time)} snapshot"
-                if gap
-                else None
-            ),
+            message=_returned_message(returned, response.snapshot_time),
         )
         return progress, check
 
@@ -450,37 +452,30 @@ class BackfillExecutor:
             await session.commit()
 
     async def _recorded_gap(self, call: Call) -> bool:
-        """Whether a recorded provider gap of a requested market covers the call: one recorded
-        for its snapshot, or a gap whose returned snapshot is earlier, beyond the timestamp
-        jitter, and whose next snapshot is later than the call's request time, so the request
-        would return the same earlier snapshot. The second needs a consistent next snapshot:
-        later than the gap's own request time and on the grid's phase."""
+        """Whether a recorded provider gap of a requested market covers the call
+        (``odds_analytics.backfill_checks.gap_covers``). The query keeps only gaps that could:
+        recorded for the call, or returning a snapshot before it with a next snapshot after its
+        request time."""
         manifest = self.manifest
         markets = {stored_market(manifest, market) for market in manifest.markets}
         gap = OddsApiSnapshotGap
-        requested = manifest.request_time(call.time)
         async with self._session_factory() as session:
             found = await session.execute(
-                select(gap.planned_snapshot, gap.next_snapshot).where(
-                    gap.sport_key == self.manifest.sport,
+                select(gap.planned_snapshot, gap.returned_snapshot, gap.next_snapshot).where(
+                    gap.sport_key == manifest.sport,
                     gap.market.in_(markets),  # type: ignore[attr-defined]
                     or_(
                         gap.planned_snapshot == call.time,
                         and_(
-                            gap.returned_snapshot < call.time - TIMESTAMP_TOLERANCE,
-                            gap.next_snapshot > requested,
+                            gap.returned_snapshot < call.time,
+                            gap.next_snapshot > manifest.request_time(call.time),
                         ),
                     ),
                 )
             )
         return any(
-            planned == call.time
-            or (
-                next_snapshot is not None
-                and next_snapshot > manifest.request_time(planned)
-                and grid_time_of(manifest, next_snapshot) is not None
-            )
-            for planned, next_snapshot in found.all()
+            gap_covers(manifest, call.time, planned, returned, next_snapshot)
+            for planned, returned, next_snapshot in found.all()
         )
 
     async def _already_stored(self, call: Call) -> bool:
@@ -519,3 +514,11 @@ async def _stored_markets(
         if market is not None:
             stored.setdefault(event_id, set()).add(market)
     return stored
+
+
+def _returned_message(returned: ReturnedSnapshot, snapshot: datetime) -> str | None:
+    if returned is ReturnedSnapshot.PROVIDER_GAP:
+        return f"provider gap: returned the {utc_isoformat(snapshot)} snapshot"
+    if returned is ReturnedSnapshot.OFF_PHASE:
+        return f"off phase: returned the {utc_isoformat(snapshot)} snapshot"
+    return None

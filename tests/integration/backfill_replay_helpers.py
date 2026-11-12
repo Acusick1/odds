@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 from odds_analytics import backfill_executor
 from odds_analytics.backfill_checks import ResponseCheck
-from odds_analytics.backfill_executor import BackfillExecutor, BackfillResult
+from odds_analytics.backfill_executor import BackfillExecutor, BackfillResult, CallProgress
 from odds_analytics.backfill_plan import Call, Fixture, Manifest, Target
 from odds_core.config import APIConfig, Settings
 from odds_core.models import Event, EventStatus
@@ -155,11 +155,17 @@ class BackfillReplay:
             self._session.expunge_all()
 
     async def run(
-        self, manifest: Manifest, calls: list[Call], *, skip_existing: bool = True, **options: Any
+        self,
+        manifest: Manifest,
+        calls: list[Call],
+        *,
+        skip_existing: bool = True,
+        progress_callback: Callable[[CallProgress], None] | None = None,
+        **options: Any,
     ) -> BackfillResult:
         """Run ``calls``. Reports each request in ``requests``."""
         async with self._executor(manifest, skip_existing=skip_existing, **options) as executor:
-            return await executor.execute(calls)
+            return await executor.execute(calls, progress_callback)
 
     async def probe(self, manifest: Manifest) -> list[ResponseCheck]:
         async with self._executor(manifest) as executor:
