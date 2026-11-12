@@ -8,11 +8,14 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from odds_analytics import backfill_executor
 from odds_analytics.backfill_checks import ResponseCheck, book_judged_lead
 from odds_analytics.backfill_executor import BackfillExecutor, BackfillStopped
-from odds_analytics.backfill_plan import GridStep
+from odds_analytics.backfill_plan import GridStep, Manifest
+from odds_core.backfill_models import OddsApiSnapshotGap
 from odds_core.models import FetchLog, OddsSnapshot
 from odds_core.sports import SportKey
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.integration.backfill_replay_helpers import (
@@ -51,6 +54,26 @@ def far_game(snapshot: datetime, *books: str, lead_hours: int = 10) -> dict[str,
 
 # A planned MLB grid snapshot two hours before the afternoon game.
 PLANNED = datetime(2025, 6, 2, 14, 55, 38, tzinfo=UTC)
+
+
+def response_check(manifest: Manifest, planned: datetime, returned: datetime) -> ResponseCheck:
+    return ResponseCheck(
+        manifest=manifest,
+        modelled=planned,
+        snapshot_time=returned,
+        units=10,
+        events=1,
+        previous_gap=None,
+        next_gap=None,
+        farthest_lead=None,
+        book_events={},
+        book_leads={},
+    )
+
+
+def grid_times(count_: int) -> list[datetime]:
+    """Consecutive MLB grid snapshots from ``PLANNED``."""
+    return [PLANNED + timedelta(minutes=5 * i) for i in range(count_)]
 
 
 def times(count_: int) -> list[datetime]:
@@ -163,6 +186,33 @@ class TestRunGuards:
         assert len(replay.requests) == 1
         assert e.value.result.fixtures_stored == len(games)
         assert await count(session, OddsSnapshot) > 0
+
+    @pytest.mark.parametrize(
+        ("offset", "returned"),
+        [
+            (timedelta(minutes=2, seconds=30), "2025-06-02T14:53:08Z"),
+            (timedelta(minutes=10, seconds=-61), "2025-06-02T14:46:39Z"),
+            (timedelta(minutes=-5), "2025-06-02T15:00:38Z"),
+        ],
+    )
+    async def test_a_call_returning_an_off_grid_or_later_snapshot_stops_the_run(
+        self,
+        pglite_async_session: AsyncSession,
+        replay: BackfillReplay,
+        mlb_schedule: type[FakeMlbStatsFetcher],
+        offset: timedelta,
+        returned: str,
+    ) -> None:
+        session = pglite_async_session
+        manifest = load_manifest(MLB)
+        games = await load_mlb(session, mlb_schedule)
+        taken = PLANNED - offset
+        replay.record(PLANNED, [g.listing(taken) for g in games], snapshot=taken)
+
+        with pytest.raises(BackfillStopped, match=f"returned the {returned} snapshot"):
+            await replay.run(manifest, [replay.call(manifest, PLANNED, games[0].event)])
+
+        assert await count(session, OddsApiSnapshotGap) == 0
 
     @pytest.mark.parametrize("offset_seconds", [-38, 0, 4, 22])
     async def test_a_call_returning_its_snapshot_with_jitter_does_not_stop_the_run(
@@ -308,6 +358,206 @@ class TestRunGuards:
 
         with pytest.raises(BackfillStopped, match="billed 35 units, expected 0 or 10"):
             await replay.run(manifest, [replay.call(manifest, at)], skip_existing=False)
+
+
+class TestProviderGaps:
+    async def test_a_gap_is_stored_recorded_and_the_run_continues(
+        self,
+        pglite_async_session: AsyncSession,
+        replay: BackfillReplay,
+        mlb_schedule: type[FakeMlbStatsFetcher],
+    ) -> None:
+        session = pglite_async_session
+        manifest = load_manifest(MLB)
+        games = await load_mlb(session, mlb_schedule)
+        later = PLANNED + timedelta(minutes=5)
+        earlier = PLANNED - timedelta(minutes=10, seconds=1)
+        replay.record(
+            PLANNED,
+            [g.listing(earlier) for g in games],
+            snapshot=earlier,
+            next_gap=timedelta(minutes=5),
+        )
+        replay.record(later, [g.listing(later) for g in games])
+        calls = [replay.call(manifest, at, games[0].event) for at in (PLANNED, later)]
+
+        result = await replay.run(manifest, calls)
+
+        assert (result.calls_made, result.provider_gaps) == (2, 1)
+        times = await session.execute(select(OddsSnapshot.snapshot_time).distinct())
+        assert set(times.scalars()) == {earlier, later}
+        gap = (await session.execute(select(OddsApiSnapshotGap))).scalars().one()
+        assert (gap.sport_key, gap.market, gap.planned_snapshot) == (MLB, "h2h", PLANNED)
+        assert (gap.returned_snapshot, gap.next_snapshot) == (
+            earlier,
+            earlier + timedelta(minutes=5),
+        )
+
+    async def test_a_rerun_skips_a_recorded_gap_without_a_request(
+        self,
+        pglite_async_session: AsyncSession,
+        replay: BackfillReplay,
+        mlb_schedule: type[FakeMlbStatsFetcher],
+    ) -> None:
+        manifest = load_manifest(MLB)
+        games = await load_mlb(pglite_async_session, mlb_schedule)
+        earlier = PLANNED - timedelta(minutes=15)
+        replay.record(PLANNED, [g.listing(earlier) for g in games], snapshot=earlier)
+        call = replay.call(manifest, PLANNED, games[0].event)
+        await replay.run(manifest, [call])
+
+        rerun = await replay.run(manifest, [call])
+
+        assert (rerun.calls_made, rerun.calls_skipped) == (0, 1)
+        assert len(replay.requests) == 1
+
+    async def test_a_call_inside_a_recorded_gap_is_skipped_and_one_after_it_is_made(
+        self,
+        pglite_async_session: AsyncSession,
+        replay: BackfillReplay,
+        mlb_schedule: type[FakeMlbStatsFetcher],
+    ) -> None:
+        manifest = load_manifest(MLB)
+        games = await load_mlb(pglite_async_session, mlb_schedule)
+        earlier = PLANNED - timedelta(minutes=55)
+        # The provider has nothing from ``earlier`` until an hour later.
+        replay.record(
+            PLANNED,
+            [g.listing(earlier) for g in games],
+            snapshot=earlier,
+            next_gap=timedelta(hours=1),
+        )
+        inside, after = PLANNED + timedelta(minutes=2), PLANNED + timedelta(minutes=5)
+        replay.record(after, [g.listing(after) for g in games])
+        calls = [replay.call(manifest, at, games[0].event) for at in (PLANNED, inside, after)]
+
+        result = await replay.run(manifest, calls)
+
+        assert (result.calls_made, result.calls_skipped, result.provider_gaps) == (2, 1, 1)
+        assert len(replay.requests) == 2
+
+    @pytest.mark.parametrize(
+        ("inside", "next_gap"),
+        [
+            # The next snapshot comes before the gap call's own request time.
+            (PLANNED - timedelta(minutes=10), timedelta(minutes=50)),
+            # The next snapshot is off the grid's phase.
+            (PLANNED + timedelta(minutes=5), timedelta(hours=1, minutes=2, seconds=30)),
+        ],
+    )
+    async def test_an_inconsistent_next_snapshot_skips_only_the_planned_call(
+        self,
+        pglite_async_session: AsyncSession,
+        replay: BackfillReplay,
+        mlb_schedule: type[FakeMlbStatsFetcher],
+        inside: datetime,
+        next_gap: timedelta,
+    ) -> None:
+        manifest = load_manifest(MLB)
+        games = await load_mlb(pglite_async_session, mlb_schedule)
+        earlier = PLANNED - timedelta(minutes=55)
+        replay.record(
+            PLANNED, [g.listing(earlier) for g in games], snapshot=earlier, next_gap=next_gap
+        )
+        replay.record(inside, [g.listing(inside) for g in games])
+        calls = [replay.call(manifest, at, games[0].event) for at in (PLANNED, inside)]
+        await replay.run(manifest, calls[:1])
+
+        result = await replay.run(manifest, calls)
+
+        assert (result.calls_made, result.calls_skipped) == (1, 1)
+        assert len(replay.requests) == 2
+
+    async def test_a_check_that_raises_keeps_the_paid_calls_rows_and_gap(
+        self,
+        pglite_async_session: AsyncSession,
+        replay: BackfillReplay,
+        mlb_schedule: type[FakeMlbStatsFetcher],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        session = pglite_async_session
+        manifest = load_manifest(MLB)
+        games = await load_mlb(session, mlb_schedule)
+        earlier = PLANNED - timedelta(minutes=10)
+        replay.record(PLANNED, [g.listing(earlier) for g in games], snapshot=earlier)
+        call = replay.call(manifest, PLANNED, games[0].event)
+
+        def fail(*args: Any, **kwargs: Any) -> ResponseCheck:
+            raise KeyError("key")
+
+        with monkeypatch.context() as patched:
+            patched.setattr(backfill_executor, "check_response", fail)
+            with pytest.raises(KeyError):
+                await replay.run(manifest, [call])
+
+        assert await count(session, OddsSnapshot) > 0
+        assert await count(session, OddsApiSnapshotGap) == 1
+        rerun = await replay.run(manifest, [call])
+        assert (rerun.calls_made, rerun.calls_skipped) == (0, 1)
+        assert len(replay.requests) == 1
+
+    async def test_the_returned_snapshots_own_grid_time_is_not_inside_the_gap(
+        self,
+        pglite_async_session: AsyncSession,
+        replay: BackfillReplay,
+        mlb_schedule: type[FakeMlbStatsFetcher],
+    ) -> None:
+        manifest = load_manifest(MLB)
+        games = await load_mlb(pglite_async_session, mlb_schedule)
+        own = PLANNED - timedelta(minutes=10)
+        returned = own - timedelta(seconds=1)
+        replay.record(
+            PLANNED,
+            [games[0].listing(returned)],
+            snapshot=returned,
+            next_gap=timedelta(minutes=15),
+        )
+        replay.record(own, [g.listing(returned) for g in games], snapshot=returned)
+        await replay.run(manifest, [replay.call(manifest, PLANNED, games[0].event)])
+
+        result = await replay.run(manifest, [replay.call(manifest, own, games[1].event)])
+
+        assert (result.calls_made, result.calls_skipped) == (1, 0)
+
+    async def test_consecutive_gaps_stop_the_run(
+        self,
+        pglite_async_session: AsyncSession,
+        replay: BackfillReplay,
+        mlb_schedule: type[FakeMlbStatsFetcher],
+    ) -> None:
+        session = pglite_async_session
+        manifest = load_manifest(MLB)
+        games = await load_mlb(session, mlb_schedule)
+        calls = []
+        for at in grid_times(3):
+            earlier = at - timedelta(minutes=10)
+            replay.record(at, [g.listing(earlier) for g in games], snapshot=earlier)
+            calls.append(replay.call(manifest, at, games[0].event))
+
+        with pytest.raises(BackfillStopped, match="2 consecutive provider gaps") as e:
+            await replay.run(manifest, calls, max_consecutive_provider_gaps=2)
+
+        assert len(replay.requests) == 2
+        assert e.value.result.provider_gaps == 2
+        assert await count(session, OddsApiSnapshotGap) == 2
+
+    async def test_a_good_call_resets_the_gap_streak(
+        self,
+        pglite_async_session: AsyncSession,
+        replay: BackfillReplay,
+        mlb_schedule: type[FakeMlbStatsFetcher],
+    ) -> None:
+        manifest = load_manifest(MLB)
+        games = await load_mlb(pglite_async_session, mlb_schedule)
+        calls = []
+        for i, at in enumerate(grid_times(3)):
+            taken = at if i == 1 else at - timedelta(minutes=10)
+            replay.record(at, [g.listing(taken) for g in games], snapshot=taken)
+            calls.append(replay.call(manifest, at, games[0].event))
+
+        result = await replay.run(manifest, calls, max_consecutive_provider_gaps=2)
+
+        assert (result.calls_made, result.provider_gaps) == (3, 2)
 
 
 class TestProbe:
@@ -479,6 +729,46 @@ class TestProbe:
 
 
 class TestResponseCheck:
+    @pytest.mark.parametrize(
+        ("sport", "planned", "returned"),
+        [
+            ("soccer_epl", "2024-02-25T19:25:38Z", "2024-02-25T19:10:38Z"),
+            ("soccer_france_ligue_one", "2024-11-30T02:40:38Z", "2024-11-30T02:35:38Z"),
+            ("soccer_italy_serie_a", "2024-11-30T02:40:38Z", "2024-11-30T02:35:38Z"),
+            (MLB, "2024-07-21T00:25:38Z", "2024-07-21T00:15:37Z"),
+            ("soccer_germany_bundesliga", "2025-04-15T21:25:38Z", "2025-04-15T18:00:38Z"),
+            ("soccer_efl_champ", "2025-04-15T18:55:38Z", "2025-04-15T18:00:38Z"),
+            ("soccer_spain_la_liga", "2025-04-15T18:55:38Z", "2025-04-15T18:00:38Z"),
+        ],
+    )
+    def test_the_providers_recorded_holes_are_provider_gaps(
+        self, sport: SportKey, planned: str, returned: str
+    ) -> None:
+        check = response_check(
+            load_manifest(sport), datetime.fromisoformat(planned), datetime.fromisoformat(returned)
+        )
+
+        assert (check.lag_ok, check.provider_gap) == (False, True)
+
+    @pytest.mark.parametrize(
+        ("lag", "gap"),
+        [
+            (timedelta(0), False),
+            (timedelta(seconds=39), False),
+            (timedelta(minutes=2, seconds=30), False),
+            (timedelta(minutes=5, seconds=-60), True),
+            (timedelta(minutes=5, seconds=60), True),
+            (timedelta(minutes=5, seconds=61), False),
+            (timedelta(minutes=-5), False),
+        ],
+    )
+    def test_only_an_earlier_snapshot_on_the_grid_is_a_provider_gap(
+        self, lag: timedelta, gap: bool
+    ) -> None:
+        check = response_check(load_manifest(MLB), PLANNED, PLANNED - lag)
+
+        assert check.provider_gap is gap
+
     def test_the_grid_step_in_force_at_each_neighbour_is_the_expected_gap(self) -> None:
         boundary = datetime(2022, 9, 1, 0, 0, 38, tzinfo=UTC)
         epl = load_manifest("soccer_epl").model_copy(
@@ -522,3 +812,7 @@ class TestGuardSettings:
     def test_a_streak_limit_below_one_is_refused(self) -> None:
         with pytest.raises(ValueError, match="max_consecutive_gaps must be at least 1"):
             BackfillExecutor(load_manifest(MLB), max_consecutive_gaps=0)
+
+    def test_a_provider_gap_limit_below_one_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="max_consecutive_provider_gaps must be at least 1"):
+            BackfillExecutor(load_manifest(MLB), max_consecutive_provider_gaps=0)

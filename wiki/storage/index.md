@@ -21,6 +21,7 @@ Every table is a SQLModel class in `packages/odds-core/odds_core/`; migrations a
 | `health_check_acknowledgements` | `odds_core.models.HealthCheckAcknowledgement` | [Events](events.md#health-check-acknowledgements) |
 | `data_quality_logs` | `odds_core.models.DataQualityLog` | [Odds validation](odds-validator.md) |
 | `fetch_logs` | `odds_core.models.FetchLog` | [Odds API ingestion](../collection/odds-ingestion-service.md) |
+| `odds_api_snapshot_gaps` | `odds_core.backfill_models.OddsApiSnapshotGap` | [Odds API historical backfill](../collection/odds-api-backfill.md#provider-gaps) |
 | `alert_history` | `odds_core.models.AlertHistory` | [Alerts and health](../operations/alerts.md) |
 | `match_briefs` | `odds_core.match_brief_models.MatchBrief` | [Match briefs](../agent/match-briefs.md) |
 | `paper_trades` | `odds_core.paper_trade_models.PaperTrade` | [Paper trading](../agent/paper-trading.md) |

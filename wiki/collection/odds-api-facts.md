@@ -36,6 +36,12 @@ Facts about The Odds API itself, as its documentation states them or as the acqu
 - Historical snapshots are 10 minutes apart from 2020-06-06 and 5 minutes apart from September 2022 ([historical odds data](https://the-odds-api.com/historical-odds-data/)).
 - A historical request returns "the closest snapshot equal to or earlier than the provided date" ([historical odds](https://the-odds-api.com/liveapi/guides/v4/#get-historical-odds)). The response carries the snapshot's own `timestamp`, and `previous_timestamp` and `next_timestamp` for its neighbours.
 - 5-minute snapshots fall 37 to 42 s past each 5-minute mark, varying by date; 10-minute snapshots fall at 5, 15, 25 minutes past the hour and so on, with no seconds ([probe results](https://github.com/Acusick1/odds/issues/527#issuecomment-6798104166)).
+- The history has holes: grid times with no snapshot, where a request returns the latest earlier snapshot, on the grid and whole steps back. Backfill runs on 2026-11-11 and 2026-11-12 met these, each planned snapshot followed by the one returned:
+  - 2024-02-25T19:25:38Z, 19:10:38Z (EPL);
+  - 2024-11-30T02:40:38Z, 02:35:38Z (Ligue 1 and Serie A);
+  - 2024-07-21T00:25:38Z, 00:15:37Z (MLB);
+  - 2025-04-15T21:25:38Z, 18:00:38Z (Bundesliga);
+  - 2025-04-15T18:55:38Z, 18:00:38Z (Championship and La Liga).
 
 ## Rate limits
 
