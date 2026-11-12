@@ -167,7 +167,7 @@ def execute_backfill(
         5,
         "--max-consecutive-provider-gaps",
         min=1,
-        help="Stop after this many consecutive calls returning an earlier snapshot than planned",
+        help="Stop after this many consecutive provider gaps (snapshots earlier than planned)",
     ),
     pause: float = typer.Option(
         0.0, "--pause", min=0.0, help="Seconds to wait after each paid call"
@@ -178,11 +178,13 @@ def execute_backfill(
 
     Spends paid quota on the acquisition key (ODDS_API_ACQUISITION_KEY_INDEX, required). Use --dry-run first to count the calls, and run `odds backfill probe` before the first real run.
     Stops when a call's billed units differ from the manifest's, when a call returns a snapshot
-    other than the planned one that is not a provider gap, when the next call would pass
-    --max-units, after --max-consecutive-gaps consecutive sparse responses, and after
-    --max-consecutive-provider-gaps consecutive provider gaps. A provider gap, an earlier grid
-    snapshot returned because the provider has none at the planned time, is stored and
-    recorded, and a rerun skips it. A call the API rate-limits (429) is retried with backoff.
+    later than its request time or stamped for the next grid time, when the next call would
+    pass --max-units, after --max-consecutive-gaps consecutive sparse responses, and after
+    --max-consecutive-provider-gaps consecutive provider gaps. A provider gap, a snapshot more
+    than 60 s before the planned one returned because the provider has none from it to the
+    request time, is stored and recorded, and a rerun skips it. The planned step's snapshot
+    stamped off the grid's phase is stored and counted. A call the API rate-limits (429) is
+    retried with backoff.
 
     Example:
         odds backfill execute --manifest backfills/odds-api-epl-2022-26.yaml --season 2024-25 --dry-run

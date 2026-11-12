@@ -1,7 +1,7 @@
 """A historical response judged against the acquisition manifest that requested it.
 
 The probe reports every check; a run stops on a unit mismatch, on a snapshot later than the
-call requested, and on a streak of sparse responses or of gaps.
+call requested or stamped for the next grid time, and on a streak of sparse responses or of gaps.
 """
 
 from __future__ import annotations
@@ -50,16 +50,25 @@ class ReturnedSnapshot(StrEnum):
     OFF_PHASE = "off_phase"
     # The provider has nothing from an earlier snapshot to the request time.
     PROVIDER_GAP = "provider_gap"
-    # Later than the request time, which the API's contract rules out, so the request or the
-    # manifest's grid is wrong.
+    # Later than the request time, which the API's contract rules out, or stamped for the next
+    # grid time, so the request or the manifest's grid is wrong.
     LATER = "later"
+
+
+def next_grid_time(manifest: Manifest, modelled: datetime) -> datetime:
+    """The grid time after the one the snapshot at ``modelled`` is stamped for, to within
+    ``TIMESTAMP_TOLERANCE``."""
+    return manifest.next_grid_time(manifest.floor_to_grid(modelled + TIMESTAMP_TOLERANCE))
 
 
 def classify_snapshot(
     manifest: Manifest, modelled: datetime, snapshot: datetime
 ) -> ReturnedSnapshot:
     """Where ``snapshot``, returned for the grid snapshot at ``modelled``, lies."""
-    if snapshot > manifest.request_time(modelled):
+    if (
+        snapshot > manifest.request_time(modelled)
+        or snapshot >= next_grid_time(manifest, modelled) - TIMESTAMP_TOLERANCE
+    ):
         return ReturnedSnapshot.LATER
     if lag_ok(modelled, snapshot):
         return ReturnedSnapshot.PLANNED

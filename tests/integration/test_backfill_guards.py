@@ -77,6 +77,19 @@ def response_check(manifest: Manifest, planned: datetime, returned: datetime) ->
     )
 
 
+def ten_then_five(boundary: datetime) -> Manifest:
+    """The EPL manifest on 10-minute snapshots at 5, 15, 25 minutes past the hour and so on,
+    then 5-minute ones from ``boundary``."""
+    return load_manifest("soccer_epl").model_copy(
+        update={
+            "snapshot_grid": (
+                GridStep(start=datetime(2020, 6, 6, 0, 5, tzinfo=UTC), step_minutes=10),
+                GridStep(start=boundary, step_minutes=5),
+            )
+        }
+    )
+
+
 def grid_times(count_: int) -> list[datetime]:
     """Consecutive MLB grid snapshots from ``PLANNED``."""
     return [PLANNED + timedelta(minutes=5 * i) for i in range(count_)]
@@ -937,6 +950,41 @@ class TestResponseCheck:
         manifest = load_manifest(MLB)
 
         assert gap_covers(manifest, modelled, PLANNED, returned, next_snapshot) is covered
+
+    @pytest.mark.parametrize(
+        ("offset", "returned"),
+        [
+            (timedelta(minutes=5), ReturnedSnapshot.OFF_PHASE),
+            (timedelta(minutes=5, seconds=1), ReturnedSnapshot.LATER),
+            (timedelta(minutes=-1, seconds=-1), ReturnedSnapshot.PROVIDER_GAP),
+        ],
+    )
+    def test_a_ten_minute_steps_snapshot_is_placed_against_its_request_time(
+        self, offset: timedelta, returned: ReturnedSnapshot
+    ) -> None:
+        planned = datetime(2021, 6, 2, 14, 5, tzinfo=UTC)
+        manifest = ten_then_five(datetime(2022, 9, 1, 0, 0, 38, tzinfo=UTC))
+
+        assert response_check(manifest, planned, planned + offset).returned is returned
+
+    @pytest.mark.parametrize(
+        ("offset", "returned"),
+        [
+            # The 5-minute step starts at the request time, so its first snapshot, stamped
+            # seconds early, is the next grid time's.
+            (timedelta(minutes=4, seconds=30), ReturnedSnapshot.LATER),
+            (timedelta(minutes=4), ReturnedSnapshot.LATER),
+            (timedelta(minutes=3, seconds=59), ReturnedSnapshot.OFF_PHASE),
+        ],
+    )
+    def test_a_snapshot_stamped_for_a_later_steps_first_grid_time_is_later(
+        self, offset: timedelta, returned: ReturnedSnapshot
+    ) -> None:
+        planned = datetime(2022, 9, 1, 0, 5, tzinfo=UTC)
+        manifest = ten_then_five(planned + timedelta(minutes=5))
+
+        assert manifest.next_grid_time(planned) == manifest.request_time(planned)
+        assert response_check(manifest, planned, planned + offset).returned is returned
 
     def test_the_grid_step_in_force_at_each_neighbour_is_the_expected_gap(self) -> None:
         boundary = datetime(2022, 9, 1, 0, 0, 38, tzinfo=UTC)

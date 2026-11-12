@@ -37,6 +37,7 @@ from odds_analytics.backfill_checks import (
     check_response,
     classify_snapshot,
     gap_covers,
+    next_grid_time,
     stored_market,
 )
 from odds_analytics.backfill_plan import Call, Manifest
@@ -164,8 +165,8 @@ class BackfillExecutor:
         Each call is paid, and a rerun skips the calls already stored, so a failure ends the run
         after reporting it rather than spending on. A guard raises ``BackfillStopped`` when a
         non-empty call's billed units differ from the manifest's or are missing (an empty one
-        bills nothing), when a call returns a snapshot later than its request time
-        (``ReturnedSnapshot.LATER``), when the next call would pass ``max_units``, after
+        bills nothing), when a call returns a snapshot later than its request time or stamped for
+        the next grid time (``ReturnedSnapshot.LATER``), when the next call would pass ``max_units``, after
         ``max_consecutive_gaps`` consecutive sparse responses, or after
         ``max_consecutive_provider_gaps`` consecutive provider gaps. A call that trips a guard is
         stored first, since it is paid.
@@ -212,7 +213,8 @@ class BackfillExecutor:
             raise BackfillStopped(
                 f"call for the {utc_isoformat(check.modelled)} snapshot returned the "
                 f"{utc_isoformat(check.snapshot_time)} snapshot, later than its request time "
-                f"{utc_isoformat(self.manifest.request_time(check.modelled))}",
+                f"{utc_isoformat(self.manifest.request_time(check.modelled))} or stamped for "
+                f"the {utc_isoformat(next_grid_time(self.manifest, check.modelled))} grid time",
                 result,
             )
         if sparse_streak >= self.max_consecutive_gaps:

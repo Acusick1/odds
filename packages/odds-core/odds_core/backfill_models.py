@@ -11,8 +11,9 @@ from odds_core.vocabulary import Market, StrEnumText, closed_set_check
 
 class OddsApiSnapshotGap(SQLModel, table=True):
     """A planned historical Odds API snapshot the provider does not have: the request returned
-    the earlier grid snapshot ``returned_snapshot``, whose ``next_snapshot`` the response named.
-    A backfill rerun skips a call it records (``odds_analytics.backfill_executor``)."""
+    the earlier snapshot ``returned_snapshot``, on the grid's phase or off it, whose
+    ``next_snapshot`` the response named. A backfill rerun skips a call it covers
+    (``odds_analytics.backfill_checks.gap_covers``)."""
 
     __tablename__ = "odds_api_snapshot_gaps"
 
