@@ -1,5 +1,7 @@
 # Audit: `odds-api-championship-2024-26.yaml`
 
+2025-26 is sealed ([ADR-0021](../docs/adr/0021-sealed-holdout-and-one-shot-gate.md)): its section and this summary report counts, coverage and ages only, with no overround check, back-price check or other price-derived statistic.
+
 Coverage of the EFL Championship Odds API historical run (`h2h` stored as `1x2`, `regions=uk`), read from the production database on 2026-11-12 after the run finished at 18:08Z. The tables below each season come from `uv run python scripts/audit_backfill.py --manifest backfills/odds-api-championship-2024-26.yaml` ([audit a finished manifest](../wiki/collection/howto-backfill-odds-api-history.md#audit-a-finished-manifest)). The near-kick-off Betfair Exchange figures are research inputs: whether they can stand in for the FDUK close is [#730](https://github.com/Acusick1/odds/issues/730)'s result, still pending.
 
 ## Summary
@@ -11,8 +13,8 @@ Coverage of the EFL Championship Odds API historical run (`h2h` stored as `1x2`,
 | KO−2h band (10 min) served | 100.0% | 100.0% |
 | KO−1d band (60 min) served | 100.0% (1 minute short) | 99.9% (450 minutes short) |
 | KO−4d band (6 h) served | 98.2% | 99.7% |
-| Exchange price within 5 min of KO, usable | 521 / 552 | 504 / 552 |
-| Exchange price within 10 min of KO, usable | 552 / 552 | 540 / 552 |
+| Exchange price within 5 min of KO | 521 / 552 | 504 / 552 |
+| Exchange price within 10 min of KO | 552 / 552 | 540 / 552 |
 | Provider gaps recorded | 1 | 2 |
 | Off-phase snapshots | 1 | 3 |
 | Planned calls / stored / covered by a gap / missing | 5,091 / 5,090 / 1 / 0 | 4,779 / 4,777 / 2 / 0 |
@@ -48,7 +50,7 @@ Coverage of the EFL Championship Odds API historical run (`h2h` stored as `1x2`,
 - **Betfred.** `betfred` is stored on 50 of the 2025-26 fixtures, from 2026-04-13 to 2026-05-02 (dates from a separate query), and on none in 2024-25.
 - **Pinnacle** appears only in the two probe snapshots, which named it; the `uk` region does not return it.
 - **Exchange quotes without a draw.** When the exchange quotes only the two teams, the response's `h2h` keeps its key and is stored as an `h2h` snapshot on the soccer fixture: 5 snapshots on 5 fixtures in 2024-25 and 71 on 26 fixtures before kick-off in 2025-26. Readers of `1x2` do not see these partial exchange books. Listings with no books are stored as snapshots with no market (27 before kick-off in 2024-25, 31 in 2025-26).
-- **Near kick-off exchange.** The latest exchange price is within 4.4 min of kick-off for 521 fixtures in 2024-25 and 504 in 2025-26, and 9.1 to 9.4 min old for the other 31 and 36, at the 19:00, 20:00 and 19:45 slots where the plan's closing calls are 10 minutes apart and none falls 4.4 min before kick-off. Twelve fixtures stored with a kick-off at :01 or :31 (2026-02-06 to 2026-02-09) have a price 10.4 min old, so they are outside the 10-minute share; the KO−2h band is still fully served. Every price found is complete and within the 5% overround limit. The run bought no snapshot nearer kick-off.
+- **Near kick-off exchange.** The latest exchange price is within 4.4 min of kick-off for 521 fixtures in 2024-25 and 504 in 2025-26, and 9.1 to 9.4 min old for the other 31 and 36, at the 19:00, 20:00 and 19:45 slots where the plan's closing calls are 10 minutes apart and none falls 4.4 min before kick-off. Twelve fixtures stored with a kick-off at :01 or :31 (2026-02-06 to 2026-02-09) have a price 10.4 min old, so they are outside the 10-minute share; the KO−2h band is still fully served. Every 2024-25 price found is complete and within the 5% overround limit. The run bought no snapshot nearer kick-off.
 
 ## 2024-25
 
@@ -223,14 +225,11 @@ Fixtures first stored less than 102 h before kick-off: 43, first stored at leads
 
 ### Near kick-off `betfair_exchange`, 2025-26
 
-Per fixture, the latest exchange snapshot at or before kick-off within 120 min; usable means a back price on every outcome with back overround at most 5%. Research inputs, not validated closing labels.
+Per fixture, the latest exchange snapshot at or before kick-off within 120 min, counted and aged only: this season is sealed ([ADR-0021](../docs/adr/0021-sealed-holdout-and-one-shot-gate.md)), so no price-derived statistic is reported. Research inputs, not validated closing labels.
 
 | Price | Fixtures with one | Within 5 min | Within 10 min | p50 age (min) | p75 age (min) | p90 age (min) | p99 age (min) |
 |---|---|---|---|---|---|---|---|
 | Any exchange quote | 552/552 | 91.3% | 97.8% | 4.4 | 4.4 | 4.4 | 10.4 |
-| Usable | 552/552 | 91.3% | 97.8% | 4.4 | 4.4 | 4.4 | 10.4 |
-
-Latest exchange snapshot missing an outcome's back price: 0 fixtures.
 
 ### Provider gaps and off-phase snapshots, 2025-26
 

@@ -265,3 +265,31 @@ class TestSummaries:
         assert audit.book_role("casumo") == "neither"
         assert "betfair_ex_uk" in audit.book_aliases("betfair_exchange")
         assert audit.book_aliases("casumo") == []
+
+
+class TestSeal:
+    def test_a_kickoff_in_a_sealed_window_seals_the_season(self) -> None:
+        assert audit.is_sealed("soccer_spain_la_liga", [datetime(2025, 10, 4, 19, tzinfo=UTC)])
+        assert audit.is_sealed("soccer_efl_champ", [datetime(2026, 5, 2, 11, 30, tzinfo=UTC)])
+
+    def test_development_days_are_not_sealed(self) -> None:
+        assert not audit.is_sealed("soccer_spain_la_liga", [datetime(2025, 3, 1, 19, tzinfo=UTC)])
+        assert not audit.is_sealed("soccer_epl", [datetime(2024, 8, 17, 14, tzinfo=UTC)])
+
+    def test_epl_2022_24_follows_the_switch(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        kickoff = [datetime(2023, 4, 8, 14, tzinfo=UTC)]
+        assert audit.is_sealed("soccer_epl", kickoff)
+        monkeypatch.setattr("odds_analytics.holdout.EPL_2022_24_SEALED", False)
+        assert not audit.is_sealed("soccer_epl", kickoff)
+
+    def test_a_sealed_section_omits_the_price_derived_rows(self) -> None:
+        points = [
+            audit.ClosePoint(
+                age=timedelta(minutes=4), usable_age=timedelta(minutes=4), complete=True
+            )
+        ]
+        sealed = "\n".join(audit.near_close_lines("2025-26", 1, points, sealed=True))
+        open_ = "\n".join(audit.near_close_lines("2024-25", 1, points, sealed=False))
+        assert "Any exchange quote" in sealed
+        assert "Usable" not in sealed and "overround" not in sealed and "back price" not in sealed
+        assert "Usable" in open_ and "overround" in open_ and "back price" in open_
