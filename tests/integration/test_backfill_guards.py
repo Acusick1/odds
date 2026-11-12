@@ -14,6 +14,7 @@ from odds_analytics.backfill_checks import (
     ReturnedSnapshot,
     book_judged_lead,
     gap_covers,
+    next_grid_time,
 )
 from odds_analytics.backfill_executor import BackfillExecutor, BackfillStopped, CallProgress
 from odds_analytics.backfill_plan import GridStep, Manifest
@@ -77,10 +78,10 @@ def response_check(manifest: Manifest, planned: datetime, returned: datetime) ->
     )
 
 
-def ten_then_five(boundary: datetime) -> Manifest:
-    """The EPL manifest on 10-minute snapshots at 5, 15, 25 minutes past the hour and so on,
+def ten_then_five(boundary: datetime, sport: SportKey = "soccer_epl") -> Manifest:
+    """``sport``'s manifest on 10-minute snapshots at 5, 15, 25 minutes past the hour and so on,
     then 5-minute ones from ``boundary``."""
-    return load_manifest("soccer_epl").model_copy(
+    return load_manifest(sport).model_copy(
         update={
             "snapshot_grid": (
                 GridStep(start=datetime(2020, 6, 6, 0, 5, tzinfo=UTC), step_minutes=10),
@@ -417,6 +418,29 @@ class TestOffPhaseSnapshots:
         assert await count(session, OddsApiSnapshotGap) == 0
         rerun = await replay.run(manifest, calls)
         assert (rerun.calls_made, rerun.calls_skipped) == (0, 2)
+
+    async def test_a_snapshot_accepted_before_a_step_change_does_not_skip_the_next_call(
+        self,
+        pglite_async_session: AsyncSession,
+        replay: BackfillReplay,
+        mlb_schedule: type[FakeMlbStatsFetcher],
+    ) -> None:
+        session = pglite_async_session
+        # 10-minute snapshots change to 5-minute ones at 14:50, the 14:45 call's request time.
+        first = datetime(2025, 6, 2, 14, 45, tzinfo=UTC)
+        second = datetime(2025, 6, 2, 14, 50, tzinfo=UTC)
+        manifest = ten_then_five(second, MLB)
+        games = await load_mlb(session, mlb_schedule)
+        off_phase = first + timedelta(minutes=3, seconds=59)
+        replay.record(first, [g.listing(off_phase) for g in games], snapshot=off_phase)
+        replay.record(second, [g.listing(second) for g in games])
+        calls = [replay.call(manifest, at, games[0].event) for at in (first, second)]
+
+        result = await replay.run(manifest, calls)
+
+        assert (result.calls_made, result.calls_skipped, result.off_phase_snapshots) == (2, 0, 1)
+        times = await session.execute(select(OddsSnapshot.snapshot_time).distinct())
+        assert set(times.scalars()) == {off_phase, second}
 
 
 class TestProviderGaps:
@@ -966,6 +990,23 @@ class TestResponseCheck:
         manifest = ten_then_five(datetime(2022, 9, 1, 0, 0, 38, tzinfo=UTC))
 
         assert response_check(manifest, planned, planned + offset).returned is returned
+
+    @pytest.mark.parametrize(
+        ("returned", "kind"),
+        [
+            (datetime(2022, 9, 1, 0, 5, 38, tzinfo=UTC), ReturnedSnapshot.LATER),
+            (datetime(2022, 9, 1, 0, 4, 38, tzinfo=UTC), ReturnedSnapshot.LATER),
+            (datetime(2022, 9, 1, 0, 4, 37, tzinfo=UTC), ReturnedSnapshot.OFF_PHASE),
+        ],
+    )
+    def test_a_step_starting_within_the_tolerance_after_the_planned_snapshot_is_its_next(
+        self, returned: datetime, kind: ReturnedSnapshot
+    ) -> None:
+        planned = datetime(2022, 9, 1, 0, 5, tzinfo=UTC)
+        manifest = ten_then_five(planned + timedelta(seconds=38))
+
+        assert next_grid_time(manifest, planned) == planned + timedelta(seconds=38)
+        assert response_check(manifest, planned, returned).returned is kind
 
     @pytest.mark.parametrize(
         ("offset", "returned"),

@@ -217,6 +217,12 @@ class Manifest(_Frozen):
         size = timedelta(minutes=step.step_minutes)
         return step.start + (t - step.start) // size * size
 
+    def previous_grid_time(self, t: datetime) -> datetime | None:
+        """The last snapshot time before ``t``, None when ``t`` is at or before the first."""
+        if t <= self.snapshot_grid[0].start:
+            return None
+        return self.floor_to_grid(t - timedelta.resolution)
+
     def next_grid_time(self, t: datetime) -> datetime:
         """The first snapshot time after ``t``, which may be the start of a later step."""
         after = self.floor_to_grid(t) + self.grid_step_at(t)

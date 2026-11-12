@@ -57,8 +57,11 @@ class ReturnedSnapshot(StrEnum):
 
 def next_grid_time(manifest: Manifest, modelled: datetime) -> datetime:
     """The grid time after the one the snapshot at ``modelled`` is stamped for, to within
-    ``TIMESTAMP_TOLERANCE``."""
-    return manifest.next_grid_time(manifest.floor_to_grid(modelled + TIMESTAMP_TOLERANCE))
+    ``TIMESTAMP_TOLERANCE``: a step starting within that tolerance after ``modelled``, or the
+    one after the grid time at ``modelled`` plus the tolerance."""
+    tolerance = modelled + TIMESTAMP_TOLERANCE
+    starts = [s.start for s in manifest.snapshot_grid if modelled < s.start <= tolerance]
+    return min(starts, default=manifest.next_grid_time(manifest.floor_to_grid(tolerance)))
 
 
 def classify_snapshot(

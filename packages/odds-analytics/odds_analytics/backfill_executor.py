@@ -482,18 +482,25 @@ class BackfillExecutor:
 
     async def _already_stored(self, call: Call) -> bool:
         """Whether any fixture the call serves already has a historical Odds API snapshot
-        (``source_stamped``, never a live fetch) of a requested market in
-        ``(request time - grid step, request time]``, where the snapshot the request returns
-        falls. A served fixture the response does not list is one the API did not list at that
+        (``source_stamped``, never a live fetch) of a requested market after the previous grid
+        time's request time and at or before the call's. The request returns a snapshot in that
+        window unless it is a provider gap, and no earlier call returns one there, since each
+        returns a snapshot at or before its own request time. Before the first grid time the
+        window opens one grid step before the request time. A served fixture the response does not list is one the API did not list at that
         time, and fetching again will not change that."""
         wanted = {target.fixture.event_id for target in call.serves}
         if not wanted:
             return True
         markets = {stored_market(self.manifest, market) for market in self.manifest.markets}
-        step = self.manifest.grid_step_at(call.time)
         requested = self.manifest.request_time(call.time)
+        previous = self.manifest.previous_grid_time(call.time)
+        after = (
+            self.manifest.request_time(previous)
+            if previous is not None
+            else requested - self.manifest.grid_step_at(call.time)
+        )
         async with self._session_factory() as session:
-            stored = await _stored_markets(session, wanted, requested - step, requested)
+            stored = await _stored_markets(session, wanted, after, requested)
         return any(markets & stored.get(event_id, set()) for event_id in wanted)
 
 
