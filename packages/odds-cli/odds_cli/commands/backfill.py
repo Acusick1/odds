@@ -19,6 +19,7 @@ from odds_analytics.backfill_plan import (
     load_fixtures,
     plan,
 )
+from odds_core.backfill_models import OddsApiSnapshotGap
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_core.time import utc_isoformat
@@ -26,6 +27,8 @@ from odds_lambda.storage.readers import OddsReader
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 from rich.table import Table
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 app = typer.Typer(help="Historical data backfill operations")
 console = Console()
@@ -160,6 +163,12 @@ def execute_backfill(
         min=1,
         help="Stop after this many consecutive calls with no events or a required book missing",
     ),
+    max_consecutive_provider_gaps: int = typer.Option(
+        5,
+        "--max-consecutive-provider-gaps",
+        min=1,
+        help="Stop after this many consecutive calls returning an earlier snapshot than planned",
+    ),
     pause: float = typer.Option(
         0.0, "--pause", min=0.0, help="Seconds to wait after each paid call"
     ),
@@ -169,9 +178,11 @@ def execute_backfill(
 
     Spends paid quota on the acquisition key (ODDS_API_ACQUISITION_KEY_INDEX, required). Use --dry-run first to count the calls, and run `odds backfill probe` before the first real run.
     Stops when a call's billed units differ from the manifest's, when a call returns a snapshot
-    other than the planned one, when the next call would pass --max-units, and after
-    --max-consecutive-gaps consecutive sparse responses. A call the API rate-limits (429) is
-    retried with backoff.
+    other than the planned one that is not a provider gap, when the next call would pass
+    --max-units, after --max-consecutive-gaps consecutive sparse responses, and after
+    --max-consecutive-provider-gaps consecutive provider gaps. A provider gap, an earlier grid
+    snapshot returned because the provider has none at the planned time, is stored and
+    recorded, and a rerun skips it. A call the API rate-limits (429) is retried with backoff.
 
     Example:
         odds backfill execute --manifest backfills/odds-api-epl-2022-26.yaml --season 2024-25 --dry-run
@@ -180,7 +191,14 @@ def execute_backfill(
     seasons = _select_seasons(manifest, season)
     asyncio.run(
         _execute_backfill_async(
-            manifest, seasons, dry_run, skip_existing, max_units, max_consecutive_gaps, pause
+            manifest,
+            seasons,
+            dry_run,
+            skip_existing,
+            max_units,
+            max_consecutive_gaps,
+            max_consecutive_provider_gaps,
+            pause,
         )
     )
 
@@ -192,6 +210,7 @@ async def _execute_backfill_async(
     skip_existing: bool,
     max_units: int | None,
     max_consecutive_gaps: int,
+    max_consecutive_provider_gaps: int,
     pause: float,
 ) -> None:
     if not dry_run:
@@ -225,6 +244,7 @@ async def _execute_backfill_async(
         dry_run=dry_run,
         max_units=max_units,
         max_consecutive_gaps=max_consecutive_gaps,
+        max_consecutive_provider_gaps=max_consecutive_provider_gaps,
         pause_seconds=pause,
     ) as executor:
         with Progress(
@@ -269,6 +289,7 @@ def _result_table(result: BackfillResult, dry_run: bool, title: str) -> Table:
     table.add_row("Units used", f"{result.units_used:,}")
     table.add_row("Fixtures stored", f"{result.fixtures_stored:,}")
     table.add_row("Snapshots stored", f"{result.snapshots_stored:,}")
+    table.add_row("Provider gaps", f"{result.provider_gaps:,}")
     table.add_row("Dropped games", f"{len(result.dropped_games):,}")
     if result.quota_remaining is not None:
         table.add_row("Key quota remaining", f"{result.quota_remaining:,}")
@@ -278,12 +299,13 @@ def _result_table(result: BackfillResult, dry_run: bool, title: str) -> Table:
 def _progress_line(update: CallProgress) -> str:
     when = utc_isoformat(update.time)
     if update.status == "fetched":
-        return (
+        line = (
             f"[green]fetched[/green] {when}  {update.fixtures_stored} fixtures, "
             f"{update.units_used} units, quota {update.quota_remaining}"
         )
+        return f"{line}  [yellow]{update.message}[/yellow]" if update.message else line
     if update.status == "skipped":
-        return f"[dim]skipped[/dim] {when}"
+        return f"[dim]skipped[/dim] {when}  {update.message}"
     if update.status == "would_fetch":
         return f"[dim]would fetch[/dim] {when}"
     return f"[red]failed[/red] {when}  {update.message}"
@@ -398,7 +420,8 @@ def backfill_status():
     """
     Check status of historical data in database.
 
-    Shows how many games have historical snapshots and date coverage.
+    Shows how many games have historical snapshots and date coverage, and each recorded Odds
+    API provider gap: a planned snapshot the provider does not have.
     """
     console.print("\n[bold cyan]Historical Data Status[/bold cyan]\n")
     asyncio.run(_backfill_status_async())
@@ -409,7 +432,7 @@ async def _backfill_status_async():
     from typing import Any, cast
 
     from odds_core.models import OddsSnapshot
-    from sqlalchemy import func, select
+    from sqlalchemy import func
     from sqlalchemy.sql.elements import ColumnElement
 
     async with async_session_maker() as session:
@@ -442,7 +465,28 @@ async def _backfill_status_async():
         else:
             console.print("[yellow]No historical data found[/yellow]")
 
+        console.print(await _provider_gap_table(session))
+
     console.print()
+
+
+async def _provider_gap_table(session: AsyncSession) -> Table:
+    gap = OddsApiSnapshotGap
+    rows = await session.execute(
+        select(gap).order_by(gap.sport_key, gap.planned_snapshot, gap.market)
+    )
+    table = Table(title="Odds API provider gaps")
+    for column in ("Sport", "Market", "Planned", "Returned", "Next"):
+        table.add_column(column)
+    for row in rows.scalars():
+        table.add_row(
+            row.sport_key,
+            row.market,
+            utc_isoformat(row.planned_snapshot),
+            utc_isoformat(row.returned_snapshot),
+            utc_isoformat(row.next_snapshot) if row.next_snapshot else "none",
+        )
+    return table
 
 
 @app.command("scores")

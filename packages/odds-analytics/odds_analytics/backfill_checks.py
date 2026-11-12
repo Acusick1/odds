@@ -1,7 +1,7 @@
 """A historical response judged against the acquisition manifest that requested it.
 
-The probe reports every check; a run stops on a unit mismatch and on a streak of sparse
-responses.
+The probe reports every check; a run stops on a unit mismatch, on a snapshot other than the
+planned one that is not a provider gap, and on a streak of sparse responses or of gaps.
 """
 
 from __future__ import annotations
@@ -88,6 +88,20 @@ class ResponseCheck:
         return ceil_minute(self.snapshot_time) <= ceil_minute(self.modelled) and floor_minute(
             self.snapshot_time
         ) >= floor_minute(self.modelled)
+
+    @property
+    def provider_gap(self) -> bool:
+        """The provider has no snapshot at the modelled time: it returned an earlier one, on the
+        grid to within ``TIMESTAMP_TOLERANCE`` and at least one step back."""
+        if self.lag_ok or self.snapshot_time >= self.modelled:
+            return False
+        try:
+            grid_time = self.manifest.floor_to_grid(self.snapshot_time + TIMESTAMP_TOLERANCE)
+        except ValueError:
+            return False
+        return (
+            grid_time < self.modelled and abs(self.snapshot_time - grid_time) <= TIMESTAMP_TOLERANCE
+        )
 
     @property
     def grid_ok(self) -> bool:

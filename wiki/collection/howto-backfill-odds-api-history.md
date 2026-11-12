@@ -48,9 +48,10 @@ Costs a historical purchase before it is bought, buys it, and fills scores. Exec
    > [!WARNING]
    > `odds backfill execute` spends paid historical quota on the acquisition key (`ODDS_API_ACQUISITION_KEY_INDEX`, which must be set), whatever the manifest's sport, 10 units per region per market per call. Confirm the prompt only when the estimated units fit the key's balance.
 
-   - Add `--max-units N` to cap the units the run may bill. The run also stops when a call's billed units differ from the manifest's, when a call returns a snapshot other than the planned one, or when several consecutive calls are sparse (no events, none of their fixtures stored, or a required book missing on a fixture near kick-off; `--max-consecutive-gaps`) ([guards](odds-api-backfill.md#executing-calls)).
-   - A guard that stops the run exits non-zero with its reason, and so does a call that fails. Rerun the same command: calls with a stored snapshot for any fixture they serve are skipped, unless you pass `--no-skip-existing`.
-   - A snapshot stop is the exception: the mismatched call's snapshot is stored, so an unchanged rerun skips it and carries on with the wrong grid. Correct the manifest's `snapshot_grid` to the returned snapshot's phase before rerunning.
+   - Add `--max-units N` to cap the units the run may bill. The run also stops when a call's billed units differ from the manifest's, when a call returns a snapshot off the grid's phase or later than planned, when several consecutive calls are sparse (no events, none of their fixtures stored, or a required book missing on a fixture near kick-off; `--max-consecutive-gaps`), or when several consecutive calls are provider gaps (`--max-consecutive-provider-gaps`) ([guards](odds-api-backfill.md#executing-calls)).
+   - A call that returns an earlier grid snapshot hit a hole in the provider's history. The run stores it, records it as a provider gap and carries on, and a rerun skips it ([provider gaps](odds-api-backfill.md#provider-gaps)).
+   - A guard that stops the run exits non-zero with its reason, and so does a call that fails. Rerun the same command: calls with a stored snapshot for any fixture they serve, and calls a recorded provider gap covers, are skipped, unless you pass `--no-skip-existing`.
+   - A snapshot drift stop is the exception: the mismatched call's snapshot is stored, so an unchanged rerun skips it and carries on with the wrong grid. Correct the manifest's `snapshot_grid` to the returned snapshot's phase before rerunning.
    - The run makes its calls back to back. A call the API rate-limits (HTTP 429) is retried with backoff; add `--pause S` to wait S seconds after each paid call ([pace](odds-api-backfill.md#executing-calls)).
    - Manifests of different sports can run at once, one process each ([limits](odds-api-backfill.md#limits)).
    - Each call logs its real cost, and the run ends with the key's remaining quota. Backfill calls record no quota in `fetch_logs`, so `odds status quota` does not show their spend.
@@ -64,7 +65,7 @@ Costs a historical purchase before it is bought, buys it, and fills scores. Exec
    uv run odds backfill scores --start 2025-01-01 --end 2025-01-07 --dry-run
    ```
    - The scores come from `nba_team_game_logs`, so fetch the game logs first; rerun without `--dry-run` to write them.
-2. Check the result with `uv run odds backfill status`.
+2. Check the result with `uv run odds backfill status`, which also lists the recorded provider gaps.
 
 ## Related
 

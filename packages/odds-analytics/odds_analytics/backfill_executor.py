@@ -11,9 +11,10 @@ from datetime import datetime
 from typing import Any, Literal
 
 import structlog
+from odds_core.backfill_models import OddsApiSnapshotGap
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
-from odds_core.models import FetchLog, OddsSnapshot
+from odds_core.models import FetchLog, OddsSnapshot, utc_now
 from odds_core.time import utc_isoformat
 from odds_core.vocabulary import Market, Source, TimeBasis
 from odds_lambda.data_fetcher import TheOddsAPIClient
@@ -25,7 +26,8 @@ from odds_lambda.odds_api_events import (
 )
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload
 from odds_lambda.storage.writers import OddsWriter
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_analytics.backfill_checks import (
@@ -48,8 +50,10 @@ CallStatus = Literal["fetched", "skipped", "would_fetch", "failed"]
 @dataclass
 class BackfillResult:
     """What a run did: ``calls_made`` paid calls, ``calls_skipped`` calls whose fixtures were
-    already stored, ``would_fetch`` calls a dry run did not make. ``dropped_games`` holds each
-    game the run dropped once, with the number of calls that listed it."""
+    already stored or that a recorded provider gap covers, ``would_fetch`` calls a dry run did
+    not make, ``provider_gaps`` paid calls that returned an earlier grid snapshot than planned.
+    ``dropped_games`` holds each game the run dropped once, with the number of calls that
+    listed it."""
 
     calls_made: int = 0
     calls_skipped: int = 0
@@ -57,6 +61,7 @@ class BackfillResult:
     units_used: int = 0
     snapshots_stored: int = 0
     fixtures_stored: int = 0
+    provider_gaps: int = 0
     quota_remaining: int | None = None
     dropped_games: dict[DroppedGame, int] = field(default_factory=dict)
 
@@ -94,6 +99,7 @@ class BackfillExecutor:
         pause_seconds: float = 0.0,
         max_units: int | None = None,
         max_consecutive_gaps: int = 10,
+        max_consecutive_provider_gaps: int = 5,
     ):
         """
         Args:
@@ -109,9 +115,16 @@ class BackfillExecutor:
             max_units: Stop before a call that would take the run's billed units past this
             max_consecutive_gaps: Stop after this many consecutive fetched calls that return no
                 events or lack a required bookmaker on a market
+            max_consecutive_provider_gaps: Stop after this many consecutive fetched calls that
+                return a provider gap (``ResponseCheck.provider_gap``)
         """
         if max_consecutive_gaps < 1:
             raise ValueError(f"max_consecutive_gaps must be at least 1, got {max_consecutive_gaps}")
+        if max_consecutive_provider_gaps < 1:
+            raise ValueError(
+                "max_consecutive_provider_gaps must be at least 1, "
+                f"got {max_consecutive_provider_gaps}"
+            )
         self.manifest = manifest
         self._client = client
         self._owns_client = client is None
@@ -121,6 +134,7 @@ class BackfillExecutor:
         self.pause_seconds = pause_seconds
         self.max_units = max_units
         self.max_consecutive_gaps = max_consecutive_gaps
+        self.max_consecutive_provider_gaps = max_consecutive_provider_gaps
 
     async def __aenter__(self) -> "BackfillExecutor":
         if self._owns_client and not self.dry_run:
@@ -146,12 +160,14 @@ class BackfillExecutor:
         after reporting it rather than spending on. A guard raises ``BackfillStopped`` when a
         non-empty call's billed units differ from the manifest's or are missing (an empty one
         bills nothing), when a call returns a snapshot other than the planned one
-        (``ResponseCheck.lag_ok``), when the next call would pass ``max_units``, or after
-        ``max_consecutive_gaps`` consecutive sparse responses. A call that trips a guard is stored
-        first, since it is paid.
+        (``ResponseCheck.lag_ok``) that is not a provider gap (``ResponseCheck.provider_gap``),
+        when the next call would pass ``max_units``, after ``max_consecutive_gaps`` consecutive
+        sparse responses, or after ``max_consecutive_provider_gaps`` consecutive provider gaps. A
+        call that trips a guard is stored first, since it is paid.
         """
         result = BackfillResult()
         sparse_streak = 0
+        gap_streak = 0
 
         def report(progress: CallProgress) -> None:
             if progress_callback:
@@ -170,21 +186,24 @@ class BackfillExecutor:
                 report(progress)
                 if check is not None:
                     sparse_streak = sparse_streak + 1 if check.sparse_reason else 0
-                    self._guard(check, sparse_streak, result)
+                    gap_streak = gap_streak + 1 if check.provider_gap else 0
+                    self._guard(check, sparse_streak, gap_streak, result)
                 if progress.status == "fetched" and self.pause_seconds:
                     await asyncio.sleep(self.pause_seconds)
         finally:
             await alert_dropped_games("odds-backfill", list(result.dropped_games))
         return result
 
-    def _guard(self, check: ResponseCheck, sparse_streak: int, result: BackfillResult) -> None:
+    def _guard(
+        self, check: ResponseCheck, sparse_streak: int, gap_streak: int, result: BackfillResult
+    ) -> None:
         if not check.units_ok:
             raise BackfillStopped(
                 f"call billed {check.units} units, expected "
                 f"{'' if check.events else '0 or '}{self.manifest.units_per_call}",
                 result,
             )
-        if not check.lag_ok:
+        if not check.lag_ok and not check.provider_gap:
             raise BackfillStopped(
                 f"call for the {utc_isoformat(check.modelled)} snapshot returned the "
                 f"{utc_isoformat(check.snapshot_time)} snapshot",
@@ -193,6 +212,13 @@ class BackfillExecutor:
         if sparse_streak >= self.max_consecutive_gaps:
             raise BackfillStopped(
                 f"{sparse_streak} consecutive sparse responses, the last {check.sparse_reason}",
+                result,
+            )
+        if gap_streak >= self.max_consecutive_provider_gaps:
+            raise BackfillStopped(
+                f"{gap_streak} consecutive provider gaps, the last for the "
+                f"{utc_isoformat(check.modelled)} snapshot returned the "
+                f"{utc_isoformat(check.snapshot_time)} snapshot",
                 result,
             )
 
@@ -224,6 +250,9 @@ class BackfillExecutor:
     async def _run_call(
         self, call: Call, result: BackfillResult
     ) -> tuple[CallProgress, ResponseCheck | None]:
+        if self.skip_existing and await self._recorded_gap(call):
+            result.calls_skipped += 1
+            return CallProgress(call.time, "skipped", message="Provider gap recorded"), None
         if self.skip_existing and await self._already_stored(call):
             result.calls_skipped += 1
             return CallProgress(call.time, "skipped", message="Already stored"), None
@@ -315,6 +344,29 @@ class BackfillExecutor:
                     response_time_ms=response.response_time_ms,
                 )
             )
+            served = {target.fixture.event_id for target in call.serves}
+            horizon = book_judged_lead(manifest)
+            near = {
+                target.fixture.event_id
+                for target in call.serves
+                if target.fixture.kickoff - response.snapshot_time <= horizon
+            }
+            judged = (
+                response.raw_events_data
+                if judge_every_event
+                else [raw for event_id, raw in attached.items() if event_id in near] or None
+            )
+            check = check_response(
+                manifest,
+                response,
+                call.time,
+                judged_events=judged,
+                served=len(served),
+                served_stored=len(served & attached.keys()),
+            )
+            if check.provider_gap:
+                await self._record_gap(session, call.time, response.next_snapshot_time, check)
+                result.provider_gaps += 1
             await session.commit()
         result.fixtures_stored += stored
         progress = CallProgress(
@@ -323,28 +375,52 @@ class BackfillExecutor:
             fixtures_stored=stored,
             units_used=response.units_used,
             quota_remaining=response.quota_remaining,
-        )
-        served = {target.fixture.event_id for target in call.serves}
-        horizon = book_judged_lead(manifest)
-        near = {
-            target.fixture.event_id
-            for target in call.serves
-            if target.fixture.kickoff - response.snapshot_time <= horizon
-        }
-        judged = (
-            response.raw_events_data
-            if judge_every_event
-            else [raw for event_id, raw in attached.items() if event_id in near] or None
-        )
-        check = check_response(
-            manifest,
-            response,
-            call.time,
-            judged_events=judged,
-            served=len(served),
-            served_stored=len(served & attached.keys()),
+            message=(
+                f"provider gap: returned the {utc_isoformat(response.snapshot_time)} snapshot"
+                if check.provider_gap
+                else None
+            ),
         )
         return progress, check
+
+    async def _record_gap(
+        self,
+        session: AsyncSession,
+        planned: datetime,
+        next_snapshot: datetime | None,
+        check: ResponseCheck,
+    ) -> None:
+        """Record that the provider has no snapshot at ``planned``, for each requested market, so
+        a rerun skips the call."""
+        logger.warning(
+            "backfill_provider_gap",
+            sport=self.manifest.sport,
+            planned_snapshot=utc_isoformat(planned),
+            returned_snapshot=utc_isoformat(check.snapshot_time),
+            next_snapshot=utc_isoformat(next_snapshot) if next_snapshot else None,
+        )
+        rows = [
+            {
+                "sport_key": self.manifest.sport,
+                "market": stored_market(self.manifest, market),
+                "planned_snapshot": planned,
+                "returned_snapshot": check.snapshot_time,
+                "next_snapshot": next_snapshot,
+                "recorded_at": utc_now(),
+            }
+            for market in self.manifest.markets
+        ]
+        statement = insert(OddsApiSnapshotGap).values(rows)
+        await session.execute(
+            statement.on_conflict_do_update(
+                index_elements=["sport_key", "market", "planned_snapshot"],
+                set_={
+                    "returned_snapshot": statement.excluded.returned_snapshot,
+                    "next_snapshot": statement.excluded.next_snapshot,
+                    "recorded_at": statement.excluded.recorded_at,
+                },
+            )
+        )
 
     async def _log_failed_fetch(
         self, client: TheOddsAPIClient, result: BackfillResult, error: Exception
@@ -363,6 +439,32 @@ class BackfillExecutor:
                 )
             )
             await session.commit()
+
+    async def _recorded_gap(self, call: Call) -> bool:
+        """Whether a recorded provider gap of a requested market covers the call: one recorded
+        for its snapshot, or a gap whose returned snapshot is earlier and whose next snapshot is
+        later than the call's request time, so the request would return the same earlier
+        snapshot."""
+        markets = {stored_market(self.manifest, market) for market in self.manifest.markets}
+        gap = OddsApiSnapshotGap
+        requested = self.manifest.request_time(call.time)
+        async with self._session_factory() as session:
+            found = await session.execute(
+                select(gap.planned_snapshot)
+                .where(
+                    gap.sport_key == self.manifest.sport,
+                    gap.market.in_(markets),  # type: ignore[attr-defined]
+                    or_(
+                        gap.planned_snapshot == call.time,
+                        and_(
+                            gap.returned_snapshot < call.time,
+                            gap.next_snapshot > requested,
+                        ),
+                    ),
+                )
+                .limit(1)
+            )
+        return found.first() is not None
 
     async def _already_stored(self, call: Call) -> bool:
         """Whether any fixture the call serves already has a historical Odds API snapshot
