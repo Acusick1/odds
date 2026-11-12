@@ -22,7 +22,12 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
-from odds_analytics.backfill_checks import TIMESTAMP_TOLERANCE, lag_ok, stored_market
+from odds_analytics.backfill_checks import (
+    TIMESTAMP_TOLERANCE,
+    gap_covers,
+    lag_ok,
+    stored_market,
+)
 from odds_analytics.backfill_plan import Band, Call, Fixture, Manifest, Season, plan
 from odds_core.as_of import latest_snapshot
 from odds_core.bookmakers import (
@@ -139,17 +144,6 @@ class CallReconciliation:
     unplanned: tuple[datetime, ...]
 
 
-def gap_covers(manifest: Manifest, gap: Gap, call: datetime) -> bool:
-    """A recorded gap accounts for the call at ``call``: recorded for it, or inside its hole."""
-    if gap.planned == call:
-        return True
-    return (
-        gap.next is not None
-        and gap.returned < call - TIMESTAMP_TOLERANCE
-        and gap.next > manifest.request_time(call)
-    )
-
-
 def reconcile_calls(
     manifest: Manifest,
     planned: Sequence[datetime],
@@ -169,7 +163,7 @@ def reconcile_calls(
         if i >= 0 and stored_sorted[i] > lo:
             n_stored += 1
             used.add(stored_sorted[i])
-        elif any(gap_covers(manifest, gap, call) for gap in gaps):
+        elif any(gap_covers(manifest, call, gap.planned, gap.returned, gap.next) for gap in gaps):
             n_gap += 1
         else:
             missing.append(call)

@@ -134,8 +134,10 @@ class TestReconcileCalls:
     def test_a_gap_without_a_next_snapshot_covers_only_its_own_call(self) -> None:
         returned = GRID - timedelta(hours=3)
         gap = audit.Gap(planned=GRID, returned=returned, next=None)
-        assert audit.gap_covers(MANIFEST, gap, GRID)
-        assert not audit.gap_covers(MANIFEST, gap, GRID + timedelta(minutes=5))
+        later = GRID + timedelta(minutes=5)
+        rec = audit.reconcile_calls(MANIFEST, [GRID, later], [returned], [gap])
+        assert rec.gap == 1
+        assert rec.missing == (later,)
 
     def test_a_call_with_nothing_stored_is_missing(self) -> None:
         rec = audit.reconcile_calls(MANIFEST, [GRID], [GRID - timedelta(minutes=5)], [])
