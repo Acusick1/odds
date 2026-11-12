@@ -38,6 +38,6 @@ Each external source has a fetcher, a job (or manual script) that runs it, and a
 ### How-to guides
 
 - [Add a sport](howto-add-sport.md) — Steps to add a sport: SportKey, timezone, kick-off authority, suffix, overnight window, league spec and Betfair config with their fixture horizons, Odds API fetch plan, candidate markets, close and fallback, team aliases, job sport allowlists, Terraform rules, heartbeat keys, the configured sports, and what odds-web then shows.
-- [Backfill Odds API history](howto-backfill-odds-api-history.md) — Steps to cost an acquisition manifest, execute its calls, and fill scores and check status.
+- [Backfill Odds API history](howto-backfill-odds-api-history.md) — Steps to cost an acquisition manifest, execute its calls, audit what they stored, and fill scores and check status.
 - [Load historical EPL odds](howto-load-historical-epl-odds.md) — Steps to scrape OddsPortal, ingest it, then ingest football-data.co.uk.
 <!-- pages:end -->

@@ -103,6 +103,22 @@ def gap_covers(
     )
 
 
+def stored_call_window(manifest: Manifest, modelled: datetime) -> tuple[datetime, datetime]:
+    """The ``(after, until]`` window a stored snapshot of a call for ``modelled`` falls in: after
+    the previous grid time's request time and at or before the call's. The request returns a
+    snapshot in it unless it is a provider gap, and no earlier call returns one there, since each
+    returns a snapshot at or before its own request time. Before the first grid time the window
+    opens one grid step before the request time."""
+    until = manifest.request_time(modelled)
+    previous = manifest.previous_grid_time(modelled)
+    after = (
+        manifest.request_time(previous)
+        if previous is not None
+        else until - manifest.grid_step_at(modelled)
+    )
+    return after, until
+
+
 def book_judged_lead(manifest: Manifest) -> timedelta:
     """How far from kick-off a call's required books are judged: at most
     ``MAX_BOOK_JUDGED_LEAD``, and no farther than the manifest needs fixtures listed, for a
