@@ -20,12 +20,12 @@ Coverage of the Bundesliga Odds API historical run (`h2h` stored as `1x2`, `regi
 ## Findings
 
 - **Billing.** `odds backfill execute` printed 9,414 paid calls at 10 units each, 94,140 units, against 9,394 planned. 22 of them requested the 2025-04-15T21:25:38Z snapshot, a provider gap, before gaps were recorded and skipped, so 21 calls (210 units) bought nothing new. The two probe snapshots (2024-09-14 and 2025-09-13, `h2h,totals` with named books) are outside these counts.
-- **Fixture horizon.** The API lists a round only once the previous one is played, so the season's first round, the round after the winter break and the last round are first stored 122 to 173 h before kick-off. That leaves 1.3% (2024-25) and 0.6% (2025-26) of the KO−7d band's decisions without a snapshot; no purchase can fill them. Two 2024-25 planned calls served only fixtures not yet listed.
-- **Provider gaps.** The three holes cost decisions only in the KO−7d band: after the 2025-04-15 and 2025-10-20 holes the next planned call was 6 h after the missing one, so 9 fixtures each lost 205 and 160 minutes of 6-hour-fresh input.
-- **Off-phase snapshot.** The call for 2026-05-08T04:25:38Z returned a snapshot stamped 04:26:09Z, which stopped the run until it was resumed. It leaves one KO−1d decision minute of Borussia Dortmund v Eintracht Frankfurt without a 60-minute-fresh input.
-- **Postponed fixtures.** St. Pauli v Leipzig and Werder Bremen v Hoffenheim (listed 2026-01-10) and Hamburger SV v Leverkusen (listed 2026-01-13) were listed at their original dates in 200 to 232 responses and attached to no event; their replayed fixtures (2026-01-27 and 2026-03-04) are fully covered. No postponement is recorded in `event_postponements`.
+- **Fixture horizon.** Some rounds are first stored 122 to 173 h before kick-off, 16 fixtures a season later than the KO−7d band's 168 h start: the first round after the winter break and the final round (fixture lists from a separate query). The API appears to list a round only once the previous one is played `(inferred)`. That leaves 1.3% (2024-25) and 0.6% (2025-26) of the KO−7d band's decisions without a snapshot, which no purchase can fill. Two 2024-25 planned calls served only fixtures not yet listed.
+- **Provider gaps.** Two of the three holes cost decisions, all in the KO−7d band: after the 2025-04-15 and 2025-10-20 holes the next planned call was 6 h after the missing one, so 9 fixtures each lost 205 and 160 minutes of 6-hour-fresh input. The 2025-05-11 hole fell before its fixtures were listed.
+- **Off-phase snapshot.** The call for 2026-05-08T04:25:38Z returned a snapshot stamped 04:26:09Z, which stopped the run until it was resumed. It leaves the one unserved KO−1d decision minute, of Borussia Dortmund v Eintracht Frankfurt (separate query), without a 60-minute-fresh input.
+- **Postponed fixtures.** St. Pauli v Leipzig and Werder Bremen v Hoffenheim (listed 2026-01-10) and Hamburger SV v Leverkusen (listed 2026-01-13) were listed at their original dates in 204 to 232 responses and attached to no event; their replayed fixtures (2026-01-27 and 2026-03-04) are first stored more than 200 h ahead, and no postponement is recorded in `event_postponements` (separate queries).
 - **Books outside `UK_RETAIL_BOOKMAKERS`.** `casumo`, `grosvenor`, `leovegas`, `livescorebet`, `virginbet` (both seasons, on 75 to 94% of snapshots) and `mrgreen` (2024-25) are stored under their own keys and counted neither as UK retail nor as exchanges. They are UK-licensed sportsbooks `(inferred)`, so retail rules reading `UK_RETAIL_BOOKMAKERS` ignore up to six of the region's books.
-- **Betfred.** `betfred` is stored on 45 of the 2025-26 fixtures, from 2026-04-13 to the season's end, and on none in 2024-25.
+- **Betfred.** `betfred` is stored on 45 of the 2025-26 fixtures, from 2026-04-13 to the season's end (dates from a separate query), and on none in 2024-25.
 - **Pinnacle** appears only in the two probe snapshots, which named it; the `uk` region does not return it.
 - **Exchange quotes without a draw.** When the exchange quotes only the two teams, the response's `h2h` keeps its key and is stored as an `h2h` snapshot on the soccer fixture: 219 snapshots on 23 fixtures before kick-off in 2025-26. Readers of `1x2` do not see these partial exchange books. Listings with no books are stored as snapshots with no market (47 in 2024-25, 34 in 2025-26).
 - **Near kick-off exchange.** The last planned call before each kick-off is the grid snapshot 4 min 22 s before it, so every fixture's latest exchange price is 4.4 min old, all of them complete and within the 5% overround limit. The run bought no snapshot nearer kick-off.
@@ -110,7 +110,7 @@ Stored snapshot times off the grid's phase (outside their nearest grid time's wh
 
 ### Calls, 2024-25
 
-Planned 4,642; stored 4,639; covered by a recorded gap 3; missing 0. Distinct stored snapshot times 4,642, × 10 units = 46,420 units; 3 of them match no planned call (gap returns, probes, off-phase stamps). Planned calls that serve only fixtures not yet stored at that time (not listed): 2.
+Planned 4,642; stored 4,639; covered by a recorded gap 3; missing 0. Distinct stored snapshot times, any market: 4,642, × 10 units = 46,420 units. `1x2` snapshot times matching no planned call (gap returns, probes): 2. Planned calls that serve only fixtures not yet stored at that time (not listed): 2.
 
 ## 2025-26
 
@@ -199,5 +199,5 @@ Stored snapshot times off the grid's phase (outside their nearest grid time's wh
 
 ### Calls, 2025-26
 
-Planned 4,752; stored 4,751; covered by a recorded gap 1; missing 0. Distinct stored snapshot times 4,753, × 10 units = 47,530 units; 2 of them match no planned call (gap returns, probes, off-phase stamps). Planned calls that serve only fixtures not yet stored at that time (not listed): 0.
+Planned 4,752; stored 4,751; covered by a recorded gap 1; missing 0. Distinct stored snapshot times, any market: 4,753, × 10 units = 47,530 units. `1x2` snapshot times matching no planned call (gap returns, probes): 2. Planned calls that serve only fixtures not yet stored at that time (not listed): 0.
 

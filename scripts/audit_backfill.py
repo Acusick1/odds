@@ -344,17 +344,22 @@ async def load_unmatched_listings(
     return [(h, a, k, int(n)) for h, a, k, n in rows.all()]
 
 
-async def load_stored_times(session: AsyncSession, event_ids: Sequence[int]) -> list[datetime]:
-    """Every distinct Odds API historical snapshot time on the events, any market."""
+async def load_stored_times(
+    session: AsyncSession, event_ids: Sequence[int], market: Market | None = None
+) -> list[datetime]:
+    """Every distinct Odds API historical snapshot time on the events, in ``market`` or, when
+    None, in any market or none."""
     rows = await session.execute(
         text(
             "SELECT DISTINCT snapshot_time FROM odds_snapshots WHERE event_id = ANY(:ids) "
-            "AND source = :source AND time_basis = :basis ORDER BY 1"
+            "AND source = :source AND time_basis = :basis "
+            "AND (CAST(:market AS text) IS NULL OR market = :market) ORDER BY 1"
         ),
         {
             "ids": list(event_ids),
             "source": Source.ODDS_API.value,
             "basis": TimeBasis.SOURCE_STAMPED.value,
+            "market": market.value if market else None,
         },
     )
     return [t for (t,) in rows.all()]
@@ -538,16 +543,16 @@ async def audit_season(
             rows,
         )
     )
+    horizon = timedelta(minutes=farthest_lead(manifest))
     late = [
         (f, f.snapshots[0].time)
         for f in fixtures
-        if f.snapshots
-        and f.snapshots[0].time > f.kickoff - timedelta(minutes=farthest_lead(manifest))
+        if f.snapshots and f.snapshots[0].time > f.kickoff - horizon
     ]
     if late:
         by_lead = Counter(f"{(f.kickoff - first).total_seconds() / 3600:.0f}" for f, first in late)
         out.append(
-            f"Fixtures first stored less than {farthest_lead(manifest) / 60:.0f} h before "
+            f"Fixtures first stored less than {horizon.total_seconds() / 3600:.0f} h before "
             "kick-off: "
             f"{len(late)}, first stored at leads (h: fixtures) "
             + ", ".join(
@@ -628,17 +633,24 @@ async def audit_season(
 
     # Calls.
     calls = plan(manifest, [Fixture(f.event_id, f.kickoff) for f in fixtures])
-    rec = reconcile_calls(manifest, [c.time for c in calls], stored, season_gaps)
+    # A call counts as stored as the executor's skip judges it: by a requested-market snapshot.
+    rec = reconcile_calls(
+        manifest,
+        [c.time for c in calls],
+        await load_stored_times(session, ids, market),
+        season_gaps,
+    )
     unlisted_calls = calls_before_listing(
         calls, {f.event_id: f.snapshots[0].time for f in fixtures if f.snapshots}
     )
     out.append(
         f"### Calls, {name}\n\nPlanned {rec.planned:,}; stored {rec.stored:,}; covered by a "
         "recorded gap "
-        f"{rec.gap:,}; missing {len(rec.missing):,}. Distinct stored snapshot times "
-        f"{len(stored):,}, × {manifest.units_per_call} units = "
-        f"{len(stored) * manifest.units_per_call:,} units; {len(rec.unplanned):,} of them match "
-        "no planned call (gap returns, probes, off-phase stamps). Planned calls that serve only "
+        f"{rec.gap:,}; missing {len(rec.missing):,}. Distinct stored snapshot times, any "
+        f"market: {len(stored):,}, × {manifest.units_per_call} units = "
+        f"{len(stored) * manifest.units_per_call:,} units. `{market}` snapshot times matching no "
+        f"planned call (gap returns, probes): {len(rec.unplanned):,}. Planned calls that serve "
+        "only "
         f"fixtures not yet stored at that time (not listed): {len(unlisted_calls):,}."
     )
     if rec.missing:

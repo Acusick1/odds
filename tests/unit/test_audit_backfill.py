@@ -69,6 +69,24 @@ class TestBandCoverage:
         assert cov.in_gaps == 10
         assert cov.before_listing == 0
 
+    def test_a_snapshot_exactly_max_age_old_serves(self) -> None:
+        # Every 11 minutes, the oldest input a decision reads is exactly the 10-minute max age.
+        snaps = every(KICKOFF - timedelta(minutes=131), KICKOFF, timedelta(minutes=11))
+        assert audit.band_coverage(KICKOFF, snaps, NEAR).served == 120
+        sparser = every(KICKOFF - timedelta(minutes=132), KICKOFF, timedelta(minutes=12))
+        assert audit.band_coverage(KICKOFF, sparser, NEAR).served < 120
+
+    def test_decisions_before_listing_are_not_counted_as_gap(self) -> None:
+        snaps = [KICKOFF - timedelta(minutes=30)]
+        gap = audit.Gap(
+            planned=KICKOFF - timedelta(minutes=100),
+            returned=KICKOFF - timedelta(hours=5),
+            next=None,
+        )
+        cov = audit.band_coverage(KICKOFF, snaps, NEAR, [gap])
+        assert cov.before_listing == 90
+        assert cov.in_gaps == 0
+
     def test_no_snapshots_leaves_every_decision_unlisted(self) -> None:
         cov = audit.band_coverage(KICKOFF, [], NEAR)
         assert (cov.served, cov.before_listing) == (0, 120)
@@ -92,6 +110,9 @@ class TestOffPhase:
     ) -> None:
         assert audit.off_phase(MANIFEST, GRID + offset) is expected
 
+    def test_a_snapshot_before_the_grid_is_off_phase(self) -> None:
+        assert audit.off_phase(MANIFEST, MANIFEST.snapshot_grid[0].start - timedelta(hours=1))
+
 
 class TestReconcileCalls:
     def test_a_stored_snapshot_in_the_response_window_stores_the_call(self) -> None:
@@ -109,6 +130,12 @@ class TestReconcileCalls:
         rec = audit.reconcile_calls(MANIFEST, [GRID, later], [returned], [gap])
         assert (rec.stored, rec.gap, rec.missing) == (0, 2, ())
         assert rec.unplanned == (returned,)
+
+    def test_a_gap_without_a_next_snapshot_covers_only_its_own_call(self) -> None:
+        returned = GRID - timedelta(hours=3)
+        gap = audit.Gap(planned=GRID, returned=returned, next=None)
+        assert audit.gap_covers(MANIFEST, gap, GRID)
+        assert not audit.gap_covers(MANIFEST, gap, GRID + timedelta(minutes=5))
 
     def test_a_call_with_nothing_stored_is_missing(self) -> None:
         rec = audit.reconcile_calls(MANIFEST, [GRID], [GRID - timedelta(minutes=5)], [])
