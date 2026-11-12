@@ -30,6 +30,7 @@ from odds_analytics.backfill_checks import (
     stored_market,
 )
 from odds_analytics.backfill_plan import Band, Call, Fixture, Manifest, Season, plan
+from odds_analytics.holdout import intersecting
 from odds_core.as_of import latest_snapshot
 from odds_core.bookmakers import (
     BOOKMAKER_ALIASES_BY_SOURCE,
@@ -122,6 +123,12 @@ def band_coverage(
         before_listing=int((~served & unlisted).sum()),
         in_gaps=int((~served & ~unlisted & in_gap).sum()),
     )
+
+
+def is_sealed(sport: str, kickoffs: Iterable[datetime]) -> bool:
+    """Some kick-off falls in a sealed holdout window of ``sport`` (ADR-0021), as the library's
+    seal reads it: such a season reports counts and ages only, no price-derived statistic."""
+    return any(intersecting(sport, k.date(), k.date()) for k in kickoffs)
 
 
 def off_phase(manifest: Manifest, snapshot: datetime) -> bool:
@@ -413,6 +420,57 @@ def _season_gaps(
     return [g for g in gaps if lo <= g.planned <= hi]
 
 
+def near_close_lines(
+    name: str, count: int, points: Sequence[ClosePoint], sealed: bool
+) -> list[str]:
+    """The near-kick-off exchange section. A sealed season gets the counts and ages of any
+    exchange quote only, not the overround or back-price checks, which read prices."""
+    out: list[str] = []
+    any_ages = [p.age for p in points]
+    usable_ages = [p.usable_age for p in points]
+    pct_any = age_percentiles(any_ages)
+    pct_usable = age_percentiles(usable_ages)
+    lookback = f"{CLOSE_LOOKBACK.total_seconds() / 60:.0f} min"
+    if sealed:
+        caption = (
+            f"Per fixture, the latest exchange snapshot at or before kick-off within {lookback}, "
+            "counted and aged only: this season is sealed "
+            "([ADR-0021](../docs/adr/0021-sealed-holdout-and-one-shot-gate.md)), so no "
+            "price-derived statistic is reported. Research inputs, not validated closing labels."
+        )
+        rows = [("Any exchange quote", any_ages, pct_any)]
+    else:
+        caption = (
+            f"Per fixture, the latest exchange snapshot at or before kick-off within {lookback}; "
+            "usable means a back price on every outcome with back overround at most "
+            f"{MAX_EXCHANGE_OVERROUND:.0%}. Research inputs, not validated closing labels."
+        )
+        rows = [("Any exchange quote", any_ages, pct_any), ("Usable", usable_ages, pct_usable)]
+    out.append(f"### Near kick-off `{EXCHANGE_BOOKMAKER}`, {name}\n\n{caption}")
+    out.append(
+        _table(
+            ["Price", "Fixtures with one"]
+            + [f"Within {m} min" for m in CLOSE_WINDOWS_MINUTES]
+            + [f"p{p} age (min)" for p in AGE_PERCENTILES],
+            [
+                (
+                    label,
+                    f"{sum(1 for a in ages if a is not None)}/{count}",
+                    *(_pct(share_within(ages, m)) for m in CLOSE_WINDOWS_MINUTES),
+                    *(f"{pct[p]:.1f}" if pct else "-" for p in AGE_PERCENTILES),
+                )
+                for label, ages, pct in rows
+            ],
+        )
+    )
+    if not sealed:
+        incomplete = sum(1 for p in points if p.age is not None and not p.complete)
+        out.append(
+            f"Latest exchange snapshot missing an outcome's back price: {incomplete} fixtures."
+        )
+    return out
+
+
 async def audit_season(
     session: AsyncSession, manifest: Manifest, name: str, season: Season, gaps: Sequence[Gap]
 ) -> str:
@@ -574,38 +632,8 @@ async def audit_season(
     for q in exchange:
         by_event[q.event_id].append(q)
     points = [close_point(f.kickoff, by_event[f.event_id], market) for f in fixtures]
-    any_ages = [p.age for p in points]
-    usable_ages = [p.usable_age for p in points]
-    pct_any = age_percentiles(any_ages)
-    pct_usable = age_percentiles(usable_ages)
-    out.append(
-        f"### Near kick-off `{EXCHANGE_BOOKMAKER}`, {name}\n\nPer fixture, the latest exchange "
-        "snapshot at or before kick-off within "
-        f"{CLOSE_LOOKBACK.total_seconds() / 60:.0f} min; usable means a back price on every "
-        f"outcome with back overround at most {MAX_EXCHANGE_OVERROUND:.0%}. Research inputs, not "
-        "validated closing labels."
-    )
-    out.append(
-        _table(
-            ["Price", "Fixtures with one"]
-            + [f"Within {m} min" for m in CLOSE_WINDOWS_MINUTES]
-            + [f"p{p} age (min)" for p in AGE_PERCENTILES],
-            [
-                (
-                    label,
-                    f"{sum(1 for a in ages if a is not None)}/{len(fixtures)}",
-                    *(_pct(share_within(ages, m)) for m in CLOSE_WINDOWS_MINUTES),
-                    *(f"{pct[p]:.1f}" if pct else "-" for p in AGE_PERCENTILES),
-                )
-                for label, ages, pct in (
-                    ("Any exchange quote", any_ages, pct_any),
-                    ("Usable", usable_ages, pct_usable),
-                )
-            ],
-        )
-    )
-    incomplete = sum(1 for p in points if p.age is not None and not p.complete)
-    out.append(f"Latest exchange snapshot missing an outcome's back price: {incomplete} fixtures.")
+    sealed = is_sealed(manifest.sport, (f.kickoff for f in fixtures))
+    out.extend(near_close_lines(name, len(fixtures), points, sealed))
 
     # Gaps and off-phase snapshots.
     stored = await load_stored_times(session, ids)
