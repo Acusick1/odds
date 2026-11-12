@@ -38,6 +38,7 @@ from odds_analytics.backfill_checks import (
     classify_snapshot,
     gap_covers,
     next_grid_time,
+    stored_call_window,
     stored_market,
 )
 from odds_analytics.backfill_plan import Call, Manifest
@@ -482,25 +483,16 @@ class BackfillExecutor:
 
     async def _already_stored(self, call: Call) -> bool:
         """Whether any fixture the call serves already has a historical Odds API snapshot
-        (``source_stamped``, never a live fetch) of a requested market after the previous grid
-        time's request time and at or before the call's. The request returns a snapshot in that
-        window unless it is a provider gap, and no earlier call returns one there, since each
-        returns a snapshot at or before its own request time. Before the first grid time the
-        window opens one grid step before the request time. A served fixture the response does not list is one the API did not list at that
-        time, and fetching again will not change that."""
+        (``source_stamped``, never a live fetch) of a requested market in the call's stored
+        window (``stored_call_window``). A served fixture the response does not list is one the
+        API did not list at that time, and fetching again will not change that."""
         wanted = {target.fixture.event_id for target in call.serves}
         if not wanted:
             return True
         markets = {stored_market(self.manifest, market) for market in self.manifest.markets}
-        requested = self.manifest.request_time(call.time)
-        previous = self.manifest.previous_grid_time(call.time)
-        after = (
-            self.manifest.request_time(previous)
-            if previous is not None
-            else requested - self.manifest.grid_step_at(call.time)
-        )
+        after, until = stored_call_window(self.manifest, call.time)
         async with self._session_factory() as session:
-            stored = await _stored_markets(session, wanted, after, requested)
+            stored = await _stored_markets(session, wanted, after, until)
         return any(markets & stored.get(event_id, set()) for event_id in wanted)
 
 

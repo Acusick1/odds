@@ -16,7 +16,7 @@ import argparse
 import asyncio
 from bisect import bisect_right
 from collections import Counter, defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -26,6 +26,7 @@ from odds_analytics.backfill_checks import (
     TIMESTAMP_TOLERANCE,
     gap_covers,
     lag_ok,
+    stored_call_window,
     stored_market,
 )
 from odds_analytics.backfill_plan import Band, Call, Fixture, Manifest, Season, plan
@@ -146,33 +147,41 @@ class CallReconciliation:
 
 def reconcile_calls(
     manifest: Manifest,
-    planned: Sequence[datetime],
-    stored: Sequence[datetime],
+    calls: Sequence[Call],
+    stored: Mapping[int, Sequence[datetime]],
     gaps: Sequence[Gap],
 ) -> CallReconciliation:
-    """Each planned call is stored when a stored snapshot lies in ``(request - step, request]``,
-    where its response falls, else a gap when a recorded gap covers it, else missing."""
-    stored_sorted = sorted(set(stored))
+    """Each planned call is stored as the executor's skip judges it: a fixture it serves has a
+    requested-market snapshot time in ``stored`` (by event, sorted) inside the call's stored
+    window (``stored_call_window``), or it serves no fixture. Otherwise it is a gap when a
+    recorded gap covers it, else missing."""
     used: set[datetime] = set()
     n_stored = n_gap = 0
     missing: list[datetime] = []
-    for call in sorted(planned):
-        request = manifest.request_time(call)
-        lo = request - manifest.grid_step_at(call)
-        i = bisect_right(stored_sorted, request) - 1
-        if i >= 0 and stored_sorted[i] > lo:
+    for call in sorted(calls, key=lambda c: c.time):
+        after, until = stored_call_window(manifest, call.time)
+        hits = [
+            times[i]
+            for event_id in {t.fixture.event_id for t in call.serves}
+            if (i := bisect_right(times := stored.get(event_id, ()), until) - 1) >= 0
+            and times[i] > after
+        ]
+        if hits or not call.serves:
             n_stored += 1
-            used.add(stored_sorted[i])
-        elif any(gap_covers(manifest, call, gap.planned, gap.returned, gap.next) for gap in gaps):
+            used.update(hits)
+        elif any(
+            gap_covers(manifest, call.time, gap.planned, gap.returned, gap.next) for gap in gaps
+        ):
             n_gap += 1
         else:
-            missing.append(call)
+            missing.append(call.time)
+    all_times = sorted({t for times in stored.values() for t in times})
     return CallReconciliation(
-        planned=len(planned),
+        planned=len(calls),
         stored=n_stored,
         gap=n_gap,
         missing=tuple(missing),
-        unplanned=tuple(t for t in stored_sorted if t not in used),
+        unplanned=tuple(t for t in all_times if t not in used),
     )
 
 
@@ -338,22 +347,17 @@ async def load_unmatched_listings(
     return [(h, a, k, int(n)) for h, a, k, n in rows.all()]
 
 
-async def load_stored_times(
-    session: AsyncSession, event_ids: Sequence[int], market: Market | None = None
-) -> list[datetime]:
-    """Every distinct Odds API historical snapshot time on the events, in ``market`` or, when
-    None, in any market or none."""
+async def load_stored_times(session: AsyncSession, event_ids: Sequence[int]) -> list[datetime]:
+    """Every distinct Odds API historical snapshot time on the events, in any market or none."""
     rows = await session.execute(
         text(
             "SELECT DISTINCT snapshot_time FROM odds_snapshots WHERE event_id = ANY(:ids) "
-            "AND source = :source AND time_basis = :basis "
-            "AND (CAST(:market AS text) IS NULL OR market = :market) ORDER BY 1"
+            "AND source = :source AND time_basis = :basis ORDER BY 1"
         ),
         {
             "ids": list(event_ids),
             "source": Source.ODDS_API.value,
             "basis": TimeBasis.SOURCE_STAMPED.value,
-            "market": market.value if market else None,
         },
     )
     return [t for (t,) in rows.all()]
@@ -627,11 +631,10 @@ async def audit_season(
 
     # Calls.
     calls = plan(manifest, [Fixture(f.event_id, f.kickoff) for f in fixtures])
-    # A call counts as stored as the executor's skip judges it: by a requested-market snapshot.
     rec = reconcile_calls(
         manifest,
-        [c.time for c in calls],
-        await load_stored_times(session, ids, market),
+        calls,
+        {f.event_id: [snap.time for snap in f.snapshots] for f in fixtures},
         season_gaps,
     )
     unlisted_calls = calls_before_listing(

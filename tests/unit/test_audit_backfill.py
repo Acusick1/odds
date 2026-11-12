@@ -114,20 +114,50 @@ class TestOffPhase:
         assert audit.off_phase(MANIFEST, MANIFEST.snapshot_grid[0].start - timedelta(hours=1))
 
 
+def call(time: datetime, *event_ids: int) -> Call:
+    return Call(time, tuple(Target(Fixture(e, KICKOFF), NEAR, time, time) for e in event_ids))
+
+
 class TestReconcileCalls:
-    def test_a_stored_snapshot_in_the_response_window_stores_the_call(self) -> None:
-        rec = audit.reconcile_calls(MANIFEST, [GRID], [GRID + timedelta(seconds=2)], [])
+    def test_a_served_fixture_stored_in_the_call_window_stores_the_call(self) -> None:
+        rec = audit.reconcile_calls(
+            MANIFEST, [call(GRID, 1)], {1: [GRID + timedelta(seconds=2)]}, []
+        )
         assert (rec.stored, rec.gap, rec.missing, rec.unplanned) == (1, 0, (), ())
 
+    def test_a_snapshot_of_a_fixture_the_call_does_not_serve_does_not_store_it(self) -> None:
+        # The executor's skip looks only at the fixtures the call serves.
+        rec = audit.reconcile_calls(MANIFEST, [call(GRID, 1)], {2: [GRID]}, [])
+        assert rec.stored == 0
+        assert rec.missing == (GRID,)
+        assert rec.unplanned == (GRID,)
+
     def test_an_off_phase_snapshot_still_stores_its_call(self) -> None:
-        rec = audit.reconcile_calls(MANIFEST, [GRID], [GRID + timedelta(seconds=31)], [])
+        rec = audit.reconcile_calls(
+            MANIFEST, [call(GRID, 1)], {1: [GRID + timedelta(seconds=31)]}, []
+        )
         assert rec.stored == 1
+
+    def test_the_window_opens_at_the_previous_grid_times_request(self) -> None:
+        # Stamped just after the previous grid time's request time: this call's response.
+        previous_request = MANIFEST.request_time(GRID - timedelta(minutes=5))
+        rec = audit.reconcile_calls(
+            MANIFEST, [call(GRID, 1)], {1: [previous_request + timedelta(seconds=1)]}, []
+        )
+        assert rec.stored == 1
+        rec = audit.reconcile_calls(MANIFEST, [call(GRID, 1)], {1: [previous_request]}, [])
+        assert rec.missing == (GRID,)
+
+    def test_a_call_serving_no_fixture_counts_as_stored(self) -> None:
+        assert audit.reconcile_calls(MANIFEST, [call(GRID)], {}, []).stored == 1
 
     def test_a_gap_covers_its_call_and_calls_inside_its_hole(self) -> None:
         returned = GRID - timedelta(hours=3)
         gap = audit.Gap(planned=GRID, returned=returned, next=GRID + timedelta(minutes=12))
         later = GRID + timedelta(minutes=5)
-        rec = audit.reconcile_calls(MANIFEST, [GRID, later], [returned], [gap])
+        rec = audit.reconcile_calls(
+            MANIFEST, [call(GRID, 1), call(later, 1)], {1: [returned]}, [gap]
+        )
         assert (rec.stored, rec.gap, rec.missing) == (0, 2, ())
         assert rec.unplanned == (returned,)
 
@@ -135,32 +165,24 @@ class TestReconcileCalls:
         returned = GRID - timedelta(hours=3)
         gap = audit.Gap(planned=GRID, returned=returned, next=None)
         later = GRID + timedelta(minutes=5)
-        rec = audit.reconcile_calls(MANIFEST, [GRID, later], [returned], [gap])
+        rec = audit.reconcile_calls(
+            MANIFEST, [call(GRID, 1), call(later, 1)], {1: [returned]}, [gap]
+        )
         assert rec.gap == 1
         assert rec.missing == (later,)
 
-    def test_a_call_with_nothing_stored_is_missing(self) -> None:
-        rec = audit.reconcile_calls(MANIFEST, [GRID], [GRID - timedelta(minutes=5)], [])
-        assert rec.missing == (GRID,)
-
 
 class TestCallsBeforeListing:
-    def call(self, time: datetime, *event_ids: int) -> Call:
-        return Call(
-            time,
-            tuple(Target(Fixture(e, KICKOFF), NEAR, time, time) for e in event_ids),
-        )
-
     def test_a_call_serving_only_unlisted_fixtures_is_reported(self) -> None:
         listed = {1: GRID + timedelta(hours=1), 2: GRID + timedelta(hours=2)}
-        assert audit.calls_before_listing([self.call(GRID, 1, 2)], listed) == [GRID]
+        assert audit.calls_before_listing([call(GRID, 1, 2)], listed) == [GRID]
 
     def test_one_listed_fixture_is_enough(self) -> None:
         listed = {1: GRID + timedelta(seconds=3), 2: GRID + timedelta(hours=2)}
-        assert audit.calls_before_listing([self.call(GRID, 1, 2)], listed) == []
+        assert audit.calls_before_listing([call(GRID, 1, 2)], listed) == []
 
     def test_a_fixture_never_stored_counts_as_unlisted(self) -> None:
-        assert audit.calls_before_listing([self.call(GRID, 1)], {}) == [GRID]
+        assert audit.calls_before_listing([call(GRID, 1)], {}) == [GRID]
 
 
 def exchange_quotes(
