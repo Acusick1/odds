@@ -1,0 +1,14 @@
+issue: 832
+market: 1x2
+version: 1
+grid_sha256: 33c417c9662d619df4704d26b59c4e221d5b0ae91eb330411c76858d0699f24b
+cell:
+  lookbacks:
+  - minutes_before_decision: 15
+    max_input_age_minutes: 10
+  min_rise: 0.02
+  gap: 0.01
+  minutes_before_kickoff:
+  - 50
+  - 40
+  max_input_age_minutes: 10
