@@ -20,6 +20,7 @@ from odds_analytics import holdout, holdout_run
 from odds_analytics.candidate_report import Checkpoint, ScoredBet
 from odds_cli.main import app
 from odds_core.candidates import MechanicalCandidate
+from odds_core.vocabulary import Source
 from typer.testing import CliRunner
 
 from tests.unit.conftest import (
@@ -84,6 +85,7 @@ def scored_bet(
         None,
         "bet365",
         p_close,
+        Source.BETFAIR,
     )
 
 

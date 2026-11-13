@@ -25,15 +25,9 @@ from typing import Any
 
 import numpy as np
 from odds_analytics.holdout import require_clear
-from odds_core.as_of import latest_snapshot
-from odds_core.close import FDUK_CLOSE, FDUK_CLOSED_LEAGUES, event_close
+from odds_core.close import FDUK_CLOSE, FDUK_CLOSED_LEAGUES, event_close, substitute_close
 from odds_core.database import async_session_maker
-from odds_core.exchange_price import (
-    EXCHANGE_BOOKMAKER,
-    MAX_EXCHANGE_OVERROUND,
-    ExchangePrice,
-    exchange_price,
-)
+from odds_core.exchange_price import EXCHANGE_BOOKMAKER, MAX_EXCHANGE_OVERROUND, ExchangePrice
 from odds_core.market_prices import Outcome, market_outcomes
 from odds_core.models import Event, EventStatus
 from odds_core.quotes import Quote, quotes
@@ -115,26 +109,19 @@ def compare_event(
     max_overround: float = MAX_EXCHANGE_OVERROUND,
 ) -> EventComparison:
     """The FDUK close of an event (``odds_core.close.event_close`` over its FDUK quotes) and the
-    latest Odds API exchange snapshot at or before ``kickoff`` that is complete and narrow."""
+    Odds API price ``odds_core.close.substitute_close`` takes within ``max_age``."""
     if not fduk_quotes:
         return EventComparison(event_id, Status.NO_FDUK_CLOSE)
     close = event_close(fduk_quotes, kickoff, sport, MARKET, max_overround)
     if close is None:
         return EventComparison(event_id, Status.FDUK_UNUSABLE)
 
-    def usable(snapshot: Sequence[Quote]) -> bool:
-        price = exchange_price(snapshot, MARKET)
-        return price is not None and price.overround <= max_overround
-
-    window = [
-        q
+    if not any(
+        q.snapshot_time <= kickoff and (max_age is None or q.snapshot_time >= kickoff - max_age)
         for q in oddsapi_quotes
-        if q.snapshot_time <= kickoff and (max_age is None or q.snapshot_time >= kickoff - max_age)
-    ]
-    if not window:
+    ):
         return EventComparison(event_id, Status.NO_SNAPSHOT, fduk=close)
-    snapshot = latest_snapshot(window, kickoff, usable)
-    price = None if snapshot is None else exchange_price(snapshot, MARKET)
+    price = substitute_close(oddsapi_quotes, kickoff, MARKET, max_age, max_overround)
     if price is None:
         return EventComparison(event_id, Status.SNAPSHOT_UNUSABLE, fduk=close)
     age = (kickoff - price.time).total_seconds() / 60

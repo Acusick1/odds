@@ -19,6 +19,7 @@ from odds_analytics import holdout
 from odds_analytics.candidate_report import ScoredBet
 from odds_analytics.retail_ev_metrics import _resample_counts
 from odds_cli.main import app
+from odds_core.vocabulary import Source
 from typer.testing import CliRunner
 
 from tests.unit.conftest import HOLDOUT_GRID, STEM, preregistration
@@ -52,6 +53,7 @@ def bet(
         line=None,
         bookmaker="bet365",
         p_close_power=None if ev is None else (1 + (ev if power is None else power)) / price,
+        close_source=None if ev is None else Source.BETFAIR,
     )
 
 
@@ -74,6 +76,7 @@ def cell_score(index: int, lower: float, mean: float, events: int) -> cs.CellSco
         lower_bound=lower,
         power_mean_ev=None,
         eligible=True,
+        closes={},
     )
 
 
@@ -129,6 +132,16 @@ class TestEligibility:
         score = cs.score_cell(replay(0, (EPL_2024_26, bets)), longshots=False)
 
         assert (score.bets, score.events, score.eligible) == (49, 49, False)
+
+    def test_bets_are_counted_by_the_source_of_their_close(self) -> None:
+        substituted = [
+            dataclasses.replace(bet(i, 0.05), close_source=Source.ODDS_API) for i in range(3)
+        ]
+        bets = [bet(10, 0.05), *substituted, bet(20, None)]
+
+        score = cs.score_cell(replay(0, (EPL_2024_26, bets)), longshots=False)
+
+        assert score.closes == {Source.BETFAIR: 1, Source.ODDS_API: 3}
 
     def test_events_are_counted_across_blocks(self) -> None:
         epl = [bet(i // 2, 0.05) for i in range(40)]
@@ -390,7 +403,11 @@ class TestCommand:
             "price",
             "p_close",
             "ev",
+            "close_source",
         }
+        assert placed["close_source"] == "betfair"
+        assert payload["cells"][1]["closes"] == {"betfair": 60}
+        assert "betfair 60" in result.stdout
 
     def test_no_eligible_cell_kills_the_idea_and_writes_nothing(
         self, directory: Path, replays: list[cs.CellReplay]

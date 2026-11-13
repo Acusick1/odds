@@ -84,6 +84,7 @@ def trade(
         line=None,
         bookmaker="bet365",
         p_close_power=None,
+        close_source=None if ev is None else Source.BETFAIR,
     )
 
 
@@ -130,6 +131,7 @@ class TestEv:
             line=None,
             bookmaker="bet365",
             p_close_power=0.45,
+            close_source=Source.BETFAIR,
         )
         assert t.ev == pytest.approx(0.25)
         assert t.ev_power == pytest.approx(0.125)

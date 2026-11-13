@@ -14,9 +14,8 @@ sources:
   - scripts.compare_substitute_close.main
 mentions:
   - odds_core.close.event_close
-  - odds_core.exchange_price.exchange_price
+  - odds_core.close.substitute_close
   - odds_core.exchange_price.MAX_EXCHANGE_OVERROUND
-  - odds_core.as_of.latest_snapshot
   - odds_core.quotes.quotes
   - odds_analytics.holdout.require_clear
 status: stable
@@ -24,7 +23,7 @@ status: stable
 
 # Substitute-close comparison
 
-`scripts.compare_substitute_close` measures whether the Odds API's Betfair Exchange price near kick-off can stand in for a backtest's close where no Betfair close exists ([#730](https://github.com/Acusick1/odds/issues/730)). It reads only: its transaction is `SET TRANSACTION READ ONLY`, and it calls no API. The close it tests against is FDUK's Betfair Exchange closing price, which [scoring](../modelling/clv-target.md#the-retail-ev-target) uses for the football leagues in `odds_core.close.FDUK_CLOSED_LEAGUES`.
+`scripts.compare_substitute_close` measures whether the Odds API's Betfair Exchange price near kick-off can stand in for a backtest's close where no Betfair close exists ([#730](https://github.com/Acusick1/odds/issues/730)). Its EPL result is the evidence of [ADR-0023](../../docs/adr/0023-odds-api-betfair-substitute-close-for-epl-backtests.md), which makes that price the EPL backtest's substitute close ([replay close](candidate-backtest.md#replay)), chosen by the same function within 10 minutes of kick-off. It reads only: its transaction is `SET TRANSACTION READ ONLY`, and it calls no API. The close it tests against is FDUK's Betfair Exchange closing price, which [scoring](../modelling/clv-target.md#the-retail-ev-target) uses for the football leagues in `odds_core.close.FDUK_CLOSED_LEAGUES`.
 
 ## Usage
 
@@ -41,7 +40,7 @@ uv run python scripts/compare_substitute_close.py [--sport soccer_epl] [--from 2
 - **FDUK close:** Betfair Exchange back prices of the source and time basis in `odds_core.close.FDUK_CLOSE`, picked by `odds_core.close.event_close`.
 - **Odds API price:** `betfair_exchange` back prices of source `odds_api` and time basis `source_stamped`, the historical backfill's ([stored shape](../collection/odds-api-backfill.md#executing-calls)). A live fetch (`observed`) is not read. With `--max-age-minutes`, only snapshots stamped at most that long before kick-off are read.
 
-`scripts.compare_substitute_close.compare_event` takes, for each event, the latest Odds API snapshot stamped at or before kick-off (`odds_core.as_of.latest_snapshot`) that is complete and whose back overround is at most `odds_core.exchange_price.MAX_EXCHANGE_OVERROUND`; a later, wider snapshot is skipped, as the close skips one ([ADR-0014](../../docs/adr/0014-ignore-wide-exchange-prices.md)). The FDUK close has the same overround cap. Both prices are devigged proportionally ([devigging](../foundations/devigging.md)), and `dp = p_oddsapi - p_fduk` in percentage points is one row per outcome and compared match.
+`scripts.compare_substitute_close.compare_event` takes, for each event, the price `odds_core.close.substitute_close` picks with the script's `--max-age-minutes` (no age cap without it): the latest Odds API historical snapshot stamped at or before kick-off that is complete and whose back overround is at most `odds_core.exchange_price.MAX_EXCHANGE_OVERROUND`; a later, wider snapshot is skipped, as the close skips one ([ADR-0014](../../docs/adr/0014-ignore-wide-exchange-prices.md)). The FDUK close has the same overround cap. Both prices are devigged proportionally ([devigging](../foundations/devigging.md)), and `dp = p_oddsapi - p_fduk` in percentage points is one row per outcome and compared match.
 
 ## Pass thresholds
 

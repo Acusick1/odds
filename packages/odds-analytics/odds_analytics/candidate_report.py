@@ -80,6 +80,8 @@ class ScoredBet:
     line: float | None
     bookmaker: str
     p_close_power: float | None
+    # Which source's price the close is (``CloseProbability.source``); None without a close.
+    close_source: Source | None
 
     @property
     def settled(self) -> bool:
@@ -205,10 +207,12 @@ def power_devig(implied: Sequence[float]) -> tuple[float, ...]:
 
 class CloseProbability(NamedTuple):
     """A selection's close probability devigged proportionally (the score) and by the power
-    method (#770, for information); ``power`` is None for a Polymarket close."""
+    method (#770, for information), and the source whose price the close is; ``power`` is None
+    for a Polymarket close."""
 
     proportional: float
     power: float | None
+    source: Source
 
 
 def _power_fair(close: ExchangePrice) -> dict[Outcome, float] | None:
@@ -228,12 +232,20 @@ def selection_close_probability(
     (``odds_core.close.close_quotes``), the close on that line; None where no close is
     defined (``odds_core.close.CLOSES``) or exists.
     """
-    close = event_close(quoted, event.commence_time, event.sport_key, market, line=line)
+    return close_probability(
+        event_close(quoted, event.commence_time, event.sport_key, market, line=line), selection
+    )
+
+
+def close_probability(close: ExchangePrice | None, selection: str) -> CloseProbability | None:
+    """The selection's probability at ``close``; None without one."""
     if close is None:
         return None
     outcome = Outcome(selection)
     power = _power_fair(close)
-    return CloseProbability(close.fair[outcome], None if power is None else power[outcome])
+    return CloseProbability(
+        close.fair[outcome], None if power is None else power[outcome], close.source
+    )
 
 
 @dataclass(frozen=True)
@@ -622,6 +634,7 @@ async def load_scored_trades(session: AsyncSession) -> list[ScoredBet]:
                 line=trade.line,
                 bookmaker=trade.bookmaker,
                 p_close_power=None if p_close is None else p_close.power,
+                close_source=None if p_close is None else p_close.source,
             )
         )
     return scored
