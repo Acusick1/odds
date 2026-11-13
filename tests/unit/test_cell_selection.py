@@ -85,7 +85,7 @@ class TestBlocks:
         blocks = cs.development_blocks(["soccer_epl", "soccer_italy_serie_a"])
 
         assert [(b.name, b.leagues) for b in blocks] == [
-            ("EPL 2020-22", ("soccer_epl",)),
+            ("EPL 2022-24", ("soccer_epl",)),
             ("EPL 2024-26", ("soccer_epl",)),
             ("five leagues 2024-25", ("soccer_italy_serie_a",)),
         ]

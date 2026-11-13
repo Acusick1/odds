@@ -275,12 +275,7 @@ class TestSeal:
     def test_development_days_are_not_sealed(self) -> None:
         assert not audit.is_sealed("soccer_spain_la_liga", [datetime(2025, 3, 1, 19, tzinfo=UTC)])
         assert not audit.is_sealed("soccer_epl", [datetime(2024, 8, 17, 14, tzinfo=UTC)])
-
-    def test_epl_2022_24_follows_the_switch(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        kickoff = [datetime(2023, 4, 8, 14, tzinfo=UTC)]
-        assert audit.is_sealed("soccer_epl", kickoff)
-        monkeypatch.setattr("odds_analytics.holdout.EPL_2022_24_SEALED", False)
-        assert not audit.is_sealed("soccer_epl", kickoff)
+        assert not audit.is_sealed("soccer_epl", [datetime(2023, 4, 8, 14, tzinfo=UTC)])
 
     def test_a_sealed_section_omits_the_price_derived_rows(self) -> None:
         points = [

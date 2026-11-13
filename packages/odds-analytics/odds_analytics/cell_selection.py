@@ -57,9 +57,9 @@ class Block:
     leagues: tuple[str, ...]
 
 
-# Seasons run 1 August to 31 July (ADR-0021).
+# Seasons run 1 August to 31 July (ADR-0021, ADR-0024).
 DEVELOPMENT_BLOCKS = (
-    Block("EPL 2020-22", date(2020, 8, 1), date(2022, 7, 31), ("soccer_epl",)),
+    Block("EPL 2022-24", date(2022, 8, 1), date(2024, 7, 31), ("soccer_epl",)),
     Block("EPL 2024-26", date(2024, 8, 1), date(2026, 7, 31), ("soccer_epl",)),
     Block("five leagues 2024-25", date(2024, 8, 1), date(2025, 7, 31), FIVE_LEAGUES),
 )

@@ -74,7 +74,7 @@ class TestSelectCell:
 
         loose, strict = result.scores
         assert [b.name for b in result.blocks] == [
-            "EPL 2020-22",
+            "EPL 2022-24",
             "EPL 2024-26",
             "five leagues 2024-25",
         ]

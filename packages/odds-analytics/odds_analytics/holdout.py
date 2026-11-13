@@ -14,7 +14,7 @@ import itertools
 import json
 import os
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -45,12 +45,6 @@ SELECTION_RULE_PATTERN = r"^https://github\.com/[^/\s]+/[^/\s]+/(issues|pull)/[0
 # Below this many holdout bets the gate asks only that the cell is not killed, and flags it.
 MIN_GATE_BETS = 30
 
-# Whether EPL 2022-23 and 2023-24 are sealed. They join the holdout once the substitute close is
-# accepted (issue 730); until then no close exists to score them, so sealing them costs nothing
-# and errs safe. Set False only if the substitute close is rejected; EPL then has no window, and a
-# pre-registration that lists it runs on its other leagues.
-EPL_2022_24_SEALED = True
-
 # Seasons run 1 August to 31 July.
 FIVE_LEAGUES = (
     "soccer_efl_champ",
@@ -77,10 +71,7 @@ class Window(BaseModel):
 
 
 def holdout_windows() -> list[Window]:
-    windows = [Window(sport=s, start=date(2025, 8, 1), end=date(2026, 7, 31)) for s in FIVE_LEAGUES]
-    if EPL_2022_24_SEALED:
-        windows.append(Window(sport="soccer_epl", start=date(2022, 8, 1), end=date(2024, 7, 31)))
-    return windows
+    return [Window(sport=s, start=date(2025, 8, 1), end=date(2026, 7, 31)) for s in FIVE_LEAGUES]
 
 
 def windows_of(sport: str) -> list[Window]:
@@ -92,10 +83,14 @@ def intersecting(sport: str, start: date, end: date) -> list[Window]:
     return [w for w in windows_of(sport) if start <= w.end and end >= w.start]
 
 
-def development_segments(sport: str, start: date, end: date) -> list[tuple[date, date]]:
-    """``start``..``end`` less the sport's holdout windows, as ordered day ranges."""
+def development_segments(
+    sport: str, start: date, end: date, windows: Sequence[Window] | None = None
+) -> list[tuple[date, date]]:
+    """``start``..``end`` less the sport's holdout windows, or the sport's among ``windows``
+    when given, as ordered day ranges."""
+    sealed = windows_of(sport) if windows is None else [w for w in windows if w.sport == sport]
     segments = [(start, end)]
-    for w in sorted(windows_of(sport), key=lambda w: w.start):
+    for w in sorted(sealed, key=lambda w: w.start):
         clipped: list[tuple[date, date]] = []
         for a, b in segments:
             if b < w.start or a > w.end:
