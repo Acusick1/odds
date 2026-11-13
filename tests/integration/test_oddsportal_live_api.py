@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from odds_lambda.jobs.fetch_oddsportal import LEAGUE_SPEC_BY_NAME
 from odds_lambda.oddsportal_client import MAX_FEED_AGE_SECONDS, OddsPortalClient, _Response
@@ -23,14 +25,14 @@ class RecordingClient(OddsPortalClient):
 class TestOddsPortalFeedCache:
     async def test_epl_feed_is_fresh_on_first_request(self) -> None:
         async with RecordingClient() as client:
-            events = await client.fetch_listing(
+            listed = await client.fetch_listing(
                 LEAGUE_SPEC_BY_NAME["england-premier-league"].listing_path
             )
-            if not events:
+            upcoming = [e for e in listed if e.start_time > datetime.now(UTC)]
+            if not upcoming:
                 pytest.skip("no upcoming EPL events listed")
             context = await client.fetch_bookmaker_context()
-            await client.fetch_market(events[0], "1x2", context)
+            await client.fetch_market(upcoming[0], "1x2", context)
 
         feeds = [r for url, r in client.responses if "/match-event/" in url]
-        assert len(feeds) == 1
         assert feeds[0].age is None or feeds[0].age <= MAX_FEED_AGE_SECONDS

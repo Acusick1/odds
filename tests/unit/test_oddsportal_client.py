@@ -514,6 +514,15 @@ class TestFeedCache:
         assert all(len(bust) == 1 for bust in busts)
         assert busts[0] != busts[1]
 
+    async def test_transient_retry_busts_the_cache_afresh(
+        self, encrypt_payload: Encrypt, sleeps: list[float]
+    ) -> None:
+        client = FakeClient([(200, PROXY_503), (200, encrypt_payload(FRESH_FEED))])
+
+        await client.fetch_market(EVENT, "1x2", CONTEXT)
+
+        assert client.requests[0][0] != client.requests[1][0]
+
     async def test_listing_is_not_busted(self, sleeps: list[float]) -> None:
         client = FakeClient([(200, EMPTY_LISTING)])
 

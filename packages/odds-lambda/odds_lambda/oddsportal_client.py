@@ -670,7 +670,7 @@ class OddsPortalClient:
                 response.status, await response.text(), _age_seconds(response.headers.get("Age"))
             )
 
-    async def _get(self, url: str, headers: dict[str, str]) -> _Response:
+    async def _get(self, url: str, headers: dict[str, str], bust_cache: bool = False) -> _Response:
         retrying = AsyncRetrying(
             stop=stop_after_attempt(_RETRY_ATTEMPTS),
             wait=wait_exponential(multiplier=1, min=1, max=8),
@@ -684,7 +684,9 @@ class OddsPortalClient:
             async for attempt in retrying:
                 with attempt:
                     await self._pacer.wait(self._request_delay, priority=self._priority)
-                    response = await self._fetch(url, headers)
+                    # The CDN keys its cache on every query param except ``_``.
+                    request_url = f"{url}&cb={uuid.uuid4().hex}" if bust_cache else url
+                    response = await self._fetch(request_url, headers)
                     status = response.status
                     if status == 429 or status >= 500:
                         raise _TransientError(f"HTTP {status}")
@@ -712,14 +714,10 @@ class OddsPortalClient:
     async def _get_fresh_json(self, url: str, headers: dict[str, str]) -> Any:
         """GET ``url`` past the CDN cache, refusing a response cached over ``MAX_FEED_AGE_SECONDS``."""
         for attempt in range(_STALE_FEED_RETRIES + 1):
-            # The CDN keys its cache on every query param except ``_``.
-            busted = f"{url}&cb={uuid.uuid4().hex}"
-            response = await self._get(busted, headers)
+            response = await self._get(url, headers, bust_cache=True)
             if response.age is None or response.age <= MAX_FEED_AGE_SECONDS:
-                return _decrypt(response, busted)
-            logger.warning(
-                "oddsportal_feed_stale", url=busted, age=response.age, attempt=attempt + 1
-            )
+                return _decrypt(response, url)
+            logger.warning("oddsportal_feed_stale", url=url, age=response.age, attempt=attempt + 1)
         raise OddsPortalError(
             f"feed still {response.age} s old in the CDN cache after "
             f"{_STALE_FEED_RETRIES} retry for {url}"
