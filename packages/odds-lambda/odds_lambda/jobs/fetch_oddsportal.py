@@ -18,7 +18,7 @@ Interval table:
   DB unreachable    → 1h (fallback)
 
 A run is also added ``SCRAPE_LEAD`` before each active mechanical candidate's
-decision time, so the decision reads a snapshot taken just before it.
+decision time and lookback point, so each reads a snapshot taken just before it.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ from odds_core.database import async_session_maker
 from odds_core.job_specs import job_cadence
 from odds_core.vocabulary import Market, Source, TimeBasis
 
-from odds_lambda.candidate_rules.registry import decision_leads
+from odds_lambda.candidate_rules.registry import input_leads
 from odds_lambda.collection_calendar import (
     CollectionSource,
     SportCollection,
@@ -380,8 +380,8 @@ async def ingest_league(
 
 
 def candidate_scrape_leads(sport_key: str) -> list[Lead]:
-    """A run ``SCRAPE_LEAD`` before each active mechanical candidate's decision time, which
-    still runs late until that decision time.
+    """A run ``SCRAPE_LEAD`` before each active mechanical candidate's decision time and
+    lookback point, which still runs late until that time.
 
     An unreadable registry gives none, so collection keeps its cadence.
     """
@@ -390,7 +390,7 @@ def candidate_scrape_leads(sport_key: str) -> list[Lead]:
     except ValueError as e:
         logger.error("candidate_registry_invalid", error=str(e))
         return []
-    return [Lead(lead + SCRAPE_LEAD, until=lead) for lead in decision_leads(candidates, sport_key)]
+    return [Lead(lead + SCRAPE_LEAD, until=lead) for lead in input_leads(candidates, sport_key)]
 
 
 async def main(ctx: JobContext) -> None:
