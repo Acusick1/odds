@@ -38,7 +38,7 @@ The sample's manifest plans the two grid snapshots before each tip-off (band 1 t
 ## Method
 
 - **Stored fixtures.** `odds backfill plan --cost` gives items 3, 4, 7, EPL and NBA in item 6, and the NBA sample. `odds backfill execute --dry-run` gives item 7's calls net of stored ones.
-- **Fixtures not stored.** No FINAL events are stored for the five leagues before 2024-25, or for their 2026-27 games. Items 1 and 6 are costed by running `odds_analytics.backfill_plan.plan` on football-data.co.uk's fixture lists, with kick-offs read as UK time. On La Liga and the Championship 2024-26 and EPL 2026-27, this gives exactly the calls `plan --cost` gives on stored events.
+- **Fixtures not stored.** No FINAL events are stored for the five leagues before 2024-25. Item 1 is costed by running `odds_analytics.backfill_plan.plan` on football-data.co.uk's fixture lists, with kick-offs read as UK time. On La Liga and the Championship 2024-26 and EPL 2026-27, this gives exactly the calls `plan --cost` gives on stored events. The five leagues' 2026-27 FINAL events to 2026-11-13 are stored (580 fixtures), and `plan --cost` on them reproduces item 6's figures.
 - **Projections.** Item 6 to 2026-12-01 and the sample to 2026-11-26 add the stored SCHEDULED events up to those dates. NBA 2023-24's full-season figure is NBA 2024-25's (1,321 games, 7,928 calls).
 - **Item 2.** Among the 5,098 FINAL fixtures of the six bought football manifests, every fixture without an FDUK or live Betfair close (626) has an Odds API exchange quote within 10 min of kick-off. That counts rows, with no overround check, because the five leagues' 2025-26 is sealed. Each of the 203 fixtures without an exchange quote within 5 min has a close or a quote within 10 min.
 - **Item 7.** The executor makes 2,240 calls: 724 in 2024, 777 in 2025 and 739 in 2026. The audit's 2,231 (718, 777, 736) counts snapshot times not yet stored. The other 9 calls serve only doubleheader games whose listing the matcher could not attach, and the All-Star Game, so they would probably store nothing again `(inferred)`.
@@ -46,7 +46,7 @@ The sample's manifest plans the two grid snapshots before each tip-off (band 1 t
 ## Before buying
 
 - **Load fixtures.** The planner and executor work only on stored events ([cost and execute a manifest](../wiki/collection/howto-backfill-odds-api-history.md#cost-and-execute-a-manifest)).
-  - Items 1 and 6 need the five leagues' FINAL events, loaded with `scripts/ingest_football_data_uk.py`. That is a production write, so back up first.
+  - Item 1 needs the five leagues' FINAL events before 2024-25, loaded with `scripts/ingest_football_data_uk.py`. That is a production write, so back up first. Item 6 needs the 2026-27 fixtures played since the last load, loaded the same way.
   - Item 4 has 1,036 of about 1,320 2023-24 games stored, and December to April are thin. Load the rest with `odds discover games --sport basketball_nba`, which makes one historical events call per day on the NBA live key.
   - Rerun `plan --cost` once the fixtures are loaded.
 - **Item 6's window.** Set each 2026-27 season's end to the run's start day.
@@ -66,5 +66,8 @@ The sample's manifest plans the two grid snapshots before each tip-off (band 1 t
 | NBA sample | 2026-11-07T00:55:38Z, the same call as item 6's NBA probe | 0 extra | — |
 | 7 | none: the audited MLB run already shows its content, grid and exchange presence; the manifest's probe snapshot is not run | 0 | — |
 
+- **Item 6's probe passed** (logs on the production host in `logs/backfill/probes-2026-27/`). EPL, La Liga, the Bundesliga, Ligue 1 and NBA pass every check. Two checks fail on behaviour the 2024-26 audits already record, so neither changes the manifests:
+  - **Serie A, fixture horizon.** The farthest fixture is 130 h ahead, against 174 h, because the next round is midweek; the [Serie A audit](odds-api-serie-a-2024-26.audit.md) records rounds first listed after the previous one is played.
+  - **Championship, exchange presence.** The exchange prices 11 of 12 events, all within 244 min of kick-off, and not the farthest; the [Championship audit](odds-api-championship-2024-26.audit.md) records the exchange in 77.7 to 84.7% of snapshots and on every fixture within 10 min of kick-off.
 - **Probe calls that are reused.** The NBA probe snapshot is a planned call of both the sample and item 6's NBA manifest, and the football one is a planned call of the EPL, La Liga and Championship 2026-27 manifests, so a run after the probe skips those calls. A probe stores only games with a stored event, so load the fixtures first.
-- **Totals.** All probes come to 270 units. The recommended package needs 70 now, 100 more with item 1, and 20 more with item 4.
+- **Totals.** All probes come to 270 units. The recommended package's 70 are spent; item 1 needs 100 more and item 4 20 more.
