@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from enum import StrEnum
 from types import MappingProxyType
 
 from odds_core.vocabulary import PRICE_SOURCES, Source
@@ -55,6 +56,37 @@ UK_RETAIL_BOOKMAKERS: frozenset[str] = frozenset(
         "spreadex",
         "unibet_uk",
         "williamhill",
+    }
+)
+
+
+class BookSet(StrEnum):
+    """A named set of the roster books a candidate takes retail prices from."""
+
+    UK_RETAIL = "uk_retail"
+    ODDS_API_UK = "odds_api_uk"
+
+
+BOOK_SETS: Mapping[BookSet, frozenset[str]] = MappingProxyType(
+    {
+        BookSet.UK_RETAIL: UK_RETAIL_BOOKMAKERS,
+        # The roster books the Odds API's ``uk`` region returns.
+        BookSet.ODDS_API_UK: frozenset(
+            {
+                "williamhill",
+                "betway",
+                "coral",
+                "ladbrokes",
+                "888sport",
+                "paddypower",
+                "boylesports",
+                "unibet_uk",
+                "skybet",
+                "betvictor",
+                "betfair_sportsbook",
+                "betfred",
+            }
+        ),
     }
 )
 

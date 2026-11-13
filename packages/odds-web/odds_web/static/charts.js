@@ -71,7 +71,26 @@
     );
   };
 
-  const drawers = { ev: evChart, cumulative: cumulativeChart };
+  const bookSetsChart = (element, data) => {
+    const muted = colour("--muted-foreground");
+    const reach = Math.max(1, ...data.sets.map((s) => s.running.length));
+    const stroke = (s) => (s.registered ? colour("--chart-1") : colour("--chart-2"));
+    return Plot.plot(
+      frame(element, {
+        height: 170,
+        x: { domain: [0, reach], label: "bets with a close", grid: false },
+        y: { domain: [-data.axis, data.axis], label: null, tickFormat: (v) => `${v > 0 ? "+" : ""}${v}%` },
+        marks: [
+          Plot.ruleY([0], { stroke: muted, strokeDasharray: "2 3" }),
+          ...data.sets.map((s) =>
+            Plot.line(s.running, { x: (d) => d[0], y: (d) => d[1], stroke: stroke(s), strokeWidth: s.registered ? 2.5 : 1.5, strokeDasharray: s.registered ? null : "5 3", clip: true, title: () => s.name }),
+          ),
+        ],
+      }),
+    );
+  };
+
+  const drawers = { ev: evChart, cumulative: cumulativeChart, booksets: bookSetsChart };
 
   const draw = (root) => {
     for (const element of root.querySelectorAll(".chart[data-chart]")) {

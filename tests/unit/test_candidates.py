@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 from odds_cli.main import app
+from odds_core.bookmakers import BookSet
 from odds_core.candidates import (
     AgentCandidate,
     MechanicalCandidate,
@@ -20,6 +21,7 @@ MECHANICAL: dict[str, object] = {
     "name": "back-longest",
     "description": "Back the longest retail price.",
     "kind": "mechanical",
+    "books": "uk_retail",
     "market": "1x2",
     "sports": ["soccer_epl"],
     "version": 1,
@@ -118,6 +120,21 @@ class TestLoadCandidates:
         write(tmp_path, AGENT)
         write(tmp_path, {**AGENT, "name": "mlb-agent", "sports": ["baseball_mlb"]})
         assert len(load_candidates(tmp_path)) == 2
+
+    def test_a_mechanical_file_must_declare_its_book_set(self, tmp_path: Path) -> None:
+        write(tmp_path, {k: v for k, v in MECHANICAL.items() if k != "books"})
+        with pytest.raises(ValueError, match="books"):
+            load_candidates(tmp_path)
+
+    def test_the_book_set_is_one_of_the_named_sets(self, tmp_path: Path) -> None:
+        write(tmp_path, {**MECHANICAL, "books": "everything"})
+        with pytest.raises(ValueError, match="books"):
+            load_candidates(tmp_path)
+
+    def test_the_book_set_is_read_by_name(self, tmp_path: Path) -> None:
+        write(tmp_path, {**MECHANICAL, "books": "odds_api_uk"})
+        [loaded] = load_candidates(tmp_path)
+        assert isinstance(loaded, MechanicalCandidate) and loaded.books is BookSet.ODDS_API_UK
 
     def test_repo_registry_is_valid(self) -> None:
         load_candidates(candidates_dir())

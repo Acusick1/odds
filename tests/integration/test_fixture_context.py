@@ -14,6 +14,7 @@ import pytest
 import yaml
 from odds_analytics.candidate_backtest import BacktestResult, replay
 from odds_analytics.candidate_parity import ParityStatus, check_parity
+from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS
 from odds_core.candidates import load_candidate_file
 from odds_core.market_prices import Outcome
 from odds_core.models import Event, EventStatus
@@ -451,7 +452,14 @@ class TestDecidingRule:
         assert event is not None
 
         state, intents = await run_rule(
-            pglite_async_session, item.spec, item.params, event, item.candidate.market, T, NOW
+            pglite_async_session,
+            item.spec,
+            item.params,
+            event,
+            item.candidate.market,
+            T,
+            NOW,
+            UK_RETAIL_BOOKMAKERS,
         )
 
         assert state.has_input and len(intents) == 1
@@ -477,6 +485,7 @@ class TestDecidingRule:
             candidate().market,
             T,
             NOW,  # type: ignore[arg-type]
+            UK_RETAIL_BOOKMAKERS,
         )
 
         assert state.has_input and len(intents) == 1

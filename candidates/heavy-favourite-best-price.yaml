@@ -2,6 +2,7 @@ name: heavy-favourite-best-price
 description: Back the longest UK retail price on the outcome whose Betfair Exchange fair probability is at least 60%, when that probability times the price minus 1 exceeds 0.5%, 60 and 30 minutes before kick-off in six football leagues, at most once per outcome
 kind: mechanical
 market: 1x2
+books: uk_retail
 sports: [soccer_epl, soccer_spain_la_liga, soccer_italy_serie_a, soccer_germany_bundesliga, soccer_france_ligue_one, soccer_efl_champ]
 version: 1
 issue: 835

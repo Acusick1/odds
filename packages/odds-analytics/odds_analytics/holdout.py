@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import yaml
+from odds_core.bookmakers import BookSet
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -158,6 +159,8 @@ class Preregistration(BaseModel):
     rule: str = Field(min_length=1)
     market: str = Field(pattern=MARKET_PATTERN)
     leagues: list[str] = Field(min_length=1)
+    # A file that predates the field used the whole roster.
+    books: BookSet = BookSet.UK_RETAIL
     grid: dict[str, list[object]] | None = None
     cells: list[dict[str, object]] | None = None
     selection_rule: str = Field(pattern=SELECTION_RULE_PATTERN)

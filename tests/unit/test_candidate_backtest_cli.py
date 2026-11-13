@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -73,7 +74,12 @@ def fake_replay(monkeypatch: pytest.MonkeyPatch) -> list[MechanicalCandidate]:
         seen.append(candidate)
         only.append(only_events)
         counts = _Counts(
-            decisions=10, with_input=9, with_exchange=8, with_polymarket=0, with_retail=9
+            decisions=10,
+            with_input=9,
+            with_exchange=8,
+            with_polymarket=0,
+            with_retail=9,
+            with_book={"bet365": 9, "williamhill": 3},
         )
         result = score(candidate, start, end, no_bets(candidate, counts, 10), k, NOW, N_BOOT, 0)
         if candidate.rule != "retail_ev_model":
@@ -123,8 +129,13 @@ class TestBacktestCommand:
         assert "With input" in result.stdout and "not_yet" in result.stdout
         assert "max input age 10 min" in result.stdout
         assert "promote" not in result.stdout
+        assert "Book coverage of back-longest v1's set (uk_retail)" in result.stdout
+        assert re.search(r"williamhill\s+│\s+3\s+│\s+33\.3%", result.stdout)
+        assert re.search(r"bet365\s+│\s+9\s+│\s+100\.0%", result.stdout)
         summary = json.loads(out.read_text())
         assert summary["coverage"]["events"] == 10
+        assert summary["coverage"]["with_book"]["williamhill"] == 3
+        assert summary["books"] == "uk_retail"
         assert summary["hash_status"] == HashStatus.MATCH
         assert summary["start"] == "2025-08-01"
         assert summary["summary"]["status"] == "active"

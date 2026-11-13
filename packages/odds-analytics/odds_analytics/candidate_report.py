@@ -13,11 +13,11 @@ from bisect import bisect_right
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Executor
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from functools import partial
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
 from odds_core.candidates import Candidate, CandidateStatus, MechanicalCandidate
@@ -33,6 +33,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from odds_analytics.retail_ev_metrics import event_clustered_ratio
+
+if TYPE_CHECKING:
+    from odds_analytics.book_replays import BookReplay
 
 CHECKPOINT_SIZE = 100
 KILL_AT_BETS = 500
@@ -181,10 +184,14 @@ class RunningScore:
 
 @dataclass(frozen=True)
 class CandidateReport:
-    """Every candidate version's summary and running score, from one read of the trades."""
+    """Every candidate version's summary and running score, from one read of the trades.
+    ``book_replays`` holds, for information only, the counterfactual book replays of each
+    registered mechanical version that has them (``candidate_report`` with ``replays``); no
+    summary, checkpoint or verdict reads them."""
 
     summaries: list[CandidateSummary]
     running: dict[tuple[str, int], RunningScore]
+    book_replays: dict[tuple[str, int], BookReplay] = field(default_factory=dict)
 
 
 def power_devig(implied: Sequence[float]) -> tuple[float, ...]:
@@ -672,24 +679,30 @@ async def candidate_report(
     seed: int = BOOTSTRAP_SEED,
     now: datetime | None = None,
     executor: Executor | None = None,
+    replays: bool = False,
 ) -> CandidateReport:
     """Every candidate version's summary and running score, from one read of the trades and
     decision starts.
 
     The bootstrap runs on ``executor`` (the loop's default one when None), so a server can hold
-    it to a single thread.
+    it to a single thread. With ``replays``, each registered mechanical version's book replays
+    are added (``odds_analytics.book_replays``), which read every recorded decision's inputs.
     """
+    # book_replays scores with this module's functions, so it cannot be imported above.
+    from odds_analytics.book_replays import book_replays
+
     trades = await load_scored_trades(session)
     decision_starts = await load_decision_starts(session)
-    return await asyncio.get_running_loop().run_in_executor(
+    now = now or datetime.now(UTC)
+    report = await asyncio.get_running_loop().run_in_executor(
         executor,
-        partial(
-            report_candidates,
-            trades,
-            registry,
-            now or datetime.now(UTC),
-            decision_starts,
-            n_boot,
-            seed,
+        partial(report_candidates, trades, registry, now, decision_starts, n_boot, seed),
+    )
+    if not replays:
+        return report
+    return replace(
+        report,
+        book_replays=await book_replays(
+            session, [s.registered for s in report.summaries], trades, now
         ),
     )

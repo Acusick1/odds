@@ -6,6 +6,7 @@ from dataclasses import replace
 from datetime import timedelta
 
 import pytest
+from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS
 from odds_core.candidates import MechanicalCandidate
 from odds_core.market_prices import Outcome
 from odds_core.quotes import Quote
@@ -35,7 +36,9 @@ def _state(
     also: frozenset[Market] = TOTALS,
     sharp: frozenset[SharpInput] = EXCHANGE,
 ) -> MarketState:
-    return build_market_state(EVENT, "1x2", quotes, CROSS_T, MAX_AGE, sharp, also)
+    return build_market_state(
+        EVENT, "1x2", quotes, CROSS_T, MAX_AGE, sharp, UK_RETAIL_BOOKMAKERS, also
+    )
 
 
 class TestDeclaredMarketIsRead:
@@ -180,6 +183,7 @@ class TestDeclaration:
                 "name": "c",
                 "description": "d",
                 "kind": "mechanical",
+                "books": "uk_retail",
                 "market": market,
                 "sports": ["soccer_epl"],
                 "version": 1,

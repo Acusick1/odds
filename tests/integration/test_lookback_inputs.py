@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 from odds_analytics.candidate_backtest import replay
 from odds_analytics.candidate_parity import ParityStatus, check_parity
+from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS
 from odds_core.vocabulary import Market
 from odds_lambda.candidate_rules import Lookback, MarketState, SharpInput, load_market_state
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -53,6 +54,7 @@ async def load(
         T,
         MAX_AGE,
         EXCHANGE,
+        UK_RETAIL_BOOKMAKERS,
         known_at=known_at,
         snapshot_ids=snapshot_ids,
         lookbacks=lookbacks,

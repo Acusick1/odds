@@ -17,6 +17,7 @@ from pydantic import (
     field_validator,
 )
 
+from odds_core.bookmakers import BookSet
 from odds_core.config import get_settings
 from odds_core.sports import SportKey
 from odds_core.vocabulary import Market
@@ -54,6 +55,8 @@ class _CandidateBase(BaseModel):
 class MechanicalCandidate(_CandidateBase):
     kind: Literal["mechanical"]
     market: Market
+    # The roster books its rule takes retail prices from (ADR-0025).
+    books: BookSet
     rule: str
     # Absent only in a draft file; the registry requires it.
     rule_sha256: str | None = Field(default=None, pattern=SHA256_PATTERN)

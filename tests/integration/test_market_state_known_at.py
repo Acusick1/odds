@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS
 from odds_core.vocabulary import PriceOutcome
 from odds_lambda.candidate_rules import SharpInput, load_market_state
 
@@ -48,7 +49,9 @@ class TestLookback:
         await pglite_async_session.commit()
 
         assert not (
-            await load_market_state(pglite_async_session, event, "1x2", T, MAX_AGE, EXCHANGE)
+            await load_market_state(
+                pglite_async_session, event, "1x2", T, MAX_AGE, EXCHANGE, UK_RETAIL_BOOKMAKERS
+            )
         ).has_input
 
 
@@ -71,14 +74,23 @@ class TestKnownAt:
         return event
 
     async def test_none_ignores_creation_time(self, pglite_async_session, event) -> None:
-        state = await load_market_state(pglite_async_session, event, "1x2", T, MAX_AGE, EXCHANGE)
+        state = await load_market_state(
+            pglite_async_session, event, "1x2", T, MAX_AGE, EXCHANGE, UK_RETAIL_BOOKMAKERS
+        )
         assert state.has_input and "bet365" in state.retail[None]
 
     async def test_snapshot_stored_after_known_at_is_excluded(
         self, pglite_async_session, event
     ) -> None:
         state = await load_market_state(
-            pglite_async_session, event, "1x2", T, MAX_AGE, EXCHANGE, known_at=T
+            pglite_async_session,
+            event,
+            "1x2",
+            T,
+            MAX_AGE,
+            EXCHANGE,
+            UK_RETAIL_BOOKMAKERS,
+            known_at=T,
         )
         assert not state.has_input
 
@@ -87,7 +99,14 @@ class TestKnownAt:
     ) -> None:
         known_at = T + timedelta(minutes=5)
         state = await load_market_state(
-            pglite_async_session, event, "1x2", T, MAX_AGE, EXCHANGE, known_at=known_at
+            pglite_async_session,
+            event,
+            "1x2",
+            T,
+            MAX_AGE,
+            EXCHANGE,
+            UK_RETAIL_BOOKMAKERS,
+            known_at=known_at,
         )
         assert state.has_input and "bet365" in state.retail[None]
 
@@ -119,7 +138,9 @@ class TestPolymarket:
         return event
 
     async def test_loads_the_polymarket_mids(self, pglite_async_session, event) -> None:
-        state = await load_market_state(pglite_async_session, event, "1x2", T, MAX_AGE, POLYMARKET)
+        state = await load_market_state(
+            pglite_async_session, event, "1x2", T, MAX_AGE, POLYMARKET, UK_RETAIL_BOOKMAKERS
+        )
         assert state.has_input and "bet365" in state.retail[None]
         assert state.polymarket[None].fair[PriceOutcome.HOME] == pytest.approx(0.5)
         assert len(state.input_snapshot_ids) == 2
@@ -127,13 +148,22 @@ class TestPolymarket:
     async def test_an_exchange_rule_has_no_input_from_retail_alone(
         self, pglite_async_session, event
     ) -> None:
-        state = await load_market_state(pglite_async_session, event, "1x2", T, MAX_AGE, EXCHANGE)
+        state = await load_market_state(
+            pglite_async_session, event, "1x2", T, MAX_AGE, EXCHANGE, UK_RETAIL_BOOKMAKERS
+        )
         assert not state.has_input
 
     async def test_polymarket_stored_after_known_at_is_excluded(
         self, pglite_async_session, event
     ) -> None:
         state = await load_market_state(
-            pglite_async_session, event, "1x2", T, MAX_AGE, POLYMARKET, known_at=T
+            pglite_async_session,
+            event,
+            "1x2",
+            T,
+            MAX_AGE,
+            POLYMARKET,
+            UK_RETAIL_BOOKMAKERS,
+            known_at=T,
         )
         assert not state.has_input

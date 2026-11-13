@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import dataclasses
 import json
 import re
 from collections.abc import Iterator
@@ -12,6 +13,7 @@ from pathlib import Path
 import odds_web
 import pytest
 from fastapi.testclient import TestClient
+from odds_analytics.book_replays import BookReplay, BookRow, BookScore, BookSetReplay
 from odds_analytics.candidate_report import (
     CandidateReport,
     CandidateSummary,
@@ -19,6 +21,7 @@ from odds_analytics.candidate_report import (
     RunningScore,
     ScoredBet,
 )
+from odds_core.bookmakers import BookSet
 from odds_core.candidates import CandidateStatus
 from odds_core.paper_trade_models import TradeResult
 from odds_web.app import create_app
@@ -80,12 +83,16 @@ def data(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         "error": None,
         "registry": [],
         "pages": [],
+        "replays": {},
     }
 
     async def read(*_: object, **__: object) -> CandidateReport:
         if isinstance(state["error"], Exception):
             raise state["error"]
-        return report(state["trades"], state["registry"])  # type: ignore[arg-type]
+        return dataclasses.replace(
+            report(state["trades"], state["registry"]),  # type: ignore[arg-type]
+            book_replays=state["replays"],  # type: ignore[arg-type]
+        )
 
     async def decisions(*_: object, **__: object) -> DecisionHistory:
         return state["decisions"]  # type: ignore[return-value]
@@ -504,6 +511,101 @@ class TestCurrentBesideACheckpoint:
         )
 
 
+def book_score(bets: int, mean_ev: float | None, pnl: float = 0.0) -> BookScore:
+    return BookScore(
+        bets=bets,
+        settled_bets=bets,
+        bets_with_close=0 if mean_ev is None else bets,
+        mean_ev=mean_ev,
+        pnl=pnl,
+    )
+
+
+def book_replay(decisions: int = 12) -> BookReplay:
+    return BookReplay(
+        name="gap",
+        version=1,
+        decisions=decisions,
+        sets=(
+            BookSetReplay(BookSet.UK_RETAIL, True, book_score(9, 0.031, 1.5), (0.1, 0.05, 0.031)),
+            BookSetReplay(BookSet.ODDS_API_UK, False, book_score(4, -0.012, -2.0), (-0.2, -0.012)),
+        ),
+        books=(
+            BookRow("midnite", book_score(5, 0.044, 3.0), book_score(6, 0.01, 0.5)),
+            BookRow("williamhill", book_score(0, None), book_score(8, 0.02, 1.0)),
+        ),
+    )
+
+
+class TestBookReplays:
+    """The information section: the report's replays, laid out beside the per-league table."""
+
+    def test_the_page_shows_each_book_set_marking_the_registered_one(
+        self, client: TestClient, data: dict[str, object]
+    ) -> None:
+        seed(data, [bet(i, 0.5) for i in range(3)], mechanical())
+        data["replays"] = {("gap", 1): book_replay()}
+
+        body = client.get("/c/gap/1").text
+
+        table = body.split('id="book-sets-table"')[1].split("</table>")[0]
+        assert "uk_retail" in table and "odds_api_uk" in table
+        assert table.count("registered</span>") == 1 and "+3.1%" in table and "−1.2%" in table
+        assert "For information" in body.split('id="book-sets"')[1]
+
+    def test_the_per_book_table_gives_placed_and_without_figures(
+        self, client: TestClient, data: dict[str, object]
+    ) -> None:
+        seed(data, [bet(i, 0.5) for i in range(3)], mechanical())
+        data["replays"] = {("gap", 1): book_replay()}
+
+        body = client.get("/c/gap/1").text
+
+        rows = re.findall(
+            r"<tr><td class=\"text\">(\w+)</td>(.*?)</tr>",
+            body.split('id="books"')[1],
+            re.DOTALL,
+        )
+        by_book = {book: re.findall(r">([^<]*)</td>", cells) for book, cells in rows}
+        assert by_book["midnite"] == ["5", "+4.4%", "+3.00", "6", "6", "+1.0%", "+0.50"]
+        assert by_book["williamhill"][:3] == ["0", "—", "+0.00"]
+
+    def test_the_chart_carries_each_sets_running_mean_ev_in_percent(
+        self, client: TestClient, data: dict[str, object]
+    ) -> None:
+        seed(data, [bet(i, 0.5) for i in range(3)], mechanical())
+        data["replays"] = {("gap", 1): book_replay()}
+
+        body = client.get("/c/gap/1").text
+
+        chart = json.loads(chart_series(body, "booksets"))
+        by_name = {s["name"]: s for s in chart["sets"]}
+        assert by_name["uk_retail"]["registered"] and not by_name["odds_api_uk"]["registered"]
+        assert by_name["odds_api_uk"]["running"] == [
+            [1, pytest.approx(-20.0)],
+            [2, pytest.approx(-1.2)],
+        ]
+        assert chart["axis"] >= 20
+
+    def test_no_section_without_replays_or_decisions(
+        self, client: TestClient, data: dict[str, object]
+    ) -> None:
+        seed(data, [bet(i, 0.5) for i in range(3)], mechanical())
+        assert 'id="book-sets"' not in client.get("/c/gap/1").text
+
+        data["replays"] = {("gap", 1): book_replay(decisions=0)}
+        assert 'id="book-sets"' not in client.get("/c/gap/1").text
+
+    def test_replays_do_not_change_the_summary_figures(
+        self, client: TestClient, data: dict[str, object]
+    ) -> None:
+        seed(data, [bet(i, 0.5) for i in range(3)], mechanical())
+        before = client.get("/fragments/portfolio").text
+        data["replays"] = {("gap", 1): book_replay()}
+
+        assert client.get("/fragments/portfolio").text == before
+
+
 class TestNoScoringInOddsWeb:
     def test_the_series_is_the_reports_running_score(self) -> None:
         summary, running = scored([bet(0, 0.3), bet(1, -0.1), bet(2, 0.5)])
@@ -516,6 +618,7 @@ class TestNoScoringInOddsWeb:
 
     def test_odds_web_takes_only_report_and_stored_run_data_from_odds_analytics(self) -> None:
         allowed = {
+            "BookReplay",
             "CandidateReport",
             "CandidateSummary",
             "Checkpoint",

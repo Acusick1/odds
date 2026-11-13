@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from odds_core.bookmakers import BookSet
 from odds_core.candidates import CandidateStatus, MechanicalCandidate
 from odds_core.close import close_spec
 from odds_core.config import SchedulerConfig, Settings, get_settings
@@ -131,6 +132,7 @@ class TestAddedSport:
             start_date="2026-01-01",
             status=CandidateStatus.ACTIVE,
             kind="mechanical",
+            books=BookSet.UK_RETAIL,
             market="1x2",
             rule="exchange_gap",
             rule_sha256=rule_sha256("exchange_gap"),

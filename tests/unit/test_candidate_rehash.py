@@ -35,6 +35,7 @@ def candidate(name: str, rule_sha256: str = OLD) -> dict[str, Any]:
         "name": name,
         "description": "d",
         "kind": "mechanical",
+        "books": "uk_retail",
         "market": "1x2",
         "sports": ["soccer_epl"],
         "version": 1,

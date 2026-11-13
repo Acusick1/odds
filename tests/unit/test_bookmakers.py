@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import pytest
 from odds_core.bookmakers import (
+    BOOK_SETS,
     NON_BETTABLE_BOOKMAKERS,
+    UK_RETAIL_BOOKMAKERS,
     ZERO_MARGIN_BOOKMAKERS,
+    BookSet,
     canonical_bookmaker,
 )
 from odds_core.vocabulary import PRICE_SOURCES, Source
@@ -25,6 +28,23 @@ class TestBookmakerRoles:
     def test_pinnacle_keeps_a_margin(self) -> None:
         assert "pinnacle" not in ZERO_MARGIN_BOOKMAKERS
         assert {"polymarket", "betfair_exchange"} <= ZERO_MARGIN_BOOKMAKERS
+
+
+class TestBookSets:
+    def test_every_named_set_is_defined(self) -> None:
+        assert set(BOOK_SETS) == set(BookSet)
+
+    def test_the_full_set_is_the_roster(self) -> None:
+        assert BOOK_SETS[BookSet.UK_RETAIL] == UK_RETAIL_BOOKMAKERS
+
+    def test_the_odds_api_set_is_the_twelve_roster_books_its_uk_region_carries(self) -> None:
+        books = BOOK_SETS[BookSet.ODDS_API_UK]
+        assert len(books) == 12 and books < UK_RETAIL_BOOKMAKERS
+        assert not books & {"bet365", "midnite", "betmgm", "betano", "spreadex", "bwin"}
+
+    def test_the_sets_are_read_only(self) -> None:
+        with pytest.raises(TypeError):
+            BOOK_SETS[BookSet.UK_RETAIL] = frozenset()  # type: ignore[index]
 
 
 class TestLegacyBetfairKey:

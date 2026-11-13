@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS
 from odds_core.candidates import MechanicalCandidate, candidates_dir, load_candidates
 from odds_core.exchange_price import ExchangePrice
 from odds_core.market_prices import Outcome
@@ -88,7 +89,13 @@ def _state(
     sharp_inputs: frozenset[SharpInput] = EXCHANGE,
 ) -> MarketState:
     return build_market_state(
-        EVENT, market, [q for s in snapshots for q in s], T, MAX_AGE, sharp_inputs
+        EVENT,
+        market,
+        [q for s in snapshots for q in s],
+        T,
+        MAX_AGE,
+        sharp_inputs,
+        UK_RETAIL_BOOKMAKERS,
     )
 
 
@@ -243,6 +250,26 @@ class TestBuildMarketState:
 
     def test_snapshot_without_retail_is_skipped(self) -> None:
         assert not _state([_snap(2, _betfair((2.0, 4.0, 4.0)))]).has_input
+
+    def test_retail_is_only_the_given_books(self) -> None:
+        betway = three_way_bookmaker("betway", (2.2, 3.2, 4.2))
+        snapshot = _snap(2, BET365, betway, _betfair((2.0, 4.0, 4.0)))
+        state = build_market_state(
+            EVENT, Market.ONE_X_TWO, snapshot, T, MAX_AGE, EXCHANGE, frozenset({"betway"})
+        )
+        assert set(state.retail[None]) == {"betway"}
+
+    def test_a_snapshot_quoting_none_of_the_books_is_not_an_input(self) -> None:
+        both = _snap(6, BET365, _betfair((2.0, 4.0, 4.0)))
+        older = _snap(9, three_way_bookmaker("betway", (2.2, 3.2, 4.2)), _betfair((2.0, 4.0, 4.0)))
+        books = frozenset({"betway"})
+        state = build_market_state(
+            EVENT, Market.ONE_X_TWO, [*older, *both], T, MAX_AGE, EXCHANGE, books
+        )
+        assert state.snapshot_time == _time(older) and set(state.retail[None]) == {"betway"}
+        assert not build_market_state(
+            EVENT, Market.ONE_X_TWO, both, T, MAX_AGE, EXCHANGE, books
+        ).has_input
 
     def test_non_retail_books_are_excluded(self) -> None:
         pinnacle = three_way_bookmaker("pinnacle", (2.0, 3.0, 4.0))
@@ -766,6 +793,7 @@ def _candidate(**overrides: Any) -> MechanicalCandidate:
         "name": "gap",
         "description": "d",
         "kind": "mechanical",
+        "books": "uk_retail",
         "market": "1x2",
         "sports": ["soccer_epl"],
         "version": 1,

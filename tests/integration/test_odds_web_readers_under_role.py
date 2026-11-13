@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from odds_core.bookmakers import BookSet
 from odds_core.candidate_backtest_models import (
     CandidateBacktest,
     CandidateBacktestBet,
@@ -59,6 +60,7 @@ def mechanical(name: str, sport: str, market: str, rule: str) -> MechanicalCandi
         start_date="2026-01-01",
         status=CandidateStatus.ACTIVE,
         kind="mechanical",
+        books=BookSet.UK_RETAIL,
         market=market,
         rule=rule,
         rule_sha256=rule_sha256(rule),

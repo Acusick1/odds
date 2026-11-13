@@ -16,15 +16,18 @@ later twin merge, commit lag): informational, never a failure.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
+from odds_core.bookmakers import BOOK_SETS
 from odds_core.candidates import MechanicalCandidate
 from odds_core.market_prices import Outcome
 from odds_core.models import Event, OddsSnapshot
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
+from odds_core.quotes import Quote
 from odds_core.vocabulary import Market
 from odds_lambda.candidate_rules import (
     BetIntent,
@@ -34,12 +37,14 @@ from odds_lambda.candidate_rules import (
     RuleSpec,
     Selection,
     apply_rule,
+    build_market_state,
     candidate_leagues,
-    load_market_state,
+    input_window,
     lookback_points,
     max_input_age,
     run_rule,
 )
+from odds_lambda.candidate_rules.inputs import rule_quotes
 from odds_lambda.candidate_rules.registry import resolve_rule
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -116,6 +121,60 @@ async def _absent_events(session: AsyncSession, ids: list[int]) -> tuple[int, ..
     return tuple(sorted(set(ids) - set(rows.scalars())))
 
 
+async def recorded_quotes(
+    session: AsyncSession,
+    spec: RuleSpec,
+    params: RuleParams,
+    event: Event,
+    market: Market,
+    decision: CandidateDecision,
+) -> list[Quote]:
+    """The quotes of the decision's recorded input snapshots within the rule's input window
+    before its decision time: what ``load_market_state`` reads for a decision."""
+    return await rule_quotes(
+        session,
+        event.id,
+        market,
+        spec.sharp_inputs,
+        since=decision.decision_time - input_window(max_input_age(params), lookback_points(params)),
+        until=decision.decision_time,
+        snapshot_ids=list(decision.input_snapshot_ids),
+        also_markets=spec.also_markets,
+    )
+
+
+def recorded_intents(
+    spec: RuleSpec,
+    params: RuleParams,
+    event: Event,
+    market: Market,
+    decision: CandidateDecision,
+    quoted: Sequence[Quote],
+    books: frozenset[str],
+    fixture: tuple[list[int], dict[str, Any] | None],
+    bet_selections: Collection[Selection],
+) -> list[BetIntent]:
+    """The bets on the state built from the decision's recorded ``quoted`` under ``books``, with
+    its recorded fixture values and kick-off, dropping the selections ``bet_selections``. A
+    rule's fixture context is the recorded one, not read again: events' scores and kick-offs
+    change, and a merge changes their ids."""
+    event_ids, values = fixture
+    state = build_market_state(
+        event,
+        market,
+        quoted,
+        decision.decision_time,
+        max_input_age(params),
+        spec.sharp_inputs,
+        books,
+        spec.also_markets,
+        lookback_points(params),
+    )
+    if spec.fixture_inputs and state.has_input:
+        state = replace(state, fixture=FixtureContext.from_record(values, event_ids))
+    return apply_rule(spec, params, state, decision.kickoff_at_decision, bet_selections)[1]
+
+
 async def _recorded_inputs(
     session: AsyncSession,
     candidate: MechanicalCandidate,
@@ -128,9 +187,7 @@ async def _recorded_inputs(
     bet_selections: set[Selection],
 ) -> tuple[list[BetIntent], tuple[int, ...], tuple[int, ...]]:
     """The bets from the decision's recorded snapshots and fixture values, and the recorded
-    snapshot ids and event ids not found. A rule's fixture context is the recorded one, not
-    read again: events' scores and kick-offs change, and a merge changes their ids."""
-    event_ids, values = fixture
+    snapshot ids and event ids not found."""
     ids = list(decision.input_snapshot_ids)
     found: set[int] = set()
     if ids:
@@ -139,21 +196,19 @@ async def _recorded_inputs(
         )
         found = {snapshot_id for snapshot_id in rows.scalars() if snapshot_id is not None}
     missing = tuple(sorted(set(ids) - found))
-    state = await load_market_state(
-        session,
+    quoted = await recorded_quotes(session, spec, params, event, market, decision)
+    intents = recorded_intents(
+        spec,
+        params,
         event,
         market,
-        decision.decision_time,
-        max_input_age(params),
-        spec.sharp_inputs,
-        snapshot_ids=ids,
-        also_markets=spec.also_markets,
-        lookbacks=lookback_points(params),
+        decision,
+        quoted,
+        BOOK_SETS[candidate.books],
+        fixture,
+        bet_selections,
     )
-    if spec.fixture_inputs and state.has_input:
-        state = replace(state, fixture=FixtureContext.from_record(values, event_ids))
-    _, intents = apply_rule(spec, params, state, decision.kickoff_at_decision, bet_selections)
-    return intents, missing, await _absent_events(session, event_ids)
+    return intents, missing, await _absent_events(session, fixture[0])
 
 
 async def _db_replayed(
@@ -174,11 +229,55 @@ async def _db_replayed(
         market,
         decision.decision_time,
         decision.known_at,
+        BOOK_SETS[candidate.books],
         kickoff=decision.kickoff_at_decision,
         bet_selections=bet_selections,
         fixture_leagues=candidate_leagues(candidate),
     )
     return intents
+
+
+async def load_decisions(session: AsyncSession, name: str, version: int) -> list[CandidateDecision]:
+    """The non-missed decisions of a candidate version in the order the live runs took them."""
+    rows = await session.execute(
+        # The recorded fixture is read only for a rule with fixture inputs
+        # (``load_recorded_fixture``), so a database not yet migrated to hold it can still be
+        # checked for other rules. The league set is never read: parity replays the candidate
+        # file's rule.
+        select(CandidateDecision)
+        .options(
+            defer(CandidateDecision.input_event_ids),  # type: ignore[arg-type]
+            defer(CandidateDecision.input_fixture),  # type: ignore[arg-type]
+            defer(CandidateDecision.sports),  # type: ignore[arg-type]
+        )
+        .where(
+            CandidateDecision.candidate_name == name,
+            CandidateDecision.candidate_version == version,
+            CandidateDecision.missed.is_(False),  # type: ignore[attr-defined]
+        )
+        # The order the live runs committed them: a kick-off moved earlier can put a later
+        # decision's time before an earlier one's.
+        .order_by(CandidateDecision.known_at, CandidateDecision.id)  # type: ignore[arg-type]
+    )
+    return list(rows.scalars().all())
+
+
+async def load_recorded_fixture(
+    session: AsyncSession, decisions: Sequence[CandidateDecision]
+) -> dict[int, tuple[list[int], dict[str, Any] | None]]:
+    """Each decision's recorded fixture event ids and values, by decision id."""
+    if not decisions:
+        return {}
+    rows = await session.execute(
+        select(
+            CandidateDecision.id,
+            CandidateDecision.input_event_ids,
+            CandidateDecision.input_fixture,
+        ).where(
+            CandidateDecision.id.in_([d.id for d in decisions])  # type: ignore[union-attr]
+        )
+    )
+    return {i: (list(ids), values) for i, ids, values in rows.tuples()}
 
 
 async def check_parity(
@@ -204,43 +303,10 @@ async def check_parity(
             "live runner does not run it, so it has no decisions to check"
         )
 
-    decisions = (
-        (
-            await session.execute(
-                # The recorded fixture is read only for a rule with fixture inputs, below, so a
-                # database not yet migrated to hold it can still be checked for other rules. The
-                # league set is never read: parity replays the candidate file's rule.
-                select(CandidateDecision)
-                .options(
-                    defer(CandidateDecision.input_event_ids),  # type: ignore[arg-type]
-                    defer(CandidateDecision.input_fixture),  # type: ignore[arg-type]
-                    defer(CandidateDecision.sports),  # type: ignore[arg-type]
-                )
-                .where(
-                    CandidateDecision.candidate_name == candidate.name,
-                    CandidateDecision.candidate_version == version,
-                    CandidateDecision.missed.is_(False),  # type: ignore[attr-defined]
-                )
-                # The order the live runs committed them: a kick-off moved earlier can put a
-                # later decision's time before an earlier one's.
-                .order_by(CandidateDecision.known_at, CandidateDecision.id)  # type: ignore[arg-type]
-            )
-        )
-        .scalars()
-        .all()
+    decisions = await load_decisions(session, candidate.name, version)
+    recorded_fixture = (
+        await load_recorded_fixture(session, decisions) if spec.fixture_inputs else {}
     )
-    recorded_fixture: dict[int, tuple[list[int], dict[str, Any] | None]] = {}
-    if decisions and spec.fixture_inputs:
-        rows = await session.execute(
-            select(
-                CandidateDecision.id,
-                CandidateDecision.input_event_ids,
-                CandidateDecision.input_fixture,
-            ).where(
-                CandidateDecision.id.in_([d.id for d in decisions])  # type: ignore[union-attr]
-            )
-        )
-        recorded_fixture = {i: (list(ids), values) for i, ids, values in rows.tuples()}
     trades: dict[int, list[PaperTrade]] = defaultdict(list)
     if decisions:
         rows = await session.execute(

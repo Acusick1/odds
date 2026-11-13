@@ -2,6 +2,7 @@ name: exchange-steam-continuation
 description: Back the longest UK retail price on the outcome whose Betfair Exchange fair probability rose by at least 2.5 points over the 180 minutes before the decision, when that probability now times the price minus 1 exceeds 0, 120 and 60 minutes before kick-off in six football leagues, one outcome per decision and at most once per outcome
 kind: mechanical
 market: 1x2
+books: uk_retail
 sports: [soccer_epl, soccer_spain_la_liga, soccer_italy_serie_a, soccer_germany_bundesliga, soccer_france_ligue_one, soccer_efl_champ]
 version: 1
 issue: 771

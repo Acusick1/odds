@@ -6,6 +6,7 @@ from collections.abc import Callable
 from datetime import timedelta
 
 import pytest
+from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS
 from odds_core.market_prices import Outcome
 from odds_core.quotes import Quote
 from odds_core.vocabulary import Market
@@ -36,7 +37,9 @@ def _state(
     lookbacks: tuple[Lookback, ...] = (SIX_HOURS,),
     also: frozenset[Market] = frozenset(),
 ) -> MarketState:
-    return build_market_state(EVENT, "1x2", quotes, CROSS_T, MAX_AGE, EXCHANGE, also, lookbacks)
+    return build_market_state(
+        EVENT, "1x2", quotes, CROSS_T, MAX_AGE, EXCHANGE, UK_RETAIL_BOOKMAKERS, also, lookbacks
+    )
 
 
 class _Base:
