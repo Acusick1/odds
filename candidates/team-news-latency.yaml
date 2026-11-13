@@ -1,0 +1,19 @@
+name: team-news-latency
+description: Back the longest UK retail price on the outcome whose Betfair Exchange fair probability rose by at least 2 points over the 15 minutes before the decision, when that probability now times the price minus 1 exceeds 1%, 50 and 40 minutes before kick-off in six football leagues, one outcome per decision and at most once per outcome
+kind: mechanical
+market: 1x2
+sports: [soccer_epl, soccer_spain_la_liga, soccer_italy_serie_a, soccer_germany_bundesliga, soccer_france_ligue_one, soccer_efl_champ]
+version: 1
+issue: 832
+start_date: 2026-11-13
+status: active
+rule: team_news_lag
+rule_sha256: 7f588a843c28ca09146268fbce3fc4b8382d13637b12ac55eb47b82da4c5bc3d
+params:
+  lookbacks:
+    - minutes_before_decision: 15
+      max_input_age_minutes: 10
+  min_rise: 0.02
+  gap: 0.01
+  minutes_before_kickoff: [50, 40]
+  max_input_age_minutes: 10

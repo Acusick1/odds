@@ -69,6 +69,34 @@ class TestCandidateScrapeLeads:
         ]
         assert candidate_scrape_leads("baseball_mlb") == []
 
+    def test_scrapes_five_minutes_before_each_lookback_point(self, registry: Path) -> None:
+        fields = {
+            "name": "news",
+            "description": "d",
+            "kind": "mechanical",
+            "market": "1x2",
+            "sports": ["soccer_italy_serie_a"],
+            "version": 1,
+            "issue": 1,
+            "start_date": "2026-11-09",
+            "status": "active",
+            "rule": "team_news_lag",
+            "rule_sha256": "0" * 64,
+            "params": {
+                "lookbacks": [{"minutes_before_decision": 15, "max_input_age_minutes": 10}],
+                "min_rise": 0.02,
+                "gap": 0.01,
+                "minutes_before_kickoff": [50],
+                "max_input_age_minutes": 10,
+            },
+        }
+        (registry / "news.yaml").write_text(yaml.safe_dump(fields))
+
+        assert candidate_scrape_leads("soccer_italy_serie_a") == [
+            Lead(timedelta(minutes=55), until=timedelta(minutes=50)),
+            Lead(timedelta(minutes=70), until=timedelta(minutes=65)),
+        ]
+
     def test_unreadable_registry_adds_no_runs(self, registry: Path) -> None:
         (registry / "broken.yaml").write_text("name: [")
 

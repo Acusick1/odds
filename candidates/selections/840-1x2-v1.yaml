@@ -1,0 +1,11 @@
+issue: 840
+market: 1x2
+version: 1
+grid_sha256: 792a1bc0a301a3c02a881308560dad6ca7c229d9004a72123f00436bd126abfb
+cell:
+  min_concurrent_kickoffs: 6
+  threshold: 0.01
+  minutes_before_kickoff:
+  - 60
+  - 30
+  max_input_age_minutes: 10

@@ -32,7 +32,7 @@ from odds_lambda.candidate_rules.code_hash import closure, root_module
 from odds_lambda.candidate_rules.gap import GapParams, exchange_gap, polymarket_gap
 from odds_lambda.candidate_rules.market_state import PolymarketPrice
 from odds_lambda.candidate_rules.pinning import RULE_ROOTS, rule_sha256, validate_candidate_rules
-from odds_lambda.candidate_rules.registry import RULES, decision_leads, resolve_rule
+from odds_lambda.candidate_rules.registry import RULES, input_leads, resolve_rule
 from odds_lambda.candidate_rules.retail_ev_model import RetailEvModelParams, retail_ev_model
 from pydantic import ValidationError
 
@@ -895,7 +895,7 @@ class TestValidateCandidateRules:
             validate_candidate_rules([candidate])
 
 
-class TestDecisionLeads:
+class TestInputLeads:
     def test_active_mechanical_candidates_of_the_sport(self) -> None:
         candidates = [
             _candidate(),
@@ -907,7 +907,7 @@ class TestDecisionLeads:
             _candidate(name="killed", status="killed"),
             _candidate(name="broken", params={"threshold": -1}),
         ]
-        assert decision_leads(candidates, "soccer_epl") == [
+        assert input_leads(candidates, "soccer_epl") == [
             timedelta(minutes=60),
             timedelta(minutes=30),
             timedelta(minutes=15),
@@ -915,8 +915,27 @@ class TestDecisionLeads:
 
     def test_a_pooled_candidate_gives_leads_in_each_of_its_leagues(self) -> None:
         pooled = [_candidate(sports=["soccer_epl", "soccer_italy_serie_a"])]
-        assert decision_leads(pooled, "soccer_italy_serie_a") == [timedelta(minutes=60)]
-        assert decision_leads(pooled, "soccer_efl_champ") == []
+        assert input_leads(pooled, "soccer_italy_serie_a") == [timedelta(minutes=60)]
+        assert input_leads(pooled, "soccer_efl_champ") == []
+
+    def test_each_lookback_point_of_each_decision_time_gives_a_lead(self) -> None:
+        steam = _candidate(
+            rule="exchange_steam",
+            rule_sha256=rule_sha256("exchange_steam"),
+            params={
+                "min_rise": 0.025,
+                "gap": 0,
+                "lookbacks": [{"minutes_before_decision": 180, "max_input_age_minutes": 60}],
+                "minutes_before_kickoff": [120, 60],
+                "max_input_age_minutes": 10,
+            },
+        )
+        assert input_leads([steam], "soccer_epl") == [
+            timedelta(minutes=120),
+            timedelta(minutes=300),
+            timedelta(minutes=60),
+            timedelta(minutes=240),
+        ]
 
 
 MECHANICAL_RULES = [name for name, spec in RULES.items() if isinstance(spec, RuleSpec)]

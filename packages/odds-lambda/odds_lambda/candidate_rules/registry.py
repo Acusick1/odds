@@ -94,9 +94,9 @@ def resolve_rule(candidate: MechanicalCandidate) -> tuple[RuleSpec | ModelRuleSp
     return spec, params
 
 
-def decision_leads(candidates: Sequence[Candidate], sport: str) -> list[timedelta]:
-    """How long before kick-off the active mechanical candidates that bet in ``sport`` decide,
-    one lead per decision time.
+def input_leads(candidates: Sequence[Candidate], sport: str) -> list[timedelta]:
+    """How long before kick-off the active mechanical candidates that bet in ``sport`` read
+    the market: one lead per decision time, and one per lookback point of each decision time.
 
     A candidate whose rule or params do not resolve is left out; the run-candidates job
     alerts on it.
@@ -113,5 +113,10 @@ def decision_leads(candidates: Sequence[Candidate], sport: str) -> list[timedelt
             _, params = resolve_rule(candidate)
         except ValueError:
             continue
-        leads.extend(timedelta(minutes=minutes) for minutes in params.minutes_before_kickoff)
+        for minutes in params.minutes_before_kickoff:
+            leads.append(timedelta(minutes=minutes))
+            leads.extend(
+                timedelta(minutes=minutes + point.minutes_before_decision)
+                for point in params.lookbacks
+            )
     return leads
