@@ -22,6 +22,7 @@ from odds_analytics.candidate_report import (
 from odds_core.candidates import candidates_dir, load_candidates
 from odds_core.config import Settings, get_settings
 
+from odds_web.backtests import BacktestOverview, RunFigures, load_overview, load_runs
 from odds_web.cache import Cached, Failure, SingleFlightCache
 from odds_web.candidate_page import CandidatePage, build_candidate_page, reads_decisions
 from odds_web.closes import WEEKS as CLOSE_WEEKS
@@ -143,9 +144,26 @@ def create_app(
     async def report_section() -> Cached[CandidateReport]:
         return await cache.get("report", load_report)
 
+    async def load_backtest_overview() -> BacktestOverview:
+        async with database.session_maker() as session:
+            return await load_overview(session)
+
+    async def overview_section() -> Section[BacktestOverview]:
+        return Section.of(await cache.get("backtests", load_backtest_overview))
+
     async def portfolio_section() -> Section[list[PortfolioRow]]:
         report = Section.of(await report_section())
-        return report.map(lambda r: portfolio_rows(r.summaries))
+        estimates = (await overview_section()).value
+        return report.map(
+            lambda r: portfolio_rows(r.summaries, {} if estimates is None else estimates.estimates)
+        )
+
+    async def backtest_runs_section(name: str, version: int) -> Section[list[RunFigures]]:
+        async def load() -> list[RunFigures]:
+            async with database.session_maker() as session:
+                return await load_runs(session, name, version)
+
+        return Section.of(await cache.get(f"backtest-runs:{name}:{version}", load))
 
     async def candidate_section(name: str, version: int, page: int) -> Section[CandidatePage]:
         report = await report_section()
@@ -248,13 +266,17 @@ def create_app(
     @app.get("/", response_class=HTMLResponse)
     async def portfolio(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
-            request, "portfolio.html.j2", {"portfolio": await portfolio_section()}
+            request,
+            "portfolio.html.j2",
+            {"portfolio": await portfolio_section(), "overview": await overview_section()},
         )
 
     @app.get("/fragments/portfolio", response_class=HTMLResponse)
     async def portfolio_fragment(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
-            request, "_portfolio.html.j2", {"portfolio": await portfolio_section()}
+            request,
+            "_portfolio.html.j2",
+            {"portfolio": await portfolio_section(), "overview": await overview_section()},
         )
 
     @app.get("/c/{name}/{version}", response_class=HTMLResponse)
@@ -265,7 +287,13 @@ def create_app(
         return templates.TemplateResponse(
             request,
             "candidate.html.j2",
-            {"candidate": section, "name": name, "version": version, "page": page},
+            {
+                "candidate": section,
+                "backtests": await backtest_runs_section(name, version),
+                "name": name,
+                "version": version,
+                "page": page,
+            },
         )
 
     @app.get("/fragments/c/{name}/{version}", response_class=HTMLResponse)
@@ -276,7 +304,13 @@ def create_app(
         return templates.TemplateResponse(
             request,
             "_candidate.html.j2",
-            {"candidate": section, "name": name, "version": version, "page": page},
+            {
+                "candidate": section,
+                "backtests": await backtest_runs_section(name, version),
+                "name": name,
+                "version": version,
+                "page": page,
+            },
         )
 
     return app

@@ -105,3 +105,4 @@ svg line.axis { stroke: var(--border); }
 td.text { font-family: system-ui, sans-serif; }
 tr.void { color: var(--muted-foreground); font-style: italic; }
 .pager { display: flex; gap: 12px; }
+h4.run { font-size: 12px; margin: 16px 0 4px; font-weight: 600; }

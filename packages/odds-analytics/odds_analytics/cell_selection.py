@@ -94,8 +94,8 @@ class BlockScore:
 
 @dataclass(frozen=True)
 class CellScore:
-    """A cell scored over its bets with a close: ``lower_bound`` is the 90% interval's,
-    ``power_mean_ev`` the mean EV against the power-devigged close when the idea bets above
+    """A cell scored over its bets with a close: ``lower_bound`` and ``upper_bound`` are the 90%
+    interval's, ``power_mean_ev`` the mean EV against the power-devigged close when the idea bets above
     ``LONGSHOT_PRICE``, else None, and ``closes`` the bets counted by the source of their
     close."""
 
@@ -106,6 +106,7 @@ class CellScore:
     blocks: tuple[BlockScore, ...]
     mean_ev: float | None
     lower_bound: float | None
+    upper_bound: float | None
     power_mean_ev: float | None
     eligible: bool
     closes: dict[Source, int]
@@ -119,9 +120,9 @@ def _evs(bets: Sequence[ScoredBet]) -> list[float]:
     return [b.ev for b in bets if b.ev is not None]
 
 
-def lower_bound(bets: Sequence[ScoredBet]) -> float:
-    """The lower bound of the 90% event-clustered percentile bootstrap interval of mean EV over
-    ``bets``, which all have a close: ``RESAMPLES`` resamples of the events, in id order, with
+def bootstrap_interval(bets: Sequence[ScoredBet]) -> tuple[float, float]:
+    """The 90% event-clustered percentile bootstrap interval of mean EV over ``bets``, which all
+    have a close: ``RESAMPLES`` resamples of the events, in id order, with
     ``numpy.random.default_rng(SEED)``, each resample's mean its bets' total EV over their
     count."""
     estimate = event_clustered_ratio(
@@ -132,7 +133,12 @@ def lower_bound(bets: Sequence[ScoredBet]) -> float:
         RESAMPLES,
         SEED,
     )
-    return estimate.intervals[INTERVAL_LEVEL][0]
+    return estimate.intervals[INTERVAL_LEVEL]
+
+
+def lower_bound(bets: Sequence[ScoredBet]) -> float:
+    """The lower end of ``bootstrap_interval``, the 5% quantile of the resampled means."""
+    return bootstrap_interval(bets)[0]
 
 
 def is_eligible(bets: int, events: int, blocks: Sequence[BlockScore]) -> bool:
@@ -156,6 +162,7 @@ def score_cell(replay: CellReplay, longshots: bool) -> CellScore:
         blocks.append(BlockScore(block.name, len(with_close), _mean(_evs(with_close))))
     events = len({b.event_id for b in scored})
     power = [b.ev_power for b in scored if b.ev_power is not None]
+    bounds = bootstrap_interval(scored) if scored else None
     return CellScore(
         index=replay.index,
         cell=replay.cell,
@@ -163,7 +170,8 @@ def score_cell(replay: CellReplay, longshots: bool) -> CellScore:
         events=events,
         blocks=tuple(blocks),
         mean_ev=_mean(_evs(scored)),
-        lower_bound=lower_bound(scored) if scored else None,
+        lower_bound=None if bounds is None else bounds[0],
+        upper_bound=None if bounds is None else bounds[1],
         power_mean_ev=_mean(power) if longshots and len(power) == len(scored) else None,
         eligible=is_eligible(len(scored), events, blocks),
         closes=close_sources(scored),
@@ -235,9 +243,12 @@ def selection_path(prereg: Preregistration, directory: Path) -> Path:
     return directory / SELECTION_DIR / f"{prereg.stem}.yaml"
 
 
-def load_selectable(path: Path, directory: Path, today: date) -> Preregistration:
+def load_selectable(
+    path: Path, directory: Path, today: date, recheck: bool = False
+) -> Preregistration:
     """The grid file at ``path``, after checking that it follows round 1's rule, has no
-    selection yet and that every cell resolves as a pooled draft of a registered rule."""
+    selection yet (unless ``recheck``, which replays a selection that exists to store it) and
+    that every cell resolves as a pooled draft of a registered rule."""
     try:
         prereg = load_preregistration(path, directory)
     except HoldoutRefused as exc:
@@ -248,7 +259,7 @@ def load_selectable(path: Path, directory: Path, today: date) -> Preregistration
             f"{ROUND_ONE_RULE}"
         )
     existing = selection_path(prereg, directory)
-    if existing.exists():
+    if existing.exists() and not recheck:
         raise SelectionRefused(
             f"{existing} already exists, and a selection is never changed: a new cell is a new "
             "version with a new grid"
@@ -281,13 +292,30 @@ async def replay_cells(
 
 
 async def select_cell(
-    session: AsyncSession, path: Path, directory: Path, today: date
+    session: AsyncSession, path: Path, directory: Path, today: date, recheck: bool = False
 ) -> GridSelection:
     """Round 1's selection over the grid file at ``path`` (in ``directory/preregistrations``).
     Writes nothing; ``write_selection`` writes the picked cell."""
-    prereg = load_selectable(path, directory, today)
+    prereg = load_selectable(path, directory, today, recheck)
     grid_sha256 = hashlib.sha256(path.read_bytes()).hexdigest()
     return select_from(prereg, grid_sha256, await replay_cells(session, prereg, today))
+
+
+def check_recorded(result: GridSelection, directory: Path) -> bool:
+    """Whether ``directory`` holds the grid's selection, which ``result`` must reproduce:
+    ``SelectionRefused`` unless the file names the cell ``result`` picked from the same grid
+    file. False when the grid has no selection file yet."""
+    path = selection_path(result.prereg, directory)
+    if not path.exists():
+        return False
+    recorded = Selection.model_validate(yaml.safe_load(path.read_text()))
+    chosen = result.selection
+    if recorded.grid_sha256 != result.grid_sha256 or chosen is None or chosen.cell != recorded.cell:
+        raise SelectionRefused(
+            f"the replay no longer picks the recorded cell of {path.name}: it picks "
+            f"{None if chosen is None else chosen.cell!r}, the file records {recorded.cell!r}"
+        )
+    return True
 
 
 def write_selection(selection: Selection, directory: Path) -> Path:

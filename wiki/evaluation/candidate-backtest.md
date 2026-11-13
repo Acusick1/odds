@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Replay backtest
-description: What odds candidates backtest replays, the decision state and timing it uses, how a model rule is tuned and refitted during the replay, the comparison candidate, the close bets are scored against and how, the coverage it reports and its JSON output, each placed bet included.
+description: What odds candidates backtest replays, the decision state and timing it uses, how a model rule is tuned and refitted during the replay, the comparison candidate, the close bets are scored against and how, the coverage it reports and its JSON output, each placed bet included, and the stored runs the web UI shows.
 sources:
   - odds_analytics.candidate_backtest
   - odds_analytics.candidate_model.ModelReplay
@@ -12,6 +12,12 @@ sources:
   - odds_core.close.backtest_close
   - odds_core.close.backtest_close_quotes
   - odds_core.close.substitute_close
+  - odds_analytics.backtest_store
+  - odds_core.candidate_backtest_models.CandidateBacktest
+  - odds_core.candidate_backtest_models.CandidateBacktestBet
+  - odds_analytics.holdout.spent_run
+  - odds_analytics.holdout_run.replay_spent
+  - odds_cli.commands.candidates.store_holdout
 mentions:
   - odds_core.candidates.load_candidate_file
 status: stable
@@ -23,7 +29,7 @@ status: stable
 
 ## Command
 
-`odds_cli.commands.candidates.backtest` resolves its argument with `odds_cli.commands.candidates._resolve`: a path to an existing file loads that file, and any other argument is a registered candidate name. `--from` and `--to` are UTC days, both inclusive. `--json <path>` also writes the result as JSON. `--compare <name-or-path>` also replays a second candidate, resolved the same way, on the events the first decided ([comparison](#comparison)). An unknown candidate, an agent candidate, a bad date, `--to` before `--from` or an invalid rule or params prints the error and exits 1.
+`odds_cli.commands.candidates.backtest` resolves its argument with `odds_cli.commands.candidates._resolve`: a path to an existing file loads that file, and any other argument is a registered candidate name. `--from` and `--to` are UTC days, both inclusive. `--json <path>` also writes the result as JSON. `--compare <name-or-path>` also replays a second candidate, resolved the same way, on the events the first decided ([comparison](#comparison)). `--store` also writes the first candidate's run to the database ([stored runs](#stored-runs)); the comparison is not stored. An unknown candidate, an agent candidate, a bad date, `--to` before `--from` or an invalid rule or params prints the error and exits 1.
 
 A file loaded by path may be an unregistered draft. `odds_core.candidates.load_candidate_file` parses it with the registry's model, but does not require the file name to match `name` and does not require `odds_core.candidates.MechanicalCandidate.rule_sha256`. `odds_analytics.candidate_backtest.hash_status` reports whether the recorded hash is `match`, `mismatch` or `absent` against the rule's current hash, `odds_lambda.candidate_rules.pinning.rule_sha256`, or `unhashable` when the rule's closure fails closed ([rule pinning](candidate-rules.md#rule-pinning)), and the command prints a warning unless it matches. The registry rejects a mechanical file without the hash.
 
@@ -31,7 +37,7 @@ A file loaded by path may be an unregistered draft. `odds_core.candidates.load_c
 
 The 2025-26 season (1 August to 31 July) of the Championship, La Liga, Serie A, the Bundesliga and Ligue 1 is sealed (`odds_analytics.holdout.holdout_windows`, [ADR-0021](../../docs/adr/0021-sealed-holdout-and-one-shot-gate.md)). EPL has no sealed window: its seasons are development data ([ADR-0024](../../docs/adr/0024-epl-2022-24-is-development-data.md)), so a pre-registration that lists it runs on its other leagues and records EPL as a league without a window.
 
-**The seal.** `odds_analytics.candidate_backtest.final_events` and `odds_analytics.candidate_backtest.collect`, which `odds_analytics.candidate_backtest.replay` and every other replay reach, call `odds_analytics.holdout.require_clear`. A range that touches a sealed window of any of the candidate's leagues raises `odds_analytics.holdout.HoldoutRefused` before any query, so the development backtest (with `--compare`: each candidate is checked) exits 1 on such a range, mixed ranges included, and `scripts.replay_candidates.dump` replays only each league's days outside its windows (`odds_analytics.holdout.development_segments`, passed by the rehash command as `--segments`). The rehash passes both replays the same days: those outside the windows of both the base revision (`odds_analytics.candidate_rehash.windows_under`) and the working tree (`odds_analytics.candidate_rehash.development_ranges`), so a seal change between them refuses neither. Only an `odds_analytics.holdout.HoldoutAccess` for the league's window opens it, and only `odds_analytics.holdout.Reservation.access` issues one.
+**The seal.** `odds_analytics.candidate_backtest.final_events` and `odds_analytics.candidate_backtest.collect`, which `odds_analytics.candidate_backtest.replay` and every other replay reach, call `odds_analytics.holdout.require_clear`. A range that touches a sealed window of any of the candidate's leagues raises `odds_analytics.holdout.HoldoutRefused` before any query, so the development backtest (with `--compare`: each candidate is checked) exits 1 on such a range, mixed ranges included, and `scripts.replay_candidates.dump` replays only each league's days outside its windows (`odds_analytics.holdout.development_segments`, passed by the rehash command as `--segments`). The rehash passes both replays the same days: those outside the windows of both the base revision (`odds_analytics.candidate_rehash.windows_under`) and the working tree (`odds_analytics.candidate_rehash.development_ranges`), so a seal change between them refuses neither. Only an `odds_analytics.holdout.HoldoutAccess` for the league's window opens it, and only `odds_analytics.holdout.Reservation.access` (the one run) and `odds_analytics.holdout.SpentRun.access` (a [replay of a spent run](#replaying-a-spent-holdout)) issue one.
 
 **The command.** `odds candidates holdout <selection file>` (`odds_cli.commands.candidates.holdout_command`, `odds_analytics.holdout_run.run_holdout`) runs a [selection and its grid](candidate-registry.md#sealed-holdout-files) once:
 
@@ -42,6 +48,10 @@ The 2025-26 season (1 August to 31 July) of the Championship, La Liga, Serie A, 
 5. A `result` row is appended, recording the leagues without a window (`odds_analytics.holdout.HoldoutResult.leagues_without_window`). An error after step 2 leaves the `reserved` row and the run is spent.
 
 The command prints each window's coverage, with its bets with a close by close source, the leagues without a window and the gate, and a holdout result never promotes. The selection it runs is written by [`odds candidates select`](cell-selection.md), which replays every cell of the grid on development data through the same `odds_analytics.candidate_backtest.collect`.
+
+## Replaying a spent holdout
+
+`odds candidates store-holdout <selection file>` (`odds_cli.commands.candidates.store_holdout`, `odds_analytics.holdout_run.replay_spent`) replays the selected cell on its sealed windows again so the run can be [stored](#stored-runs). It is for an idea whose `result` row `candidates/holdout.jsonl` already holds: `odds_analytics.holdout.spent_run` finds that row, requires its cell to be the selection's, and issues the access; an idea with no result is refused without reading a window. The replay is the run's own (`odds_analytics.holdout_run.run_holdout` shares its pooled replay and scoring, at family size 1), and the command refuses to store unless the rule still hashes as the ledger records it and the replay's gate (verdict, bets, mean EV, interval and flags, floats to a relative 1e-9) equals the ledger's (`odds_analytics.holdout_run.HoldoutMismatch`). It appends nothing to the ledger and the version stays spent, and the replay runs in a read-only transaction.
 
 ## Replay
 
@@ -96,3 +106,15 @@ The command prints the verdict as `meets_promote_bar` (with "development data, n
 ## JSON output
 
 `--json` writes `odds_cli.commands.candidates._backtest_json` of `odds_analytics.candidate_backtest.BacktestResult`, its `dataclasses.asdict` with each summary's `registered` entry replaced by its registry status (a replay scores the draft, so `active`, `promoted` or `killed`): the candidate's name, version, rule, params and hash status, the range, the coverage, the summary (including `odds_analytics.candidate_report.CandidateSummary.family_versions`), the overall estimate, the range's event count (`range_events`), the per-league coverage (`odds_analytics.candidate_backtest.BacktestResult.league_coverage`) and the summary's per-league breakdown (`leagues`), a model rule's tuning, refits and `odds_analytics.candidate_backtest.BacktestResult.library_versions` (the XGBoost, Optuna and NumPy versions, from `odds_analytics.candidate_model.library_versions`), the comparison candidate's result in the same form, or `null`, and `bets`, every bet placed (`odds_analytics.candidate_backtest.BacktestResult.bets`) in placement order, each written by `odds_cli.commands.candidates._bet_json` as its event id, league, kick-off, decision time, outcome, line (`null` in a market without lines), bookmaker, price, close probability, EV and close source, the last three `null` without a close. Dates and enums are written as strings.
+
+## Stored runs
+
+`odds_core.candidate_backtest_models.CandidateBacktest` (table `candidate_backtests`) keeps a run so the [web UI](../operations/odds-web.md#candidate-page) can show it, and `odds_core.candidate_backtest_models.CandidateBacktestBet` (`candidate_backtest_bets`) the bets of the runs a page charts. Three commands write runs, each in one transaction on `DATABASE_URL`'s read-write session, through `odds_analytics.backtest_store.store_runs`:
+
+- `odds candidates backtest ... --store` stores the replay it just printed as a `development` run (`odds_analytics.backtest_store.replay_record`): every bet it placed and an estimate over every bet with a close (`odds_analytics.candidate_backtest.BacktestResult.overall`, 95% interval).
+- `odds candidates select ... --store` stores each cell of the grid as a `development` run (`odds_analytics.backtest_store.grid_records`), with the [selection's](cell-selection.md#storing-the-grid) score and 90% interval. [Only the picked cell keeps its bets.](cell-selection.md#storing-the-grid)
+- `odds candidates store-holdout` stores the [replayed spent holdout](#replaying-a-spent-holdout) as a `holdout` run (`odds_analytics.backtest_store.holdout_record`), marked selected, over the pooled bets of the sealed windows with a 95% interval.
+
+A run records the candidate's name, version, issue, market, rule, its hash and params (a grid cell's params are the cell), the window kind, the day range and leagues, the git commit of the code that replayed it (`odds_core.git_info.current_git_sha`, suffixed `-dirty` for a tree with uncommitted changes), `selected`, the counts of its events, bets and bets with a close, the stake and P&L of every bet, and the estimate: mean EV, interval bounds and the interval's level, all null for a run with no bet with a close. A grid cell also records its index in the grid and whether it was eligible (both null for any other run), and a pooled development run lists its blocks with their bets and mean EV. A bet records the fields of `odds_cli.commands.candidates._bet_json` and its stake and P&L, in placement order from position 1.
+
+`odds_analytics.backtest_store.store_runs` replaces the stored run of the same candidate version, window kind, day range, git commit and grid cell (the table's unique constraint, which treats a null cell index as a value), deleting its bets with it, so storing again with the same code is idempotent and another commit adds a run. A run of an earlier commit stays; the pages show a version's latest.

@@ -74,6 +74,7 @@ def cell_score(index: int, lower: float, mean: float, events: int) -> cs.CellSco
         blocks=(),
         mean_ev=mean,
         lower_bound=lower,
+        upper_bound=mean + (mean - lower),
         power_mean_ev=None,
         eligible=True,
         closes={},
@@ -431,3 +432,96 @@ class TestCommand:
         result = self.invoke(directory)
 
         assert result.exit_code == 1 and "unknown rule 'no_such_rule'" in result.stdout
+
+    @pytest.fixture
+    def stored(self, monkeypatch: pytest.MonkeyPatch) -> list[Any]:
+        records: list[Any] = []
+
+        async def store(_session: object, found: list[Any]) -> None:
+            records.extend(found)
+
+        monkeypatch.setattr("odds_analytics.backtest_store.store_runs", store)
+        monkeypatch.setattr("odds_cli.commands.candidates.current_git_sha", lambda: "d" * 40)
+        return records
+
+    def grid(self, replays: list[cs.CellReplay], *evs: float, n: int = 60) -> None:
+        cells = self.cells()
+        replays += [
+            replay(i, (FIVE_2024_25, [bet(j, ev) for j in range(n)]), cell=cells[i])
+            for i, ev in enumerate(evs)
+        ]
+
+    def test_stores_every_cell_with_the_picked_cells_bets_and_writes_the_selection(
+        self, directory: Path, replays: list[cs.CellReplay], stored: list[Any]
+    ) -> None:
+        self.grid(replays, 0.02, 0.05, 0.03, 0.01)
+
+        result = self.invoke(directory, "--store")
+
+        assert result.exit_code == 0, result.stdout
+        assert (directory / "selections" / f"{STEM}.yaml").exists()
+        assert [(r.run.cell_index, r.run.selected, len(r.bets)) for r in stored] == [
+            (0, False, 0),
+            (1, True, 60),
+            (2, False, 0),
+            (3, False, 0),
+        ]
+        assert {r.run.git_sha for r in stored} == {"d" * 40}
+        assert "Stored development run" in result.stdout
+
+    def test_without_the_flag_nothing_is_stored(
+        self, directory: Path, replays: list[cs.CellReplay], stored: list[Any]
+    ) -> None:
+        self.grid(replays, 0.02, 0.05, 0.03, 0.01)
+
+        assert self.invoke(directory).exit_code == 0
+        assert stored == []
+
+    def test_a_killed_idea_stores_its_cells_with_none_selected(
+        self, directory: Path, replays: list[cs.CellReplay], stored: list[Any]
+    ) -> None:
+        self.grid(replays, -0.01, -0.02, -0.03, -0.01)
+
+        result = self.invoke(directory, "--store")
+
+        assert result.exit_code == 0, result.stdout
+        assert [r.run.selected for r in stored] == [False] * 4
+        assert not (directory / "selections").exists()
+
+    def test_a_selection_that_exists_is_replayed_and_checked_not_rewritten(
+        self, directory: Path, replays: list[cs.CellReplay], stored: list[Any]
+    ) -> None:
+        self.grid(replays, 0.02, 0.05, 0.03, 0.01)
+        assert self.invoke(directory).exit_code == 0
+        written = directory / "selections" / f"{STEM}.yaml"
+        before = written.read_text()
+
+        result = self.invoke(directory, "--store")
+
+        assert result.exit_code == 0, result.stdout
+        assert written.read_text() == before
+        assert "the recorded selection" in result.stdout
+        assert [r.run.selected for r in stored] == [False, True, False, False]
+
+    def test_a_replay_that_picks_another_cell_than_the_recorded_one_stores_nothing(
+        self, directory: Path, replays: list[cs.CellReplay], stored: list[Any]
+    ) -> None:
+        self.grid(replays, 0.02, 0.05, 0.03, 0.01)
+        assert self.invoke(directory).exit_code == 0
+        replays.clear()
+        self.grid(replays, 0.02, 0.01, 0.06, 0.01)
+
+        result = self.invoke(directory, "--store")
+
+        assert result.exit_code == 1 and "no longer picks the recorded cell" in result.stdout
+        assert stored == []
+
+    def test_an_existing_selection_is_still_refused_without_the_flag(
+        self, directory: Path, replays: list[cs.CellReplay], stored: list[Any]
+    ) -> None:
+        self.grid(replays, 0.02, 0.05, 0.03, 0.01)
+        assert self.invoke(directory).exit_code == 0
+
+        result = self.invoke(directory)
+
+        assert result.exit_code == 1 and "never changed" in result.stdout

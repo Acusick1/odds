@@ -4,7 +4,8 @@ over the pre-registered leagues, each on its sealed window, and judge the pooled
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import math
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -17,9 +18,18 @@ from odds_lambda.candidate_rules.registry import resolve_rule
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_analytics.candidate_backtest import Coverage, collect, league_coverage, score
+from odds_analytics.candidate_backtest import (
+    BacktestResult,
+    Coverage,
+    Replayed,
+    collect,
+    league_coverage,
+    score,
+)
 from odds_analytics.candidate_report import BOOTSTRAP_SEED, DEFAULT_BOOTSTRAP_SAMPLES
 from odds_analytics.holdout import (
+    Gate,
+    HoldoutAccess,
     HoldoutRefused,
     HoldoutResult,
     Preregistration,
@@ -28,6 +38,7 @@ from odds_analytics.holdout import (
     gate,
     load_plan,
     reserve,
+    spent_run,
     windows_of,
 )
 
@@ -102,21 +113,12 @@ async def run_holdout(
     backfill_start = await earliest_backfill(session)
     with exclusive_lock(directory.parent):
         reservation = reserve(plan, directory, backfill_start, now)
-        replayed = await collect(
+        replayed, pooled = await _replay_windows(
             session,
             draft,
-            {sport: [(w.start, w.end)] for sport, w in windows.items()},
-            access=[reservation.access(sport) for sport in draft.sports],
-        )
-        pooled = score(
-            draft,
-            min(w.start for w in windows.values()),
-            max(w.end for w in windows.values()),
-            replayed,
-            1,
+            list(windows.values()),
+            [reservation.access(sport) for sport in draft.sports],
             now,
-            DEFAULT_BOOTSTRAP_SAMPLES,
-            BOOTSTRAP_SEED,
         )
         row = reservation.record(
             rule_sha256(prereg.rule),
@@ -126,3 +128,90 @@ async def run_holdout(
         )
     coverage = league_coverage(replayed)
     return HoldoutRun(row, [LeagueRun(w, coverage[sport]) for sport, w in windows.items()])
+
+
+async def _replay_windows(
+    session: AsyncSession,
+    draft: MechanicalCandidate,
+    windows: Sequence[Window],
+    access: Collection[HoldoutAccess],
+    now: datetime,
+) -> tuple[Replayed, BacktestResult]:
+    """``draft`` replayed once on each window and its pooled bets scored once, at family size 1."""
+    replayed = await collect(
+        session, draft, {w.sport: [(w.start, w.end)] for w in windows}, access=access
+    )
+    pooled = score(
+        draft,
+        min(w.start for w in windows),
+        max(w.end for w in windows),
+        replayed,
+        1,
+        now,
+        DEFAULT_BOOTSTRAP_SAMPLES,
+        BOOTSTRAP_SEED,
+    )
+    return replayed, pooled
+
+
+class HoldoutMismatch(ValueError):
+    """A replay of a spent holdout that does not reproduce the ledger's result."""
+
+
+@dataclass(frozen=True)
+class SpentReplay:
+    """A spent holdout replayed again: the ledger's row and the pooled result of the replay,
+    which reproduces ``row``'s gate."""
+
+    row: HoldoutResult
+    draft: MechanicalCandidate
+    windows: list[Window]
+    result: BacktestResult
+
+
+def _same(a: object, b: object) -> bool:
+    if isinstance(a, float) and isinstance(b, float):
+        return math.isclose(a, b, rel_tol=1e-9, abs_tol=1e-12)
+    return a == b
+
+
+def differences(replayed: Gate, recorded: Gate) -> list[str]:
+    """What of ``replayed`` differs from the ledger's ``recorded`` gate, by field."""
+    return [
+        f"{name}: ledger {getattr(recorded, name)!r}, replay {getattr(replayed, name)!r}"
+        for name in ("verdict", "bets", "mean_ev", "ci_lower", "ci_upper", "killed", "low_bets")
+        if not _same(getattr(replayed, name), getattr(recorded, name))
+    ]
+
+
+async def replay_spent(
+    session: AsyncSession, path: Path, directory: Path, now: datetime | None = None
+) -> SpentReplay:
+    """Replay the selection at ``path``'s holdout, which the ledger already holds a result for,
+    to store it. Reads the sealed windows again and records nothing in the ledger; it raises
+    ``HoldoutMismatch`` unless the rule is the one that ran and the replay reproduces the
+    ledger's gate."""
+    now = now or datetime.now(UTC)
+    plan = load_plan(path, directory)
+    spent = spent_run(plan, directory)
+    prereg = plan.prereg
+    draft = pooled_draft(prereg, plan.cell, now.date(), "Holdout replay", plan.holdout_leagues)
+    try:
+        resolve_rule(draft)
+    except ValueError as exc:
+        raise HoldoutRefused(str(exc)) from exc
+    if rule_sha256(prereg.rule) != spent.row.rule_sha256:
+        raise HoldoutMismatch(
+            f"the rule {prereg.rule} hashes {rule_sha256(prereg.rule)} now and the ledger holds "
+            f"{spent.row.rule_sha256}: the code that ran is not this checkout's"
+        )
+    windows = [windows_of(sport)[0] for sport in draft.sports]
+    _, pooled = await _replay_windows(
+        session, draft, windows, [spent.access(sport) for sport in draft.sports], now
+    )
+    wrong = differences(gate(pooled.overall), spent.row.result)
+    if wrong:
+        raise HoldoutMismatch(
+            f"#{prereg.issue} {prereg.stem} does not reproduce the ledger: " + "; ".join(wrong)
+        )
+    return SpentReplay(spent.row, draft, windows, pooled)

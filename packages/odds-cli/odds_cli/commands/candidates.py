@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Annotated, Any, cast
 
 import typer
-from odds_analytics import cell_selection, holdout, holdout_run
+from odds_analytics import backtest_store, cell_selection, holdout, holdout_run
 from odds_analytics.candidate_backtest import BacktestResult, Coverage, HashStatus, replay
 from odds_analytics.candidate_parity import ParityReport, ParityStatus, check_parity
 from odds_analytics.candidate_rehash import rehash as record_rehash
@@ -25,6 +25,7 @@ from odds_analytics.candidate_report import (
     family_starts,
     load_decision_starts,
 )
+from odds_core.candidate_backtest_models import WindowKind
 from odds_core.candidates import (
     Candidate,
     CandidateStatus,
@@ -34,6 +35,7 @@ from odds_core.candidates import (
     load_candidates,
 )
 from odds_core.database import async_session_maker
+from odds_core.git_info import current_git_sha
 from odds_core.vocabulary import Source
 from odds_lambda.candidate_rules import ModelRuleSpec
 from odds_lambda.candidate_rules.pinning import rule_sha256, validate_candidate_rules
@@ -461,11 +463,17 @@ def backtest(
             help="Also replay this candidate (name or YAML path) on the same decided matches",
         ),
     ] = None,
+    store: Annotated[
+        bool,
+        typer.Option("--store", help="Store the run in the database, replacing an earlier one"),
+    ] = False,
 ) -> None:
     """Replay a mechanical candidate over completed events and score it like the report.
 
-    Development data can kill an idea, never promote one.
+    Development data can kill an idea, never promote one. With --store, writes the run and its
+    bets to the database, which the odds-web candidate page shows.
     """
+    sha = _git_sha() if store else None
     resolved = _resolve(candidate)
     other = _resolve(compare) if compare is not None else None
     if other is not None and isinstance(RULES.get(other.rule), ModelRuleSpec):
@@ -512,6 +520,36 @@ def backtest(
     if json_path is not None:
         payload = _backtest_json(result)
         json_path.write_text(json.dumps(payload, indent=2, default=str) + "\n")
+    if sha is not None:
+        _store([backtest_store.replay_record(resolved, result, WindowKind.DEVELOPMENT, sha)])
+
+
+def _git_sha() -> str:
+    sha = current_git_sha()
+    if sha is None:
+        raise _fail("cannot read the git commit of this checkout, which a stored run records")
+    return sha
+
+
+def _store(records: list[backtest_store.RunRecord]) -> None:
+    """Write ``records`` in one transaction on a read-write session."""
+
+    async def run() -> None:
+        async with async_session_maker() as session:
+            await backtest_store.store_runs(session, records)
+
+    try:
+        asyncio.run(run())
+    except Exception as exc:
+        raise _fail(f"the runs were not stored: {exc!r}") from exc
+    for record in records:
+        run = record.run
+        console.print(
+            f"Stored {run.window_kind} run of {run.candidate_name} v{run.candidate_version}"
+            + (f" cell {run.cell_index + 1}" if run.cell_index is not None else "")
+            + f": {run.bets} bets, {run.bets_with_close} with a close, {len(record.bets)} kept",
+            soft_wrap=True,
+        )
 
 
 @app.command("holdout")
@@ -569,6 +607,36 @@ def holdout_command(
     _print_gate(done.row)
 
 
+@app.command("store-holdout")
+def store_holdout(
+    selection: Annotated[
+        Path,
+        typer.Argument(help="candidates/selections/<issue>-<market>-v<version>.yaml, committed"),
+    ],
+) -> None:
+    """Replay a spent holdout and store its run in the database.
+
+    For an idea whose result candidates/holdout.jsonl already holds. Replays the selected cell on
+    the sealed windows again, refuses unless the rule and the gate match the ledger's row, and
+    writes nothing to the ledger. The version stays spent.
+    """
+
+    sha = _git_sha()
+
+    async def run() -> holdout_run.SpentReplay:
+        async with async_session_maker() as session:
+            await session.execute(text("SET TRANSACTION READ ONLY"))
+            return await holdout_run.replay_spent(session, selection, candidates_dir())
+
+    try:
+        replayed = asyncio.run(run())
+    except (holdout.HoldoutRefused, holdout_run.HoldoutMismatch) as exc:
+        raise _fail(str(exc)) from exc
+    _print_gate(replayed.row)
+    console.print("The replay reproduces the ledger's result.")
+    _store([backtest_store.holdout_record(replayed, sha)])
+
+
 @app.command("select")
 def select_command(
     preregistration: Annotated[
@@ -579,21 +647,33 @@ def select_command(
         Path | None,
         typer.Option("--json", help="Write every cell's score and placed bets to this file"),
     ] = None,
+    store: Annotated[
+        bool,
+        typer.Option(
+            "--store",
+            help="Store every cell's score, and the picked cell's bets, in the database",
+        ),
+    ] = False,
 ) -> None:
     """Pick a pre-registered grid's cell on development data by round 1's selection rule.
 
     Replays every cell as one pooled draft over the file's leagues on each development block,
     prints each cell's score and, when a cell is eligible, writes the picked cell to
     candidates/selections/ under the grid file's name. No eligible cell kills the idea, and
-    nothing is written. Reads the database only.
+    nothing is written. Reads the database only, unless --store writes the cells' scores to it.
+    With --store, a grid that already has a selection is replayed and checked against it: the
+    replay must pick the recorded cell, and the file is left alone.
     """
+    sha = _git_sha() if store else None
     directory = candidates_dir()
     today = datetime.now(UTC).date()
 
     async def run() -> cell_selection.GridSelection:
         async with async_session_maker() as session:
             await session.execute(text("SET TRANSACTION READ ONLY"))
-            return await cell_selection.select_cell(session, preregistration, directory, today)
+            return await cell_selection.select_cell(
+                session, preregistration, directory, today, recheck=store
+            )
 
     try:
         result = asyncio.run(run())
@@ -604,22 +684,33 @@ def select_command(
         payload = _selection_json(result)
         json_path.write_text(json.dumps(payload, indent=2, default=str) + "\n")
     prereg, picked, chosen = result.prereg, result.picked, result.selection
+    try:
+        recorded = store and cell_selection.check_recorded(result, directory)
+    except ValueError as exc:
+        raise _fail(str(exc)) from exc
     if picked is None or chosen is None:
         console.print(
             f"[red]No eligible cell: #{prereg.issue} {prereg.name} v{prereg.version} is killed on "
             "development data and gets no holdout run.[/red]",
             soft_wrap=True,
         )
-        return
-    try:
-        path = cell_selection.write_selection(chosen, directory)
-    except FileExistsError as exc:
-        raise _fail(f"{exc.filename} already exists; a selection is never changed") from exc
-    console.print(
-        f"[green]Picked cell {picked.index + 1}: {_cell_label(picked.cell)}[/green]. Wrote "
-        f"{path}: commit it alone, then run `odds candidates holdout {path}`.",
-        soft_wrap=True,
-    )
+    elif recorded:
+        console.print(
+            f"Picked cell {picked.index + 1}: {_cell_label(picked.cell)}, the recorded selection.",
+            soft_wrap=True,
+        )
+    else:
+        try:
+            path = cell_selection.write_selection(chosen, directory)
+        except FileExistsError as exc:
+            raise _fail(f"{exc.filename} already exists; a selection is never changed") from exc
+        console.print(
+            f"[green]Picked cell {picked.index + 1}: {_cell_label(picked.cell)}[/green]. Wrote "
+            f"{path}: commit it alone, then run `odds candidates holdout {path}`.",
+            soft_wrap=True,
+        )
+    if sha is not None:
+        _store(backtest_store.grid_records(result, sha, today))
 
 
 def _cell_label(cell: dict[str, object], keys: Collection[str] | None = None) -> str:

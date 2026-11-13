@@ -131,6 +131,82 @@ class TestBacktestCommand:
         assert "registered" not in summary["summary"]
         assert summary["summary"]["verdict"] == "not_yet"
 
+    def test_store_writes_the_replayed_run_and_not_the_comparison(
+        self, registry: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_replay(monkeypatch)
+        write(registry, {**MECHANICAL, "name": "other"})
+        stored: list[Any] = []
+
+        async def store(_session: Any, records: list[Any]) -> None:
+            stored.extend(records)
+
+        monkeypatch.setattr("odds_analytics.backtest_store.store_runs", store)
+        monkeypatch.setattr("odds_cli.commands.candidates.current_git_sha", lambda: "e" * 40)
+
+        result = RUNNER.invoke(
+            app,
+            ["candidates", "backtest", "back-longest", "--from", "2025-08-01", "--to", "2025-12-31"]
+            + ["--compare", "other", "--store"],
+        )
+
+        assert result.exit_code == 0, result.stdout
+        (record,) = stored
+        run = record.run
+        assert (run.candidate_name, run.window_kind.value, run.git_sha) == (
+            "back-longest",
+            "development",
+            "e" * 40,
+        )
+        assert (run.start_date, run.end_date) == (date(2025, 8, 1), date(2025, 12, 31))
+        assert "Stored development run of back-longest v1" in result.stdout
+
+    def test_nothing_is_stored_without_the_flag(
+        self, registry: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_replay(monkeypatch)
+        stored: list[Any] = []
+
+        async def store(_session: Any, records: list[Any]) -> None:
+            stored.extend(records)
+
+        monkeypatch.setattr("odds_analytics.backtest_store.store_runs", store)
+
+        result = RUNNER.invoke(
+            app,
+            [
+                "candidates",
+                "backtest",
+                "back-longest",
+                "--from",
+                "2025-08-01",
+                "--to",
+                "2025-12-31",
+            ],
+        )
+
+        assert result.exit_code == 0 and stored == []
+
+    def test_a_failed_store_exits_one_after_printing_the_replay(
+        self, registry: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        fake_replay(monkeypatch)
+
+        async def refuse(_session: Any, _records: list[Any]) -> None:
+            raise RuntimeError("relation does not exist")
+
+        monkeypatch.setattr("odds_analytics.backtest_store.store_runs", refuse)
+        monkeypatch.setattr("odds_cli.commands.candidates.current_git_sha", lambda: "e" * 40)
+
+        result = RUNNER.invoke(
+            app,
+            ["candidates", "backtest", "back-longest", "--from", "2025-08-01", "--to", "2025-12-31"]
+            + ["--store"],
+        )
+
+        assert result.exit_code == 1
+        assert "With input" in result.stdout and "the runs were not stored" in result.stdout
+
     def test_compare_replays_the_other_candidate_and_reports_both(
         self, registry: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:

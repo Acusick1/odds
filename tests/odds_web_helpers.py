@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from odds_analytics.candidate_report import (
     CandidateReport,
     CandidateSummary,
@@ -13,6 +14,7 @@ from odds_analytics.candidate_report import (
 )
 from odds_core.candidates import AgentCandidate, CandidateStatus, MechanicalCandidate
 from odds_core.vocabulary import Source
+from odds_web.backtests import BacktestOverview, RunFigures
 
 NOW = datetime(2026, 6, 1, tzinfo=UTC)
 LONG_AGO = NOW - timedelta(days=30)
@@ -82,3 +84,20 @@ def report(
     starts: dict[tuple[str, int], datetime] | None = None,
 ) -> CandidateReport:
     return report_candidates(bets, registry, NOW, starts, n_boot=N_BOOT)
+
+
+def stub_stored_backtests(
+    monkeypatch: pytest.MonkeyPatch,
+    overview: BacktestOverview | None = None,
+    runs: list[RunFigures] | None = None,
+) -> None:
+    """Make the app read ``overview`` and ``runs`` as the stored backtests, none by default."""
+
+    async def read_overview(*_: object, **__: object) -> BacktestOverview:
+        return overview or BacktestOverview({}, [])
+
+    async def read_runs(*_: object, **__: object) -> list[RunFigures]:
+        return runs or []
+
+    monkeypatch.setattr("odds_web.app.load_overview", read_overview)
+    monkeypatch.setattr("odds_web.app.load_runs", read_runs)

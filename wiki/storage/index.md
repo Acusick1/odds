@@ -25,6 +25,8 @@ Every table is a SQLModel class in `packages/odds-core/odds_core/`; migrations a
 | `alert_history` | `odds_core.models.AlertHistory` | [Alerts and health](../operations/alerts.md) |
 | `match_briefs` | `odds_core.match_brief_models.MatchBrief` | [Match briefs](../agent/match-briefs.md) |
 | `paper_trades` | `odds_core.paper_trade_models.PaperTrade` | [Paper trading](../agent/paper-trading.md) |
+| `candidate_backtests` | `odds_core.candidate_backtest_models.CandidateBacktest` | [Replay backtest](../evaluation/candidate-backtest.md#stored-runs) |
+| `candidate_backtest_bets` | `odds_core.candidate_backtest_models.CandidateBacktestBet` | [Replay backtest](../evaluation/candidate-backtest.md#stored-runs) |
 | `agent_wakeups` | `odds_core.agent_wakeup_models.AgentWakeup` | [Agent runtime and the agent-run job](../agent/agent-run-job.md) |
 | `espn_fixtures` | `odds_core.epl_data_models.EspnFixture` | [EPL context data](../collection/epl-context-data.md) |
 | `espn_lineups` | `odds_core.epl_data_models.EspnLineup` | [EPL context data](../collection/epl-context-data.md) |

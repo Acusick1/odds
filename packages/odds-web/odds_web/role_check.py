@@ -23,6 +23,8 @@ WRITE_PRIVILEGES = ("INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRI
 READ_TABLES = (
     "paper_trades",
     "candidate_decisions",
+    "candidate_backtests",
+    "candidate_backtest_bets",
     "events",
     "odds_snapshots",
     "prices",

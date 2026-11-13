@@ -1,0 +1,47 @@
+{% if backtests.failure %}
+<p class="unavailable" title="{{ backtests.failure.exception }}: {{ backtests.failure.message }}">Stored backtests unavailable{% if backtests.failure.kind != "unavailable" %} (odds-web error {{ backtests.failure.exception }}, see the server log){% endif %}</p>
+{% endif %}
+{% if backtests.value %}
+<h3>Backtest</h3>
+<div class="sub">Stored replays on completed events, scored like the forward test against the Betfair Exchange close. They never promote a candidate: the forward test below decides.</div>
+{% for run in backtests.value %}
+<h4 class="run">{{ run.kind.value | capitalize }} <span class="sub num">{{ run.start }} … {{ run.end }} · {{ run.leagues | join(', ') }}</span></h4>
+<div class="sub">
+{% if run.kind.value == 'development' %}{% if run.blocks %}The cell is the one the selection rule picked from its grid on this data, so its EV is optimistic.{% else %}Replayed on development data.{% endif %}
+{% else %}One run of the selected cell on the sealed holdout.{% endif %}
+Code <span class="num">{{ run.git_sha[:10] }}</span>, stored {{ run.stored_at | stamp }}.
+</div>
+<div class="tiles">
+  <div class="tile"><div class="k">Bets with a close</div>
+    <div class="v num">{{ run.bets_with_close }}</div>
+    <div class="sub num">{{ run.bets }} placed · {{ run.events }} events</div></div>
+  <div class="tile"><div class="k">Mean EV vs close</div>
+    {% if run.estimate %}
+    <div class="v num {{ 'pos' if run.estimate.mean_ev >= 0 else 'neg' }}">{{ run.estimate.mean_ev | percent }}</div>
+    <div class="sub num">{{ (run.estimate.level * 100) | round | int }}% CI {{ run.estimate.ci[0] | percent }} … {{ run.estimate.ci[1] | percent }}</div>
+    {% else %}<div class="v sub">no bets with a close</div>{% endif %}</div>
+  <div class="tile"><div class="k">P&amp;L (stake units)</div>
+    <div class="v num">{{ run.pnl | signed }}u</div><div class="sub num">ROI {{ run.roi | percent }}</div></div>
+</div>
+{% if run.blocks %}
+<div class="scroll">
+<table class="blocks">
+<thead><tr><th>Development block</th><th>Days</th><th>Leagues</th><th class="r">Bets with a close</th><th class="r">Mean EV</th></tr></thead>
+<tbody class="num">
+{% for b in run.blocks %}
+<tr><td class="text">{{ b.name }}</td><td>{{ b.start }} … {{ b.end }}</td><td class="text">{{ b.leagues | join(', ') }}</td><td class="r">{{ b.bets }}</td>
+<td class="r {{ ('pos' if b.mean_ev >= 0 else 'neg') if b.mean_ev is not none }}">{{ b.mean_ev | percent }}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+{% endif %}
+{% if run.series %}
+<div class="chart" data-chart="ev" data-series='{{ run.series.ev_chart() | tojson }}'></div>
+<div class="legend"><span><svg width="26" height="10"><line class="ci" x1="2" y1="5" x2="24" y2="5"/></svg>{{ (run.estimate.level * 100) | round | int }}% CI of the whole run</span><span>Dashed line: zero EV</span></div>
+<div class="chart" data-chart="cumulative" data-series='{{ run.series.cumulative_chart() | tojson }}'></div>
+<div class="legend"><span><span class="sw sw-expected"></span>Σ stake·EV (signal)</span><span><span class="sw sw-pnl"></span>P&amp;L (signal + luck)</span></div>
+{% endif %}
+{% endfor %}
+<h3>Forward test</h3>
+{% endif %}
