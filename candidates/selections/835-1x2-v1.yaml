@@ -1,0 +1,11 @@
+issue: 835
+market: 1x2
+version: 1
+grid_sha256: 5122dfb2753b51b65c6586efc6386eb89c1dadef7ba98ef9d35ef1b8fa3f6568
+cell:
+  min_probability: 0.6
+  threshold: 0.005
+  minutes_before_kickoff:
+  - 60
+  - 30
+  max_input_age_minutes: 10
