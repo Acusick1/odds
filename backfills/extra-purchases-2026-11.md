@@ -1,6 +1,6 @@
 # Odds API extra purchases, 2026-11: costs and recommendations
 
-Costed options for step 10 of the Odds API month ([#859](https://github.com/Acusick1/odds/issues/859)), and the cost of step 9's NBA sample ([#730](https://github.com/Acusick1/odds/issues/730)). The acquisition key's balance is 3,899,110 units, with no run active (#859, 2026-11-13). NBA 2024-26 (`odds-api-nba-2024-26.yaml`, 161,170 units) waits on step 9 and is not part of these options. No units were spent to produce these figures.
+Costed options for step 10 of the Odds API month ([#859](https://github.com/Acusick1/odds/issues/859)), and the cost of step 9's NBA sample ([#730](https://github.com/Acusick1/odds/issues/730)). The acquisition key's balance is 3,899,110 units, with no run active (#859, 2026-11-13). NBA 2024-26 (`odds-api-nba-2024-26.yaml`, 161,170 units) waits on step 9 and is not part of these options. No units were spent to produce these figures. The manifests named below are in `backfills/proposed/`, outside the tests that every bought manifest in `backfills/` passes (`tests/unit/test_backfill_plan.py`, `tests/integration/test_backfill_replay.py`).
 
 ## Summary
 
