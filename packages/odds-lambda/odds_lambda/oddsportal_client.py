@@ -16,6 +16,7 @@ import json
 import math
 import re
 import time
+import uuid
 from collections import deque
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
@@ -62,6 +63,9 @@ _RETRY_ATTEMPTS = 3
 _FEED_ERROR_MAX_RETRIES = 2
 _FEED_ERROR_DEFAULT_REFRESH_SECONDS = 20
 _FEED_ERROR_MAX_REFRESH_SECONDS = 30
+# The CDN caches a match feed for up to 5 h; a candidate reads prices at most 10 minutes old.
+MAX_FEED_AGE_SECONDS = 120
+_STALE_FEED_RETRIES = 1
 
 _PUSH_RE = re.compile(r"self\.__next_f\.push\((\[.*?\])\)</script>", re.DOTALL)
 _EVENT_KEYS = ("encodeEventId", "home-name", "away-name", "date-start-timestamp", "url", "sport-id")
@@ -79,6 +83,23 @@ class OddsPortalError(Exception):
 
 class _TransientError(Exception):
     """Retryable HTTP status (429 or 5xx), possibly wrapped in a proxy error body."""
+
+
+@dataclass(frozen=True)
+class _Response:
+    status: int
+    text: str
+    age: float | None
+
+
+def _age_seconds(raw: str | None) -> float | None:
+    """The ``Age`` header in seconds; an unreadable one counts as too old."""
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return math.inf
 
 
 @dataclass(frozen=True)
@@ -526,6 +547,13 @@ def select_main_line_window(prices: list[BookmakerPrices], window: float) -> lis
     return [r for line in sorted(by_line) if abs(line - main) <= window for r in by_line[line]]
 
 
+def _decrypt(response: _Response, url: str) -> Any:
+    try:
+        return decrypt_payload(response.text)
+    except OddsPortalError as e:
+        raise OddsPortalError(f"{e} (url={url})") from e
+
+
 async def _sleep(seconds: float) -> None:
     await asyncio.sleep(seconds)
 
@@ -634,13 +662,15 @@ class OddsPortalClient:
             await self._session.close()
             self._session = None
 
-    async def _fetch_text(self, url: str, headers: dict[str, str]) -> tuple[int, str]:
+    async def _fetch(self, url: str, headers: dict[str, str]) -> _Response:
         if self._session is None:
             raise RuntimeError("OddsPortalClient must be used as an async context manager")
         async with self._session.get(url, headers=headers) as response:
-            return response.status, await response.text()
+            return _Response(
+                response.status, await response.text(), _age_seconds(response.headers.get("Age"))
+            )
 
-    async def _get(self, url: str, headers: dict[str, str]) -> str:
+    async def _get(self, url: str, headers: dict[str, str]) -> _Response:
         retrying = AsyncRetrying(
             stop=stop_after_attempt(_RETRY_ATTEMPTS),
             wait=wait_exponential(multiplier=1, min=1, max=8),
@@ -654,18 +684,19 @@ class OddsPortalClient:
             async for attempt in retrying:
                 with attempt:
                     await self._pacer.wait(self._request_delay, priority=self._priority)
-                    status, text = await self._fetch_text(url, headers)
+                    response = await self._fetch(url, headers)
+                    status = response.status
                     if status == 429 or status >= 500:
                         raise _TransientError(f"HTTP {status}")
                     if status != 200:
                         raise OddsPortalError(f"HTTP {status} for {url}")
-                    wrapped = _PROXY_ERROR_RE.match(text)
+                    wrapped = _PROXY_ERROR_RE.match(response.text)
                     if wrapped is not None:
                         upstream = int(wrapped.group(1))
                         if upstream == 429 or upstream >= 500:
                             raise _TransientError(f"upstream status {upstream}")
                         raise OddsPortalError(f"upstream status {upstream} for {url}")
-                    return text
+                    return response
         except OddsPortalError:
             raise
         except (TimeoutError, aiohttp.ClientError, _TransientError) as e:
@@ -676,17 +707,29 @@ class OddsPortalClient:
         raise AssertionError("unreachable")  # pragma: no cover
 
     async def _get_json(self, url: str, headers: dict[str, str]) -> Any:
-        text = await self._get(url, headers)
-        try:
-            return decrypt_payload(text)
-        except OddsPortalError as e:
-            raise OddsPortalError(f"{e} (url={url})") from e
+        return _decrypt(await self._get(url, headers), url)
+
+    async def _get_fresh_json(self, url: str, headers: dict[str, str]) -> Any:
+        """GET ``url`` past the CDN cache, refusing a response cached over ``MAX_FEED_AGE_SECONDS``."""
+        for attempt in range(_STALE_FEED_RETRIES + 1):
+            # The CDN keys its cache on every query param except ``_``.
+            busted = f"{url}&cb={uuid.uuid4().hex}"
+            response = await self._get(busted, headers)
+            if response.age is None or response.age <= MAX_FEED_AGE_SECONDS:
+                return _decrypt(response, busted)
+            logger.warning(
+                "oddsportal_feed_stale", url=busted, age=response.age, attempt=attempt + 1
+            )
+        raise OddsPortalError(
+            f"feed still {response.age} s old in the CDN cache after "
+            f"{_STALE_FEED_RETRIES} retry for {url}"
+        )
 
     async def fetch_listing(self, path: str) -> list[ListingEvent]:
-        html = await self._get(
+        response = await self._get(
             BASE_URL + path, {**_BASE_HEADERS, "Accept": "text/html,application/xhtml+xml"}
         )
-        return parse_listing(html)
+        return parse_listing(response.text)
 
     async def fetch_results(self, path: str, since: datetime) -> FetchedResults:
         """Finished and cancelled matches on a results page, newest first, back to the page holding ``since``.
@@ -694,10 +737,10 @@ class OddsPortalClient:
         A page that fails after the first keeps the earlier pages and marks the result
         incomplete; a failure on the first page raises.
         """
-        html = await self._get(
+        response = await self._get(
             BASE_URL + path, {**_BASE_HEADERS, "Accept": "text/html,application/xhtml+xml"}
         )
-        archive = parse_archive_path(html)
+        archive = parse_archive_path(response.text)
         matches: list[FinishedMatch] = []
         cancelled: list[CancelledMatch] = []
         rows_seen = 0
@@ -763,7 +806,7 @@ class OddsPortalClient:
         self, url: str, headers: dict[str, str], event: ListingEvent, market_key: str
     ) -> dict[str, Any]:
         for attempt in range(_FEED_ERROR_MAX_RETRIES + 1):
-            feed = await self._get_json(url, headers)
+            feed = await self._get_fresh_json(url, headers)
             data = feed.get("d") if isinstance(feed, dict) else None
             if not isinstance(data, dict):
                 raise OddsPortalError(f"unexpected feed shape for {url}")
