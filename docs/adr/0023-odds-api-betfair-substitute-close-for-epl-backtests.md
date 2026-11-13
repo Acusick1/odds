@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Score EPL backtests against the Odds API's Betfair Exchange price where FDUK has no close
@@ -22,8 +22,7 @@ A backtest scores each bet against the Betfair Exchange close of [ADR-0012](0012
   The Odds API price is the latest complete snapshot stamped at or before kick-off and at most 10 minutes before it, whose back overround is within `odds_core.exchange_price.MAX_EXCHANGE_OVERROUND` ([ADR-0014](0014-ignore-wide-exchange-prices.md)). It is devigged proportionally, like the other closes.
 - **Backtests only.** The substitute scores development replays and holdout runs. The live forward test's score, the candidate report on paper trades, and the retail-EV target are unchanged.
 - **EPL `1x2` only.** The test ran on EPL. Other leagues keep the ADR-0012 close order. Totals get no substitute, because the Odds API has no Betfair Exchange totals price (#859).
-- **The EPL holdout stays sealed.** EPL 2022-23 and 2023-24 remain sealed under ADR-0021, and `EPL_2022_24_SEALED` stays true. A holdout run that lists EPL replays EPL from 2022-08-01 to 2024-07-31 and scores its bets against this close.
-- **EPL development screens stay EPL 2024-26.** EPL 2023-24 is inside the sealed window, so a development screen cannot include it under ADR-0021.
+- **The substitute scores EPL bets wherever FDUK has no close,** including EPL 2022-23 and 2023-24, which ADR-0024 makes development data in place of ADR-0021's EPL seal. EPL development screens can therefore score EPL from 2023-04-01, when the Odds API's Betfair EPL h2h begins.
 
 ## Considered options
 
@@ -41,9 +40,8 @@ A backtest scores each bet against the Betfair Exchange close of [ADR-0012](0012
 ## Consequences
 
 - **Where EPL gains a close.** The EPL Odds API run starts 2023-04-01, when its Betfair EPL h2h begins (#859). So:
-  - In the sealed window, the 110 FINAL fixtures from 2023-04-01 and all 380 of 2023-24 have a price within 10 minutes of kick-off.
-  - EPL 2022-23 before 2023-04-01 still has no close. A holdout bet there counts as a bet without a close, which the gate leaves out.
-  - EPL 2020-22, development data under ADR-0021, stays unscoreable.
+  - The 110 FINAL fixtures of EPL 2022-23 from 2023-04-01 and all 380 of 2023-24 have a price within 10 minutes of kick-off, so their bets are scoreable.
+  - EPL 2022-23 before 2023-04-01 still has no close, and neither does EPL 2020-22; bets there can only generate ideas.
 - **The 22 EPL 2024-26 FINAL matches without an FDUK close gain a close.** All are from April and May 2026, and each has an Odds API price 4.4 minutes before kick-off.
 - **The pass is EPL evidence only.** NBA has its own sample under #730, and MLB inherits the NBA result (#787).
 
