@@ -262,9 +262,9 @@ class TestSummaries:
     def test_book_role_and_aliases(self) -> None:
         assert audit.book_role("ladbrokes") == "UK retail"
         assert audit.book_role("betfair_exchange") == "exchange"
-        assert audit.book_role("casumo") == "neither"
+        assert audit.book_role("virginbet") == "neither"
         assert "betfair_ex_uk" in audit.book_aliases("betfair_exchange")
-        assert audit.book_aliases("casumo") == []
+        assert audit.book_aliases("virginbet") == []
 
 
 class TestSeal:
