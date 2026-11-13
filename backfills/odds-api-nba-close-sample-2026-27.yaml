@@ -1,0 +1,29 @@
+# #730's NBA sample: the Odds API's Betfair Exchange price about 10 and 5 minutes before
+# tip-off, for 2026-27 games with a live Betfair close (#859 step 9). Snapshot grid, billing
+# and books follow the NBA probes (#729, #787).
+sport: basketball_nba
+# From the first full day of live Betfair NBA closes. The end is the day the last probability
+# band reaches 50 rows; the planner costs only the stored FINAL games before it.
+seasons:
+  2026-27: {start: 2026-11-01T00:00:00Z, end: 2026-11-26T00:00:00Z}
+# Totals are not requested: the exchange quotes none in any probed sport or season (#787).
+markets: [h2h]
+# The uk region bills as one region, 10 units per call, and returns 11 to 20 UK books per
+# sport, Pinnacle not among them (wiki/collection/odds-api-facts.md#coverage).
+regions: [uk]
+# Decisions 6 to 1 minutes before tip-off, each with a snapshot at most 5 minutes old: the
+# two grid snapshots before a tip-off on a 5-minute mark, about 9.4 and 4.4 minutes before it.
+coverage:
+  - {min_lead_minutes: 1, max_lead_minutes: 6, max_input_age_minutes: 5}
+# 5-minute snapshots, each about 38 s past its 5-minute mark (probed in #729).
+snapshot_grid:
+  - {start: 2022-09-01T00:00:38Z, step_minutes: 5}
+probe:
+  snapshots:
+    - 2026-11-07T00:55:38Z
+  # The NBA probes found games listed 604 to 2054 minutes ahead (#787).
+  min_fixture_lead_hours: 1
+  # Betfair Exchange is the scoring reference and close (ADR-0012); no current candidate or
+  # model uses Pinnacle.
+  required_bookmakers:
+    h2h: [betfair_ex_uk]

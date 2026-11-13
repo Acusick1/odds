@@ -1,0 +1,27 @@
+# Odds API historical totals of the Championship in the last hour before kick-off, 2024-25 and
+# 2025-26 (#859 step 10). Snapshot grid, billing, books and fixture horizon follow the
+# probe (#729, #787).
+sport: soccer_efl_champ
+# FDUK's Betfair Exchange over/under 2.5 close, the only totals close, starts in 2024-25.
+seasons:
+  2024-25: {start: 2024-07-01T00:00:00Z, end: 2025-07-01T00:00:00Z}
+  2025-26: {start: 2025-07-01T00:00:00Z, end: 2026-07-01T00:00:00Z}
+# h2h is not requested: the h2h manifests already hold these times.
+markets: [totals]
+# Historical football totals carry only Pinnacle and William Hill (#527). Two named books
+# bill as one region, 10 units per call.
+bookmakers: [pinnacle, williamhill]
+# A decision at any whole minute in a band finds a snapshot at most its max age old.
+# The last hour of the 2024-26 manifests' KO-2h band.
+coverage:
+  - {min_lead_minutes: 1, max_lead_minutes: 60, max_input_age_minutes: 10}
+# 5-minute snapshots, each about 38 s past its 5-minute mark (probed in #729).
+snapshot_grid:
+  - {start: 2022-09-01T00:00:38Z, step_minutes: 5}
+probe:
+  snapshots:
+    - 2025-09-13T09:55:38Z
+  # Call sharing needs fixtures as far ahead as the earliest coverage, 1 h plus its 10 min max age.
+  min_fixture_lead_hours: 2
+  required_bookmakers:
+    totals: [pinnacle, williamhill]
