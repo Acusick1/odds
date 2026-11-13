@@ -5,22 +5,28 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import math
+import re
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 import aiohttp
 import pytest
 from odds_lambda import oddsportal_client
 from odds_lambda.oddsportal_client import (
     FEED_MARKETS,
+    MAX_FEED_AGE_SECONDS,
     BookmakerContext,
     BookmakerPrices,
     ListingEvent,
     OddsPortalClient,
     OddsPortalError,
     RequestPacer,
+    _age_seconds,
+    _Response,
     decrypt_payload,
     extract_market,
     parse_archive_path,
@@ -253,7 +259,8 @@ class TestExtractMarket:
 
 
 class FakeClient(OddsPortalClient):
-    """Client whose HTTP layer replays scripted ``(status, body)`` responses."""
+    """Client whose HTTP layer replays scripted ``(status, body)`` or ``(status, body, age)``
+    responses."""
 
     def __init__(
         self, responses: list[Any], request_delay: float = 0.0, pacer: RequestPacer | None = None
@@ -262,12 +269,13 @@ class FakeClient(OddsPortalClient):
         self.responses = list(responses)
         self.requests: list[tuple[str, dict[str, str]]] = []
 
-    async def _fetch_text(self, url: str, headers: dict[str, str]) -> tuple[int, str]:
+    async def _fetch(self, url: str, headers: dict[str, str]) -> _Response:
         self.requests.append((url, headers))
         response = self.responses.pop(0)
         if isinstance(response, BaseException):
             raise response
-        return response
+        status, text, *age = response
+        return _Response(status, text, age[0] if age else None)
 
 
 PROXY_503 = "URL:/ajax-sport-country-tournament-archive_/1/SY30SsKF/X0X1/1/0/page/1/ Status: 503"
@@ -311,9 +319,13 @@ class TestClientRequests:
 
         assert [b.name for b in result] == ["bet365"]
         url, headers = client.requests[0]
-        assert url == (
-            "https://www.oddsportal.com/proxy/match-event/"
-            f"1-1-2wo3m634-1-2-{'a' * 32}.dat?geo=GB&lang=en"
+        assert re.fullmatch(
+            re.escape(
+                "https://www.oddsportal.com/proxy/match-event/"
+                f"1-1-2wo3m634-1-2-{'a' * 32}.dat?geo=GB&lang=en&cb="
+            )
+            + "[0-9a-f]{32}",
+            url,
         )
         assert headers["Referer"] == (
             "https://www.oddsportal.com/football/h2h/chelsea-x/everton-y/"
@@ -474,15 +486,91 @@ class TestClientRequests:
             client.requests[0][0] == "https://www.oddsportal.com/football/england/premier-league/"
         )
 
-    async def test_fetch_text_requires_context_manager(self) -> None:
+    async def test_fetch_requires_context_manager(self) -> None:
         with pytest.raises(RuntimeError):
-            await OddsPortalClient()._fetch_text("http://x", {})
+            await OddsPortalClient()._fetch("http://x", {})
 
     async def test_context_manager_opens_and_closes_session(self) -> None:
         async with OddsPortalClient() as client:
             assert client._session is not None
             session = client._session
         assert session.closed
+
+
+FRESH_FEED = _feed({"odds": {"16": [2.0, 3.0, 4.0]}, "act": {"16": True}})
+
+
+class TestFeedCache:
+    async def test_each_feed_request_busts_the_cache_afresh(
+        self, encrypt_payload: Encrypt, sleeps: list[float]
+    ) -> None:
+        envelope = encrypt_payload({"s": 1, "d": {"E": "dcapiexc"}})
+        client = FakeClient([(200, envelope), (200, encrypt_payload(FRESH_FEED))])
+
+        await client.fetch_market(EVENT, "1x2", CONTEXT)
+
+        busts = [parse_qs(urlsplit(url).query)["cb"] for url, _ in client.requests]
+        assert len(busts) == 2
+        assert all(len(bust) == 1 for bust in busts)
+        assert busts[0] != busts[1]
+
+    async def test_transient_retry_busts_the_cache_afresh(
+        self, encrypt_payload: Encrypt, sleeps: list[float]
+    ) -> None:
+        client = FakeClient([(200, PROXY_503), (200, encrypt_payload(FRESH_FEED))])
+
+        await client.fetch_market(EVENT, "1x2", CONTEXT)
+
+        assert client.requests[0][0] != client.requests[1][0]
+
+    async def test_listing_is_not_busted(self, sleeps: list[float]) -> None:
+        client = FakeClient([(200, EMPTY_LISTING)])
+
+        await client.fetch_listing("/x/")
+
+        assert "cb=" not in client.requests[0][0]
+
+    @pytest.mark.parametrize("age", [None, 0.0, float(MAX_FEED_AGE_SECONDS)])
+    async def test_fresh_feed_is_accepted(
+        self, encrypt_payload: Encrypt, sleeps: list[float], age: float | None
+    ) -> None:
+        client = FakeClient([(200, encrypt_payload(FRESH_FEED), age)])
+
+        result = await client.fetch_market(EVENT, "1x2", CONTEXT)
+
+        assert [b.name for b in result] == ["bet365"]
+        assert len(client.requests) == 1
+
+    async def test_stale_feed_is_retried_with_a_new_bust(
+        self, encrypt_payload: Encrypt, sleeps: list[float]
+    ) -> None:
+        body = encrypt_payload(FRESH_FEED)
+        client = FakeClient([(200, body, 13790.0), (200, body, 0.0)])
+
+        with capture_logs() as logs:
+            result = await client.fetch_market(EVENT, "1x2", CONTEXT)
+
+        assert [b.name for b in result] == ["bet365"]
+        assert client.requests[0][0] != client.requests[1][0]
+        assert [log["age"] for log in logs if log["event"] == "oddsportal_feed_stale"] == [13790.0]
+
+    @pytest.mark.parametrize("age", [float(MAX_FEED_AGE_SECONDS + 1), math.inf])
+    async def test_feed_stale_after_a_retry_raises(
+        self, encrypt_payload: Encrypt, sleeps: list[float], age: float
+    ) -> None:
+        body = encrypt_payload(FRESH_FEED)
+        client = FakeClient([(200, body, age), (200, body, age)])
+
+        with pytest.raises(OddsPortalError, match="CDN cache.*match-event"):
+            await client.fetch_market(EVENT, "1x2", CONTEXT)
+
+        assert len(client.requests) == 2
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"), [(None, None), ("0", 0.0), ("13790", 13790.0), ("soon", math.inf)]
+    )
+    def test_age_header_parsing(self, raw: str | None, expected: float | None) -> None:
+        assert _age_seconds(raw) == expected
 
 
 ARCHIVE = "ajax-sport-country-tournament-archive_/1/AbCdEfGh/X1X2/1/0"
