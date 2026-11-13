@@ -31,7 +31,7 @@ The registry is the `candidates/` directory: one `<name>.yaml` file per candidat
 
 `odds_core.candidates.load_candidates` raises a `ValueError` naming the file when a file fails validation, its `name` differs from its file stem or a mechanical file lacks `odds_core.candidates.MechanicalCandidate.rule_sha256`, and when a league is listed by more than one agent candidate whose status is active or promoted. Agents for one sport share `packages/odds-mcp/agents/common.md` and the sport's `base.md`, so two live agents for one sport would run identical prompts. A killed agent does not count, so its replacement can be added.
 
-A change of status goes through a pull request. The version is a strict positive integer (`"3"` is rejected), bumped whenever the rule, parameters, model or league set change ([versioning](../foundations/goal-and-strategy.md#candidates)).
+A change of status goes through a pull request. The version is a strict positive integer (`"3"` is rejected), bumped whenever the rule, parameters, model or league set change, or a collection fix changes the prices earlier decisions saw ([versioning](../foundations/goal-and-strategy.md#candidates)).
 
 ## `odds candidates list`
 
