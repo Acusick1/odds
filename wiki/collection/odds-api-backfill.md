@@ -42,7 +42,7 @@ A manifest in `backfills/` fixes what a historical purchase requests, validated 
 - `odds-api-nba-2024-26.yaml`: NBA 2024-25 and 2025-26, each window starting at opening night so preseason is excluded.
 - `odds-api-mlb-2024-26.yaml`: MLB 2024, 2025 and 2026 as calendar years.
 
-The other manifests in `backfills/` are top-ups not yet bought, costed with a recommendation each in [extra purchases](../../backfills/extra-purchases-2026-11.md).
+The other manifests in `backfills/` are not bought, and are costed with a recommendation each in [extra purchases](../../backfills/extra-purchases-2026-11.md).
 
 The planner prices every stored FINAL event in a window, so the MLB manifest's cost includes the 2026 All-Star Game. `odds backfill plan --manifest M --cost` prints each manifest's cost ([cost and execute a manifest](howto-backfill-odds-api-history.md#cost-and-execute-a-manifest)).
 

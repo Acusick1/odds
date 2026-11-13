@@ -21,7 +21,7 @@ snapshot_grid:
   - {start: 2022-09-01T00:00:38Z, step_minutes: 5}
 probe:
   snapshots:
-    - 2026-11-07T09:55:38Z
+    - 2026-10-24T09:55:38Z
   # Call sharing needs fixtures as far ahead as the earliest coverage, 4 d plus its 6 h max age.
   min_fixture_lead_hours: 102
   # Betfair Exchange is the scoring reference and close (ADR-0012); no current candidate or

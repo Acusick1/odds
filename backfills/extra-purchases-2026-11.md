@@ -4,20 +4,20 @@ Costed options for step 10 of the Odds API month ([#859](https://github.com/Acus
 
 ## Summary
 
-Every call is `h2h` on `regions=uk` at 10 units, apart from item 3 and item 5. Runtime is at 20 to 40 calls a minute per process, and manifests of different sports run in parallel ([limits](../wiki/collection/odds-api-backfill.md#limits)).
+Every call is `h2h` on `regions=uk` at 10 units, apart from item 3 and item 5. Runtime is at 20 to 40 calls a minute per process; the month's runs took about 1.3 to 2.2 s a call (#859). Manifests of different sports run in parallel ([limits](../wiki/collection/odds-api-backfill.md#limits)).
 
 | Item | Calls | Units | Runtime | Probe units | What it adds | What it decides | Recommendation |
 |---|---|---|---|---|---|---|---|
 | NBA sample, step 9 (`odds-api-nba-close-sample-2026-27.yaml`) | 114 now; ≈224 at the run | 1,140 now; ≈2,240 at the run | 6 to 11 min | 10, shared with item 6 | The exchange price about 9.4 and 4.4 min before tip-off for 2026-27 games with a live Betfair close | Whether the Odds API exchange price can be the NBA close, and through #787 the MLB close | **Buy** when the `<0.25` band reaches 50 rows, projected 2026-11-25 ([below](#nba-sample-readiness)) |
-| 1. Older football: La Liga, Serie A, Bundesliga, Ligue 1 and the Championship, 2022-23 from 2023-04-01 and 2023-24 (`odds-api-<league>-2022-24.yaml`) | 36,767 | 367,670 | 4.0 to 8.0 h in 5 processes | 100 | A second development season for the five leagues, 2,430 fixtures | Nothing under the ADRs in force: FDUK has no Betfair Exchange close before 2024-25, and ADR-0023's substitute close is EPL only. With an ADR extending ADR-0023 to these leagues, it scores development bets | **Buy after a probe**, and only with that ADR; otherwise skip |
-| 2. A KO−5 close band where no close exists | 0 | 0 | — | 0 | Nothing: no bought fixture lacks both a close and an exchange price within 10 min | — | **Skip**: the target set is empty |
+| 1. Older football: La Liga, Serie A, Bundesliga, Ligue 1 and the Championship, 2022-23 from 2023-04-01 and 2023-24 (`odds-api-<league>-2022-24.yaml`) | 36,767 | 367,670 | 4.0 to 8.0 h in 5 processes | 100 | A second development season for the five leagues, 2,430 fixtures | Nothing under the ADRs in force: FDUK has no Betfair Exchange close before 2024-25, and ADR-0023's substitute close is EPL only. An ADR extending ADR-0023 to these leagues would give it a close. Round 1 still could not use it, since its development blocks (ADR-0024, `odds_analytics.cell_selection.DEVELOPMENT_BLOCKS`) leave it out; later rounds could | **Buy after a probe**, and only with that ADR; otherwise skip |
+| 2. A KO−5 close band where no close exists | 0 | 0 | — | 0 | Nothing: by row counts, no bought fixture lacks both a close and an exchange quote within 10 min ([method](#method)) | — | **Skip**: the target set is empty |
 | 3. Narrow football totals, KO−1h to KO, 2024-26, six leagues (`odds-api-<league>-totals-2024-26.yaml`) | 20,451 | 204,510 | 2.0 to 4.0 h in 6 processes | 60 | Pinnacle and William Hill totals, every 10 min in the last hour | Nothing scheduled: step 7 judges totals ideas on live data only, and no totals rule exists in code | **Skip** |
-| 4. NBA 2023-24 (`odds-api-nba-2023-24.yaml`) | 6,153 on stored games; ≈7,900 for the full season | 61,530; ≈79,000 | 3.3 to 6.6 h | 20 | A third NBA season | Nothing until step 9 passes: 2023-24 has no live Betfair or Polymarket close | **Buy after step 9 passes**, with NBA 2024-26; skip if it fails |
+| 4. NBA 2023-24 (`odds-api-nba-2023-24.yaml`) | 6,153 on stored games; ≈7,928 for the full season | 61,530; ≈79,280 | 3.3 to 6.6 h | 20 | A third NBA season | Nothing until step 9 passes: 2023-24 has no live Betfair or Polymarket close | **Buy after step 9 passes**, with NBA 2024-26; skip if it fails |
 | 5. NBA spreads on the NBA 2024-26 calls | 16,117 (0 extra if requested with `h2h`) | 161,170 | none extra with `h2h`; 6.7 to 13.4 h alone | 20, after a code change | Retail spreads from William Hill, Ladbrokes, Coral, 888sport, LeoVegas and Matchbook | Nothing: no exchange spreads price, no spreads close in `odds_core.close.CLOSES`, and no spreads candidate | **Skip** |
-| 6. The current season to 2026-12-01: EPL, La Liga, Serie A, Bundesliga, Ligue 1, the Championship and NBA (`odds-api-<league>-2026-27.yaml`, `odds-api-nba-2026-27.yaml`) | 11,313 to date; ≈13,849 to 2026-12-01, net of the NBA sample | 113,130 to date; ≈138,490 to 2026-12-01 | 1.2 to 2.5 h in 7 processes | 70 | The only pre-kick-off prices for the five leagues' 2026-27 before 2026-11-20, and UK retail with the exchange in one snapshot for the 69 EPL games where live Odds API collection has none | Nothing in round 1, whose development and holdout blocks are fixed (ADR-0024). The data can be bought only this month, and FDUK publishes 2026-27 Betfair Exchange closes, so it is scoreable for later rounds | **Buy after a probe**, run last, with the window ending on the run's start day |
+| 6. The current season to 2026-12-01: EPL, La Liga, Serie A, Bundesliga, Ligue 1, the Championship and NBA (`odds-api-<league>-2026-27.yaml`, `odds-api-nba-2026-27.yaml`) | 11,313 to date; ≈13,849 to 2026-12-01, net of the NBA sample | 113,130 to date; ≈138,490 to 2026-12-01 | 1.2 to 2.5 h in 7 processes | 70 | The only pre-kick-off prices for the five leagues' 2026-27 games before 2026-11-20, their first stored 2026-27 event, and UK retail with the exchange in one snapshot for the 69 EPL games where live Odds API collection has none | Nothing in round 1, whose development and holdout blocks are fixed (ADR-0024). The data can be bought only this month, and FDUK publishes 2026-27 Betfair Exchange closes, so it is scoreable for later rounds | **Buy after a probe**, run last, with the window ending on the run's start day |
 | 7. MLB KO−5 (`odds-api-mlb-ko5-2024-26.yaml`) | 2,240 | 22,400 | 56 to 112 min | 0 | An exchange price at most 4.4 min before first pitch on the 3,307 games without one | Only matters if step 9 sets a 5-minute cap on the substitute close: 99.3 to 99.4% of MLB games already have one within 10 min | **Skip** unless step 9's close needs the 5-minute cap; then buy with no probe |
 
-Recommended now: the NBA sample and item 6, about 140,800 units with their 70 probe units. Item 1 adds 367,770 with its probes, if the substitute close is extended. Item 4 adds about 79,020 if step 9 passes. That comes to about 587,590 units, against 3,737,940 left after NBA 2024-26.
+Recommended: the NBA sample and item 6, about 140,800 units with their 70 probe units. Item 1 adds 367,770 with its probes, if the substitute close is extended. Item 4 adds about 79,300 if step 9 passes. That comes to about 587,870 units, against 3,737,940 left after NBA 2024-26.
 
 ## NBA sample readiness
 
@@ -31,7 +31,7 @@ On 2026-11-13, 93 of 171 FINAL 2026-27 NBA games have one: every game from 2026-
 | 0.25–0.5 | 67 | 5.0 | reached |
 | `≥0.5` | 93 | 7.0 | reached |
 
-Games arrive at about 7.2 a day, and 28% of games have a `<0.25` row. Rows whose Odds API price is incomplete or over the overround cap drop out of the comparison, so the band may need a day or two more.
+Games arrive at about 7.0 a day over the same week, and 28% of games have a `<0.25` row. Rows whose Odds API price is incomplete or over the overround cap drop out of the comparison, so the band may need a day or two more.
 
 The sample's manifest plans the two grid snapshots before each tip-off (band 1 to 6 min, max age 5 min), so games tipping off in the same 5 minutes share calls. The planner costs only stored FINAL games before the season's end, set to 2026-11-26.
 
@@ -62,9 +62,9 @@ The sample's manifest plans the two grid snapshots before each tip-off (band 1 t
 | 3 | 2025-09-13T09:55:38Z, per league | 60 | That Pinnacle and William Hill price totals when named as the only books |
 | 4 | 2023-12-16T15:55:38Z and 2024-03-16T15:55:38Z | 20 | That the exchange prices NBA in 2023-24 |
 | 5 | One `h2h,spreads` call at 2025-01-18T15:55:38Z | 20 | Which `uk` books price NBA spreads historically, and whether the exchange does |
-| 6 | 2026-11-07T09:55:38Z per football league; 2026-11-07T00:55:38Z for NBA | 70 | The 2026-27 books and horizon |
+| 6 | 2026-10-24T09:55:38Z per football league; 2026-11-07T00:55:38Z for NBA | 70 | The 2026-27 books and horizon |
 | NBA sample | 2026-11-07T00:55:38Z, the same call as item 6's NBA probe | 0 extra | — |
-| 7 | none: the audited MLB run already shows its content, grid and exchange presence | 0 | — |
+| 7 | none: the audited MLB run already shows its content, grid and exchange presence; the manifest's probe snapshot is not run | 0 | — |
 
-- **Probe calls that are reused.** The football 2026-27 and NBA probe snapshots are calls the item 6 and sample manifests plan anyway, so a run after them skips the probe calls. A probe stores only games with a stored event, so load the fixtures first.
+- **Probe calls that are reused.** The NBA probe snapshot is a planned call of both the sample and item 6's NBA manifest, and the football one is a planned call of the EPL, La Liga and Championship 2026-27 manifests, so a run after the probe skips those calls. A probe stores only games with a stored event, so load the fixtures first.
 - **Totals.** All probes come to 270 units. The recommended package needs 70 now, 100 more with item 1, and 20 more with item 4.

@@ -20,6 +20,8 @@ coverage:
 # 5-minute snapshots, each about 38 s past its 5-minute mark (probed in #729).
 snapshot_grid:
   - {start: 2022-09-01T00:00:38Z, step_minutes: 5}
+# The MLB run's first probe snapshot, already stored. The audited run answers what a probe would
+# check, so this one is not run.
 probe:
   snapshots:
     - 2024-07-20T15:55:38Z
