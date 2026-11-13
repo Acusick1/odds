@@ -7,7 +7,17 @@ from datetime import UTC, datetime, timedelta
 from itertools import count
 
 import pytest
-from odds_core.close import CLOSES, close_grace, close_spec, event_close, pick_close
+from odds_core.close import (
+    CLOSES,
+    SUBSTITUTE_CLOSE_AGE,
+    SUBSTITUTE_CLOSED,
+    backtest_close,
+    close_grace,
+    close_spec,
+    event_close,
+    pick_close,
+    substitute_close,
+)
 from odds_core.close import FDUK_CLOSE as FDUK_CLOSE_SPEC
 from odds_core.exchange_price import MAX_EXCHANGE_OVERROUND, ExchangePrice, exchange_price
 from odds_core.market_prices import market_outcomes
@@ -140,6 +150,82 @@ class TestEventClose:
         close = _close(_betfair(10, LATE))
         assert isinstance(close, ExchangePrice)
         assert sum(close.fair.values()) == pytest.approx(1.0)
+
+
+def _oddsapi(
+    minutes_before: float,
+    prices: tuple[float, float, float],
+    time_basis: TimeBasis = TimeBasis.SOURCE_STAMPED,
+) -> list[Quote]:
+    quoted = make_quotes(
+        EVENT,
+        next(_ids),
+        KICKOFF - timedelta(minutes=minutes_before),
+        [betfair_exchange_bookmaker(prices)],
+        None,
+    )
+    return [replace(q, time_basis=time_basis) for q in quoted]
+
+
+def _backtest(*snapshots: list[Quote], sport: str = "soccer_epl", market: str = "1x2"):
+    return backtest_close([q for s in snapshots for q in s], KICKOFF, sport, market)
+
+
+class TestBacktestClose:
+    def test_live_betfair_comes_first(self) -> None:
+        close = _backtest(_betfair(10, LATE), _fduk_close(FDUK_CLOSE), _oddsapi(4, EARLY))
+        assert close is not None and close.source is Source.BETFAIR
+        assert close.fair == pytest.approx(_fair(LATE))
+
+    def test_fduk_comes_before_the_substitute(self) -> None:
+        close = _backtest(_betfair(45, LATE), _fduk_close(FDUK_CLOSE), _oddsapi(4, EARLY))
+        assert close is not None and close.source is Source.FOOTBALL_DATA_UK
+        assert close.fair == pytest.approx(_fair(FDUK_CLOSE))
+
+    def test_the_substitute_closes_where_neither_exists(self) -> None:
+        close = _backtest(_betfair(45, LATE), _oddsapi(4, EARLY))
+        assert close is not None
+        assert (close.source, close.time_basis) == (Source.ODDS_API, TimeBasis.SOURCE_STAMPED)
+        assert close.time == KICKOFF - timedelta(minutes=4)
+        assert close.fair == pytest.approx(_fair(EARLY))
+
+    def test_the_latest_snapshot_at_or_before_kickoff_wins(self) -> None:
+        close = _backtest(_oddsapi(8, EARLY), _oddsapi(0, LATE), _oddsapi(-2, FDUK_CLOSE))
+        assert close is not None and close.time == KICKOFF
+        assert close.fair == pytest.approx(_fair(LATE))
+
+    @pytest.mark.parametrize(("minutes", "found"), [(10, True), (10.5, False), (30, False)])
+    def test_at_most_ten_minutes_before_kickoff(self, minutes: float, found: bool) -> None:
+        assert SUBSTITUTE_CLOSE_AGE == timedelta(minutes=10)
+        assert (_backtest(_oddsapi(minutes, EARLY)) is not None) is found
+
+    def test_a_wide_snapshot_is_skipped_for_an_earlier_narrow_one(self) -> None:
+        close = _backtest(_oddsapi(8, EARLY), _oddsapi(3, WIDE))
+        assert close is not None and close.fair == pytest.approx(_fair(EARLY))
+
+    def test_only_wide_snapshots_have_no_close(self) -> None:
+        assert _backtest(_oddsapi(3, WIDE)) is None
+
+    def test_an_incomplete_snapshot_is_skipped(self) -> None:
+        partial = [q for q in _oddsapi(3, LATE) if q.outcome is not PriceOutcome.DRAW]
+        close = _backtest(_oddsapi(8, EARLY), partial)
+        assert close is not None and close.fair == pytest.approx(_fair(EARLY))
+
+    def test_a_live_odds_api_fetch_is_not_the_substitute(self) -> None:
+        assert _backtest(_oddsapi(3, EARLY, TimeBasis.OBSERVED)) is None
+
+    def test_only_epl_1x2_takes_the_substitute(self) -> None:
+        assert SUBSTITUTE_CLOSED == {("soccer_epl", Market.ONE_X_TWO)}
+        assert _backtest(_oddsapi(4, EARLY), sport="soccer_spain_la_liga") is None
+
+    def test_the_live_close_never_takes_the_substitute(self) -> None:
+        assert _close(_oddsapi(4, EARLY)) is None
+
+    def test_without_an_age_cap_any_earlier_snapshot_counts(self) -> None:
+        quoted = _oddsapi(148, EARLY)
+        assert substitute_close(quoted, KICKOFF, "1x2") is None
+        close = substitute_close(quoted, KICKOFF, "1x2", max_age=None)
+        assert close is not None and close.fair == pytest.approx(_fair(EARLY))
 
 
 class TestExchangePrice:

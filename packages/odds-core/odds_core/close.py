@@ -1,5 +1,5 @@
 """The close of an event's market: the live Betfair Exchange price ADR-0012 takes, else the
-fallback of the event's sport (ADR-0019)."""
+fallback of the event's sport (ADR-0019); in a backtest, else the substitute (ADR-0023)."""
 
 from __future__ import annotations
 
@@ -11,15 +11,22 @@ from enum import StrEnum
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_core.as_of import by_snapshot
+from odds_core.as_of import by_snapshot, latest_snapshot
 from odds_core.book_price import POLYMARKET_BOOK_SIDE, POLYMARKET_SIDE, book_price
 from odds_core.bookmakers import POLYMARKET_BOOKMAKER
-from odds_core.exchange_price import EXCHANGE_BOOKMAKER, MAX_EXCHANGE_OVERROUND, ExchangePrice
+from odds_core.exchange_price import (
+    EXCHANGE_BOOKMAKER,
+    MAX_EXCHANGE_OVERROUND,
+    ExchangePrice,
+    exchange_price,
+)
 from odds_core.models import Event
 from odds_core.quotes import Quote, quotes
 from odds_core.vocabulary import Market, Side, Source, TimeBasis
 
 LIVE_CLOSE_WINDOW = timedelta(minutes=30)
+# How long before kick-off the substitute close may be stamped (ADR-0023).
+SUBSTITUTE_CLOSE_AGE = timedelta(minutes=10)
 
 
 @dataclass(frozen=True)
@@ -94,6 +101,11 @@ CLOSES: dict[tuple[str, Market], CloseSpec | None] = {
     ("baseball_mlb", Market.H2H): None,
     ("baseball_mlb", Market.TOTALS): None,
 }
+
+
+# The (sport, market)s whose backtests take the substitute close where ``event_close`` has none
+# (ADR-0023).
+SUBSTITUTE_CLOSED: frozenset[tuple[str, Market]] = frozenset({("soccer_epl", Market.ONE_X_TWO)})
 
 
 def close_spec(sport: str, market: str) -> CloseSpec | None:
@@ -174,6 +186,48 @@ def event_close(
         fallback,
         max_exchange_overround=max_exchange_overround,
     )
+
+
+def substitute_close(
+    quoted: Iterable[Quote],
+    kickoff: datetime,
+    market: str,
+    max_age: timedelta | None = SUBSTITUTE_CLOSE_AGE,
+    max_exchange_overround: float = MAX_EXCHANGE_OVERROUND,
+) -> ExchangePrice | None:
+    """The Odds API's Betfair Exchange back price in the latest historical (``source_stamped``)
+    snapshot stamped at or before ``kickoff``, and at most ``max_age`` before it, that is
+    complete and within ``max_exchange_overround``; None when there is none. Devigged."""
+    stamped = [
+        q
+        for q in quoted
+        if q.source is Source.ODDS_API
+        and q.time_basis is TimeBasis.SOURCE_STAMPED
+        and (max_age is None or q.snapshot_time >= kickoff - max_age)
+    ]
+
+    def usable(snapshot: Sequence[Quote]) -> bool:
+        price = exchange_price(snapshot, market)
+        return price is not None and price.overround <= max_exchange_overround
+
+    snapshot = latest_snapshot(stamped, kickoff, usable)
+    return None if snapshot is None else exchange_price(snapshot, market)
+
+
+def backtest_close(
+    quoted: Iterable[Quote],
+    kickoff: datetime,
+    sport: str,
+    market: str,
+    line: float | None = None,
+) -> ExchangePrice | None:
+    """A backtest's close: ``event_close``, else the substitute (``substitute_close``) where
+    ``SUBSTITUTE_CLOSED`` has the sport's market. The live forward test never takes it."""
+    quoted = list(quoted)
+    close = event_close(quoted, kickoff, sport, market, line=line)
+    if close is not None or (sport, Market(market)) not in SUBSTITUTE_CLOSED:
+        return close
+    return substitute_close(quoted, kickoff, market)
 
 
 class CloseKind(StrEnum):
@@ -272,5 +326,32 @@ async def close_quotes(
         if spec.fallback is not None:
             found += await _fallback_quotes(session, event_ids, market, spec.fallback)
         for quote in found:
+            by_event[quote.event_id].append(quote)
+    return by_event
+
+
+async def backtest_close_quotes(
+    session: AsyncSession, events: Sequence[Event], market: str
+) -> dict[int, list[Quote]]:
+    """The quotes of ``events`` that ``backtest_close`` can pick, per event id: those of
+    ``close_quotes`` and, for an event in ``SUBSTITUTE_CLOSED``, its Odds API historical
+    Betfair Exchange backs within ``SUBSTITUTE_CLOSE_AGE`` before kick-off."""
+    by_event = await close_quotes(session, events, market)
+    substituted = [
+        event.id
+        for event in events
+        if event.id is not None and (event.sport_key, Market(market)) in SUBSTITUTE_CLOSED
+    ]
+    if substituted:
+        for quote in await quotes(
+            session,
+            substituted,
+            Market(market),
+            sources=[Source.ODDS_API],
+            time_bases=[TimeBasis.SOURCE_STAMPED],
+            bookmakers=[EXCHANGE_BOOKMAKER],
+            sides=[Side.BACK],
+            before_kickoff=SUBSTITUTE_CLOSE_AGE,
+        ):
             by_event[quote.event_id].append(quote)
     return by_event

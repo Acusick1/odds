@@ -2,9 +2,9 @@
 
 Each event is decided at each of its rule's decision times, from the snapshots stamped at or
 before it, betting each selection at most once per event, and the bets are scored by
-``odds_analytics.candidate_report``: the same close lookup, EV, checkpoint and verdict code
-as the paper trades. Development data can kill an idea but
-never promote one.
+``odds_analytics.candidate_report``: the same EV, checkpoint and verdict code as the paper
+trades, against the backtest close (``odds_core.close.backtest_close``), which adds the
+substitute to the paper trades' close. Development data can kill an idea but never promote one.
 """
 
 from __future__ import annotations
@@ -15,9 +15,10 @@ from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
 
 from odds_core.candidates import MechanicalCandidate
-from odds_core.close import close_grace, close_quotes
+from odds_core.close import backtest_close, backtest_close_quotes, close_grace
 from odds_core.models import Event, EventStatus
 from odds_core.odds_math import calculate_profit_from_decimal, selection_won
+from odds_core.vocabulary import Source
 from odds_lambda.candidate_rules import (
     ModelRuleSpec,
     RuleParams,
@@ -41,8 +42,8 @@ from odds_analytics.candidate_report import (
     Checkpoint,
     ScoredBet,
     checkpoint_at,
+    close_probability,
     scoreable_prefix,
-    selection_close_probability,
     summarize_candidate,
 )
 from odds_analytics.holdout import HoldoutAccess, require_clear
@@ -63,7 +64,7 @@ class HashStatus(StrEnum):
 class Coverage:
     """How much of the range the rule could act on. ``events`` counts the events decided (a
     model rule's scored matches); the other fields count decisions, one per event and decision
-    time, and bets."""
+    time, and bets, ``closes`` the bets with a close by the source of their close."""
 
     events: int
     decisions: int
@@ -74,6 +75,7 @@ class Coverage:
     with_bet: int
     bets: int
     bets_with_close: int
+    closes: dict[Source, int]
 
 
 @dataclass(frozen=True)
@@ -202,16 +204,19 @@ async def _decide(
                 decided.append((event, t, intents))
 
         betting = {e.id: e for e, _, intents in decided if intents}
-        closes = await close_quotes(session, list(betting.values()), market)
+        closes = await backtest_close_quotes(session, list(betting.values()), market)
         for event, t, intents in decided:
             assert event.home_score is not None and event.away_score is not None  # noqa: S101
             for intent in intents:
-                p_close = selection_close_probability(
-                    market,
+                p_close = close_probability(
+                    backtest_close(
+                        closes.get(event.id, []),
+                        event.commence_time,
+                        event.sport_key,
+                        market,
+                        intent.line,
+                    ),
                     intent.outcome.value,
-                    intent.line,
-                    event,
-                    closes.get(event.id, []),
                 )
                 bets.append(
                     ScoredBet(
@@ -239,6 +244,7 @@ async def _decide(
                         line=intent.line,
                         bookmaker=intent.bookmaker,
                         p_close_power=None if p_close is None else p_close.power,
+                        close_source=None if p_close is None else p_close.source,
                     )
                 )
     return bets
@@ -364,7 +370,17 @@ def _coverage(counts: _Counts, events: int, bets: Sequence[ScoredBet]) -> Covera
         with_bet=counts.with_bet,
         bets=len(bets),
         bets_with_close=sum(b.p_close is not None for b in bets),
+        closes=close_sources(bets),
     )
+
+
+def close_sources(bets: Sequence[ScoredBet]) -> dict[Source, int]:
+    """The bets with a close, counted by the source of their close, in source name order."""
+    return {
+        source: n
+        for source in sorted(Source)
+        if (n := sum(b.close_source is source for b in bets if b.p_close is not None))
+    }
 
 
 def league_coverage(replayed: Replayed) -> dict[str, Coverage]:

@@ -34,6 +34,7 @@ from odds_core.candidates import (
     load_candidates,
 )
 from odds_core.database import async_session_maker
+from odds_core.vocabulary import Source
 from odds_lambda.candidate_rules import ModelRuleSpec
 from odds_lambda.candidate_rules.pinning import rule_sha256, validate_candidate_rules
 from odds_lambda.candidate_rules.registry import RULES
@@ -117,7 +118,8 @@ def _backtest_verdict(verdict: Verdict) -> str:
 
 
 def _bet_json(bet: ScoredBet) -> dict[str, Any]:
-    """A placed bet as ``--json`` writes it; ``p_close`` and ``ev`` are null without a close."""
+    """A placed bet as ``--json`` writes it; ``p_close``, ``ev`` and ``close_source`` are null
+    without a close."""
     return {
         "event_id": bet.event_id,
         "league": bet.sport_key,
@@ -129,6 +131,7 @@ def _bet_json(bet: ScoredBet) -> dict[str, Any]:
         "price": bet.price_decimal,
         "p_close": bet.p_close,
         "ev": bet.ev,
+        "close_source": bet.close_source,
     }
 
 
@@ -277,6 +280,10 @@ def _resolve(name_or_path: str) -> MechanicalCandidate:
     raise _fail(f"no registered candidate {name_or_path!r} and no such file")
 
 
+def _close_sources(closes: dict[Source, int]) -> str:
+    return ", ".join(f"{source} {n}" for source, n in closes.items()) or "none"
+
+
 def _checkpoint_row(table: Table, label: str, cp: Checkpoint | None) -> None:
     if cp is None:
         table.add_row(label, "-", "-", "-", "-")
@@ -318,6 +325,7 @@ def _backtest_tables(result: BacktestResult) -> list[Table]:
         str(summary.bets_without_close),
         str(summary.pending_bets),
     )
+    coverage.caption = f"Bets with a close by close source: {_close_sources(cov.closes)}"
     verdict = Table(title="Checkpoint verdict")
     verdict.add_column("Estimate")
     verdict.add_column("n", justify="right")
@@ -537,8 +545,10 @@ def holdout_command(
             "Commit the reservation in candidates/holdout.jsonl."
         ) from exc
     table = Table(title=f"Holdout of #{done.row.issue} {done.row.name} v{done.row.version}")
-    for column in ("Window", "Events", "Decisions", "Bets", "With close"):
-        table.add_column(column, justify="left" if column == "Window" else "right")
+    for column in ("Window", "Events", "Decisions", "Bets", "With close", "Close sources"):
+        table.add_column(
+            column, justify="left" if column in ("Window", "Close sources") else "right"
+        )
     for league in done.leagues:
         cov = league.coverage
         table.add_row(
@@ -547,6 +557,7 @@ def holdout_command(
             str(cov.decisions),
             str(cov.bets),
             str(cov.bets_with_close),
+            _close_sources(cov.closes),
         )
     console.print(table)
     if done.row.leagues_without_window:
@@ -644,6 +655,7 @@ def _selection_table(result: cell_selection.GridSelection) -> Table:
     table.add_column(f"{cell_selection.INTERVAL_LEVEL:.0%} lower", justify="right")
     if result.longshots:
         table.add_column("Power-devig mean EV", justify="right")
+    table.add_column("Close sources")
     table.add_column("Eligible")
     for score in result.scores:
         picked = result.picked is not None and score.index == result.picked.index
@@ -656,6 +668,7 @@ def _selection_table(result: cell_selection.GridSelection) -> Table:
             _ev(score.mean_ev),
             _ev(score.lower_bound),
             *([_ev(score.power_mean_ev)] if result.longshots else []),
+            _close_sources(score.closes),
             "picked" if picked else "yes" if score.eligible else "no",
         ]
         table.add_row(*row, style="green" if picked else None)

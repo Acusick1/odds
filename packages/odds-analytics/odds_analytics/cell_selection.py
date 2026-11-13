@@ -15,10 +15,11 @@ from pathlib import Path
 
 import numpy as np
 import yaml
+from odds_core.vocabulary import Source
 from odds_lambda.candidate_rules.registry import resolve_rule
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_analytics.candidate_backtest import collect
+from odds_analytics.candidate_backtest import close_sources, collect
 from odds_analytics.candidate_report import ScoredBet
 from odds_analytics.holdout import (
     FIVE_LEAGUES,
@@ -93,9 +94,10 @@ class BlockScore:
 
 @dataclass(frozen=True)
 class CellScore:
-    """A cell scored over its bets with a close: ``lower_bound`` is the 90% interval's, and
+    """A cell scored over its bets with a close: ``lower_bound`` is the 90% interval's,
     ``power_mean_ev`` the mean EV against the power-devigged close when the idea bets above
-    ``LONGSHOT_PRICE``, else None."""
+    ``LONGSHOT_PRICE``, else None, and ``closes`` the bets counted by the source of their
+    close."""
 
     index: int
     cell: dict[str, object]
@@ -106,6 +108,7 @@ class CellScore:
     lower_bound: float | None
     power_mean_ev: float | None
     eligible: bool
+    closes: dict[Source, int]
 
 
 def _mean(values: Sequence[float]) -> float | None:
@@ -163,6 +166,7 @@ def score_cell(replay: CellReplay, longshots: bool) -> CellScore:
         lower_bound=lower_bound(scored) if scored else None,
         power_mean_ev=_mean(power) if longshots and len(power) == len(scored) else None,
         eligible=is_eligible(len(scored), events, blocks),
+        closes=close_sources(scored),
     )
 
 

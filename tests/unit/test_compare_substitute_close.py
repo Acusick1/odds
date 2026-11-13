@@ -4,6 +4,7 @@ verdicts, and the report."""
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 
 import numpy as np
@@ -32,13 +33,14 @@ def fduk(prices: tuple[float, float, float]) -> list[Quote]:
 def oddsapi(
     minutes_before: float, prices: tuple[float, float, float], snapshot_id: int = 100
 ) -> list[Quote]:
-    return make_quotes(
+    quoted = make_quotes(
         EVENT,
         snapshot_id,
         KICKOFF - timedelta(minutes=minutes_before),
         [betfair_exchange_bookmaker(prices)],
         None,
     )
+    return [replace(q, time_basis=TimeBasis.SOURCE_STAMPED) for q in quoted]
 
 
 def compare(

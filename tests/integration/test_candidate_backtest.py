@@ -15,9 +15,11 @@ from odds_analytics.candidate_report import (
     load_decision_starts,
 )
 from odds_core.candidates import MechanicalCandidate
-from odds_core.models import EventStatus
+from odds_core.models import Event, EventStatus
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade, TradeResult
+from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.candidate_rules.pinning import rule_sha256
+from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_shaped_snapshot
 
 from tests.test_helpers import (
     betfair_exchange_bookmaker,
@@ -340,6 +342,125 @@ class TestReplay:
         assert result.coverage.events == 0
         assert result.overall is None
         assert result.summary.verdict == "not_yet"
+
+
+# The Odds API's Betfair price (0.4, 0.3, 0.3) against the home retail price of 2.2: EV -12%.
+SUBSTITUTE = (2.5, 10 / 3, 10 / 3)
+
+
+async def add_oddsapi(
+    session: Any,
+    event_id: int,
+    minutes_before: float,
+    prices: tuple[float, float, float] = SUBSTITUTE,
+    kickoff: datetime = KICKOFF,
+) -> None:
+    """An Odds API historical snapshot of the event's Betfair Exchange backs."""
+    event = await session.get(Event, event_id)
+    book = betfair(prices, home_team=event.home_team, away_team=event.away_team)
+    await store_shaped_snapshot(
+        session,
+        event,
+        {"bookmakers": [book]},
+        kickoff - timedelta(minutes=minutes_before),
+        SnapshotShape(Source.ODDS_API, TimeBasis.SOURCE_STAMPED, None),
+    )
+    await session.commit()
+
+
+async def add_fduk_close(session: Any, event_id: int, prices: tuple[float, float, float]) -> None:
+    await store_tagged(
+        session,
+        make_tagged_snapshot(event_id, KICKOFF, [betfair(prices)], "football_data_uk", "kickoff"),
+    )
+    await session.commit()
+
+
+class TestSubstituteClose:
+    async def test_each_close_in_order_scores_the_bet_and_is_counted_by_source(
+        self, pglite_async_session
+    ) -> None:
+        session = pglite_async_session
+        day = timedelta(days=1)
+        # Live close, which beats FDUK and the substitute.
+        await add_event(session, 1, KICKOFF, close=(2.5, 3.6, 3.6))
+        await add_fduk_close(session, 1, (2.0, 4.0, 4.0))
+        await add_oddsapi(session, 1, 4)
+        # FDUK, which beats the substitute.
+        await add_event(session, 2, KICKOFF + day, close=None)
+        await add_fduk_close(session, 2, (2.0, 4.0, 4.0))
+        await add_oddsapi(session, 2, 4, kickoff=KICKOFF + day)
+        # The substitute alone.
+        await add_event(session, 3, KICKOFF + 2 * day, close=None)
+        await add_oddsapi(session, 3, 4, kickoff=KICKOFF + 2 * day)
+        # The Odds API price 15 minutes before kick-off is too old.
+        await add_event(session, 4, KICKOFF + 3 * day, close=None)
+        await add_oddsapi(session, 4, 15, kickoff=KICKOFF + 3 * day)
+
+        result = await run(session)
+
+        sources = {b.event_id: (b.close_source, b.p_close) for b in result.bets}
+        assert sources[1][0] is Source.BETFAIR
+        assert sources[2] == (Source.FOOTBALL_DATA_UK, pytest.approx(0.5))
+        assert sources[3] == (Source.ODDS_API, pytest.approx(0.4))
+        assert sources[4] == (None, None)
+        assert result.coverage.closes == {
+            Source.BETFAIR: 1,
+            Source.FOOTBALL_DATA_UK: 1,
+            Source.ODDS_API: 1,
+        }
+        assert result.league_coverage is not None
+        assert result.league_coverage["soccer_epl"].closes == result.coverage.closes
+
+    async def test_another_league_gets_no_substitute(self, pglite_async_session) -> None:
+        session = pglite_async_session
+        # Before La Liga's sealed 2025-26 season.
+        kickoff = datetime(2025, 4, 10, 15, 0, tzinfo=UTC)
+        await add_event(session, 1, kickoff, close=None, sport="soccer_spain_la_liga")
+        await add_oddsapi(session, 1, 4, kickoff=kickoff)
+
+        result = await replay(
+            session,
+            candidate(sports=["soccer_spain_la_liga"]),
+            date(2025, 4, 1),
+            date(2025, 4, 30),
+            1,
+            now=NOW,
+            n_boot=N_BOOT,
+        )
+
+        assert (result.coverage.bets, result.coverage.bets_with_close) == (1, 0)
+
+    async def test_the_forward_test_report_does_not_take_it(self, pglite_async_session) -> None:
+        session = pglite_async_session
+        await add_event(session, 1, close=None)
+        await add_oddsapi(session, 1, 4)
+        session.add(
+            PaperTrade(
+                event_id=1,
+                market="1x2",
+                selection="home",
+                bookmaker="bet365",
+                price_decimal=2.2,
+                stake=1.0,
+                candidate_name="gap",
+                candidate_version=1,
+                placed_at=T,
+                settled_at=KICKOFF,
+                result=TradeResult.WIN,
+                pnl=1.2,
+            )
+        )
+        await session.commit()
+
+        replayed = await run(session)
+        [forward] = (await candidate_report(session, [], N_BOOT, now=NOW)).summaries
+
+        assert replayed.summary.bets_with_close == 1
+        assert replayed.overall is not None
+        assert replayed.overall.mean_ev == pytest.approx(0.4 * 2.2 - 1)
+        assert (forward.settled_bets, forward.bets_with_close) == (1, 0)
+        assert forward.checkpoint is None
 
 
 class TestHashStatus:

@@ -12,6 +12,7 @@ from odds_analytics.candidate_report import (
     summarize_candidates,
 )
 from odds_core.candidates import AgentCandidate, CandidateStatus, MechanicalCandidate
+from odds_core.vocabulary import Source
 
 NOW = datetime(2026, 6, 1, tzinfo=UTC)
 LONG_AGO = NOW - timedelta(days=30)
@@ -36,6 +37,7 @@ def bet(index: int, ev: float, *, name: str = "gap", p_close: bool = True) -> Sc
         line=None,
         bookmaker="bet365",
         p_close_power=None,
+        close_source=Source.BETFAIR if p_close else None,
     )
 
 

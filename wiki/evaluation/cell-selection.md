@@ -43,11 +43,11 @@ The blocks are `odds_analytics.cell_selection.DEVELOPMENT_BLOCKS`, each limited 
 | EPL 2024-26 | 2024-08-01 to 2026-07-31 | EPL |
 | five leagues 2024-25 | 2024-08-01 to 2025-07-31 | `odds_analytics.holdout.FIVE_LEAGUES`: the Championship, La Liga, Serie A, the Bundesliga, Ligue 1 |
 
-These are the development seasons of [ADR-0021](../../docs/adr/0021-sealed-holdout-and-one-shot-gate.md) and [ADR-0024](../../docs/adr/0024-epl-2022-24-is-development-data.md). EPL's Odds API data starts on 2023-04-01, and an EPL bet before 2024-08-01 has no close until the Odds API substitute close of [#730](https://github.com/Acusick1/odds/issues/730) ([substitute-close comparison](substitute-close-comparison.md)) is accepted and built, so until then the EPL 2022-24 block holds no bets with a close. A replay over six leagues takes a few minutes per cell.
+These are the development seasons of [ADR-0021](../../docs/adr/0021-sealed-holdout-and-one-shot-gate.md) and [ADR-0024](../../docs/adr/0024-epl-2022-24-is-development-data.md). FDUK's Betfair close starts in 2024-25, so an EPL bet in the EPL 2022-24 block has a close only from the Odds API substitute ([replay close](candidate-backtest.md#replay), [ADR-0023](../../docs/adr/0023-odds-api-betfair-substitute-close-for-epl-backtests.md)), which begins on 2023-04-01; a bet before then has none. A replay over six leagues takes a few minutes per cell.
 
 ## Score and pick
 
-`odds_analytics.cell_selection.score_cell` scores a cell over its bets with a close, each bet's EV that of the [replay backtest](candidate-backtest.md#replay) (`odds_analytics.candidate_report.ScoredBet.ev`): the bet count, the distinct events, each block's bets and mean EV, the pooled mean EV (total EV over the bet count) and the lower bound.
+`odds_analytics.cell_selection.score_cell` scores a cell over its bets with a close, each bet's EV that of the [replay backtest](candidate-backtest.md#replay) (`odds_analytics.candidate_report.ScoredBet.ev`): the bet count, the distinct events, each block's bets and mean EV, the pooled mean EV (total EV over the bet count), the lower bound, and the bets counted by the source of their close (`odds_analytics.cell_selection.CellScore.closes`), for information.
 
 - **Eligible** (`odds_analytics.cell_selection.is_eligible`): at least `odds_analytics.cell_selection.MIN_BETS` (50) bets in at least `odds_analytics.cell_selection.MIN_EVENTS` (30) events, and a mean EV above 0 in every block with at least `odds_analytics.cell_selection.MIN_BLOCK_BETS` (20) bets.
 - **Lower bound** (`odds_analytics.cell_selection.lower_bound`): the lower end of the 90% (`odds_analytics.cell_selection.INTERVAL_LEVEL`) event-clustered percentile bootstrap interval of the mean EV, from `odds_analytics.retail_ev_metrics.event_clustered_ratio` with `odds_analytics.cell_selection.RESAMPLES` (10,000) resamples and seed `odds_analytics.cell_selection.SEED` (821), its generator created afresh for each cell. Each resample draws the events, in id order, with replacement, and its mean is its bets' total EV over their count. The bound is the 5% quantile.
@@ -56,7 +56,7 @@ These are the development seasons of [ADR-0021](../../docs/adr/0021-sealed-holdo
 
 ## Output
 
-The command prints one table: each cell's number, the parameters that vary across the grid (the title names the fixed ones), bets, events, each block's bets and mean EV, the mean EV, the lower bound, the power-devig mean EV when reported, and whether it is eligible, the picked row marked (`odds_cli.commands.candidates._selection_table`).
+The command prints one table: each cell's number, the parameters that vary across the grid (the title names the fixed ones), bets, events, each block's bets and mean EV, the mean EV, the lower bound, the power-devig mean EV when reported, the bets by close source, and whether it is eligible, the picked row marked (`odds_cli.commands.candidates._selection_table`).
 
 With an eligible cell, `odds_analytics.cell_selection.write_selection` writes `candidates/selections/<issue>-<market>-v<version>.yaml`, an `odds_analytics.holdout.Selection` of the issue, market, version, the grid file's sha256 and the picked cell, which `odds_analytics.holdout.load_plan` loads, and the command prints the next step: commit it in its own commit and run the holdout. It refuses to replace an existing file. Without one it prints that the idea is killed on development data and writes nothing; the exit code is 0 either way.
 

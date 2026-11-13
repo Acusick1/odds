@@ -5,18 +5,26 @@ from __future__ import annotations
 import dataclasses
 import json
 from contextlib import asynccontextmanager
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
-from odds_analytics.candidate_backtest import Coverage, HashStatus, Replayed, _Counts, score
+from odds_analytics.candidate_backtest import (
+    BacktestResult,
+    Coverage,
+    HashStatus,
+    Replayed,
+    _Counts,
+    score,
+)
 from odds_analytics.candidate_model import Refit, Tuning
 from odds_analytics.candidate_parity import DecisionParity, ParityReport, ParityStatus
-from odds_analytics.candidate_report import DecisionStart, Verdict
+from odds_analytics.candidate_report import DecisionStart, ScoredBet, Verdict
 from odds_cli.main import app
 from odds_core.candidates import MechanicalCandidate
+from odds_core.vocabulary import Source
 from typer.testing import CliRunner
 
 from tests.unit.test_candidates import MECHANICAL, write
@@ -398,8 +406,8 @@ class TestPerLeagueTable:
         from rich.console import Console
 
         epl = LeagueBreakdown("soccer_epl", 3, 2, 0.05, 1.5)
-        cov = Coverage(4, 8, 6, 6, 0, 6, 3, 3, 2)
-        empty = Coverage(2, 2, 0, 0, 0, 0, 0, 0, 0)
+        cov = Coverage(4, 8, 6, 6, 0, 6, 3, 3, 2, {})
+        empty = Coverage(2, 2, 0, 0, 0, 0, 0, 0, 0, {})
         table = _league_table(
             "pooled v1", (epl,), {"soccer_epl": cov, "soccer_italy_serie_a": empty}
         )
@@ -410,3 +418,62 @@ class TestPerLeagueTable:
         assert "the verdict is the pooled series'" in text
         assert "soccer_epl" in text and "+0.0500" in text and "+1.50" in text
         assert "soccer_italy_serie_a" in text
+
+
+class TestCloseSources:
+    def result(self) -> BacktestResult:
+        candidate = MechanicalCandidate.model_validate(MECHANICAL)
+        (league,) = candidate.sports
+
+        def bet(event_id: int, source: Source | None) -> ScoredBet:
+            return ScoredBet(
+                candidate.name,
+                candidate.version,
+                event_id,
+                NOW,
+                1.0,
+                0.5,
+                2.0,
+                None if source is None else 0.55,
+                NOW,
+                timedelta(0),
+                league,
+                "home",
+                None,
+                "bet365",
+                None,
+                source,
+            )
+
+        bets = [bet(1, Source.BETFAIR), bet(2, Source.ODDS_API), bet(3, Source.ODDS_API)]
+        replayed = Replayed(
+            [*bets, bet(4, None)], {league: _Counts()}, {league: 4}, 4, None, (), False
+        )
+        return score(candidate, date(2025, 8, 1), date(2025, 9, 1), replayed, 1, NOW, N_BOOT, 0)
+
+    def test_coverage_counts_the_bets_with_a_close_by_source(self) -> None:
+        assert self.result().coverage.closes == {Source.BETFAIR: 1, Source.ODDS_API: 2}
+
+    def test_the_coverage_table_prints_them(self) -> None:
+        from io import StringIO
+
+        from odds_cli.commands.candidates import _backtest_tables
+        from rich.console import Console
+
+        out = StringIO()
+        for table in _backtest_tables(self.result()):
+            Console(file=out, width=250).print(table)
+        text = " ".join(out.getvalue().split())
+        assert "Bets with a close by close source: betfair 1, odds_api 2" in text
+
+    def test_json_writes_them_and_each_bets_source(self) -> None:
+        from odds_cli.commands.candidates import _backtest_json
+
+        payload = json.loads(json.dumps(_backtest_json(self.result()), default=str))
+        assert payload["coverage"]["closes"] == {"betfair": 1, "odds_api": 2}
+        assert [b["close_source"] for b in payload["bets"]] == [
+            "betfair",
+            "odds_api",
+            "odds_api",
+            None,
+        ]
