@@ -1,0 +1,9 @@
+issue: 842
+market: 1x2
+version: 1
+grid_sha256: 387c8d501a6d6ce45689ff36e12de98a610c65027b03b10322d6fc27bd5e3ff6
+cell:
+  threshold: 0.03
+  minutes_before_kickoff:
+  - 360
+  max_input_age_minutes: 60
