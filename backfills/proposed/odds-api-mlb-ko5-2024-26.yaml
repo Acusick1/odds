@@ -1,0 +1,33 @@
+# A top-up of odds-api-mlb-2024-26.yaml: one snapshot 1 to 5 minutes before first pitch
+# (#859 step 10). Its content, grid and billing are the audited run's
+# (backfills/odds-api-mlb-2024-26.audit.md).
+sport: baseball_mlb
+# The windows of odds-api-mlb-2024-26.yaml.
+seasons:
+  "2024": {start: 2024-01-01T00:00:00Z, end: 2025-01-01T00:00:00Z}
+  "2025": {start: 2025-01-01T00:00:00Z, end: 2026-01-01T00:00:00Z}
+  "2026": {start: 2026-01-01T00:00:00Z, end: 2027-01-01T00:00:00Z}
+# Totals are not requested: the exchange quotes none in any probed sport or season (#787).
+markets: [h2h]
+# The uk region bills as one region, 10 units per call, and returns 11 to 20 UK books per
+# sport, Pinnacle not among them (wiki/collection/odds-api-facts.md#coverage).
+regions: [uk]
+# A decision 1 minute before first pitch finds a snapshot at most 5 minutes old: the grid
+# snapshot before a first pitch on a 5-minute mark, about 4.4 minutes before it. The run
+# skips every time the 2024-26 run stored.
+coverage:
+  - {min_lead_minutes: 1, max_lead_minutes: 1, max_input_age_minutes: 5}
+# 5-minute snapshots, each about 38 s past its 5-minute mark (probed in #729).
+snapshot_grid:
+  - {start: 2022-09-01T00:00:38Z, step_minutes: 5}
+# The MLB run's first probe snapshot, already stored. The audited run answers what a probe would
+# check, so this one is not run.
+probe:
+  snapshots:
+    - 2024-07-20T15:55:38Z
+  # The MLB probes found games listed 584 to 612 minutes ahead (#787).
+  min_fixture_lead_hours: 1
+  # Betfair Exchange is the scoring reference and close (ADR-0012); no current candidate or
+  # model uses Pinnacle.
+  required_bookmakers:
+    h2h: [betfair_ex_uk]

@@ -1,0 +1,30 @@
+# Odds API historical backfill of NBA 2026-27 to 1 December 2026 (#859 step 10). Snapshot
+# grid, billing, books and fixture horizon follow the probe (#729, #787).
+sport: basketball_nba
+# The window starts at opening night, so preseason is excluded (#782), and ends at the
+# latest start of the month's extra purchases (#859).
+seasons:
+  2026-27: {start: 2026-10-21T00:00:00Z, end: 2026-12-01T00:00:00Z}
+# Totals are not requested: the exchange quotes none in any probed sport or season (#787).
+markets: [h2h]
+# The uk region bills as one region, 10 units per call, and returns 11 to 20 UK books per
+# sport, Pinnacle not among them (wiki/collection/odds-api-facts.md#coverage).
+regions: [uk]
+# A decision at any whole minute in a band finds a snapshot at most its max age old.
+# The bands of odds-api-nba-2024-26.yaml, chosen in #740, ending at 8 h since the API lists
+# only about the next 10 h of games (#787).
+coverage:
+  - {min_lead_minutes: 1, max_lead_minutes: 120, max_input_age_minutes: 10}
+  - {min_lead_minutes: 121, max_lead_minutes: 480, max_input_age_minutes: 60}
+# 5-minute snapshots, each about 38 s past its 5-minute mark (probed in #729).
+snapshot_grid:
+  - {start: 2022-09-01T00:00:38Z, step_minutes: 5}
+probe:
+  snapshots:
+    - 2026-11-07T00:55:38Z
+  # Call sharing needs fixtures as far ahead as the earliest coverage, 8 h plus its 1 h max age.
+  min_fixture_lead_hours: 9
+  # Betfair Exchange is the scoring reference and close (ADR-0012); no current candidate or
+  # model uses Pinnacle.
+  required_bookmakers:
+    h2h: [betfair_ex_uk]

@@ -1,0 +1,29 @@
+# Odds API historical backfill of EPL 2026-27 to 1 December 2026 (#859 step 10).
+# Snapshot grid, billing, books and fixture horizon follow the probe (#729, #787).
+sport: soccer_epl
+# The window ends at the latest start of the month's extra purchases (#859).
+seasons:
+  2026-27: {start: 2026-07-01T00:00:00Z, end: 2026-12-01T00:00:00Z}
+# Totals are not requested: the exchange quotes none in any probed sport or season (#787).
+markets: [h2h]
+# The uk region bills as one region, 10 units per call, and returns 11 to 20 UK books per
+# sport, Pinnacle not among them (wiki/collection/odds-api-facts.md#coverage).
+regions: [uk]
+# A decision at any whole minute in a band finds a snapshot at most its max age old.
+# The bands of the 2024-26 manifests, chosen in #740.
+coverage:
+  - {min_lead_minutes: 1, max_lead_minutes: 120, max_input_age_minutes: 10}
+  - {min_lead_minutes: 121, max_lead_minutes: 1440, max_input_age_minutes: 60}
+  - {min_lead_minutes: 1441, max_lead_minutes: 10080, max_input_age_minutes: 360}
+# 5-minute snapshots, each about 38 s past its 5-minute mark (probed in #729).
+snapshot_grid:
+  - {start: 2022-09-01T00:00:38Z, step_minutes: 5}
+probe:
+  snapshots:
+    - 2026-10-24T09:55:38Z
+  # Call sharing needs fixtures as far ahead as the earliest coverage, 7 d plus its 6 h max age.
+  min_fixture_lead_hours: 174
+  # Betfair Exchange is the scoring reference and close (ADR-0012); no current candidate or
+  # model uses Pinnacle.
+  required_bookmakers:
+    h2h: [betfair_ex_uk]
