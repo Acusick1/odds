@@ -2,7 +2,7 @@
 
 Coverage of the EPL Odds API historical run (`h2h` stored as `1x2`, `regions=uk`), read from the production database on 2026-11-12 after the run finished at 21:07Z. The tables below each season come from `uv run python scripts/audit_backfill.py --manifest backfills/odds-api-epl-2022-26.yaml` ([audit a finished manifest](../wiki/collection/howto-backfill-odds-api-history.md#audit-a-finished-manifest)). The near-kick-off Betfair Exchange figures are research inputs: whether they can stand in for the FDUK close is [#730](https://github.com/Acusick1/odds/issues/730)'s result, still pending.
 
-EPL 2022-23 and 2023-24 are sealed while `odds_analytics.holdout.EPL_2022_24_SEALED` is true ([ADR-0021](../docs/adr/0021-sealed-holdout-and-one-shot-gate.md)). Their sections and this summary report counts, coverage and ages only: no overround check, back-price check or other price-derived statistic. 2022-23 covers the fixtures from 2023-04-01.
+EPL 2022-23 and 2023-24 were sealed when this audit ran ([ADR-0021](../docs/adr/0021-sealed-holdout-and-one-shot-gate.md)); they are development data under [ADR-0024](../docs/adr/0024-epl-2022-24-is-development-data.md). Their sections and this summary report counts, coverage and ages only: no overround check, back-price check or other price-derived statistic. 2022-23 covers the fixtures from 2023-04-01.
 
 ## Summary
 

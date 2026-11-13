@@ -170,8 +170,7 @@ class TestSealInTheLibrary:
     def test_the_replay_script_never_replays_sealed_days(self) -> None:
         segments = holdout.development_segments("soccer_epl", date(2015, 8, 1), date(2026, 11, 9))
         assert segments == [
-            (date(2015, 8, 1), date(2022, 7, 31)),
-            (date(2024, 8, 1), date(2026, 11, 9)),
+            (date(2015, 8, 1), date(2026, 11, 9)),
         ]
         assert holdout.development_segments(
             "soccer_spain_la_liga", date(2015, 8, 1), date(2026, 7, 31)
@@ -207,21 +206,16 @@ class TestWindows:
             ("soccer_spain_la_liga", "2025-08-01", True),
             ("soccer_spain_la_liga", "2026-07-31", True),
             ("soccer_spain_la_liga", "2026-08-01", False),
+            ("soccer_epl", "2023-01-01", False),
             ("soccer_epl", "2025-09-01", False),
-            ("soccer_epl", "2023-01-01", True),
-            ("soccer_epl", "2022-07-31", False),
         ],
     )
     def test_inclusive_edges_by_sport(self, sport: str, day: str, sealed: bool) -> None:
         d = date.fromisoformat(day)
         assert bool(holdout.intersecting(sport, d, d)) is sealed
 
-    def test_epl_2022_24_follows_the_switch_and_defaults_sealed(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        assert holdout.EPL_2022_24_SEALED is True
-        monkeypatch.setattr(holdout, "EPL_2022_24_SEALED", False)
-        assert not holdout.intersecting("soccer_epl", date(2023, 1, 1), date(2023, 1, 2))
+    def test_only_the_five_leagues_are_sealed(self) -> None:
+        assert [w.sport for w in holdout.holdout_windows()] == list(holdout.FIVE_LEAGUES)
 
     def test_events_are_selected_by_utc_kickoff_day(self) -> None:
         session = MagicMock()
@@ -360,45 +354,26 @@ class TestPlan:
             chosen.write_text(yaml.safe_dump(selection(grid, market=market, version=version)))
             assert holdout.load_plan(chosen, holdout_repo).prereg.stem == stem
 
-    @pytest.mark.parametrize(
-        ("sealed", "windowed", "windowless"),
-        [
-            (True, ["soccer_epl", "soccer_spain_la_liga"], []),
-            (False, ["soccer_spain_la_liga"], ["soccer_epl"]),
-        ],
-    )
     def test_a_league_without_a_window_is_set_aside_while_another_has_one(
-        self,
-        holdout_repo: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        sealed: bool,
-        windowed: list[str],
-        windowless: list[str],
+        self, holdout_repo: Path
     ) -> None:
-        monkeypatch.setattr(holdout, "EPL_2022_24_SEALED", sealed)
         grid = holdout_repo / "preregistrations" / f"{STEM}.yaml"
-        grid.write_text(yaml.safe_dump(preregistration(leagues=["soccer_epl", windowed[-1]])))
+        grid.write_text(
+            yaml.safe_dump(preregistration(leagues=["soccer_epl", "soccer_spain_la_liga"]))
+        )
         self.rewrite_selection(holdout_repo)
         plan = self.plan(holdout_repo)
-        assert (plan.holdout_leagues, plan.windowless_leagues) == (windowed, windowless)
+        assert (plan.holdout_leagues, plan.windowless_leagues) == (
+            ["soccer_spain_la_liga"],
+            ["soccer_epl"],
+        )
 
-    @pytest.mark.parametrize(("sealed", "refused"), [(True, False), (False, True)])
-    def test_epl_alone_is_refused_only_without_its_window(
-        self,
-        holdout_repo: Path,
-        monkeypatch: pytest.MonkeyPatch,
-        sealed: bool,
-        refused: bool,
-    ) -> None:
-        monkeypatch.setattr(holdout, "EPL_2022_24_SEALED", sealed)
+    def test_epl_alone_is_refused(self, holdout_repo: Path) -> None:
         grid = holdout_repo / "preregistrations" / f"{STEM}.yaml"
         grid.write_text(yaml.safe_dump(preregistration(leagues=["soccer_epl"])))
         self.rewrite_selection(holdout_repo)
-        if refused:
-            with pytest.raises(holdout.HoldoutRefused, match="none of soccer_epl has a sealed"):
-                self.plan(holdout_repo)
-        else:
-            assert self.plan(holdout_repo).windowless_leagues == []
+        with pytest.raises(holdout.HoldoutRefused, match="none of soccer_epl has a sealed"):
+            self.plan(holdout_repo)
 
     def test_a_pre_registration_of_leagues_none_of_which_has_a_window_is_refused(
         self, holdout_repo: Path
@@ -703,30 +678,21 @@ class TestRun:
         git_commit(directory.parent)
         return path
 
-    @pytest.mark.parametrize("sealed", [True, False])
-    def test_epl_is_replayed_only_while_it_has_a_window_and_the_row_records_when_not(
-        self,
-        holdout_repo: Path,
-        collected: list[Collected],
-        monkeypatch: pytest.MonkeyPatch,
-        sealed: bool,
+    def test_epl_is_not_replayed_and_the_row_records_it_as_without_a_window(
+        self, holdout_repo: Path, collected: list[Collected]
     ) -> None:
-        monkeypatch.setattr(holdout, "EPL_2022_24_SEALED", sealed)
-        leagues = ["soccer_epl", "soccer_spain_la_liga"]
         path = self.register_epl_and_la_liga(holdout_repo)
 
         done = asyncio.run(holdout_run.run_holdout(None, path, holdout_repo, NOW))  # type: ignore[arg-type]
 
-        replayed_leagues = tuple(leagues if sealed else leagues[1:])
-        assert [(c[0], tuple(c[1]), c[2]) for c in collected] == [
-            (replayed_leagues, replayed_leagues, replayed_leagues)
-        ]
-        assert [r.window.sport for r in done.leagues] == list(replayed_leagues)
-        assert done.row.leagues_without_window == ([] if sealed else ["soccer_epl"])
-        assert done.row.result.bets == 40 * len(replayed_leagues)
+        replayed = ("soccer_spain_la_liga",)
+        assert [(c[0], tuple(c[1]), c[2]) for c in collected] == [(replayed, replayed, replayed)]
+        assert [r.window.sport for r in done.leagues] == list(replayed)
+        assert done.row.leagues_without_window == ["soccer_epl"]
+        assert done.row.result.bets == 40
         *_, stored = holdout.load_ledger(holdout_repo)
         assert stored == done.row
-        assert {w.sport for w in done.row.windows} == set(replayed_leagues)
+        assert {w.sport for w in done.row.windows} == set(replayed)
 
     def test_a_second_run_is_refused_without_reading_any_holdout_data(
         self, holdout_repo: Path, collected: list[Collected]
@@ -795,7 +761,6 @@ class TestRun:
         async def session() -> Any:
             yield None
 
-        monkeypatch.setattr(holdout, "EPL_2022_24_SEALED", False)
         monkeypatch.setattr("odds_cli.commands.candidates.candidates_dir", lambda: holdout_repo)
         monkeypatch.setattr("odds_cli.commands.candidates.async_session_maker", session)
         path = self.register_epl_and_la_liga(holdout_repo)

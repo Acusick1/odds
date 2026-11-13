@@ -45,12 +45,6 @@ SELECTION_RULE_PATTERN = r"^https://github\.com/[^/\s]+/[^/\s]+/(issues|pull)/[0
 # Below this many holdout bets the gate asks only that the cell is not killed, and flags it.
 MIN_GATE_BETS = 30
 
-# Whether EPL 2022-23 and 2023-24 are sealed. They join the holdout once the substitute close is
-# accepted (issue 730); until then no close exists to score them, so sealing them costs nothing
-# and errs safe. Set False only if the substitute close is rejected; EPL then has no window, and a
-# pre-registration that lists it runs on its other leagues.
-EPL_2022_24_SEALED = True
-
 # Seasons run 1 August to 31 July.
 FIVE_LEAGUES = (
     "soccer_efl_champ",
@@ -77,10 +71,7 @@ class Window(BaseModel):
 
 
 def holdout_windows() -> list[Window]:
-    windows = [Window(sport=s, start=date(2025, 8, 1), end=date(2026, 7, 31)) for s in FIVE_LEAGUES]
-    if EPL_2022_24_SEALED:
-        windows.append(Window(sport="soccer_epl", start=date(2022, 8, 1), end=date(2024, 7, 31)))
-    return windows
+    return [Window(sport=s, start=date(2025, 8, 1), end=date(2026, 7, 31)) for s in FIVE_LEAGUES]
 
 
 def windows_of(sport: str) -> list[Window]:

@@ -30,5 +30,6 @@ Development data has been examined many times, so a result on it cannot promote 
 
 ## Evidence
 
+- Superseded in part: [ADR-0024](0024-epl-2022-24-is-development-data.md) makes EPL 2022-23 and 2023-24 development data, so the sealed holdout is the five leagues' 2025-26 only.
 - Issues: #820 (decision), #821 (round rules, cell selection), #828 (implementation), #730 (EPL substitute close), #827 (pooled drafts).
 - Code: `odds_analytics.holdout`, `odds_analytics.holdout_run`, `odds_analytics.candidate_backtest.final_events`, `odds_cli.commands.candidates.holdout_command`, `scripts/check_candidate_versions.py`.
