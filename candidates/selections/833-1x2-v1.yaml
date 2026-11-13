@@ -1,0 +1,11 @@
+issue: 833
+market: 1x2
+version: 1
+grid_sha256: 6893b37821e1862721e0d14308c5611fe0503eae96006d37b799067760941ae9
+cell:
+  min_ratio: 1.05
+  gap: 0.01
+  minutes_before_kickoff:
+  - 60
+  - 30
+  max_input_age_minutes: 10
