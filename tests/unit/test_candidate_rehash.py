@@ -16,6 +16,7 @@ import pytest
 import yaml
 from odds_analytics import candidate_rehash
 from odds_analytics.candidate_rehash import RehashResult, Replay
+from odds_analytics.holdout import Window
 from odds_core.candidates import candidates_dir, load_candidates
 from odds_core.rehash_ledger import REHASH_LEDGER, Rehash, load_rehashes
 from odds_lambda.candidate_rules.registry import RULES
@@ -95,6 +96,7 @@ class TestRehash:
         monkeypatch.setattr(candidate_rehash, "frozen_snapshot", frozen_snapshot)
         monkeypatch.setattr(candidate_rehash, "base_checkout", base_checkout)
         monkeypatch.setattr(candidate_rehash, "replay_under", replay_under)
+        monkeypatch.setattr(candidate_rehash, "windows_under", lambda checkout: [])
         monkeypatch.setattr(candidate_rehash, "parity_counts", parity_counts)
         return fakes
 
@@ -277,3 +279,48 @@ class TestLedger:
         with pytest.raises(ValueError):
             Rehash.model_validate_json(line)
         assert hook._row_problem(line) is not None
+
+
+class TestDevelopmentRanges:
+    def test_days_either_revision_seals_are_not_replayed(self, tmp_path: Path) -> None:
+        path = tmp_path / "gap-one.yaml"
+        path.write_text(yaml.safe_dump(candidate("gap-one")))
+        base_seal = Window(sport="soccer_epl", start=date(2022, 8, 1), end=date(2024, 7, 31))
+
+        ranges = candidate_rehash.development_ranges(
+            [path], date(2022, 1, 1), date(2025, 1, 31), [base_seal]
+        )
+
+        assert ranges == {
+            "soccer_epl": [("2022-01-01", "2022-07-31"), ("2024-08-01", "2025-01-31")]
+        }
+
+
+class TestWindowsUnder:
+    def test_a_revision_without_a_holdout_seals_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        failed = subprocess.CompletedProcess(
+            [], 1, "", "ModuleNotFoundError: No module named 'odds_analytics.holdout'"
+        )
+        monkeypatch.setattr(candidate_rehash.subprocess, "run", lambda *a, **k: failed)
+
+        assert candidate_rehash.windows_under(tmp_path) == []
+
+    def test_a_revision_s_windows_are_read_from_its_code(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        window = {"sport": "soccer_epl", "start": "2022-08-01", "end": "2024-07-31"}
+        done = subprocess.CompletedProcess([], 0, json.dumps([window]), "")
+        monkeypatch.setattr(candidate_rehash.subprocess, "run", lambda *a, **k: done)
+
+        assert candidate_rehash.windows_under(tmp_path) == [Window.model_validate(window)]
+
+    def test_any_other_failure_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        failed = subprocess.CompletedProcess([], 1, "", "SyntaxError")
+        monkeypatch.setattr(candidate_rehash.subprocess, "run", lambda *a, **k: failed)
+
+        with pytest.raises(subprocess.CalledProcessError):
+            candidate_rehash.windows_under(tmp_path)

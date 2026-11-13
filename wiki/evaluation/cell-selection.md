@@ -43,7 +43,7 @@ The blocks are `odds_analytics.cell_selection.DEVELOPMENT_BLOCKS`, each limited 
 | EPL 2024-26 | 2024-08-01 to 2026-07-31 | EPL |
 | five leagues 2024-25 | 2024-08-01 to 2025-07-31 | `odds_analytics.holdout.FIVE_LEAGUES`: the Championship, La Liga, Serie A, the Bundesliga, Ligue 1 |
 
-These are the development seasons of [ADR-0021](../../docs/adr/0021-sealed-holdout-and-one-shot-gate.md) and [ADR-0024](../../docs/adr/0024-epl-2022-24-is-development-data.md), which put EPL 2022-24 in place of the round-1 rule's EPL 2020-22. EPL's Odds API data starts on 2023-04-01, and an EPL bet before 2024-08-01 has no close until the Odds API substitute close of [#730](https://github.com/Acusick1/odds/issues/730) ([substitute-close comparison](substitute-close-comparison.md)) is accepted and built, so until then the EPL 2022-24 block holds no bets with a close. A replay over six leagues takes a few minutes per cell.
+These are the development seasons of [ADR-0021](../../docs/adr/0021-sealed-holdout-and-one-shot-gate.md) and [ADR-0024](../../docs/adr/0024-epl-2022-24-is-development-data.md). EPL's Odds API data starts on 2023-04-01, and an EPL bet before 2024-08-01 has no close until the Odds API substitute close of [#730](https://github.com/Acusick1/odds/issues/730) ([substitute-close comparison](substitute-close-comparison.md)) is accepted and built, so until then the EPL 2022-24 block holds no bets with a close. A replay over six leagues takes a few minutes per cell.
 
 ## Score and pick
 

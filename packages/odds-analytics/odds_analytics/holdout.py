@@ -14,7 +14,7 @@ import itertools
 import json
 import os
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -83,10 +83,14 @@ def intersecting(sport: str, start: date, end: date) -> list[Window]:
     return [w for w in windows_of(sport) if start <= w.end and end >= w.start]
 
 
-def development_segments(sport: str, start: date, end: date) -> list[tuple[date, date]]:
-    """``start``..``end`` less the sport's holdout windows, as ordered day ranges."""
+def development_segments(
+    sport: str, start: date, end: date, windows: Sequence[Window] | None = None
+) -> list[tuple[date, date]]:
+    """``start``..``end`` less the sport's holdout windows, or the sport's among ``windows``
+    when given, as ordered day ranges."""
+    sealed = windows_of(sport) if windows is None else [w for w in windows if w.sport == sport]
     segments = [(start, end)]
-    for w in sorted(windows_of(sport), key=lambda w: w.start):
+    for w in sorted(sealed, key=lambda w: w.start):
         clipped: list[tuple[date, date]] = []
         for a, b in segments:
             if b < w.start or a > w.end:

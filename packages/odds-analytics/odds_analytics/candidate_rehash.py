@@ -24,7 +24,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession, create_async_engine
 
 from odds_analytics.candidate_parity import ParityStatus, check_parity
-from odds_analytics.holdout import development_segments
+from odds_analytics.holdout import Window, development_segments, holdout_windows
 
 REPLAY_SCRIPT = Path("scripts") / "replay_candidates.py"
 LOCK_FILE = "odds-rehash.lock"
@@ -87,6 +87,43 @@ def _leagues(path: Path) -> tuple[str, ...]:
     return candidate.sports
 
 
+# Prints the holdout windows a checkout's code seals, as JSON.
+_WINDOWS_PROBE = (
+    "import json; from odds_analytics.holdout import holdout_windows; "
+    "print(json.dumps([w.model_dump(mode='json') for w in holdout_windows()]))"
+)
+
+
+def windows_under(checkout: Path) -> list[Window]:
+    """The holdout windows ``checkout``'s code seals; none for a revision without a holdout."""
+    result = subprocess.run(
+        ["uv", "run", "--project", str(checkout), "python", "-c", _WINDOWS_PROBE],
+        cwd=checkout,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        if "No module named 'odds_analytics.holdout'" in result.stderr:
+            return []
+        raise subprocess.CalledProcessError(
+            result.returncode, result.args, result.stdout, result.stderr
+        )
+    return [Window.model_validate(w) for w in json.loads(result.stdout)]
+
+
+def development_ranges(
+    paths: Sequence[Path], start: date, end: date, windows: Sequence[Window]
+) -> dict[str, list[tuple[str, str]]]:
+    """Each league's days of ``start``..``end`` that no window in ``windows`` seals."""
+    return {
+        sport: [
+            (a.isoformat(), b.isoformat())
+            for a, b in development_segments(sport, start, end, windows)
+        ]
+        for sport in {league for p in paths for league in _leagues(p)}
+    }
+
+
 def replay_under(
     checkout: Path,
     root: Path,
@@ -94,17 +131,12 @@ def replay_under(
     paths: Sequence[Path],
     start: date,
     end: date,
+    segments: dict[str, list[tuple[str, str]]],
     database_url: str,
     snapshot: str,
 ) -> Replay:
     """The replay of the candidate files under ``checkout``'s code from the exported database
-    ``snapshot``, and the rule's hash under that code."""
-    # The replay never reads the sealed holdout: each league's days less its windows, which the
-    # script replays as separate ranges. Computed here because a base revision has no holdout.
-    segments = {
-        sport: [(a.isoformat(), b.isoformat()) for a, b in development_segments(sport, start, end)]
-        for sport in {league for p in paths for league in _leagues(p)}
-    }
+    ``snapshot``, over each league's ``segments``, and the rule's hash under that code."""
     with tempfile.TemporaryDirectory() as tmp:
         out, hash_out = Path(tmp) / "replay.json", Path(tmp) / "hash"
         subprocess.run(
@@ -215,14 +247,20 @@ async def _evidence(
     # One snapshot, held open, is what both replays and parity read.
     async with frozen_snapshot(database_url) as (connection, snapshot):
         with base_checkout(root, base) as checkout:
-            before = replay_under(checkout, root, rule, paths, start, end, database_url, snapshot)
+            # Both replays read only days neither revision seals, so neither refuses a range.
+            segments = development_ranges(
+                paths, start, end, [*holdout_windows(), *windows_under(checkout)]
+            )
+            before = replay_under(
+                checkout, root, rule, paths, start, end, segments, database_url, snapshot
+            )
         olds = {c.rule_sha256 for c in candidates}
         if olds != {before.rule_sha256}:
             raise Refused(
                 f"the candidates record {sorted(str(o) for o in olds)}, not the hash at base "
                 f"{base}, {before.rule_sha256}"
             )
-        after = replay_under(root, root, rule, paths, start, end, database_url, snapshot)
+        after = replay_under(root, root, rule, paths, start, end, segments, database_url, snapshot)
         if after.rule_sha256 != new:
             raise Refused(f"the working tree's hash {after.rule_sha256} is not {new}")
         if before.output != after.output:
