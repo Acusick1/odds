@@ -8,7 +8,7 @@ status: accepted
 
 A backtest scores each bet against the Betfair Exchange close of [ADR-0012](0012-retail-ev-against-betfair-exchange-close.md): the last live Betfair job snapshot within 30 minutes before kick-off, else the FDUK Betfair Exchange closing price. FDUK has that price only from 2024-25, so EPL `1x2` bets before then have no close and can only generate ideas. The FDUK Pinnacle close was tested as a substitute and rejected: its ≥ 0.5 probability band had mean Δp −0.64 pp against the ±0.5 pp limit (#730).
 
-When #730 ran, [ADR-0021](0021-sealed-holdout-and-one-shot-gate.md) sealed EPL 2022-23 and 2023-24 as holdout, conditional on this substitute close being accepted. ADR-0024 replaces that seal and makes those seasons development data.
+When #730 ran, [ADR-0021](0021-sealed-holdout-and-one-shot-gate.md) sealed EPL 2022-23 and 2023-24 as holdout, conditional on this substitute close being accepted. [ADR-0024](0024-epl-2022-24-is-development-data.md) replaces that seal and makes those seasons development data.
 
 #730 pre-set the test. Measure `Δp = p_oddsapi_bfe − p_fduk_bfe_close`, with both prices devigged proportionally, on EPL matches that have an FDUK Betfair close. The substitute passes when every outcome has `|mean Δp| ≤ 0.3 pp` and `sd ≤ 1.0 pp`, and every probability band (< 0.25, 0.25–0.5, ≥ 0.5) with at least 50 rows has `|mean Δp| ≤ 0.5 pp`. A band under 50 rows is inconclusive. Freshness alone does not make a valid substitute. The outcome #730 set for a pass is an ADR adding the substitute to ADR-0012's close order for backtests, with the live forward-test score unchanged.
 
