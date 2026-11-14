@@ -1,12 +1,12 @@
 """Every reader behind every odds-web page, populated, under the ``odds_web`` role and its grants.
 
-A reader that starts using a table the grants file does not list fails these tests, because each
-sport's branch of each reader runs against rows and the role may read only what the file grants.
+A reader that starts using a table ``READ_TABLES`` does not list fails these tests, because each
+sport's branch of each reader runs against rows and the role may read only what ``odds_web.grants``
+grants from that list.
 """
 
 from __future__ import annotations
 
-import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -30,7 +30,6 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from tests.test_helpers import (
-    ODDS_WEB_GRANTS,
     as_odds_web_login,
     betfair_exchange_bookmaker,
     book,
@@ -263,7 +262,7 @@ class TestEveryReaderUnderTheRole:
         pages = await fetch_every_page(populated, tmp_path)
 
         for path, body in pages.items():
-            assert 'class="unavailable"' not in body, path
+            assert 'class="unavailable"' not in body and "odds-web error" not in body, path
         assert all(name in pages["/"] for name in MARKETS)
         # The sport branches that read different tables: the strip's calendars and sources, the
         # closes of EPL's FDUK, NBA's Polymarket and MLB's none, and each candidate's coverage.
@@ -277,17 +276,6 @@ class TestEveryReaderUnderTheRole:
         assert all(c.name in coverage for c in CANDIDATES if c.kind == "mechanical")
         for candidate in CANDIDATES:
             assert "bet365" in pages[f"/c/{candidate.name}/{candidate.version}"]
-
-    def test_the_grants_file_lists_exactly_the_tables_the_readers_use(self) -> None:
-        granted = {
-            table.strip()
-            for listed in re.findall(
-                r"GRANT SELECT ON(.*?)TO odds_web", ODDS_WEB_GRANTS.read_text(), re.S
-            )
-            for table in listed.split(",")
-        }
-
-        assert granted == set(READ_TABLES)
 
     @pytest.mark.parametrize("table", READ_TABLES)
     async def test_a_table_the_role_cannot_read_fails_a_page(

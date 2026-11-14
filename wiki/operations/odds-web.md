@@ -16,6 +16,7 @@ sources:
   - odds_web.backtests
   - odds_web.decisions
   - odds_web.role_check
+  - odds_web.grants
   - odds_lambda.health_readers.source_freshness
   - odds_lambda.health_readers.last_heartbeats
   - odds_lambda.health_readers.schedule_heartbeat_name
@@ -36,7 +37,6 @@ sources:
   - odds_analytics.backtest_store.kill_reason
   - odds_core.config.DatabaseConfig
   - odds-web.service
-  - scripts/odds_web_grants.sql
   - deploy.sh
 status: stable
 ---
@@ -55,7 +55,7 @@ Systemd runs it as `odds-web.service` beside `odds-scheduler.service`, with `CPU
 
 The app never uses `odds_core.database.async_session_maker`, which binds to `DATABASE_URL` only. `odds_web.db.web_database_from_settings` builds its own engine from `odds_core.config.DatabaseConfig.web_url` (`WEB_DATABASE_URL`) and every reader takes a session from that factory (`odds_web.db.WebDatabase`).
 
-- **The role.** `WEB_DATABASE_URL` names the `odds_web` role, which `scripts/odds_web_grants.sql` limits to `SELECT` on the tables the pages read, each of which `odds_web.role_check.READ_TABLES` also probes: `events`, `odds_snapshots`, `prices`, `paper_trades`, `candidate_decisions`, `candidate_backtests`, `candidate_backtest_bets`, `fetch_logs`, `alert_history`, `mlb_probable_pitchers` and the APScheduler `schedules` and `jobs` tables. It grants nothing else and sets no default privileges, so a table a reader starts using must be added to the file. The file also sets the role's `default_transaction_read_only`.
+- **The role.** `WEB_DATABASE_URL` names the `odds_web` role. `odds_web.role_check.READ_TABLES` is the one allowlist of the tables the pages read: `events`, `odds_snapshots`, `prices`, `paper_trades`, `candidate_decisions`, `candidate_backtests`, `candidate_backtest_bets`, `fetch_logs`, `alert_history`, `mlb_probable_pitchers` and the APScheduler `schedules` and `jobs` tables. `python -m odds_web.grants` (`odds_web.grants.apply_grants`) applies it over `DATABASE_URL`: it sets the role's `default_transaction_read_only`, grants `USAGE` on `public`, revokes every privilege on every public table and grants `SELECT` on the allowlist, in one transaction, so it is safe to re-run and a table removed from the list loses its grant. It sets no default privileges, so a table a reader starts using must be added to `odds_web.role_check.READ_TABLES`. `deploy.sh` runs it after every migration, then `python -m odds_web.role_check` as the role over `WEB_DATABASE_URL`, which probes each table in `odds_web.role_check.READ_TABLES` and fails the deploy before any restart if the role cannot read one, can write, or is elevated ([Redeploy](../scheduling/howto-run-scheduler-service.md#redeploy)).
 - **The engine.** `odds_web.db.build_web_database` opens at most `odds_web.db.POOL_SIZE` connections. Every transaction on it is `READ ONLY` and carries `odds_web.db.STATEMENT_TIMEOUT_MS` as its statement timeout (`odds_web.db.restrict_transactions`), so a DSN that is not the restricted role still cannot write through the app.
 - **`odds copy` and `--db`.** `odds_cli.db_override.override_database_url` swaps the database name in `WEB_DATABASE_URL` like the agent's DSN.
 
@@ -104,7 +104,7 @@ Below the table, a "Killed" list shows each idea whose latest stored [grid](../e
 - **Decision timeline.** `odds_web.decisions.load_decision_history` reads `odds_core.paper_trade_models.CandidateDecision` rows of the version (by name and version, whatever leagues it recorded): the last `odds_web.decisions.WINDOW` days up to today as one mark per decision (bet, no bet or missed), and the count of every decision and of the missed ones for the tile. Only a mechanical candidate has one; an agent's trades have no decision rows, and an earlier version, whose kind is unknown, shows one only if it recorded decisions.
 - **Bet ledger.** `odds_web.ledger.load_ledger_page` pages the version's paper trades newest first, with their stakes, `odds_web.ledger.PAGE_SIZE` to a page, and looks up the close of only that page's events with `odds_analytics.candidate_report.close_probabilities`, on each trade's own line, and shows its proportionally devigged probability. Unlike the series it keeps void trades, shown dimmed with their result, and unsettled ones, shown as pending. It is read apart from the report, so for up to a cache window it can list a trade the tiles do not count yet.
 
-The readers need no table beyond those in the grants file.
+The readers need no table beyond those in `odds_web.role_check.READ_TABLES`.
 
 ## Status strip
 

@@ -226,8 +226,8 @@ confirm "Run ./scripts/backup-prod-db.sh odds-web-role now?" || exit 1
 ./scripts/backup-prod-db.sh odds-web-role
 
 stage "Create the odds_web role and apply its grants"
-say "Creates the login role odds_web with a generated password, then applies"
-say "scripts/odds_web_grants.sql (SELECT on the tables the UI reads, nothing else)."
+say "Creates the login role odds_web with a generated password, then applies its grants"
+say "over DATABASE_URL (SELECT on odds_web.role_check.READ_TABLES, nothing else)."
 note "The grants name the APScheduler tables, so the scheduler must have booted once on this database."
 confirm "Create the role and apply the grants on the production database?" || exit 1
 ODDS_WEB_PASSWORD="$(openssl rand -hex 24)"
@@ -242,7 +242,7 @@ BEGIN
 END
 \$\$;
 SQL
-"${PSQL[@]}" < scripts/odds_web_grants.sql
+uv run python -m odds_web.grants
 say "Role created and grants applied."
 
 stage "Write WEB_DATABASE_URL into .env"

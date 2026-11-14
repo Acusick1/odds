@@ -1,6 +1,7 @@
 """Check, over a connection made as the ``odds_web`` role, that the role can read and cannot write.
 
-``python -m odds_web.role_check`` is the host wizard's last step before it installs the unit.
+``python -m odds_web.role_check`` is the host wizard's check before it installs the unit, and
+``deploy.sh``'s after it applies the grants.
 """
 
 from __future__ import annotations
@@ -18,8 +19,8 @@ INSUFFICIENT_PRIVILEGE = "42501"
 # ``default_transaction_read_only`` the rejection is the first of these, not the second.
 WRITE_REJECTIONS = (READ_ONLY_SQL_TRANSACTION, INSUFFICIENT_PRIVILEGE)
 WRITE_PRIVILEGES = ("INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER")
-# The tables the readers use, as ``scripts/odds_web_grants.sql`` grants them; the first is the
-# one the write probe targets.
+# The one allowlist: the tables the readers use. ``odds_web.grants`` grants exactly these and the
+# check probes each; the first is the one the write probe targets.
 READ_TABLES = (
     "paper_trades",
     "candidate_decisions",

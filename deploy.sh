@@ -3,8 +3,9 @@
 # Deploy-with-confidence for the always-on local scheduler and the web UI.
 #
 # Pulls the latest code, syncs dependencies, applies migrations, smoke-tests
-# the bootstrapped jobs, and only then restarts the systemd-managed scheduler and
-# then odds-web. If migration or smoke fails, the script aborts BEFORE the restarts;
+# the bootstrapped jobs, applies the odds_web role's grants and checks them as that role,
+# and only then restarts the systemd-managed scheduler and then odds-web. If migration,
+# smoke, the grants or the role check fails, the script aborts BEFORE the restarts;
 # the running services are untouched on the old code unless a migration was pending,
 # in which case both were stopped first and stay down.
 #
@@ -139,7 +140,15 @@ migration_committed=1
 echo "==> scheduler smoke (SCHEDULER_DRY_RUN=true)"
 SCHEDULER_DRY_RUN=true uv run odds scheduler smoke
 
-# Only reached when migrate + smoke both succeed (set -e aborts otherwise).
+# The odds_web role reads only the tables in odds_web.role_check.READ_TABLES. Grant them over
+# DATABASE_URL (the superuser), then connect as odds_web over WEB_DATABASE_URL, so a migration
+# that adds a table the UI reads cannot reach a restart with the role unable to read it.
+echo "==> odds_web grants"
+uv run python -m odds_web.grants
+echo "==> odds_web role check"
+uv run python -m odds_web.role_check
+
+# Only reached when migrate, smoke, the grants and the role check all succeed (set -e aborts otherwise).
 service_states() {
     echo "  $SERVICE: $(systemctl is-active "$SERVICE" 2>/dev/null || true)" >&2
     echo "  $WEB_SERVICE: $(systemctl is-active "$WEB_SERVICE" 2>/dev/null || true)" >&2
