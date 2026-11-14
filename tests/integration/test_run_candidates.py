@@ -14,6 +14,7 @@ import pytest
 import structlog
 import yaml
 from odds_analytics.candidate_parity import ParityStatus, check_parity
+from odds_core.bookmakers import BOOK_SETS, BookSet
 from odds_core.candidates import MechanicalCandidate
 from odds_core.models import Event, EventStatus
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
@@ -358,7 +359,8 @@ class TestDecisions:
         assert spy.await_args.args[2] == "1x2"
         assert spy.await_args.args[3] == DUE - timedelta(minutes=60)
         assert spy.await_args.args[4] == timedelta(minutes=120)
-        assert spy.await_args.args[6] == NOW
+        assert spy.await_args.args[6] == BOOK_SETS[BookSet.UK_RETAIL]
+        assert spy.await_args.args[7] == NOW
 
     async def test_failed_decision_is_not_recorded_and_others_run(
         self, pglite_async_session, registry
