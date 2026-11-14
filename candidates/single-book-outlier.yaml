@@ -9,7 +9,7 @@ issue: 833
 start_date: 2026-11-13
 status: active
 rule: single_book_outlier
-rule_sha256: 06258d0c05c223e862c13cc3f46da574f43899155720e4bbd172ac4210ea8544
+rule_sha256: 8ca80b06c84f0999fef41e57fad4f544290085427402baebfd3dfb88ad104427
 params:
   min_ratio: 1.05
   gap: 0.01
