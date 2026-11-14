@@ -541,7 +541,13 @@ class SpentRun:
             raise HoldoutRefused("a SpentRun is issued by spent_run() only")
 
     def access(self, sport: str) -> HoldoutAccess:
-        return _access(self.plan, sport)
+        """The access to the window the ledger recorded for ``sport``, not the seal's current."""
+        for window in self.row.windows:
+            if window.sport == sport:
+                return HoldoutAccess(window, _ISSUER)
+        raise HoldoutRefused(
+            f"{sport} has no window in the recorded run of {self.plan.prereg.stem}"
+        )
 
 
 def spent_run(plan: Plan, directory: Path) -> SpentRun:

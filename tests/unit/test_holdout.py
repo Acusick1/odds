@@ -803,14 +803,16 @@ class TestSpentReplay:
     """A spent holdout replays again to be stored, and only if it reproduces the ledger."""
 
     @pytest.fixture
-    def stub(self, monkeypatch: pytest.MonkeyPatch) -> dict[str, int]:
+    def stub(self, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         """La Liga's and the Bundesliga's holdout bets, ``per_league`` of them each."""
-        state = {"per_league": 40, "access": 0}
+        state: dict[str, Any] = {"per_league": 40, "access": 0, "ranges": None, "windows": None}
 
         async def collect(
-            _session: object, candidate: MechanicalCandidate, _ranges: object, **kw: Any
+            _session: object, candidate: MechanicalCandidate, ranges: object, **kw: Any
         ) -> bt.Replayed:
             state["access"] = len(kw["access"])
+            state["ranges"] = ranges
+            state["windows"] = [a.window for a in kw["access"]]
             return replayed(
                 [
                     scored_bet(
@@ -829,7 +831,7 @@ class TestSpentReplay:
         return state
 
     @pytest.fixture
-    def spent(self, holdout_repo: Path, stub: dict[str, int]) -> Path:
+    def spent(self, holdout_repo: Path, stub: dict[str, Any]) -> Path:
         path = holdout_repo / "selections" / f"{STEM}.yaml"
         asyncio.run(holdout_run.run_holdout(None, path, holdout_repo, NOW))  # type: ignore[arg-type]
         git_commit(holdout_repo.parent)
@@ -840,7 +842,7 @@ class TestSpentReplay:
         return asyncio.run(holdout_run.replay_spent(None, path, directory, NOW))  # type: ignore[arg-type]
 
     def test_a_replay_that_reproduces_the_ledger_returns_the_pooled_result(
-        self, holdout_repo: Path, spent: Path, stub: dict[str, int]
+        self, holdout_repo: Path, spent: Path, stub: dict[str, Any]
     ) -> None:
         replay = self.replay(spent, holdout_repo)
 
@@ -852,6 +854,26 @@ class TestSpentReplay:
         ]
         assert replay.row == holdout.load_ledger(holdout_repo)[-1]
 
+    def test_the_windows_are_the_ledgers_not_the_seals_current_ones(
+        self,
+        holdout_repo: Path,
+        spent: Path,
+        stub: dict[str, Any],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        recorded = holdout.load_ledger(holdout_repo)[-1].windows  # type: ignore[union-attr]
+        later = [
+            holdout.Window(sport=w.sport, start=date(2026, 8, 1), end=date(2027, 7, 31))
+            for w in recorded
+        ]
+        monkeypatch.setattr(holdout, "holdout_windows", lambda: later)
+
+        replay = self.replay(spent, holdout_repo)
+
+        assert replay.windows == recorded
+        assert stub["windows"] == recorded
+        assert stub["ranges"] == {w.sport: [(w.start, w.end)] for w in recorded}
+
     def test_it_appends_nothing_to_the_ledger_and_spends_nothing(
         self, holdout_repo: Path, spent: Path
     ) -> None:
@@ -862,7 +884,7 @@ class TestSpentReplay:
         assert (holdout_repo / "holdout.jsonl").read_text() == before
 
     def test_a_replay_with_other_bets_than_the_ledger_is_a_mismatch(
-        self, holdout_repo: Path, spent: Path, stub: dict[str, int]
+        self, holdout_repo: Path, spent: Path, stub: dict[str, Any]
     ) -> None:
         stub["per_league"] = 39
 
@@ -878,7 +900,7 @@ class TestSpentReplay:
             self.replay(spent, holdout_repo)
 
     def test_an_idea_with_no_result_in_the_ledger_is_refused_without_reading_the_windows(
-        self, holdout_repo: Path, stub: dict[str, int]
+        self, holdout_repo: Path, stub: dict[str, Any]
     ) -> None:
         path = holdout_repo / "selections" / f"{STEM}.yaml"
 
@@ -928,7 +950,7 @@ class TestSpentReplay:
         self,
         holdout_repo: Path,
         spent: Path,
-        stub: dict[str, int],
+        stub: dict[str, Any],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         stored: list[Any] = []

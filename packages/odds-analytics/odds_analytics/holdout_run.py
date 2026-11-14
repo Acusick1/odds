@@ -195,7 +195,10 @@ async def replay_spent(
     plan = load_plan(path, directory)
     spent = spent_run(plan, directory)
     prereg = plan.prereg
-    draft = pooled_draft(prereg, plan.cell, now.date(), "Holdout replay", plan.holdout_leagues)
+    windows = list(spent.row.windows)
+    draft = pooled_draft(
+        prereg, plan.cell, now.date(), "Holdout replay", [w.sport for w in windows]
+    )
     try:
         resolve_rule(draft)
     except ValueError as exc:
@@ -205,7 +208,6 @@ async def replay_spent(
             f"the rule {prereg.rule} hashes {rule_sha256(prereg.rule)} now and the ledger holds "
             f"{spent.row.rule_sha256}: the code that ran is not this checkout's"
         )
-    windows = [windows_of(sport)[0] for sport in draft.sports]
     _, pooled = await _replay_windows(
         session, draft, windows, [spent.access(sport) for sport in draft.sports], now
     )
