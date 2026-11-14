@@ -166,6 +166,53 @@ class TestLeagueField:
         assert "sports changed without a version bump" in error
 
 
+class TestBooksField:
+    """A mechanical file without `books` reads as `books: uk_retail`: adding that line is no
+    change, and changing the set is."""
+
+    YAML = BASE_YAML + "kind: mechanical\nrule: exchange_gap\nmarket: 1x2\nsports: [soccer_epl]\n"
+
+    @pytest.fixture
+    def repo(self, candidates_repo: Path) -> Path:
+        (candidates_repo / "candidates" / "back-longest.yaml").write_text(self.YAML)
+        git(candidates_repo, "add", "candidates")
+        git(candidates_repo, "commit", "-q", "-m", "base")
+        return candidates_repo
+
+    def errors(self, repo: Path, new: str) -> list[str]:
+        (repo / "candidates" / "back-longest.yaml").write_text(new)
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--base", "HEAD"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+        return result.stderr.splitlines()
+
+    def test_adding_the_full_roster_set_at_the_same_version_passes(self, repo: Path) -> None:
+        assert self.errors(repo, self.YAML + "books: uk_retail\n") == []
+
+    def test_changing_the_set_at_the_same_version_fails(self, repo: Path) -> None:
+        (error,) = self.errors(repo, self.YAML + "books: odds_api_uk\n")
+        assert "books changed without a version bump" in error
+
+    def test_changing_the_set_with_a_bump_passes(self, repo: Path) -> None:
+        new = self.YAML.replace("version: 2", "version: 3") + "books: odds_api_uk\n"
+        assert self.errors(repo, new) == []
+
+    def test_changing_the_set_of_a_file_that_has_one_fails(self, repo: Path) -> None:
+        self.errors(repo, self.YAML + "books: uk_retail\n")
+        git(repo, "commit", "-qam", "declare")
+        (error,) = self.errors(repo, self.YAML + "books: odds_api_uk\n")
+        assert "books changed without a version bump" in error
+
+    def test_an_agent_file_is_not_given_a_set(self, repo: Path) -> None:
+        agent = BASE_YAML + "kind: agent\nsports: [soccer_epl]\n"
+        (repo / "candidates" / "back-longest.yaml").write_text(agent)
+        git(repo, "commit", "-qam", "agent")
+        assert self.errors(repo, agent + "# unchanged\n") == []
+
+
 class TestIdentityKeys:
     """A name's rule and market are fixed: another rule or market is another candidate."""
 

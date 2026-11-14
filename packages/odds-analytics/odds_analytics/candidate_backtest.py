@@ -10,14 +10,15 @@ substitute to the paper trades' close. Development data can kill an idea but nev
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
+from functools import reduce
 
+from odds_core.bookmakers import BOOK_SETS, BookSet
 from odds_core.candidates import MechanicalCandidate
-from odds_core.close import backtest_close, backtest_close_quotes, close_grace
+from odds_core.close import backtest_close, backtest_close_quotes
 from odds_core.models import Event, EventStatus
-from odds_core.odds_math import calculate_profit_from_decimal, selection_won
 from odds_core.vocabulary import Source
 from odds_lambda.candidate_rules import (
     ModelRuleSpec,
@@ -44,6 +45,7 @@ from odds_analytics.candidate_report import (
     checkpoint_at,
     close_probability,
     scoreable_prefix,
+    scored_intent,
     summarize_candidate,
 )
 from odds_analytics.holdout import HoldoutAccess, require_clear
@@ -64,7 +66,9 @@ class HashStatus(StrEnum):
 class Coverage:
     """How much of the range the rule could act on. ``events`` counts the events decided (a
     model rule's scored matches); the other fields count decisions, one per event and decision
-    time, and bets, ``closes`` the bets with a close by the source of their close."""
+    time, and bets, ``closes`` the bets with a close by the source of their close.
+    ``with_book`` counts, for each book of the candidate's set, the decisions with inputs whose
+    retail snapshot quoted it on the decision's market (at a bettable line)."""
 
     events: int
     decisions: int
@@ -76,6 +80,12 @@ class Coverage:
     bets: int
     bets_with_close: int
     closes: dict[Source, int]
+    with_book: dict[str, int] = field(default_factory=dict)
+
+    def book_share(self, book: str) -> float | None:
+        """The share of decisions with inputs whose retail snapshot quoted ``book``; None without
+        decisions with inputs."""
+        return self.with_book.get(book, 0) / self.with_input if self.with_input else None
 
 
 @dataclass(frozen=True)
@@ -92,6 +102,7 @@ class BacktestResult:
     name: str
     version: int
     rule: str
+    books: BookSet
     params: dict[str, object]
     start: date
     end: date
@@ -164,6 +175,22 @@ class _Counts:
     with_polymarket: int = 0
     with_retail: int = 0
     with_bet: int = 0
+    with_book: dict[str, int] = field(default_factory=dict)
+
+    def merge(self, other: _Counts) -> _Counts:
+        """The sum of two counts; ``with_book`` adds book by book."""
+        return _Counts(
+            self.decisions + other.decisions,
+            self.with_input + other.with_input,
+            self.with_exchange + other.with_exchange,
+            self.with_polymarket + other.with_polymarket,
+            self.with_retail + other.with_retail,
+            self.with_bet + other.with_bet,
+            {
+                book: self.with_book.get(book, 0) + other.with_book.get(book, 0)
+                for book in self.with_book.keys() | other.with_book.keys()
+            },
+        )
 
 
 async def _decide(
@@ -176,6 +203,7 @@ async def _decide(
 ) -> list[ScoredBet]:
     """Decide ``events`` at each of their decision times and settle the bets."""
     market = candidate.market
+    books = BOOK_SETS[candidate.books]
     bets: list[ScoredBet] = []
     for offset in range(0, len(events), EVENT_BATCH_SIZE):
         batch = events[offset : offset + EVENT_BATCH_SIZE]
@@ -191,6 +219,7 @@ async def _decide(
                     market,
                     t,
                     None,
+                    books,
                     bet_selections=bet_selections,
                     fixture_leagues=candidate_leagues(candidate),
                 )
@@ -201,6 +230,8 @@ async def _decide(
                 counts.with_polymarket += bool(state.polymarket)
                 counts.with_retail += bool(state.retail)
                 counts.with_bet += bool(intents)
+                for book in {b for quoted in state.retail.values() for b in quoted}:
+                    counts.with_book[book] = counts.with_book.get(book, 0) + 1
                 decided.append((event, t, intents))
 
         betting = {e.id: e for e, _, intents in decided if intents}
@@ -219,32 +250,8 @@ async def _decide(
                     intent.outcome.value,
                 )
                 bets.append(
-                    ScoredBet(
-                        candidate_name=candidate.name,
-                        candidate_version=candidate.version,
-                        event_id=event.id,
-                        commence_time=event.commence_time,
-                        stake=intent.stake,
-                        pnl=calculate_profit_from_decimal(
-                            intent.stake,
-                            intent.price_decimal,
-                            won=selection_won(
-                                intent.outcome.value,
-                                intent.line,
-                                event.home_score,
-                                event.away_score,
-                            ),
-                        ),
-                        price_decimal=intent.price_decimal,
-                        p_close=None if p_close is None else p_close.proportional,
-                        placed_at=t,
-                        close_grace=close_grace(event.sport_key, market),
-                        sport_key=event.sport_key,
-                        selection=intent.outcome.value,
-                        line=intent.line,
-                        bookmaker=intent.bookmaker,
-                        p_close_power=None if p_close is None else p_close.power,
-                        close_source=None if p_close is None else p_close.source,
+                    scored_intent(
+                        candidate.name, candidate.version, market, event, intent, t, p_close
                     )
                 )
     return bets
@@ -334,7 +341,9 @@ async def collect(
             )
         assert isinstance(params, RetailEvModelParams)  # noqa: S101
         bets: list[ScoredBet] = []
-        model = ModelReplay(session, spec, params, candidate.market, events)
+        model = ModelReplay(
+            session, spec, params, candidate.market, events, BOOK_SETS[candidate.books]
+        )
         tuning = await model.tuned_hyperparameters()
         if tuning is not None:
             async for refit, bound, block in model.blocks(tuning):
@@ -359,7 +368,9 @@ async def collect(
     )
 
 
-def _coverage(counts: _Counts, events: int, bets: Sequence[ScoredBet]) -> Coverage:
+def _coverage(
+    counts: _Counts, events: int, bets: Sequence[ScoredBet], books: Collection[str]
+) -> Coverage:
     return Coverage(
         events=events,
         decisions=counts.decisions,
@@ -371,6 +382,7 @@ def _coverage(counts: _Counts, events: int, bets: Sequence[ScoredBet]) -> Covera
         bets=len(bets),
         bets_with_close=sum(b.p_close is not None for b in bets),
         closes=close_sources(bets),
+        with_book={book: counts.with_book.get(book, 0) for book in sorted(books)},
     )
 
 
@@ -383,23 +395,21 @@ def close_sources(bets: Sequence[ScoredBet]) -> dict[Source, int]:
     }
 
 
-def league_coverage(replayed: Replayed) -> dict[str, Coverage]:
+def league_coverage(replayed: Replayed, books: Collection[str]) -> dict[str, Coverage]:
     return {
         league: _coverage(
             counts,
             replayed.scored_events.get(league, 0),
             [b for b in replayed.bets if b.sport_key == league],
+            books,
         )
         for league, counts in replayed.counts.items()
     }
 
 
-def coverage_of(replayed: Replayed) -> Coverage:
-    total = _Counts()
-    for counts in replayed.counts.values():
-        for field in fields(_Counts):
-            setattr(total, field.name, getattr(total, field.name) + getattr(counts, field.name))
-    return _coverage(total, sum(replayed.scored_events.values()), replayed.bets)
+def coverage_of(replayed: Replayed, books: Collection[str]) -> Coverage:
+    total = reduce(_Counts.merge, replayed.counts.values(), _Counts())
+    return _coverage(total, sum(replayed.scored_events.values()), replayed.bets, books)
 
 
 async def replay(
@@ -476,15 +486,17 @@ def score(
         seed,
     )
     with_close, _ = scoreable_prefix(bets, now)
+    books = BOOK_SETS[candidate.books]
     return BacktestResult(
         name=candidate.name,
         version=candidate.version,
         rule=candidate.rule,
+        books=candidate.books,
         params=dict(candidate.params),
         start=start,
         end=end,
         hash_status=hash_status(candidate),
-        coverage=coverage_of(replayed),
+        coverage=coverage_of(replayed, books),
         summary=summary,
         overall=checkpoint_at(with_close, len(with_close), family_versions, n_boot, seed)
         if with_close
@@ -493,6 +505,6 @@ def score(
         tuning=replayed.tuning,
         refits=replayed.refits,
         library_versions=library_versions() if replayed.model else None,
-        league_coverage=league_coverage(replayed),
+        league_coverage=league_coverage(replayed, books),
         bets=tuple(bets),
     )

@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS, BookSet
 from odds_core.candidates import (
     CandidateStatus,
     MechanicalCandidate,
@@ -61,6 +62,7 @@ def candidate(rule: str = "exchange_gap", name: str = "exchange-gap-epl") -> Mec
         start_date="2026-01-01",
         status=CandidateStatus.ACTIVE,
         kind="mechanical",
+        books=BookSet.UK_RETAIL,
         market="1x2",
         rule=rule,
         rule_sha256=rule_sha256(rule),
@@ -116,6 +118,7 @@ class TestDecisionWindowCoverage:
                 cell.time,
                 max_input_age(params),
                 spec.sharp_inputs,
+                UK_RETAIL_BOOKMAKERS,
                 known_at=cell.known_at,
             )
             assert cell.complete == state.has_input, cell
@@ -130,6 +133,7 @@ class TestDecisionWindowCoverage:
                     cell.time,
                     max_input_age(params),
                     needs,
+                    UK_RETAIL_BOOKMAKERS,
                     known_at=cell.known_at,
                 )
                 assert (name in cell.fresh) == alone.has_input, (name, cell)

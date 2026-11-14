@@ -12,6 +12,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from odds_analytics.book_replays import BookReplay
 from odds_analytics.candidate_report import (
     CandidateSummary,
     Checkpoint,
@@ -94,6 +95,29 @@ class Series:
 
 
 @dataclass(frozen=True)
+class BookReplayView:
+    """A version's counterfactual book replays, for information only, with the axis of the
+    running mean EV of every book set drawn together."""
+
+    replay: BookReplay
+    axis_percent: float
+
+    def chart(self) -> dict[str, Any]:
+        """The running mean EV of each book set, for ``charts.js``."""
+        return {
+            "sets": [
+                {
+                    "name": s.books.value,
+                    "registered": s.registered,
+                    "running": [[n, ev * 100] for n, ev in enumerate(s.running_mean_ev, 1)],
+                }
+                for s in self.replay.sets
+            ],
+            "axis": self.axis_percent,
+        }
+
+
+@dataclass(frozen=True)
 class CandidatePage:
     name: str
     version: int
@@ -113,6 +137,9 @@ class CandidatePage:
     series: Series | None
     # Shown only for a version that bet in more than one league; it never changes the verdict.
     leagues: tuple[LeagueBreakdown, ...]
+    # Shown only when the report holds replays of the version's decisions; it never changes the
+    # verdict.
+    book_replay: BookReplayView | None
     decisions: DecisionHistory | None
     ledger: LedgerPage
 
@@ -134,6 +161,18 @@ def axis_percent(running: Sequence[float], intervals: Sequence[Interval]) -> flo
     reach += [abs(v) for v in running[AXIS_FROM_BETS - 1 :]] or [abs(v) for v in running]
     widest = max(reach, default=0.0) * 1.1
     return max(MIN_AXIS_PERCENT, math.ceil(widest / MIN_AXIS_PERCENT) * MIN_AXIS_PERCENT)
+
+
+def build_book_replay(replay: BookReplay | None) -> BookReplayView | None:
+    """The view of ``replay``; None without one or without a decision to replay."""
+    if replay is None or not replay.decisions:
+        return None
+    settled = [
+        ev * 100
+        for s in replay.sets
+        for ev in s.running_mean_ev[AXIS_FROM_BETS - 1 :] or s.running_mean_ev
+    ]
+    return BookReplayView(replay, axis_percent(settled, ()))
 
 
 def build_series(summary: CandidateSummary, running: RunningScore) -> Series:
@@ -159,6 +198,7 @@ def build_candidate_page(
     running: RunningScore,
     decisions: DecisionHistory | None,
     ledger: LedgerPage,
+    book_replay: BookReplay | None = None,
 ) -> CandidatePage:
     entry = summary.registered
     verdict, note = verdict_of(summary)
@@ -180,6 +220,7 @@ def build_candidate_page(
         pending_bets=summary.pending_bets,
         series=build_series(summary, running) if summary.bets_with_close else None,
         leagues=summary.leagues if len(summary.leagues) > 1 else (),
+        book_replay=build_book_replay(book_replay),
         decisions=shown_decisions(entry, decisions),
         ledger=ledger,
     )

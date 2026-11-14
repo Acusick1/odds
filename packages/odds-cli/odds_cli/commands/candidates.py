@@ -344,7 +344,24 @@ def _backtest_tables(result: BacktestResult) -> list[Table]:
         f"[{style}]{label}[/{style}]  family versions k={summary.family_versions}  "
         f"staked {summary.total_stake:.2f}  P&L {summary.pnl:+.2f}  ROI {summary.roi:+.1%}"
     )
-    return [coverage, verdict]
+    return [coverage, _book_table(result), verdict]
+
+
+def _book_table(result: BacktestResult) -> Table:
+    cov = result.coverage
+    table = Table(
+        title=(
+            f"Book coverage of {result.name} v{result.version}'s set ({result.books.value}): "
+            "decisions with input whose retail snapshot quoted each book"
+        )
+    )
+    table.add_column("Book")
+    table.add_column("Decisions", justify="right")
+    table.add_column("Share of decisions with input", justify="right")
+    for book, n in cov.with_book.items():
+        share = cov.book_share(book)
+        table.add_row(book, str(n), "-" if share is None else f"{share:.1%}")
+    return table
 
 
 def _refit_table(result: BacktestResult) -> Table:

@@ -9,6 +9,7 @@ from datetime import timedelta
 import pytest
 from odds_analytics.candidate_backtest import replay
 from odds_analytics.candidate_parity import ParityStatus, check_parity
+from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS
 from odds_core.vocabulary import Market
 from odds_lambda.candidate_rules import MarketState, SharpInput, load_market_state
 from odds_lambda.candidate_rules.registry import RULES
@@ -46,6 +47,7 @@ async def load(
         T,
         MAX_AGE,
         EXCHANGE,
+        UK_RETAIL_BOOKMAKERS,
         also_markets=also,
         snapshot_ids=snapshot_ids,
     )

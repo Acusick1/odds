@@ -2,8 +2,9 @@
 
 A candidate whose start_date at the base is later than today (UTC) has made no
 decisions yet, so it may change in place at the same version. A file is compared with its
-one league `sport: X` read as `sports: [X]`, so the rename of that field alone is no change;
-adding or dropping a league is. The rule and market of a name never change, with or without a
+one league `sport: X` read as `sports: [X]`, and a mechanical file without `books` read as
+`books: uk_retail`, so neither alone is a change; adding or dropping a league, or changing the
+book set, is. The rule and market of a name never change, with or without a
 bump. A rule_sha256 may also
 change in place when the rule and both hashes are a complete row of the rehash ledger,
 candidates/rehashes.jsonl. The hook checks a row's shape only: the ledger is a record the
@@ -38,6 +39,8 @@ UNVERSIONED_KEYS = frozenset({"status", "description"})
 # Fixed per name even across versions: a version's family is read from the name's current rule
 # and market.
 IDENTITY_KEYS = ("rule", "market")
+# The book set of a candidate file that predates the `books` field (ADR-0025).
+LEGACY_BOOKS = "uk_retail"
 REHASH_LEDGER = "rehashes.jsonl"
 HOLDOUT_LEDGER = "holdout.jsonl"
 SEALED_DIRS = ("preregistrations", "selections")
@@ -71,12 +74,16 @@ def _load(text: str) -> dict[str, Any]:
 
 
 def _normalised(candidate: dict[str, Any]) -> dict[str, Any]:
-    """``candidate`` with a single ``sport`` read as the one-league ``sports`` that replaced it."""
-    if "sport" not in candidate or "sports" in candidate:
-        return candidate
-    renamed = {k: v for k, v in candidate.items() if k != "sport"}
-    renamed["sports"] = [candidate["sport"]]
-    return renamed
+    """``candidate`` with a single ``sport`` read as the one-league ``sports`` that replaced it,
+    and a mechanical one without ``books`` read as ``books: uk_retail``, so adding that line is
+    no version change (ADR-0025)."""
+    normalised = candidate
+    if "sport" in normalised and "sports" not in normalised:
+        normalised = {k: v for k, v in normalised.items() if k != "sport"}
+        normalised["sports"] = [candidate["sport"]]
+    if normalised.get("kind") == "mechanical" and "books" not in normalised:
+        normalised = {**normalised, "books": LEGACY_BOOKS}
+    return normalised
 
 
 def _not_started(candidate: dict[str, Any], today: date) -> bool:

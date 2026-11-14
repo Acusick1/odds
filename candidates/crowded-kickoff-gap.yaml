@@ -2,13 +2,14 @@ name: crowded-kickoff-gap
 description: When at least 6 matches of the six football leagues, the match included, kick off within 10 minutes of the match, back the longest UK retail price when the Betfair Exchange fair probability times the price minus 1 exceeds 1%, 60 and 30 minutes before kick-off, one outcome per decision and at most once per outcome
 kind: mechanical
 market: 1x2
+books: uk_retail
 sports: [soccer_epl, soccer_spain_la_liga, soccer_italy_serie_a, soccer_germany_bundesliga, soccer_france_ligue_one, soccer_efl_champ]
 version: 1
 issue: 840
 start_date: 2026-11-13
 status: active
 rule: crowded_gap
-rule_sha256: 8cd0b95ed5dc355bd004f17114426074fc38d7f6f0c55db0bb3066150acba357
+rule_sha256: 77e651a613af4dcef5eef596d95ccbf9fc90b82f73a5c74f05426abab9d4160d
 params:
   min_concurrent_kickoffs: 6
   threshold: 0.01

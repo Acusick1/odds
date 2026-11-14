@@ -12,6 +12,7 @@ from odds_analytics.candidate_report import (
     report_candidates,
     summarize_candidates,
 )
+from odds_core.bookmakers import BookSet
 from odds_core.candidates import AgentCandidate, CandidateStatus, MechanicalCandidate
 from odds_core.vocabulary import Source
 from odds_web.backtests import BacktestOverview, RunFigures
@@ -55,6 +56,7 @@ def mechanical(
         start_date="2026-01-01",
         status=CandidateStatus.ACTIVE,
         kind="mechanical",
+        books=BookSet.UK_RETAIL,
         market=market,
         rule="exchange_gap",
         rule_sha256="0" * 64,

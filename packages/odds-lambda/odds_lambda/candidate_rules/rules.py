@@ -216,6 +216,7 @@ async def run_rule(
     market: Market,
     at: datetime,
     known_at: datetime | None,
+    books: frozenset[str],
     kickoff: datetime | None = None,
     bet_selections: Collection[Selection] = frozenset(),
     fixture_leagues: Collection[str] | None = None,
@@ -223,7 +224,9 @@ async def run_rule(
     """The state of ``event``'s ``market`` at ``at`` as known at ``known_at``, and the bets the
     rule takes.
 
-    The live runner, the replay backtest and the parity check all decide through this.
+    The live runner, the replay backtest and the parity check all decide through this, each
+    with the candidate's ``books`` (``odds_core.bookmakers.BOOK_SETS``), the only retail books
+    the state prices.
     ``kickoff`` overrides the event's current kick-off with the one a recorded decision saw.
     ``fixture_leagues`` are the leagues a rule's concurrent kick-offs count, the event's own
     by default (``candidate_leagues``). The returned state's ``snapshot_id`` and
@@ -236,6 +239,7 @@ async def run_rule(
         at,
         max_input_age(params),
         spec.sharp_inputs,
+        books,
         known_at,
         also_markets=spec.also_markets,
         lookbacks=lookback_points(params),

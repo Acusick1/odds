@@ -10,6 +10,7 @@ Backtests replay a strategy over stored events. The experiment pages record what
 <!-- pages:start -->
 ### Reference
 
+- [Book replays](book-replays.md) — How the candidate report replays a version's recorded decisions under other book sets and with each book left out, what each replay scores and what it is allowed to affect.
 - [Candidate registry](candidate-registry.md) — The candidate file format, the odds candidates list, rule-hash, report and rehash commands, which commands replay a candidate, how paper trades are scored and judged per candidate, and the version check that stops a candidate changing without a new version.
 - [Candidate rules](candidate-rules.md) — The market state and fixture context a mechanical rule reads at decision time, the bets it returns, the rule registry and module layout, decision times and the once-per-selection rule, maximum input age, params validation, rule pinning, the one-bet helper, the exchange-gap and Polymarket-gap rules, the exchange-steam rule, the retail-consensus rules (retail-quorum lag, subsidised outcome and single-book outlier), the favourite-price, crowded-gap and last-result rules and the retail-EV model rule.
 - [Cell selection](cell-selection.md) — What odds candidates select replays for a pre-registered grid, the development blocks, the eligibility rule, the bootstrap lower bound and tie-breaks that pick a cell, the power-devig score it reports for information, the selection file it writes and its JSON output.

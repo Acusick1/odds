@@ -13,26 +13,31 @@ from bisect import bisect_right
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Executor
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from functools import partial
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
 from odds_core.candidates import Candidate, CandidateStatus, MechanicalCandidate
 from odds_core.close import close_grace, close_quotes, event_close
 from odds_core.exchange_price import ExchangePrice
 from odds_core.market_prices import Outcome
-from odds_core.models import Event
+from odds_core.models import Event, EventStatus
+from odds_core.odds_math import calculate_profit_from_decimal, selection_won
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade, TradeResult
 from odds_core.quotes import Quote
 from odds_core.vocabulary import Market, Source
+from odds_lambda.candidate_rules import BetIntent
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from odds_analytics.retail_ev_metrics import event_clustered_ratio
+
+if TYPE_CHECKING:
+    from odds_analytics.book_replays import BookReplay
 
 CHECKPOINT_SIZE = 100
 KILL_AT_BETS = 500
@@ -181,10 +186,14 @@ class RunningScore:
 
 @dataclass(frozen=True)
 class CandidateReport:
-    """Every candidate version's summary and running score, from one read of the trades."""
+    """Every candidate version's summary and running score, from one read of the trades.
+    ``book_replays`` holds, for information only, the counterfactual book replays of each
+    registered mechanical version that has them (``candidate_report`` with ``replays``); no
+    summary, checkpoint or verdict reads them."""
 
     summaries: list[CandidateSummary]
     running: dict[tuple[str, int], RunningScore]
+    book_replays: dict[tuple[str, int], BookReplay] = field(default_factory=dict)
 
 
 def power_devig(implied: Sequence[float]) -> tuple[float, ...]:
@@ -418,22 +427,72 @@ def scoreable_prefix(trades: Sequence[ScoredBet], now: datetime) -> tuple[list[S
     return with_close, length
 
 
+def stake_weighted_mean_ev(with_close: Sequence[ScoredBet]) -> float | None:
+    """Σ stake·EV / Σ stake over ``with_close``, the checkpoint score; None without stake."""
+    stake = sum(t.stake for t in with_close)
+    if not stake:
+        return None
+    return sum(t.stake * t.ev for t in with_close if t.ev is not None) / stake
+
+
+def scored_intent(
+    candidate_name: str,
+    candidate_version: int,
+    market: Market,
+    event: Event,
+    intent: BetIntent,
+    placed_at: datetime,
+    p_close: CloseProbability | None,
+) -> ScoredBet:
+    """The bet a rule's ``intent`` placed at ``placed_at`` on ``event``, with the close
+    ``p_close``, settled on the event's final score as ``settle_trades`` settles a trade and
+    unsettled until the event is final with both scores."""
+    pnl = None
+    if (
+        event.status == EventStatus.FINAL
+        and event.home_score is not None
+        and event.away_score is not None
+    ):
+        pnl = calculate_profit_from_decimal(
+            intent.stake,
+            intent.price_decimal,
+            won=selection_won(
+                intent.outcome.value, intent.line, event.home_score, event.away_score
+            ),
+        )
+    return ScoredBet(
+        candidate_name=candidate_name,
+        candidate_version=candidate_version,
+        event_id=event.id,
+        commence_time=event.commence_time,
+        stake=intent.stake,
+        pnl=pnl,
+        price_decimal=intent.price_decimal,
+        p_close=None if p_close is None else p_close.proportional,
+        placed_at=placed_at,
+        close_grace=close_grace(event.sport_key, market),
+        sport_key=event.sport_key,
+        selection=intent.outcome.value,
+        line=intent.line,
+        bookmaker=intent.bookmaker,
+        p_close_power=None if p_close is None else p_close.power,
+        close_source=None if p_close is None else p_close.source,
+    )
+
+
 def league_breakdown(trades: Sequence[ScoredBet], now: datetime) -> tuple[LeagueBreakdown, ...]:
     """``trades`` split by league, in league-key order; ``trades`` in placement order."""
     with_close, _ = scoreable_prefix(trades, now)
     breakdown: list[LeagueBreakdown] = []
     for league in sorted({t.sport_key for t in trades}):
         scored = [t for t in with_close if t.sport_key == league]
-        stake = sum(t.stake for t in scored)
         settled = [t for t in trades if t.sport_key == league and t.pnl is not None]
         breakdown.append(
             LeagueBreakdown(
                 sport_key=league,
                 settled_bets=len(settled),
                 bets_with_close=len(scored),
-                mean_ev=sum(t.stake * t.ev for t in scored if t.ev is not None) / stake
-                if scored
-                else None,
+                mean_ev=stake_weighted_mean_ev(scored),
                 pnl=sum(t.pnl for t in settled if t.pnl is not None),
             )
         )
@@ -672,24 +731,30 @@ async def candidate_report(
     seed: int = BOOTSTRAP_SEED,
     now: datetime | None = None,
     executor: Executor | None = None,
+    replays: bool = False,
 ) -> CandidateReport:
     """Every candidate version's summary and running score, from one read of the trades and
     decision starts.
 
     The bootstrap runs on ``executor`` (the loop's default one when None), so a server can hold
-    it to a single thread.
+    it to a single thread. With ``replays``, each registered mechanical version's book replays
+    are added (``odds_analytics.book_replays``), which read every recorded decision's inputs.
     """
+    # book_replays scores with this module's functions, so it cannot be imported above.
+    from odds_analytics.book_replays import book_replays
+
     trades = await load_scored_trades(session)
     decision_starts = await load_decision_starts(session)
-    return await asyncio.get_running_loop().run_in_executor(
+    now = now or datetime.now(UTC)
+    report = await asyncio.get_running_loop().run_in_executor(
         executor,
-        partial(
-            report_candidates,
-            trades,
-            registry,
-            now or datetime.now(UTC),
-            decision_starts,
-            n_boot,
-            seed,
+        partial(report_candidates, trades, registry, now, decision_starts, n_boot, seed),
+    )
+    if not replays:
+        return report
+    return replace(
+        report,
+        book_replays=await book_replays(
+            session, [s.registered for s in report.summaries], trades, now
         ),
     )

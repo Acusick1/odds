@@ -61,6 +61,45 @@
 </table>
 {% endif %}
 
+{% if c.book_replay %}
+{% set r = c.book_replay.replay %}
+<h3 id="book-sets">Book sets <span class="sub">{{ r.decisions }} recorded decisions replayed</span></h3>
+<div class="sub">For information: the version's recorded decisions rebuilt from their recorded inputs under each book set and with each book left out, scored against the same close. No checkpoint, verdict or family count reads them; to act on one, register a new version with that set.</div>
+<table id="book-sets-table">
+<thead><tr><th>Book set</th><th class="r">Bets</th><th class="r">With a close</th><th class="r">Mean EV</th><th class="r">P&amp;L</th></tr></thead>
+<tbody class="num">
+{% for s in r.sets %}
+<tr><td class="text">{{ s.books.value }}{% if s.registered %} <span class="sub">registered</span>{% endif %}</td>
+<td class="r">{{ s.score.bets }}</td><td class="r">{{ s.score.bets_with_close }}</td>
+<td class="r {{ ('pos' if s.score.mean_ev >= 0 else 'neg') if s.score.mean_ev is not none }}">{{ s.score.mean_ev | percent }}</td>
+<td class="r">{{ s.score.pnl | signed(2) }}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+<div class="chart" data-chart="booksets" data-series='{{ c.book_replay.chart() | tojson }}'></div>
+<div class="legend">{% for s in r.sets %}<span><svg width="26" height="10"><line class="{{ 'bookset-registered' if s.registered else 'bookset-other' }}" x1="2" y1="5" x2="24" y2="5"/></svg>{{ s.books.value }}{% if s.registered %} (registered){% endif %}</span>{% endfor %}<span>Running mean EV over the bets with a close</span></div>
+
+<h3>Per book</h3>
+<div class="sub">Books with a trade placed at them, or whose removal changes the replay. Without: the version's own book set less that book.</div>
+<table id="books">
+<thead><tr><th rowspan="2">Book</th><th class="r" colspan="3">Placed there</th><th class="r" colspan="4">Without this book</th></tr>
+<tr><th class="r">Bets</th><th class="r">Mean EV</th><th class="r">P&amp;L</th><th class="r">Bets</th><th class="r">With a close</th><th class="r">Mean EV</th><th class="r">P&amp;L</th></tr></thead>
+<tbody class="num">
+{% for b in r.books %}
+<tr><td class="text">{{ b.book }}</td>
+<td class="r">{{ b.placed.bets }}</td>
+<td class="r {{ ('pos' if b.placed.mean_ev >= 0 else 'neg') if b.placed.mean_ev is not none }}">{{ b.placed.mean_ev | percent }}</td>
+<td class="r">{{ b.placed.pnl | signed(2) }}</td>
+<td class="r">{{ b.without.bets }}</td><td class="r">{{ b.without.bets_with_close }}</td>
+<td class="r {{ ('pos' if b.without.mean_ev >= 0 else 'neg') if b.without.mean_ev is not none }}">{{ b.without.mean_ev | percent }}</td>
+<td class="r">{{ b.without.pnl | signed(2) }}</td></tr>
+{% else %}
+<tr><td colspan="8" class="sub">No book to show.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+{% endif %}
+
 {% if c.decisions %}
 <h3>Decisions, last {{ c.decisions.days | length }} days</h3>
 <div class="legend"><span><span class="sw sw-bet"></span>bet</span><span><span class="sw sw-no-bet"></span>no bet</span><span><span class="sw sw-missed"></span>missed (no input)</span></div>

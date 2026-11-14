@@ -16,6 +16,7 @@ from enum import StrEnum
 
 import structlog
 from odds_core.alerts import job_alert_context, send_recorded_alert, stale_reminder_interval
+from odds_core.bookmakers import BOOK_SETS
 from odds_core.candidates import (
     Candidate,
     CandidateStatus,
@@ -251,6 +252,7 @@ async def _decide(
         candidate.market,
         t,
         known_at=now,
+        books=BOOK_SETS[candidate.books],
         bet_selections=await _bet_selections(session, candidate, event.id),
         fixture_leagues=candidate_leagues(candidate),
     )

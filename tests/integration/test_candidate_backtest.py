@@ -14,6 +14,7 @@ from odds_analytics.candidate_report import (
     family_starts,
     load_decision_starts,
 )
+from odds_core.bookmakers import BOOK_SETS, BookSet
 from odds_core.candidates import MechanicalCandidate
 from odds_core.models import Event, EventStatus
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade, TradeResult
@@ -49,6 +50,7 @@ def candidate(**overrides: Any) -> MechanicalCandidate:
         "name": "gap",
         "description": "d",
         "kind": "mechanical",
+        "books": "uk_retail",
         "market": "1x2",
         "sports": ["soccer_epl"],
         "version": 1,
@@ -243,6 +245,60 @@ class TestReplay:
             coverage.bets,
             coverage.bets_with_close,
         ) == (5, 5, 2, 2, 2, 1, 1, 1)
+
+    async def test_coverage_reports_the_share_of_inputs_quoting_each_book_of_the_set(
+        self, pglite_async_session
+    ) -> None:
+        day = timedelta(days=1)
+        await add_event(pglite_async_session, 6, KICKOFF)
+        kickoff = KICKOFF + day
+        await add_event(pglite_async_session, 22, kickoff, retail=None, exchange=None)
+        await store_tagged(
+            pglite_async_session,
+            make_tagged_snapshot(
+                22,
+                kickoff - timedelta(minutes=65),
+                [three_way_bookmaker("williamhill", RETAIL), betfair(EXCHANGE)],
+                "oddsportal_live",
+            ),
+        )
+        await add_event(pglite_async_session, 23, KICKOFF + 2 * day, retail=None, exchange=None)
+        await pglite_async_session.commit()
+
+        full = (await run(pglite_async_session)).coverage
+        api = (await run(pglite_async_session, candidate(books="odds_api_uk"))).coverage
+
+        assert full.with_input == 2
+        assert (full.with_book["bet365"], full.with_book["williamhill"]) == (1, 1)
+        assert full.book_share("bet365") == pytest.approx(0.5)
+        assert full.with_book.keys() == BOOK_SETS[BookSet.UK_RETAIL]
+        assert api.with_input == 1 and api.with_book.keys() == BOOK_SETS[BookSet.ODDS_API_UK]
+        assert (api.book_share("williamhill"), api.book_share("betway")) == (1.0, 0.0)
+
+    async def test_the_book_set_limits_the_prices_a_rule_can_take(
+        self, pglite_async_session
+    ) -> None:
+        await add_event(pglite_async_session, 1, retail=None, exchange=None)
+        await store_tagged(
+            pglite_async_session,
+            make_tagged_snapshot(
+                1,
+                T - timedelta(minutes=5),
+                [
+                    three_way_bookmaker("midnite", (2.6, 3.0, 3.0)),
+                    three_way_bookmaker("williamhill", (2.4, 3.0, 3.0)),
+                    betfair(EXCHANGE),
+                ],
+                "oddsportal_live",
+            ),
+        )
+        await pglite_async_session.commit()
+
+        full = await run(pglite_async_session)
+        api = await run(pglite_async_session, candidate(books="odds_api_uk"))
+
+        assert [b.bookmaker for b in full.bets] == ["midnite"]
+        assert [b.bookmaker for b in api.bets] == ["williamhill"]
 
     async def test_polymarket_coverage_counts_decisions_with_a_polymarket_input(
         self, pglite_async_session

@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
+from odds_core.bookmakers import BOOK_SETS
 from odds_core.candidates import Candidate, CandidateStatus, MechanicalCandidate
 from odds_core.models import Event, EventStatus
 from odds_core.paper_trade_models import CandidateDecision
@@ -93,6 +94,7 @@ class _EventInputs:
     sharp_inputs: frozenset[SharpInput]
     also_markets: frozenset[Market]
     lookbacks: Sequence[Lookback]
+    books: frozenset[str]
 
     def evaluate(self, slot: CoverageCell, now: datetime) -> CoverageCell:
         """``slot`` with its inputs filled in, from the quotes stored by its ``known_at``; a
@@ -109,6 +111,7 @@ class _EventInputs:
                 slot.time,
                 self.age,
                 needs,
+                self.books,
                 self.also_markets,
                 self.lookbacks,
             )
@@ -181,7 +184,14 @@ async def candidate_coverage(
             also_markets=spec.also_markets,
         )
         inputs = _EventInputs(
-            event, candidate.market, quoted, age, spec.sharp_inputs, spec.also_markets, points
+            event,
+            candidate.market,
+            quoted,
+            age,
+            spec.sharp_inputs,
+            spec.also_markets,
+            points,
+            BOOK_SETS[candidate.books],
         )
         cells = [inputs.evaluate(slot, now) for slot in slots]
         rows.append(

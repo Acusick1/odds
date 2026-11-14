@@ -474,6 +474,7 @@ def mechanical(name: str, version: int = 1, start: str = "2026-01-01", **overrid
             "name": name,
             "description": "d",
             "kind": "mechanical",
+            "books": "uk_retail",
             "market": "1x2",
             "sports": ["soccer_epl"],
             "version": version,

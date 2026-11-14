@@ -10,7 +10,7 @@ from types import MappingProxyType
 
 from odds_core.as_of import latest_snapshot
 from odds_core.book_price import polymarket_price
-from odds_core.bookmakers import POLYMARKET_BOOKMAKER, UK_RETAIL_BOOKMAKERS
+from odds_core.bookmakers import POLYMARKET_BOOKMAKER
 from odds_core.exchange_price import (
     EXCHANGE_BOOKMAKER,
     MAX_EXCHANGE_OVERROUND,
@@ -124,11 +124,11 @@ def is_bettable_line(market: Market, line: Line) -> bool:
 
 
 def _retail(
-    snapshot: Sequence[Quote], market: Market
+    snapshot: Sequence[Quote], market: Market, books: frozenset[str]
 ) -> Mapping[Line, Mapping[str, Mapping[Outcome, float]]]:
     retail: dict[Line, dict[str, dict[Outcome, float]]] = {}
     for q in snapshot:
-        if q.bookmaker in UK_RETAIL_BOOKMAKERS and is_bettable_line(market, q.line):
+        if q.bookmaker in books and is_bettable_line(market, q.line):
             retail.setdefault(q.line, {}).setdefault(q.bookmaker, {})[q.outcome] = q.price
     return MappingProxyType(
         {
@@ -165,13 +165,13 @@ def _polymarket(snapshot: Sequence[Quote], market: Market) -> Mapping[Line, Poly
     return MappingProxyType(prices)
 
 
-def _co_timed(snapshot: Sequence[Quote]) -> bool:
-    books = {q.bookmaker for q in snapshot}
-    return EXCHANGE_BOOKMAKER in books and bool(books & UK_RETAIL_BOOKMAKERS)
+def _co_timed(snapshot: Sequence[Quote], books: frozenset[str]) -> bool:
+    quoted = {q.bookmaker for q in snapshot}
+    return EXCHANGE_BOOKMAKER in quoted and bool(quoted & books)
 
 
-def _quotes_retail(snapshot: Sequence[Quote]) -> bool:
-    return any(q.bookmaker in UK_RETAIL_BOOKMAKERS for q in snapshot)
+def _quotes_retail(snapshot: Sequence[Quote], books: frozenset[str]) -> bool:
+    return any(q.bookmaker in books for q in snapshot)
 
 
 def _in_run(quoted: Iterable[Quote], market: Market, run: Sequence[Quote]) -> list[Quote]:
@@ -205,6 +205,7 @@ def _own_state(
     max_input_age: timedelta,
     sharp_inputs: frozenset[SharpInput],
     also_markets: frozenset[Market],
+    books: frozenset[str],
 ) -> MarketState:
     state = _no_input(event, market, decision_time)
     retail_quotes = [
@@ -225,12 +226,13 @@ def _own_state(
                 max_input_age,
                 extra_sharp,
                 frozenset(),
+                books,
             )
             for m in sorted(also_markets)
         }
 
     def accepted(run: Sequence[Quote]) -> bool:
-        return accept(run) and all(s.has_input for s in extras(run).values())
+        return accept(run, books) and all(s.has_input for s in extras(run).values())
 
     snapshot = latest_snapshot(retail_quotes, decision_time, accepted)
     if snapshot is None or decision_time - snapshot[0].snapshot_time > max_input_age:
@@ -261,7 +263,7 @@ def _own_state(
         state,
         snapshot_id=snapshot_id,
         snapshot_time=snapshot[0].snapshot_time,
-        retail=_retail(snapshot, market),
+        retail=_retail(snapshot, market, books),
         exchange=_exchange(snapshot, market),
         polymarket=polymarket,
         also=MappingProxyType(also),
@@ -280,20 +282,22 @@ def build_market_state(
     decision_time: datetime,
     max_input_age: timedelta,
     sharp_inputs: frozenset[SharpInput],
+    books: frozenset[str],
     also_markets: frozenset[Market] = frozenset(),
     lookbacks: Sequence[Lookback] = (),
 ) -> MarketState:
     """The event's state in ``market`` at ``decision_time`` from the quotes stamped at or before
-    it; later ones are ignored. ``sharp_inputs`` are the sharp prices the rule needs and
+    it; later ones are ignored. ``sharp_inputs`` are the sharp prices the rule needs,
+    ``books`` the retail books it takes prices from (``odds_core.bookmakers.BOOK_SETS``) and
     ``also_markets`` the extra markets it reads.
 
     The retail input is the latest snapshot of the market from a ``RETAIL_SOURCES`` source,
-    stamped at or before t, whose back prices quote a UK retail book and, when the rule needs
+    stamped at or before t, whose back prices quote one of ``books`` and, when the rule needs
     ``SharpInput.EXCHANGE``, the Betfair Exchange too, so both prices were taken together. When
     the rule needs ``SharpInput.POLYMARKET``, the Polymarket input is the latest Polymarket
     snapshot of the market stamped at or before t whose mids price every outcome of a line.
     The state has no inputs unless each needed input is at most ``max_input_age`` old. Only
-    bettable lines (``is_bettable_line``) count. Retail is its UK retail books' back prices per
+    bettable lines (``is_bettable_line``) count. Retail is the back prices of ``books`` per
     line. A line's exchange price is the retail snapshot's devigged Betfair Exchange backs on
     that line, when they price every outcome with an overround of at most
     ``MAX_EXCHANGE_OVERROUND``. A line's Polymarket price is its mids' implied probabilities
@@ -319,6 +323,7 @@ def build_market_state(
         max_input_age,
         sharp_inputs,
         frozenset(also_markets),
+        books,
     )
     if not state.has_input or not lookbacks:
         return state
@@ -331,6 +336,7 @@ def build_market_state(
             point.max_input_age,
             sharp_inputs,
             frozenset(also_markets),
+            books,
         )
         for point in sorted(lookbacks, key=lambda p: p.minutes_before_decision)
     }
@@ -357,12 +363,14 @@ async def load_market_state(
     decision_time: datetime,
     max_input_age: timedelta,
     sharp_inputs: frozenset[SharpInput],
+    books: frozenset[str],
     known_at: datetime | None = None,
     snapshot_ids: Collection[int] | None = None,
     also_markets: frozenset[Market] = frozenset(),
     lookbacks: Sequence[Lookback] = (),
 ) -> MarketState:
-    """Build the state from the quotes ``rule_quotes`` loads within ``input_window`` before t.
+    """Build the state from the quotes ``rule_quotes`` loads within ``input_window`` before t,
+    with retail prices from ``books`` only.
 
     With ``known_at``, only snapshots stored (``created_at``) by then count: the data the
     system had when it acted. The live runner passes its run time and the parity check
@@ -384,5 +392,13 @@ async def load_market_state(
         also_markets=also_markets,
     )
     return build_market_state(
-        event, market, quoted, decision_time, max_input_age, sharp_inputs, also_markets, lookbacks
+        event,
+        market,
+        quoted,
+        decision_time,
+        max_input_age,
+        sharp_inputs,
+        books,
+        also_markets,
+        lookbacks,
     )

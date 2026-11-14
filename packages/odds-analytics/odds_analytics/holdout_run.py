@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+from odds_core.bookmakers import BOOK_SETS
 from odds_core.candidates import CandidateStatus, MechanicalCandidate
 from odds_core.models import OddsSnapshot
 from odds_core.vocabulary import Source, TimeBasis
@@ -70,6 +71,7 @@ def pooled_draft(
             "description": f"{purpose} of #{prereg.issue}",
             "kind": "mechanical",
             "market": prereg.market,
+            "books": prereg.books,
             "sports": list(leagues) if leagues is not None else prereg.leagues,
             "version": prereg.version,
             "issue": prereg.issue,
@@ -126,7 +128,7 @@ async def run_holdout(
             now.date(),
             gate(pooled.overall),
         )
-    coverage = league_coverage(replayed)
+    coverage = league_coverage(replayed, BOOK_SETS[draft.books])
     return HoldoutRun(row, [LeagueRun(w, coverage[sport]) for sport, w in windows.items()])
 
 

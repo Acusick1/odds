@@ -40,8 +40,10 @@ BET_FIELDS = (
 # Summary fields that only some revisions have, or that restate the candidate file (whose
 # league field is named differently across revisions) or the bets above, rather than what the
 # replay decided.
-SUMMARY_DROPPED = ("hash_status", "league_coverage", "bets")
+SUMMARY_DROPPED = ("hash_status", "league_coverage", "bets", "books")
 CANDIDATE_SUMMARY_DROPPED = ("registered", "leagues")
+# Counts that only some revisions keep, which say nothing about the bets decided.
+COUNTS_DROPPED = ("with_book",)
 
 
 def current_rule_sha256(rule: str) -> str:
@@ -64,8 +66,11 @@ def resolve(candidate: MechanicalCandidate) -> tuple[Any, Any]:
 
 def load(path: Path) -> MechanicalCandidate:
     """The candidate file parsed by this checkout's model: a revision before pooled leagues
-    names its one league ``sport``, a later one lists ``sports``."""
+    names its one league ``sport``, a later one lists ``sports``, and a revision before book
+    sets has no ``books``."""
     raw = yaml.safe_load(path.read_text())
+    if "books" not in MechanicalCandidate.model_fields:
+        raw.pop("books", None)
     if "sports" in MechanicalCandidate.model_fields:
         if "sport" in raw:
             raw["sports"] = [raw.pop("sport")]
@@ -92,6 +97,8 @@ def _summary(result: object) -> dict[str, Any]:
         summary.pop(key, None)
     for key in CANDIDATE_SUMMARY_DROPPED:
         summary["summary"].pop(key, None)
+    for key in COUNTS_DROPPED:
+        summary["coverage"].pop(key, None)
     return summary
 
 
@@ -124,7 +131,9 @@ async def dump(
                         _summary(await replay(session, single, first, last, 1, now=NOW))
                     )
             out[candidate.name] = {
-                "counts": dataclasses.asdict(counts),
+                "counts": {
+                    k: v for k, v in dataclasses.asdict(counts).items() if k not in COUNTS_DROPPED
+                },
                 "bets": [{f: getattr(b, f) for f in BET_FIELDS} for b in bets],
                 "summary": summaries,
             }

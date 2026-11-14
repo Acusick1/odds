@@ -102,10 +102,13 @@ def state_inputs(state: MarketState) -> list[RetailEvInput]:
     )
 
 
-def training_rows(event: Event, market: Market, quoted: Sequence[Quote]) -> list[RetailEvRow]:
+def training_rows(
+    event: Event, market: Market, quoted: Sequence[Quote], books: frozenset[str]
+) -> list[RetailEvRow]:
     """Rows of every co-timed snapshot in the decision window, against the live Betfair close.
 
-    ``quoted`` holds the event's retail quotes and its close quotes. An event without a live
+    ``quoted`` holds the event's retail quotes and its close quotes, and the rows price only
+    the retail ``books``. An event without a live
     Betfair close has none.
     """
     close = event_close(quoted, event.commence_time, event.sport_key, market)
@@ -118,7 +121,9 @@ def training_rows(event: Event, market: Market, quoted: Sequence[Quote]) -> list
         time = snapshot[0].snapshot_time
         if not first <= time <= last:
             continue
-        state = build_market_state(event, market, snapshot, time, timedelta(0), _SHARP_INPUTS)
+        state = build_market_state(
+            event, market, snapshot, time, timedelta(0), _SHARP_INPUTS, books
+        )
         rows.extend(RetailEvRow.with_close(inputs, close) for inputs in state_inputs(state))
     return rows
 
@@ -324,12 +329,14 @@ class ModelReplay:
         params: RetailEvModelParams,
         market: Market,
         events: Sequence[Event],
+        books: frozenset[str],
     ) -> None:
         self._session = session
         self._spec = spec
         self._params = params
         self._market = market
         self._events = events
+        self._books = books
         self._rows: dict[int, list[RetailEvRow]] = {}
 
     async def _training_rows(self, events: Sequence[Event]) -> list[RetailEvRow]:
@@ -345,7 +352,9 @@ class ModelReplay:
                 since=event.commence_time - DECISION_WINDOW,
                 until=event.commence_time - DECISION_CUTOFF,
             )
-            self._rows[event.id] = training_rows(event, market, retail + closes[event.id])
+            self._rows[event.id] = training_rows(
+                event, market, retail + closes[event.id], self._books
+            )
         return [row for event in events for row in self._rows[event.id]]
 
     async def tuned_hyperparameters(self) -> Tuning | None:

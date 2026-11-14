@@ -2,13 +2,14 @@ name: exchange-gap-epl-totals
 description: On each half goal line of over/under, back the longest UK retail price when the Betfair Exchange fair probability on that line times the price minus 1 exceeds 1%, 60 and 30 minutes before kick-off, at most once per outcome and line
 kind: mechanical
 market: totals
+books: uk_retail
 sports: [soccer_epl]
 version: 3
 issue: 708
 start_date: 2026-11-14
 status: active
 rule: exchange_gap
-rule_sha256: d46814c0448f5a2480f4c5c0594c4388219f15b92ebe71df946f17b5ad6cda9d
+rule_sha256: a9a1bbd6116b1a110c0af54f5fa895ed31a9934d67bf2c885050ae10bfe47429
 params:
   threshold: 0.01
   minutes_before_kickoff: [60, 30]

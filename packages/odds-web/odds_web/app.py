@@ -139,7 +139,7 @@ def create_app(
     async def load_report() -> CandidateReport:
         registry = load_candidates(registry_dir or candidates_dir())
         async with database.session_maker() as session:
-            return await candidate_report(session, registry, executor=executor)
+            return await candidate_report(session, registry, executor=executor, replays=True)
 
     async def report_section() -> Cached[CandidateReport]:
         return await cache.get("report", load_report)
@@ -194,7 +194,8 @@ def create_app(
             if listings.value is not None and not (listings.value[0] and listings.value[0].total):
                 raise HTTPException(status_code=404, detail=f"No candidate {name} v{version}")
             summary, running = unscored_version(name, version, datetime.now(UTC))
-        built = listings.map(lambda found: build_candidate_page(summary, running, *found))
+        replay = report.value.book_replays.get((name, version))
+        built = listings.map(lambda found: build_candidate_page(summary, running, *found, replay))
         # The page is as old as the older of its two reads.
         as_of = (
             None if built.as_of is None or report.as_of is None else min(built.as_of, report.as_of)
