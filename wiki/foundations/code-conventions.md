@@ -41,7 +41,7 @@ Ruff selects the whole `DTZ` family for timezone checks ([Timezones](timezones.m
 
 ### Dependency checks
 
-`deptry` runs in the "Check declared dependencies" step of `.github/workflows/test.yml`, before the tests in every run that does not skip them, once per package (`cd "$pkg" && uv run --project ../.. --with deptry deptry .`, for each `packages/*/`) and fails on a module that a package imports without declaring in its own `pyproject.toml`. Deliberate exceptions sit in that package's `[tool.deptry.per_rule_ignores]` ([Workspace packages](workspace-packages.md#dependency-exceptions)).
+`deptry` runs in the "Check declared dependencies" step of `.github/workflows/test.yml`, before the tests in every run of the test job (a docs-only branch skips it), once per package (`cd "$pkg" && uv run --project ../.. --with deptry deptry .`, for each `packages/*/`) and fails on a module that a package imports without declaring in its own `pyproject.toml`. Deliberate exceptions sit in that package's `[tool.deptry.per_rule_ignores]` ([Workspace packages](workspace-packages.md#dependency-exceptions)).
 
 ## Conventions without tooling
 

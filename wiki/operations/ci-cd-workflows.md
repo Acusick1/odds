@@ -23,7 +23,7 @@ Workflows live in `.github/workflows/`. Secrets come from the `development` and 
 
 | Workflow | Trigger | What it does |
 |---|---|---|
-| `test.yml` | push to any branch but main; `workflow_call` | a `changes` job compares the branch with `origin/main` and skips the test job when the branch changes only wiki pages, ADRs or other Markdown files (the how-to page whose example draft a unit test validates still counts as code); otherwise `deptry` per package under `packages/` (each declares its own imports), then `uv run pytest` (`tests/unit` and `tests/integration` without `live_api`) |
+| `test.yml` | push to any branch but main; `workflow_call` | on a push, a `changes` job compares the branch with `origin/main`, renames counted as a deletion and an addition, and skips the test job when the branch changes only wiki pages, ADRs or other Markdown files (the how-to page whose example draft a unit test validates still counts as code); a failed comparison or a `workflow_call` runs the tests. The tests are `deptry` per package under `packages/` (each declares its own imports), then `uv run pytest` (`tests/unit` and `tests/integration` without `live_api`) |
 | `lint.yml` | push to non-main branches, every push | `uvx pre-commit run --all-files` (ruff with all `DTZ` datetime rules, per the root `pyproject.toml`; shellcheck, Vale, lychee, wiki-lint, candidate-versions, which compares against the merge-base with `origin/main` and validates the rehash ledger) ([code-conventions](../foundations/code-conventions.md)) |
 | `ci-cd.yml` | manual only | calls `test.yml`, then `deploy-dev.yml` |
 | `deploy-dev.yml` | called by `ci-cd.yml`, or manual | ephemeral dev stack |
@@ -31,7 +31,7 @@ Workflows live in `.github/workflows/`. Secrets come from the `development` and 
 | `live-api.yml` | Monday 06:00 UTC | `pytest -m live_api` against third-party APIs |
 | `schedule-health-check.yml` | 10:00 UTC cron, `production` environment; disabled | `scripts/verify-schedules.sh --rule-prefix odds` |
 
-A new push to a branch cancels that branch's `test.yml` and `lint.yml` runs still in progress, so only the latest commit is tested. Nothing runs on a merge to main. The main ruleset requires the checks `Run Unit and Integration Tests` and `Run pre-commit hooks` to pass on a pull request's head before it merges; a skipped test job passes, so a docs-only pull request merges on Lint alone. The ruleset is GitHub state, not in the repo: `gh api repos/Acusick1/odds/rulesets` lists it.
+A new push to a branch cancels that branch's `test.yml` and `lint.yml` runs still in progress, so only the latest commit is tested. A `ci-cd.yml` run's tests sit in a separate concurrency group, so they never cancel the push run. Nothing runs on a merge to main. The main ruleset requires the checks `Run Unit and Integration Tests` and `Run pre-commit hooks` to pass on a pull request's head before it merges; a skipped test job passes, so a docs-only pull request merges on Lint alone. The ruleset is GitHub state, not in the repo: `gh api repos/Acusick1/odds/rulesets` lists it.
 
 `schedule-health-check` fails every disabled rule ([Schedule verification](#schedule-verification)), so it would fail while AWS is dormant. It and `deploy-prod.yml` are disabled in GitHub; that state is not in the repo, so check it with `gh workflow list --all` and restore one with `gh workflow enable`.
 
