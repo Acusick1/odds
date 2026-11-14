@@ -172,7 +172,7 @@ def build_book_replay(replay: BookReplay | None) -> BookReplayView | None:
         for s in replay.sets
         for ev in s.running_mean_ev[AXIS_FROM_BETS - 1 :] or s.running_mean_ev
     ]
-    return BookReplayView(replay, _axis_percent(settled, ()))
+    return BookReplayView(replay, axis_percent(settled, ()))
 
 
 def build_series(summary: CandidateSummary, running: RunningScore) -> Series:
