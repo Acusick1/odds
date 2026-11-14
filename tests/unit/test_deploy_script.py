@@ -33,6 +33,7 @@ uv)
     if [[ "$*" == "run alembic current" ]]; then
         echo "${ALEMBIC_CURRENT:-abc123 (head)}"
     fi
+    [[ -n "${FAIL_UV:-}" && "$*" == *"$FAIL_UV"* ]] && exit 1
     exit 0 ;;
 sudo)
     if [[ "$1" == "-n" ]]; then echo "$SUDO_RULES"; exit 0; fi
@@ -231,6 +232,45 @@ class TestDeploy:
         upgrade = next(i for i, c in enumerate(log) if c == "uv run alembic upgrade head")
         backup = next(i for i, c in enumerate(log) if c.startswith("backup-prod-db.sh"))
         assert max(stops) < backup < upgrade
+
+    def test_applies_the_grants_then_checks_the_role_after_the_migration_and_before_any_restart(
+        self, host: Path
+    ) -> None:
+        result = deploy(host, ALEMBIC_CURRENT="abc123")
+
+        assert result.returncode == 0, result.stderr
+        log = calls(host)
+        upgrade = log.index("uv run alembic upgrade head")
+        grants = log.index("uv run python -m odds_web.grants")
+        check = log.index("uv run python -m odds_web.role_check")
+        first_restart = next(i for i, c in enumerate(log) if " restart " in c)
+        assert upgrade < grants < check < first_restart
+
+    @pytest.mark.parametrize("failing", ["odds_web.grants", "odds_web.role_check"])
+    def test_a_failed_grants_or_role_check_aborts_before_any_restart(
+        self, host: Path, failing: str
+    ) -> None:
+        result = deploy(host, ALEMBIC_CURRENT="abc123", FAIL_UV=failing)
+
+        assert result.returncode != 0
+        assert not any(" restart " in c for c in calls(host))
+        assert "FAILED with odds-scheduler odds-web STOPPED" in result.stderr
+        assert "alembic downgrade abc123" in result.stderr
+        if failing == "odds_web.grants":
+            assert not any("odds_web.role_check" in c for c in calls(host))
+            assert "uv run python -m odds_web.grants" not in result.stderr
+        else:
+            assert "uv run python -m odds_web.grants   # on the old code" in result.stderr
+
+    def test_a_failed_role_check_without_a_migration_leaves_the_services_running(
+        self, host: Path
+    ) -> None:
+        result = deploy(host, FAIL_UV="odds_web.role_check")
+
+        assert result.returncode != 0
+        assert not any(" restart " in c or " stop " in c for c in calls(host))
+        assert (host / "state.odds-scheduler").read_text().strip() == "active"
+        assert (host / "state.odds-web").read_text().strip() == "active"
 
     def test_a_web_restart_failure_fails_the_deploy_and_leaves_the_scheduler_running(
         self, host: Path

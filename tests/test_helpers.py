@@ -6,7 +6,6 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -23,6 +22,7 @@ from odds_lambda.price_rows import expand_envelope
 from odds_lambda.storage.event_resolver import ListedGame, MatchWindow, resolve_event
 from odds_lambda.storage.game_pks import game_pks_of
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_shaped_snapshot
+from odds_web.grants import apply_grants
 from sqlalchemy import Connection, text
 from sqlalchemy import event as sqlalchemy_event
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -680,12 +680,9 @@ async def book(session: AsyncSession, job: str, next_run: datetime | None) -> No
     )
 
 
-ODDS_WEB_GRANTS = Path(__file__).parents[1] / "scripts" / "odds_web_grants.sql"
-
-
 async def apply_odds_web_role(session: AsyncSession) -> None:
-    """Create the ``odds_web`` role and apply the grants file, as the host wizard does."""
-    # The APScheduler tables exist only once the scheduler has booted; the grants file names them.
+    """Create the ``odds_web`` role and apply its grants, as the host setup and ``deploy.sh`` do."""
+    # The APScheduler tables exist only once the scheduler has booted; the grants name them.
     await create_scheduler_tables(session)
     await session.execute(
         text(
@@ -693,9 +690,7 @@ async def apply_odds_web_role(session: AsyncSession) -> None:
             "THEN CREATE ROLE odds_web NOLOGIN; END IF; END $$"
         )
     )
-    for statement in ODDS_WEB_GRANTS.read_text().split(";"):
-        if statement.strip():
-            await session.execute(text(statement))
+    await apply_grants(await session.connection())
     await session.commit()
 
 
