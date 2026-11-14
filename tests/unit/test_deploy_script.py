@@ -27,7 +27,14 @@ echo "$name $*" >>"$SHIM_DIR/calls.log"
 state() { cat "$SHIM_DIR/state.$1" 2>/dev/null || echo inactive; }
 case "$name" in
 git)
-    [[ "$1" == "rev-parse" ]] && echo abc1234
+    case "$1" in
+    rev-parse) cat "$SHIM_DIR/head" 2>/dev/null || echo abc1234 ;;
+    pull)
+        [[ -n "${FAIL_PULL:-}" ]] && exit 1
+        echo def5678 >"$SHIM_DIR/head"
+        # A pull that changes deploy.sh replaces it on disk while the old copy is running.
+        [[ -n "${PULLED_DEPLOY:-}" ]] && cat "$PULLED_DEPLOY" >"$SHIM_DIR/repo/deploy.sh" ;;
+    esac
     exit 0 ;;
 uv)
     if [[ "$*" == "run alembic current" ]]; then
@@ -332,3 +339,77 @@ class TestDeploy:
 
         assert result.returncode == 1
         assert [c.split()[-1] for c in calls(host) if " restart " in c] == ["odds-scheduler"]
+
+
+class TestReexecAfterPull:
+    @staticmethod
+    def pulled_copy(host: Path) -> str:
+        """A deploy.sh that logs when it starts, standing in for a pull that changed the script."""
+        text = DEPLOY.read_text()
+        marker = 'echo "pulled copy started" >>"$SHIM_DIR/calls.log"\n'
+        script = text.replace("set -euo pipefail\n", "set -euo pipefail\n" + marker, 1)
+        assert script != text
+        path = host / "pulled-deploy.sh"
+        path.write_text(script)
+        return str(path)
+
+    def test_a_pull_that_changes_the_script_runs_the_pulled_copy_from_the_top(
+        self, host: Path
+    ) -> None:
+        result = deploy(host, PULLED_DEPLOY=self.pulled_copy(host))
+
+        assert result.returncode == 0, result.stderr
+        assert calls(host).count("pulled copy started") == 1
+        assert "==> deploy complete" in result.stdout
+
+    def test_the_pull_runs_once_and_before_the_dependencies_sync(self, host: Path) -> None:
+        result = deploy(host)
+
+        assert result.returncode == 0, result.stderr
+        log = calls(host)
+        assert log.count("git pull --ff-only") == 1
+        assert log.index("git pull --ff-only") < log.index("uv sync")
+        assert result.stdout.count("==> git pull") == 1
+        assert result.stdout.count("==> re-executing the pulled deploy.sh") == 1
+        assert result.stdout.index("==> git pull") < result.stdout.index("==> re-executing")
+
+    def test_a_run_already_re_executed_does_not_pull_again(self, host: Path) -> None:
+        result = deploy(
+            host,
+            ODDS_DEPLOY_REEXEC="1",
+            ODDS_DEPLOY_PREVIOUS_HEAD="abc1234",
+            ODDS_DEPLOY_STARTED_AT="0",
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert "git pull --ff-only" not in calls(host)
+
+    def test_a_failed_pull_exits_before_the_re_exec_and_the_sync(self, host: Path) -> None:
+        result = deploy(host, FAIL_PULL="1")
+
+        assert result.returncode != 0
+        assert "re-executing" not in result.stdout
+        assert not any(c.startswith("uv ") for c in calls(host))
+
+    def test_the_re_executed_run_reports_the_head_from_before_the_pull(self, host: Path) -> None:
+        result = deploy(host, ALEMBIC_CURRENT="abc123", FAIL_RESTART="odds-scheduler")
+
+        assert result.returncode == 1
+        assert "git checkout abc1234" in result.stderr
+        assert "def5678" not in result.stderr
+        assert "backup-prod-db.sh pre-deploy-def5678" in calls(host)
+
+    def test_a_preflight_failure_after_the_re_exec_says_the_checkout_is_already_pulled(
+        self, host: Path
+    ) -> None:
+        result = deploy(
+            host,
+            WEB_UNIT_MISSING="1",
+            ODDS_DEPLOY_REEXEC="1",
+            ODDS_DEPLOY_PREVIOUS_HEAD="abc1234",
+            ODDS_DEPLOY_STARTED_AT="0",
+        )
+
+        assert result.returncode == 1
+        assert "the checkout is already pulled but no service was touched" in result.stderr
+        assert "nothing was changed" not in result.stderr

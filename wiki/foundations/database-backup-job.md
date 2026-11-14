@@ -42,7 +42,7 @@ The job shells out to `rclone` on the scheduler's `PATH` and to `docker compose`
 
 `odds_lambda.jobs.backup_database.select_kept` keeps the newest dump of each of the `keep_daily` most recent UTC days that have a dump, and the newest dump of each of the `keep_weekly` most recent ISO weeks that have one; a dump kept by either rule stays. Periods are counted among those that hold a dump, so nights the job failed never push the last good dumps out. The same rule runs on the remote and in the local directory.
 
-Only files named `odds-nightly-<YYYYmmddTHHMMZ>.dump` (`odds_lambda.jobs.backup_database.parse_nightly`) are candidates. A dump with any other label, such as `pre-deploy-*` (taken by `deploy.sh` before it runs a pending migration) or a hand-run `pre-<issue>`, are never pruned, and nothing else copies them off the host.
+Only files named `odds-nightly-<YYYYmmddTHHMMZ>.dump` (`odds_lambda.jobs.backup_database.parse_nightly`) are candidates. A dump with any other label, such as `pre-deploy-*` (taken by `deploy.sh` after pulling and before it runs a pending migration) or a hand-run `pre-<issue>`, are never pruned, and nothing else copies them off the host.
 
 ## Missing backups
 

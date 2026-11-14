@@ -22,7 +22,7 @@ Do this once on the production host, after the PR that adds [odds-web](odds-web.
    4. **Install and enable `odds-web.service`.** It copies the unit to `/etc/systemd/system`, reloads systemd and enables the unit without starting it. Edit `User` and `WorkingDirectory` in the unit first if this host differs from the defaults.
    5. **Install the sudo rules** `deploy.sh` needs as `/etc/sudoers.d/odds-web`, checked with `visudo -cf` first: `systemctl stop odds-web` and `systemctl restart odds-web` without a password. The paths must match `command -v systemctl`.
    6. **Expose it on the tailnet.** The tailnet access policy is the only authentication, so check it admits only your own devices to this host, and that MagicDNS and HTTPS Certificates are enabled on the DNS page (the wizard opens both admin console pages), then `sudo tailscale serve --bg 8765`. The first `tailscale serve` on a tailnet prints a link to enable Serve; open it and re-run the stage.
-2. **Deploy.** `./deploy.sh` starts `odds-web` on the merged code.
+2. **Deploy.** `./deploy.sh` pulls the merged code and starts `odds-web` on that code.
 3. **Check.** `systemctl status odds-web`, then open the host's tailnet address from the laptop. The portfolio page is at `/`.
 
 Re-running the wizard is safe: each run generates a new password, resets the role to it and rewrites `WEB_DATABASE_URL` to match. Restart `odds-web` afterwards to pick it up.

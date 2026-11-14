@@ -2,7 +2,8 @@
 #
 # Deploy-with-confidence for the always-on local scheduler and the web UI.
 #
-# Pulls the latest code, syncs dependencies, applies migrations, smoke-tests
+# Pulls the latest code and re-executes itself from the pulled copy, so every deploy runs
+# the script it just pulled; then syncs dependencies, applies migrations, smoke-tests
 # the bootstrapped jobs, applies the odds_web role's grants and checks them as that role,
 # and only then restarts the systemd-managed scheduler and then odds-web. If migration,
 # smoke, the grants or the role check fails, the script aborts BEFORE the restarts;
@@ -27,13 +28,19 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_ROOT"
 
+# The preflight runs again after the re-exec, when the checkout is already pulled.
+unchanged="nothing was changed"
+if [[ -n "${ODDS_DEPLOY_REEXEC:-}" ]]; then
+    unchanged="the checkout is already pulled but no service was touched"
+fi
+
 # A non-interactive shell (`ssh host ./deploy.sh`) does not read the rc file
 # that puts the uv installer's directory on PATH. Resolve every tool before the
 # pull so a missing one cannot leave the checkout ahead of the running scheduler.
 export PATH="$HOME/.local/bin:$PATH"
 for tool in git uv sudo systemctl; do
     if ! command -v "$tool" >/dev/null; then
-        echo "deploy.sh: $tool not found on PATH ($PATH); nothing was changed" >&2
+        echo "deploy.sh: $tool not found on PATH ($PATH); $unchanged" >&2
         exit 1
     fi
 done
@@ -44,7 +51,7 @@ SYSTEMCTL="$(command -v systemctl)"
 
 # The web unit is installed by hand (docs: wiki/operations/howto-set-up-odds-web-host.md).
 if ! "$SYSTEMCTL" cat "$WEB_SERVICE.service" >/dev/null 2>&1; then
-    echo "deploy.sh: $WEB_SERVICE.service is not installed; nothing was changed" >&2
+    echo "deploy.sh: $WEB_SERVICE.service is not installed; $unchanged" >&2
     exit 1
 fi
 
@@ -60,18 +67,32 @@ if [[ ! -t 0 ]]; then
     for service in "$SERVICE" "$WEB_SERVICE"; do
         for action in restart stop; do
             if ! grep -qxF "$SYSTEMCTL $action $service" <<<"$allowed_commands"; then
-                echo "deploy.sh: no NOPASSWD sudo rule for '$SYSTEMCTL $action $service' and no terminal to prompt; nothing was changed" >&2
+                echo "deploy.sh: no NOPASSWD sudo rule for '$SYSTEMCTL $action $service' and no terminal to prompt; $unchanged" >&2
                 exit 1
             fi
         done
     done
 fi
 
+# Bash reads a script as it runs, so a script that pulls a change to itself would carry on
+# with the old text: re-exec the pulled copy once. The pre-pull head and the start time cross
+# the exec in the environment, for the rollback steps and the restart check.
+if [[ -z "${ODDS_DEPLOY_REEXEC:-}" ]]; then
+    ODDS_DEPLOY_PREVIOUS_HEAD="$(git rev-parse HEAD)"
+    ODDS_DEPLOY_STARTED_AT="$(date +%s)"
+    export ODDS_DEPLOY_PREVIOUS_HEAD ODDS_DEPLOY_STARTED_AT
+    echo "==> git pull"
+    git pull --ff-only
+    echo "==> re-executing the pulled deploy.sh"
+    ODDS_DEPLOY_REEXEC=1 exec "$BASH" "$REPO_ROOT/deploy.sh" "$@"
+fi
+previous_head="${ODDS_DEPLOY_PREVIOUS_HEAD:?}"
+deploy_started_at="${ODDS_DEPLOY_STARTED_AT:?}"
+
 scheduler_down=0
 web_down=0
 migration_committed=0
 grants_applied=0
-previous_head=""
 previous_revision=""
 report_services_down() {
     local status=$? stopped=()
@@ -106,12 +127,6 @@ report_services_down() {
     fi
 }
 trap report_services_down EXIT
-
-previous_head="$(git rev-parse HEAD)"
-deploy_started_at="$(date +%s)"
-
-echo "==> git pull"
-git pull --ff-only
 
 echo "==> uv sync"
 uv sync

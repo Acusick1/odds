@@ -49,7 +49,7 @@ status: stable
 
 `odds web serve [--port 8765]` (`odds_cli.commands.web.serve`) builds the app with `odds_web.app.create_app_from_settings` and runs uvicorn on `odds_cli.commands.web.LOOPBACK` (`127.0.0.1`). There is no host option, so only the host and `tailscale serve` reach it. It exits 1 without starting when `WEB_DATABASE_URL` is unset (`odds_web.db.WebDatabaseNotConfigured`). The command imports the web stack only when it runs, so no other `odds` command loads it.
 
-Systemd runs it as `odds-web.service` beside `odds-scheduler.service`, with `CPUQuota` and `MemoryMax` so it cannot starve the scheduler, and no systemd dependency on the scheduler in either direction. `deploy.sh` restarts it after the scheduler ([Redeploy](../scheduling/howto-run-scheduler-service.md#redeploy)). The one-time host steps are in [Set up the odds-web host](howto-set-up-odds-web-host.md).
+Systemd runs it as `odds-web.service` beside `odds-scheduler.service`, with `CPUQuota` and `MemoryMax` so it cannot starve the scheduler, and no systemd dependency on the scheduler in either direction. `deploy.sh` restarts it after the scheduler, on the code it just pulled ([Redeploy](../scheduling/howto-run-scheduler-service.md#redeploy)). The one-time host steps are in [Set up the odds-web host](howto-set-up-odds-web-host.md).
 
 ## Database access
 
