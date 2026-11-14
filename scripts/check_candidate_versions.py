@@ -75,8 +75,8 @@ def _load(text: str) -> dict[str, Any]:
 
 def _normalised(candidate: dict[str, Any]) -> dict[str, Any]:
     """``candidate`` with a single ``sport`` read as the one-league ``sports`` that replaced it,
-    and a mechanical one without ``books`` read as ``books: uk_retail``, the set every
-    candidate used before the field."""
+    and a mechanical one without ``books`` read as ``books: uk_retail``, so adding that line is
+    no version change (ADR-0025)."""
     normalised = candidate
     if "sport" in normalised and "sports" not in normalised:
         normalised = {k: v for k, v in normalised.items() if k != "sport"}

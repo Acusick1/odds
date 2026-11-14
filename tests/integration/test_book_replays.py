@@ -27,8 +27,8 @@ from tests.test_helpers import make_tagged_snapshot, store_tagged, three_way_boo
 
 pytestmark = pytest.mark.integration
 
-OWN = ("set", "uk_retail")
-ODDS_API = ("set", "odds_api_uk")
+OWN = BookSet.UK_RETAIL
+ODDS_API = BookSet.ODDS_API_UK
 
 
 async def add_snapshot(
@@ -73,9 +73,8 @@ class TestReplayVariants:
         replayed = await replay_variants(pglite_async_session, candidate())
 
         assert replayed is not None
-        decisions, variants = replayed
-        assert decisions == 1
-        [bet] = variants[OWN]
+        assert replayed.decisions == 1
+        [bet] = replayed.by_set[OWN]
         assert (bet.bookmaker, bet.selection, bet.price_decimal) == ("midnite", "home", 2.6)
         assert bet.p_close == pytest.approx(0.5) and bet.pnl == pytest.approx(1.6)
 
@@ -87,7 +86,7 @@ class TestReplayVariants:
         replayed = await replay_variants(pglite_async_session, candidate())
 
         assert replayed is not None
-        [bet] = replayed[1][ODDS_API]
+        [bet] = replayed.by_set[ODDS_API]
         assert (bet.bookmaker, bet.price_decimal, bet.pnl) == (
             "williamhill",
             2.4,
@@ -102,13 +101,11 @@ class TestReplayVariants:
         replayed = await replay_variants(pglite_async_session, candidate())
 
         assert replayed is not None
-        variants = replayed[1]
-        assert [b.bookmaker for b in variants[("without", "midnite")]] == ["williamhill"]
-        assert [b.bookmaker for b in variants[("without", "williamhill")]] == ["midnite"]
-        assert variants.keys() == {
-            *(("set", s.value) for s in BookSet),
-            *(("without", b) for b in BOOK_SETS[BookSet.UK_RETAIL]),
-        }
+        left_out = replayed.without
+        assert [b.bookmaker for b in left_out["midnite"]] == ["williamhill"]
+        assert [b.bookmaker for b in left_out["williamhill"]] == ["midnite"]
+        assert left_out.keys() == BOOK_SETS[BookSet.UK_RETAIL]
+        assert replayed.by_set.keys() == set(BookSet)
 
     async def test_a_selection_is_bet_once_per_match_in_each_variant(
         self, pglite_async_session: Any, midnite_event: list[int]
@@ -126,7 +123,7 @@ class TestReplayVariants:
         replayed = await replay_variants(pglite_async_session, candidate())
 
         assert replayed is not None
-        assert len(replayed[1][OWN]) == len(replayed[1][ODDS_API]) == 1
+        assert len(replayed.by_set[OWN]) == len(replayed.by_set[ODDS_API]) == 1
 
     async def test_a_missed_decision_is_not_replayed(
         self, pglite_async_session: Any, midnite_event: list[int]
@@ -135,8 +132,8 @@ class TestReplayVariants:
 
         replayed = await replay_variants(pglite_async_session, candidate())
 
-        assert replayed is not None and replayed[0] == 0
-        assert all(not bets for bets in replayed[1].values())
+        assert replayed is not None and replayed.decisions == 0
+        assert not any(replayed.by_set.values()) and not any(replayed.without.values())
 
 
 class TestBookReplays:

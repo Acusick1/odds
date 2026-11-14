@@ -24,10 +24,12 @@ from odds_core.candidates import Candidate, CandidateStatus, MechanicalCandidate
 from odds_core.close import close_grace, close_quotes, event_close
 from odds_core.exchange_price import ExchangePrice
 from odds_core.market_prices import Outcome
-from odds_core.models import Event
+from odds_core.models import Event, EventStatus
+from odds_core.odds_math import calculate_profit_from_decimal, selection_won
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade, TradeResult
 from odds_core.quotes import Quote
 from odds_core.vocabulary import Market, Source
+from odds_lambda.candidate_rules import BetIntent
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -425,22 +427,72 @@ def scoreable_prefix(trades: Sequence[ScoredBet], now: datetime) -> tuple[list[S
     return with_close, length
 
 
+def stake_weighted_mean_ev(with_close: Sequence[ScoredBet]) -> float | None:
+    """Σ stake·EV / Σ stake over ``with_close``, the checkpoint score; None without stake."""
+    stake = sum(t.stake for t in with_close)
+    if not stake:
+        return None
+    return sum(t.stake * t.ev for t in with_close if t.ev is not None) / stake
+
+
+def scored_intent(
+    candidate_name: str,
+    candidate_version: int,
+    market: Market,
+    event: Event,
+    intent: BetIntent,
+    placed_at: datetime,
+    p_close: CloseProbability | None,
+) -> ScoredBet:
+    """The bet a rule's ``intent`` placed at ``placed_at`` on ``event``, with the close
+    ``p_close``, settled on the event's final score as ``settle_trades`` settles a trade and
+    unsettled until the event is final with both scores."""
+    pnl = None
+    if (
+        event.status == EventStatus.FINAL
+        and event.home_score is not None
+        and event.away_score is not None
+    ):
+        pnl = calculate_profit_from_decimal(
+            intent.stake,
+            intent.price_decimal,
+            won=selection_won(
+                intent.outcome.value, intent.line, event.home_score, event.away_score
+            ),
+        )
+    return ScoredBet(
+        candidate_name=candidate_name,
+        candidate_version=candidate_version,
+        event_id=event.id,
+        commence_time=event.commence_time,
+        stake=intent.stake,
+        pnl=pnl,
+        price_decimal=intent.price_decimal,
+        p_close=None if p_close is None else p_close.proportional,
+        placed_at=placed_at,
+        close_grace=close_grace(event.sport_key, market),
+        sport_key=event.sport_key,
+        selection=intent.outcome.value,
+        line=intent.line,
+        bookmaker=intent.bookmaker,
+        p_close_power=None if p_close is None else p_close.power,
+        close_source=None if p_close is None else p_close.source,
+    )
+
+
 def league_breakdown(trades: Sequence[ScoredBet], now: datetime) -> tuple[LeagueBreakdown, ...]:
     """``trades`` split by league, in league-key order; ``trades`` in placement order."""
     with_close, _ = scoreable_prefix(trades, now)
     breakdown: list[LeagueBreakdown] = []
     for league in sorted({t.sport_key for t in trades}):
         scored = [t for t in with_close if t.sport_key == league]
-        stake = sum(t.stake for t in scored)
         settled = [t for t in trades if t.sport_key == league and t.pnl is not None]
         breakdown.append(
             LeagueBreakdown(
                 sport_key=league,
                 settled_bets=len(settled),
                 bets_with_close=len(scored),
-                mean_ev=sum(t.stake * t.ev for t in scored if t.ev is not None) / stake
-                if scored
-                else None,
+                mean_ev=stake_weighted_mean_ev(scored),
                 pnl=sum(t.pnl for t in settled if t.pnl is not None),
             )
         )

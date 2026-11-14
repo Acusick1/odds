@@ -28,9 +28,9 @@ Each variant chains [once per selection](candidate-rules.md#once-per-selection) 
 
 ## What is scored
 
-`odds_analytics.book_replays.replay_variants` turns each variant's bets into `odds_analytics.candidate_report.ScoredBet` placed at the decision's `known_at`, with the close of the report (`odds_analytics.candidate_report.selection_close_probability` over `odds_core.close.close_quotes`, never the backtest's substitute). A bet is settled when its event is final with both scores, by `odds_core.odds_math.selection_won` and `odds_core.odds_math.calculate_profit_from_decimal`, as `odds_lambda.paper_trading.settle_trades` settles trades, and is unsettled otherwise.
+`odds_analytics.book_replays.replay_variants` returns the bets of every variant as an `odds_analytics.book_replays.ReplayedBets` (one list per book set and one per left-out book). It turns each bet into a `odds_analytics.candidate_report.ScoredBet` with `odds_analytics.candidate_report.scored_intent`, which the [replay backtest](candidate-backtest.md#replay) uses too, placed at the decision's `known_at`, with the close of the report (`odds_analytics.candidate_report.selection_close_probability` over `odds_core.close.close_quotes`, never the backtest's substitute). A bet is settled when its event is final with both scores, by `odds_core.odds_math.selection_won` and `odds_core.odds_math.calculate_profit_from_decimal`, as `odds_lambda.paper_trading.settle_trades` settles trades, and is unsettled otherwise.
 
-`odds_analytics.book_replays.score_bets` summarises a series as an `odds_analytics.book_replays.BookScore`: its bets, the settled ones, the bets with a close in the scoreable prefix (`odds_analytics.candidate_report.scoreable_prefix` at the report's `now`), their stake-weighted mean EV and the P&L of the settled bets.
+`odds_analytics.book_replays.score_bets` summarises a series as an `odds_analytics.book_replays.BookScore`: its bets, the settled ones, the bets with a close in the scoreable prefix (`odds_analytics.candidate_report.scoreable_prefix` at the report's `now`), their stake-weighted mean EV (`odds_analytics.candidate_report.stake_weighted_mean_ev`, which the per-league breakdown uses too) and the P&L of the settled bets.
 
 `odds_analytics.book_replays.BookReplay` holds, per version:
 

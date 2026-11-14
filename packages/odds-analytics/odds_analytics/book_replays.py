@@ -19,11 +19,9 @@ from datetime import datetime
 import structlog
 from odds_core.bookmakers import BOOK_SETS, BookSet
 from odds_core.candidates import Candidate, MechanicalCandidate
-from odds_core.close import close_grace, close_quotes
-from odds_core.models import Event, EventStatus
-from odds_core.odds_math import calculate_profit_from_decimal, selection_won
+from odds_core.close import close_quotes
+from odds_core.models import Event
 from odds_core.paper_trade_models import CandidateDecision
-from odds_core.quotes import Quote
 from odds_lambda.candidate_rules import BetIntent, ModelRuleSpec, Selection
 from odds_lambda.candidate_rules.registry import resolve_rule
 from sqlalchemy import select
@@ -37,19 +35,15 @@ from odds_analytics.candidate_parity import (
     recorded_quotes,
 )
 from odds_analytics.candidate_report import (
-    RunningScore,
     ScoredBet,
     running_score,
     scoreable_prefix,
+    scored_intent,
     selection_close_probability,
+    stake_weighted_mean_ev,
 )
 
 logger = structlog.get_logger()
-
-# A variant is a named book set or the candidate's own set without one book.
-_SET = "set"
-_WITHOUT = "without"
-_Variant = tuple[str, str]
 
 
 @dataclass(frozen=True)
@@ -102,83 +96,33 @@ class BookReplay:
 def score_bets(bets: Sequence[ScoredBet], with_close: Sequence[ScoredBet]) -> BookScore:
     """``bets`` summarised, ``with_close`` being those of them with a close in the scoreable
     prefix."""
-    stake = sum(b.stake for b in with_close)
     settled = [b.pnl for b in bets if b.pnl is not None]
     return BookScore(
         bets=len(bets),
         settled_bets=len(settled),
         bets_with_close=len(with_close),
-        mean_ev=sum(b.stake * b.ev for b in with_close if b.ev is not None) / stake
-        if stake
-        else None,
+        mean_ev=stake_weighted_mean_ev(with_close),
         pnl=sum(settled),
     )
 
 
-def _variants(candidate: MechanicalCandidate) -> dict[_Variant, frozenset[str]]:
-    own = BOOK_SETS[candidate.books]
-    return {
-        **{(_SET, s.value): BOOK_SETS[s] for s in BookSet},
-        **{(_WITHOUT, book): own - {book} for book in sorted(own)},
-    }
+@dataclass(frozen=True)
+class ReplayedBets:
+    """The scored bets of each variant of ``decisions`` replayed decisions, in the order the
+    live runs took them: under each named book set, and under the version's own set without
+    each of its books."""
 
-
-def _scored(
-    candidate: MechanicalCandidate,
-    decision_time: datetime,
-    event: Event,
-    intents: Sequence[BetIntent],
-    closes: dict[int, list[Quote]],
-) -> list[ScoredBet]:
-    settleable = (
-        event.status == EventStatus.FINAL
-        and event.home_score is not None
-        and event.away_score is not None
-    )
-    bets: list[ScoredBet] = []
-    for intent in intents:
-        p_close = selection_close_probability(
-            candidate.market, intent.outcome.value, intent.line, event, closes.get(event.id, [])
-        )
-        pnl = None
-        if settleable:
-            assert event.home_score is not None and event.away_score is not None  # noqa: S101
-            pnl = calculate_profit_from_decimal(
-                intent.stake,
-                intent.price_decimal,
-                won=selection_won(
-                    intent.outcome.value, intent.line, event.home_score, event.away_score
-                ),
-            )
-        bets.append(
-            ScoredBet(
-                candidate_name=candidate.name,
-                candidate_version=candidate.version,
-                event_id=event.id,
-                commence_time=event.commence_time,
-                stake=intent.stake,
-                pnl=pnl,
-                price_decimal=intent.price_decimal,
-                p_close=None if p_close is None else p_close.proportional,
-                placed_at=decision_time,
-                close_grace=close_grace(event.sport_key, candidate.market),
-                sport_key=event.sport_key,
-                selection=intent.outcome.value,
-                line=intent.line,
-                bookmaker=intent.bookmaker,
-                p_close_power=None if p_close is None else p_close.power,
-                close_source=None if p_close is None else p_close.source,
-            )
-        )
-    return bets
+    decisions: int
+    by_set: dict[BookSet, list[ScoredBet]]
+    without: dict[str, list[ScoredBet]]
 
 
 async def replay_variants(
     session: AsyncSession, candidate: MechanicalCandidate
-) -> tuple[int, dict[_Variant, list[ScoredBet]]] | None:
-    """The number of decisions replayed and each variant's scored bets in the order the live
-    runs took the decisions; None for a model rule, which has none. Each decision's recorded
-    quotes are read once and every variant's state is built from them in memory."""
+) -> ReplayedBets | None:
+    """The version's decisions replayed under every variant; None for a model rule, which has
+    none. Each decision's recorded quotes are read once and every variant's state is built from
+    them in memory."""
     spec, params = resolve_rule(candidate)
     if isinstance(spec, ModelRuleSpec):
         return None
@@ -192,16 +136,17 @@ async def replay_variants(
             )
         ).all()
     }
-    variants = _variants(candidate)
-    chains: dict[_Variant, dict[int, set[Selection]]] = {v: defaultdict(set) for v in variants}
-    placed: dict[_Variant, list[tuple[CandidateDecision, list[BetIntent]]]] = {
-        v: [] for v in variants
-    }
+    own = BOOK_SETS[candidate.books]
+    named = list(BookSet)
+    left_out = sorted(own)
+    variants = [BOOK_SETS[s] for s in named] + [own - {book} for book in left_out]
+    chains: list[dict[int, set[Selection]]] = [defaultdict(set) for _ in variants]
+    placed: list[list[tuple[CandidateDecision, list[BetIntent]]]] = [[] for _ in variants]
     for decision in decisions:
         assert decision.id is not None  # noqa: S101
         event = events[decision.event_id]
         quoted = await recorded_quotes(session, spec, params, event, candidate.market, decision)
-        for variant, books in variants.items():
+        for i, books in enumerate(variants):
             intents = recorded_intents(
                 spec,
                 params,
@@ -211,56 +156,71 @@ async def replay_variants(
                 quoted,
                 books,
                 fixtures.get(decision.id, ([], None)),
-                chains[variant][decision.event_id],
+                chains[i][decision.event_id],
             )
-            chains[variant][decision.event_id].update(i.selection for i in intents)
-            placed[variant].append((decision, intents))
-    betting = [events[i] for i in {d.event_id for v in placed.values() for d, b in v if b}]
+            chains[i][decision.event_id].update(intent.selection for intent in intents)
+            placed[i].append((decision, intents))
+    betting = [events[i] for i in {d.event_id for v in placed for d, b in v if b}]
     closes = await close_quotes(session, betting, candidate.market)
-    return len(decisions), {
-        variant: [
-            bet
-            for decision, intents in per_decision
-            for bet in _scored(
-                candidate, decision.known_at, events[decision.event_id], intents, closes
+    scored = [
+        [
+            scored_intent(
+                candidate.name,
+                candidate.version,
+                candidate.market,
+                events[decision.event_id],
+                intent,
+                decision.known_at,
+                selection_close_probability(
+                    candidate.market,
+                    intent.outcome.value,
+                    intent.line,
+                    events[decision.event_id],
+                    closes.get(decision.event_id, []),
+                ),
             )
+            for decision, intents in per_decision
+            for intent in intents
         ]
-        for variant, per_decision in placed.items()
-    }
+        for per_decision in placed
+    ]
+    return ReplayedBets(
+        len(decisions),
+        dict(zip(named, scored[: len(named)], strict=True)),
+        dict(zip(left_out, scored[len(named) :], strict=True)),
+    )
 
 
 def build_replay(
     candidate: MechanicalCandidate,
-    decisions: int,
-    variants: dict[_Variant, list[ScoredBet]],
+    replayed: ReplayedBets,
     trades: Sequence[ScoredBet],
     now: datetime,
 ) -> BookReplay:
     """The replay of ``candidate`` from its variants' bets and its paper ``trades``, both in
     placement order."""
-    own = BOOK_SETS[candidate.books]
-    prefixes = {v: scoreable_prefix(bets, now)[0] for v, bets in variants.items()}
-    scores = {v: score_bets(bets, prefixes[v]) for v, bets in variants.items()}
-    running: dict[_Variant, RunningScore] = {v: running_score(p) for v, p in prefixes.items()}
+    prefixes = {s: scoreable_prefix(bets, now)[0] for s, bets in replayed.by_set.items()}
     sets = tuple(
         BookSetReplay(
             books=s,
             registered=s is candidate.books,
-            score=scores[(_SET, s.value)],
-            running_mean_ev=running[(_SET, s.value)].mean_ev,
+            score=score_bets(replayed.by_set[s], prefixes[s]),
+            running_mean_ev=running_score(prefixes[s]).mean_ev,
         )
         for s in BookSet
     )
+    baseline = next(s.score for s in sets if s.registered)
     live_with_close = scoreable_prefix(trades, now)[0]
-    baseline = scores[(_SET, candidate.books.value)]
     rows: list[BookRow] = []
-    for book in sorted(own):
-        at_book = [t for t in trades if t.bookmaker == book]
-        placed = score_bets(at_book, [t for t in live_with_close if t.bookmaker == book])
-        without = scores[(_WITHOUT, book)]
+    for book, bets in replayed.without.items():
+        placed = score_bets(
+            [t for t in trades if t.bookmaker == book],
+            [t for t in live_with_close if t.bookmaker == book],
+        )
+        without = score_bets(bets, scoreable_prefix(bets, now)[0])
         if placed.bets or (without.bets, without.mean_ev) != (baseline.bets, baseline.mean_ev):
             rows.append(BookRow(book, placed, without))
-    return BookReplay(candidate.name, candidate.version, decisions, sets, tuple(rows))
+    return BookReplay(candidate.name, candidate.version, replayed.decisions, sets, tuple(rows))
 
 
 async def book_replays(
@@ -288,5 +248,5 @@ async def book_replays(
             )
             continue
         if replayed is not None:
-            found[key] = build_replay(entry, *replayed, by_version.get(key, []), now)
+            found[key] = build_replay(entry, replayed, by_version.get(key, []), now)
     return found

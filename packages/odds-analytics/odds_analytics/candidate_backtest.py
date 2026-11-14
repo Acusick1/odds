@@ -10,15 +10,15 @@ substitute to the paper trades' close. Development data can kill an idea but nev
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 from enum import StrEnum
+from functools import reduce
 
 from odds_core.bookmakers import BOOK_SETS, BookSet
 from odds_core.candidates import MechanicalCandidate
-from odds_core.close import backtest_close, backtest_close_quotes, close_grace
+from odds_core.close import backtest_close, backtest_close_quotes
 from odds_core.models import Event, EventStatus
-from odds_core.odds_math import calculate_profit_from_decimal, selection_won
 from odds_core.vocabulary import Source
 from odds_lambda.candidate_rules import (
     ModelRuleSpec,
@@ -45,6 +45,7 @@ from odds_analytics.candidate_report import (
     checkpoint_at,
     close_probability,
     scoreable_prefix,
+    scored_intent,
     summarize_candidate,
 )
 from odds_analytics.holdout import HoldoutAccess, require_clear
@@ -176,6 +177,21 @@ class _Counts:
     with_bet: int = 0
     with_book: dict[str, int] = field(default_factory=dict)
 
+    def merge(self, other: _Counts) -> _Counts:
+        """The sum of two counts; ``with_book`` adds book by book."""
+        return _Counts(
+            self.decisions + other.decisions,
+            self.with_input + other.with_input,
+            self.with_exchange + other.with_exchange,
+            self.with_polymarket + other.with_polymarket,
+            self.with_retail + other.with_retail,
+            self.with_bet + other.with_bet,
+            {
+                book: self.with_book.get(book, 0) + other.with_book.get(book, 0)
+                for book in self.with_book.keys() | other.with_book.keys()
+            },
+        )
+
 
 async def _decide(
     session: AsyncSession,
@@ -234,32 +250,8 @@ async def _decide(
                     intent.outcome.value,
                 )
                 bets.append(
-                    ScoredBet(
-                        candidate_name=candidate.name,
-                        candidate_version=candidate.version,
-                        event_id=event.id,
-                        commence_time=event.commence_time,
-                        stake=intent.stake,
-                        pnl=calculate_profit_from_decimal(
-                            intent.stake,
-                            intent.price_decimal,
-                            won=selection_won(
-                                intent.outcome.value,
-                                intent.line,
-                                event.home_score,
-                                event.away_score,
-                            ),
-                        ),
-                        price_decimal=intent.price_decimal,
-                        p_close=None if p_close is None else p_close.proportional,
-                        placed_at=t,
-                        close_grace=close_grace(event.sport_key, market),
-                        sport_key=event.sport_key,
-                        selection=intent.outcome.value,
-                        line=intent.line,
-                        bookmaker=intent.bookmaker,
-                        p_close_power=None if p_close is None else p_close.power,
-                        close_source=None if p_close is None else p_close.source,
+                    scored_intent(
+                        candidate.name, candidate.version, market, event, intent, t, p_close
                     )
                 )
     return bets
@@ -416,18 +408,7 @@ def league_coverage(replayed: Replayed, books: Collection[str]) -> dict[str, Cov
 
 
 def coverage_of(replayed: Replayed, books: Collection[str]) -> Coverage:
-    total = _Counts()
-    for counts in replayed.counts.values():
-        for counter in fields(_Counts):
-            if counter.name == "with_book":
-                for book, n in counts.with_book.items():
-                    total.with_book[book] = total.with_book.get(book, 0) + n
-            else:
-                setattr(
-                    total,
-                    counter.name,
-                    getattr(total, counter.name) + getattr(counts, counter.name),
-                )
+    total = reduce(_Counts.merge, replayed.counts.values(), _Counts())
     return _coverage(total, sum(replayed.scored_events.values()), replayed.bets, books)
 
 
