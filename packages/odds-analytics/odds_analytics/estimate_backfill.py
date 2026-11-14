@@ -33,11 +33,23 @@ from odds_analytics.candidate_parity import (
     recorded_quotes,
 )
 
-MatchKey = tuple[str, float | None, str, float]
+# A trade's price matches a replayed bet's when they are equal to this many decimal places, the
+# tolerance the parity check compares prices at (``odds_analytics.candidate_parity.bet_key``).
+PRICE_DECIMALS = 9
 
 
-def _key(selection: str, line: float | None, bookmaker: str, price: float) -> MatchKey:
-    return (selection, line, bookmaker, round(price, 9))
+@dataclass(frozen=True)
+class BetMatch:
+    """What a trade and a replayed bet must share to be the same bet."""
+
+    selection: str
+    line: float | None
+    bookmaker: str
+    price: float
+
+    @classmethod
+    def of(cls, selection: str, line: float | None, bookmaker: str, price: float) -> BetMatch:
+        return cls(selection, line, bookmaker, round(price, PRICE_DECIMALS))
 
 
 @dataclass(frozen=True)
@@ -48,7 +60,7 @@ class TradeEstimate:
     trade_id: int
     decision_id: int
     event_id: int
-    key: MatchKey
+    key: BetMatch
     matched: bool
     estimated_ev: float | None
     stored: float | None
@@ -62,11 +74,19 @@ class VersionBackfill:
 
     @property
     def to_write(self) -> list[TradeEstimate]:
-        """Matched trades with an estimate that differs from the one stored."""
+        """Matched trades with an estimate and none stored; a stored estimate is never
+        overwritten."""
+        return [
+            t for t in self.trades if t.matched and t.estimated_ev is not None and t.stored is None
+        ]
+
+    @property
+    def mismatched(self) -> list[TradeEstimate]:
+        """Matched trades whose stored estimate differs from the replay's."""
         return [
             t
             for t in self.trades
-            if t.matched and t.estimated_ev is not None and t.stored != t.estimated_ev
+            if t.matched and t.stored is not None and t.stored != t.estimated_ev
         ]
 
     @property
@@ -122,10 +142,12 @@ async def _version_backfill(
             fixtures.get(decision.id, ([], None)),
             live_selections[decision.event_id],
         )
-        replayed = {_key(i.outcome.value, i.line, i.bookmaker, i.price_decimal): i for i in intents}
+        replayed = {
+            BetMatch.of(i.outcome.value, i.line, i.bookmaker, i.price_decimal): i for i in intents
+        }
         for trade in placed:
             assert trade.id is not None  # noqa: S101
-            key = _key(trade.selection, trade.line, trade.bookmaker, trade.price_decimal)
+            key = BetMatch.of(trade.selection, trade.line, trade.bookmaker, trade.price_decimal)
             intent = replayed.get(key)
             estimates.append(
                 TradeEstimate(
@@ -169,7 +191,8 @@ async def plan_backfill(session: AsyncSession, registry: Sequence[Candidate]) ->
 
 
 async def apply_backfill(session: AsyncSession, backfill: EstimateBackfill) -> int:
-    """Write each matched trade's estimate and commit; the number of trades written."""
+    """Write the estimate of each trade in ``VersionBackfill.to_write`` and commit; the number of
+    trades written."""
     written = 0
     for version in backfill.versions:
         for trade in version.to_write:

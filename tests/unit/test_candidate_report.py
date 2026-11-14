@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from odds_analytics.candidate_report import (
+    KILL_LEVEL,
     DecisionStart,
     ScoredBet,
     Verdict,
@@ -13,7 +14,7 @@ from odds_analytics.candidate_report import (
     checkpoint_at,
     checkpoint_progress,
     checkpoints_through_next,
-    estimate_gap,
+    estimates_of,
     family_size_at,
     family_starts,
     judge,
@@ -814,27 +815,19 @@ def _paper_trade(event_id: int, minutes: int, **fields) -> PaperTrade:
     return PaperTrade(**{**defaults, **fields})
 
 
-class TestEstimate:
-    def test_the_running_estimate_is_stake_weighted_over_the_same_bets(self) -> None:
+class TestEstimates:
+    def test_the_running_estimate_is_stake_weighted_over_the_bets_with_a_close(self) -> None:
         sequence = [
             trade(0, 0.3, stake=2.0, estimated_ev=0.5),
             trade(1, None, estimated_ev=0.9),
             trade(2, -0.1, estimated_ev=0.2),
         ]
 
-        running = report_candidates(sequence, [], NOW, n_boot=N_BOOT).running[("cand", 1)]
+        [summary] = report_candidates(sequence, [], NOW, n_boot=N_BOOT).summaries
 
-        assert running.estimated == pytest.approx((1.0, 1.2))
-        assert running.mean_estimated_ev == pytest.approx((0.5, 0.4))
-        assert running.without_estimate == 0
-
-    def test_a_bet_without_an_estimate_leaves_no_running_estimate(self) -> None:
-        sequence = [trade(0, 0.3, estimated_ev=0.5), trade(1, 0.1), trade(2, 0.1)]
-
-        running = report_candidates(sequence, [], NOW, n_boot=N_BOOT).running[("cand", 1)]
-
-        assert (running.estimated, running.mean_estimated_ev) == (None, None)
-        assert running.without_estimate == 2
+        assert summary.estimates is not None
+        assert summary.estimates.mean_estimated_ev == pytest.approx((0.5, 0.4))
+        assert summary.estimates.gap.n == summary.bets_with_close == 2
 
     def test_the_gap_is_the_stake_weighted_mean_of_estimate_minus_ev(self) -> None:
         sequence = [
@@ -843,36 +836,43 @@ class TestEstimate:
             trade(2, 0.0, estimated_ev=0.1),
         ]
 
-        gap = estimate_gap(sequence)
+        estimates = estimates_of(sequence, N_BOOT, 0)
 
-        assert gap is not None
-        assert gap.n == 3
+        assert estimates is not None
+        gap = estimates.gap
+        assert (gap.n, gap.level) == (3, KILL_LEVEL)
         assert gap.mean_gap == pytest.approx((2 * 0.2 + 0.3 + 0.1) / 4)
-        assert gap.ci95[0] <= gap.mean_gap <= gap.ci95[1]
+        assert gap.interval[0] <= gap.mean_gap <= gap.interval[1]
+
+    def test_the_interval_takes_the_resamples_and_seed_it_is_given(self) -> None:
+        sequence = [trade(i, 0.1 * (i % 3), estimated_ev=0.05 * i) for i in range(30)]
+
+        first = estimates_of(sequence, N_BOOT, 0)
+        again = estimates_of(sequence, N_BOOT, 0)
+        other = estimates_of(sequence, N_BOOT, 1)
+
+        assert first is not None and again is not None and other is not None
+        assert first.gap.interval == again.gap.interval != other.gap.interval
 
     def test_events_are_resampled_whole(self) -> None:
         one_event = [trade(i, 0.1, estimated_ev=0.1 + i / 10, event_id=7) for i in range(3)]
 
-        gap = estimate_gap(one_event)
+        estimates = estimates_of(one_event, N_BOOT, 0)
 
-        assert gap is not None and gap.ci95 == pytest.approx((gap.mean_gap, gap.mean_gap))
+        assert estimates is not None
+        gap = estimates.gap
+        assert gap.interval == pytest.approx((gap.mean_gap, gap.mean_gap))
 
-    def test_no_gap_without_a_bet_or_with_a_bet_lacking_an_estimate(self) -> None:
-        assert estimate_gap([]) is None
-        assert estimate_gap([trade(0, 0.1, estimated_ev=0.2), trade(1, 0.1)]) is None
+    def test_none_without_a_bet_or_with_a_bet_lacking_an_estimate(self) -> None:
+        assert estimates_of([], N_BOOT, 0) is None
+        assert estimates_of([trade(0, 0.1, estimated_ev=0.2), trade(1, 0.1)], N_BOOT, 0) is None
 
-    def test_the_summarys_gap_covers_its_bets_with_a_close(self) -> None:
-        sequence = [
-            trade(0, 0.3, estimated_ev=0.5),
-            trade(1, None),
-            trade(2, -0.1, estimated_ev=0.2),
-        ]
+    def test_the_summary_has_none_when_a_bet_lacks_one(self) -> None:
+        sequence = [trade(0, 0.3, estimated_ev=0.5), trade(1, 0.1)]
 
         [summary] = report_candidates(sequence, [], NOW, n_boot=N_BOOT).summaries
 
-        assert summary.estimate_gap is not None
-        assert summary.estimate_gap.n == summary.bets_with_close == 2
-        assert summary.estimate_gap.mean_gap == pytest.approx(0.25)
+        assert summary.estimates is None
 
 
 class TestLoadScoredBets:

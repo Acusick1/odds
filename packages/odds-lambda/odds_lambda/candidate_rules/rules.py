@@ -38,7 +38,7 @@ Selection = tuple[Outcome, Line]
 @dataclass(frozen=True)
 class BetIntent:
     """A bet a rule takes. ``estimated_ev`` is the EV per unit staked the rule estimated for it
-    at decision time, against its spec's ``estimate_basis``; None for a rule without one."""
+    at decision time, against its spec's ``estimate_basis``; None for a rule without a basis."""
 
     outcome: Outcome
     bookmaker: str
@@ -171,8 +171,6 @@ class EstimateBasis(StrEnum):
     POLYMARKET = "polymarket"
     RETAIL_CONSENSUS = "retail_consensus"
     MODEL = "model"
-    # The rule has no fair price, so its bets carry no estimate.
-    NONE = "none"
 
 
 @dataclass(frozen=True)
@@ -183,7 +181,7 @@ class RuleSpec:
     decision without an input for each of them has no inputs. ``fixture_inputs`` are the
     fixture inputs the rule reads, in ``MarketState.fixture``: a decision with a team whose
     previous result is not known has no inputs. ``estimate_basis`` is what the rule's bets'
-    ``estimated_ev`` is against."""
+    ``estimated_ev`` is against, None for a rule without a fair price, whose bets carry none."""
 
     # Each rule takes its own params model, which a shared Callable cannot express.
     function: Callable[[MarketState, Any], list[BetIntent]]
@@ -191,7 +189,7 @@ class RuleSpec:
     sharp_inputs: frozenset[SharpInput]
     also_markets: frozenset[Market] = frozenset()
     fixture_inputs: frozenset[FixtureInput] = frozenset()
-    estimate_basis: EstimateBasis = field(kw_only=True)
+    estimate_basis: EstimateBasis | None = field(kw_only=True)
 
 
 # Predicted EV of each (outcome, UK retail book) quote in a state of a market without lines.
@@ -215,7 +213,7 @@ class ModelRuleSpec:
     markets: frozenset[Market]
     also_markets: frozenset[Market] = frozenset()
     fixture_inputs: frozenset[FixtureInput] = frozenset()
-    estimate_basis: EstimateBasis = field(kw_only=True)
+    estimate_basis: EstimateBasis | None = field(kw_only=True)
 
     def bind(self, predict: EvPredictor) -> RuleSpec:
         return RuleSpec(

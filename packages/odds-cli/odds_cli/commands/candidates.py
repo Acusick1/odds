@@ -929,7 +929,9 @@ def backfill_estimates(
     Replays every decision of each version of a registered mechanical candidate from its
     recorded inputs under the registry's rule, params and book set, as `odds candidates parity`
     does, and takes the estimate of the replayed bet on the trade's selection, line, bookmaker
-    and price. A trade with no such bet keeps none and is listed. Safe to re-run.
+    and price. Only a trade without a stored estimate is written. A trade with no such bet, or
+    whose stored estimate differs from the replay's, is listed and left as it is. Safe to
+    re-run.
 
     Example:
         odds candidates backfill-estimates --apply
@@ -948,13 +950,20 @@ def backfill_estimates(
         console.print(
             f"{v.name} v{v.version}: {len(v.trades)} trades, "
             f"{len(v.trades) - len(v.unmatched)} matched ({len(with_estimate)} with an estimate), "
-            f"{len(v.unmatched)} unmatched, {len(v.to_write)} to write",
+            f"{len(v.unmatched)} unmatched, {len(v.mismatched)} with a different stored "
+            f"estimate, {len(v.to_write)} to write",
             soft_wrap=True,
         )
         for t in v.unmatched:
             console.print(
                 f"  [yellow]unmatched trade {t.trade_id} (decision {t.decision_id}, "
                 f"event {t.event_id}): {t.key}[/yellow]",
+                soft_wrap=True,
+            )
+        for t in v.mismatched:
+            console.print(
+                f"  [yellow]trade {t.trade_id} (decision {t.decision_id}): stored estimate "
+                f"{t.stored}, replay {t.estimated_ev}; left as stored[/yellow]",
                 soft_wrap=True,
             )
     for (name, version), count in plan.skipped.items():

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from odds_analytics.backtest_store import kill_reason, stored_with_close
+from odds_analytics.backtest_store import kill_reason, stored_scored_bets
 from odds_analytics.candidate_report import CandidateReport, running_score
 from odds_core.candidate_backtest_models import (
     CandidateBacktest,
@@ -18,8 +18,10 @@ from odds_core.candidate_backtest_models import (
     WindowKind,
 )
 from odds_core.vocabulary import Source
+from odds_lambda.candidate_rules import EstimateBasis
 from odds_web import backtests as bt
 from odds_web.app import create_app
+from odds_web.candidate_page import ESTIMATE_OMITTED
 from odds_web.db import build_web_database
 from odds_web.ledger import LedgerPage
 
@@ -169,7 +171,7 @@ class TestFigures:
         closeless.p_close = closeless.ev = None
 
         score = running_score(
-            stored_with_close(run(), [stored_bet(1, 0.2, 1.0), pending, closeless])
+            stored_scored_bets(run(), [stored_bet(1, 0.2, 1.0), pending, closeless])
         )
 
         assert score.mean_ev == (pytest.approx(0.2),)
@@ -177,31 +179,30 @@ class TestFigures:
     def test_a_run_whose_bets_carry_an_estimate_draws_it_and_its_gap(self) -> None:
         bets = [stored_bet(i, 0.02, 1.0, estimated_ev=0.05) for i in range(1, 4)]
 
-        figures = bt.figures_of(run(bets=3), bets)
+        figures = bt.figures_of(run(bets=3), bets, EstimateBasis.EXCHANGE)
 
         assert figures.series is not None
         assert figures.series.estimate_percent == pytest.approx([5.0, 5.0, 5.0])
-        assert figures.series.estimate_label == "exchange at decision"
+        assert figures.series.estimate_label == "Estimate (exchange at decision)"
         assert figures.estimate_gap is not None
         assert (figures.estimate_gap.n, figures.estimate_gap.mean_gap) == (3, pytest.approx(0.03))
 
     def test_a_run_with_a_bet_lacking_an_estimate_has_neither(self) -> None:
         bets = [stored_bet(1, 0.02, 1.0, estimated_ev=0.05), stored_bet(2, 0.02, 1.0)]
 
-        figures = bt.figures_of(run(bets=2), bets)
+        figures = bt.figures_of(run(bets=2), bets, EstimateBasis.EXCHANGE)
 
         assert figures.series is not None and figures.series.estimate_percent is None
-        assert figures.series.estimate_omitted == "No estimate: 1 of the 2 bets have none recorded."
+        assert figures.series.estimate_omitted == ESTIMATE_OMITTED
         assert figures.estimate_gap is None
 
-    def test_a_rule_without_a_fair_price_has_neither(self) -> None:
-        stored = run(bets=1)
-        stored.rule = "last_result_overreaction"
+    def test_a_run_of_a_rule_without_a_basis_still_draws_recorded_estimates(self) -> None:
+        bets = [stored_bet(1, 0.02, 1.0, estimated_ev=0.05)]
 
-        figures = bt.figures_of(stored, [stored_bet(1, 0.02, 1.0, estimated_ev=0.05)])
+        figures = bt.figures_of(run(bets=1), bets, None)
 
-        assert figures.series is not None and figures.series.estimate_percent is None
-        assert figures.estimate_gap is None
+        assert figures.series is not None and figures.series.estimate_label == "Estimate"
+        assert figures.estimate_gap is not None
 
     def test_blocks_come_back_as_figures(self) -> None:
         stored = run(cell_index=0, selected=True)

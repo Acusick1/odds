@@ -9,7 +9,6 @@ from odds_lambda.candidate_rules.fixture_context import FixtureInput
 from odds_lambda.candidate_rules.market_state import MarketState
 from odds_lambda.candidate_rules.rules import (
     BetIntent,
-    EstimateBasis,
     RuleParams,
     RuleSpec,
     best_bet,
@@ -46,5 +45,5 @@ LAST_RESULT_OVERREACTION = RuleSpec(
     LastResultParams,
     frozenset(),
     fixture_inputs=frozenset({FixtureInput.PREVIOUS_RESULT}),
-    estimate_basis=EstimateBasis.NONE,
+    estimate_basis=None,
 )

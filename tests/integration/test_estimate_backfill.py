@@ -6,9 +6,9 @@ from datetime import timedelta
 from typing import Any
 
 import pytest
-from odds_analytics.estimate_backfill import apply_backfill, plan_backfill
+from odds_analytics.estimate_backfill import BetMatch, apply_backfill, plan_backfill
 from odds_core.paper_trade_models import PaperTrade
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlmodel import col
 
 from tests.integration.test_candidate_backtest import T, candidate
@@ -48,7 +48,7 @@ class TestPlan:
         [version] = (await plan_backfill(pglite_async_session, [candidate()])).versions
 
         [trade] = version.unmatched
-        assert (trade.key, trade.estimated_ev) == (("home", None, "bet365", 2.3), None)
+        assert (trade.key, trade.estimated_ev) == (BetMatch("home", None, "bet365", 2.3), None)
         assert version.to_write == []
 
     async def test_a_decision_replays_dropping_only_the_selections_traded_before(
@@ -102,6 +102,23 @@ class TestApply:
         again = await plan_backfill(pglite_async_session, [candidate()])
         assert again.versions[0].to_write == []
         assert await apply_backfill(pglite_async_session, again) == 0
+
+    async def test_a_stored_estimate_is_never_overwritten_and_is_listed(
+        self, pglite_async_session: Any
+    ) -> None:
+        ids = await add_event(pglite_async_session)
+        await add_decision(pglite_async_session, ids, [("home", "bet365", 2.2)])
+        await pglite_async_session.execute(update(PaperTrade).values(estimated_ev=0.5))
+        await pglite_async_session.commit()
+
+        plan = await plan_backfill(pglite_async_session, [candidate()])
+
+        [version] = plan.versions
+        assert version.to_write == []
+        [mismatch] = version.mismatched
+        assert (mismatch.stored, mismatch.estimated_ev) == (0.5, pytest.approx(HOME_ESTIMATE))
+        assert await apply_backfill(pglite_async_session, plan) == 0
+        assert await estimates(pglite_async_session) == [0.5]
 
     async def test_an_unmatched_trade_stays_without_an_estimate(
         self, pglite_async_session: Any

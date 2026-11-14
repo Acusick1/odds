@@ -27,7 +27,7 @@ from odds_core.paper_trade_models import TradeResult
 from odds_lambda.candidate_rules import EstimateBasis
 from odds_web.app import create_app
 from odds_web.cache import SingleFlightCache
-from odds_web.candidate_page import AXIS_FROM_BETS, build_series
+from odds_web.candidate_page import AXIS_FROM_BETS, ESTIMATE_OMITTED, build_series
 from odds_web.db import build_web_database
 from odds_web.decisions import Decision, DecisionDay, DecisionHistory, DecisionKind
 from odds_web.ledger import LedgerPage, LedgerRow
@@ -608,13 +608,15 @@ class TestBookReplays:
 
 
 class TestEstimateLine:
-    def test_is_the_running_mean_estimate_over_the_series_bets(self) -> None:
+    def test_is_the_reports_running_mean_estimate_over_the_series_bets(self) -> None:
         summary, running = scored([bet(i, 0.1, estimated_ev=0.1 + i / 100) for i in range(3)])
 
         series = build_series(summary, running, EstimateBasis.EXCHANGE)
 
+        assert summary.estimates is not None
+        assert series.estimate_percent == [v * 100 for v in summary.estimates.mean_estimated_ev]
         assert series.estimate_percent == pytest.approx([10.0, 10.5, 11.0])
-        assert series.estimate_label == "exchange at decision"
+        assert series.estimate_label == "Estimate (exchange at decision)"
         assert series.estimate_omitted is None
         assert series.ev_chart()["estimate"] == [
             [n, pytest.approx(v)] for n, v in enumerate([10.0, 10.5, 11.0], 1)
@@ -631,45 +633,37 @@ class TestEstimateLine:
         summary, running = scored(swing)
         assert build_series(summary, running, EstimateBasis.EXCHANGE).axis_percent < 40
 
-    def test_a_bet_without_an_estimate_omits_it_with_the_count(self) -> None:
+    def test_a_bet_without_an_estimate_omits_it(self) -> None:
         summary, running = scored([bet(0, 0.1, estimated_ev=0.2), bet(1, 0.1), bet(2, 0.1)])
 
         series = build_series(summary, running, EstimateBasis.EXCHANGE)
 
-        assert (series.estimate_percent, series.estimate_label) == (None, None)
-        assert series.estimate_omitted == "No estimate: 2 of the 3 bets have none recorded."
+        assert series.estimate_percent is None
+        assert series.estimate_omitted == ESTIMATE_OMITTED
         assert series.ev_chart()["estimate"] is None
 
-    @pytest.mark.parametrize(
-        ("basis", "reason"),
-        [
-            (EstimateBasis.NONE, "No estimate: the rule has no fair price at decision time."),
-            (None, "No estimate: only a registered mechanical rule records one."),
-        ],
-    )
-    def test_a_rule_without_an_estimate_omits_it(
-        self, basis: EstimateBasis | None, reason: str
-    ) -> None:
+    def test_an_unknown_basis_still_draws_it_with_a_generic_label(self) -> None:
         summary, running = scored([bet(i, 0.1, estimated_ev=0.2) for i in range(3)])
 
-        series = build_series(summary, running, basis)
+        series = build_series(summary, running, None)
 
-        assert (series.estimate_percent, series.estimate_omitted) == (None, reason)
+        assert series.estimate_percent is not None and series.estimate_label == "Estimate"
 
     def test_the_page_draws_it_and_shows_the_gap(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
         summary = seed(data, [bet(i, 0.1, estimated_ev=0.15) for i in range(10)], mechanical())
-        assert summary.estimate_gap is not None
+        assert summary.estimates is not None
+        gap = summary.estimates.gap
 
         body = client.get("/c/gap/1").text
 
         assert "Estimate − close EV" in body
-        assert f"{summary.estimate_gap.mean_gap * 100:+.1f}%" in body and "n=10" in body
+        assert f"{gap.mean_gap * 100:+.1f}%" in body and "n=10" in body
         assert "Estimate (exchange at decision)" in body
         assert json.loads(chart_series(body, "ev"))["estimate"] is not None
 
-    def test_an_earlier_version_takes_its_names_rule(
+    def test_an_earlier_version_takes_its_names_basis(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
         current = mechanical().model_copy(update={"version": 2})
@@ -679,6 +673,16 @@ class TestEstimateLine:
 
         assert "Estimate (exchange at decision)" in body
 
+    def test_a_name_the_registry_no_longer_holds_draws_a_generic_estimate(
+        self, client: TestClient, data: dict[str, object]
+    ) -> None:
+        seed(data, [bet(i, 0.1, estimated_ev=0.15, name="gone") for i in range(3)], mechanical())
+
+        body = client.get("/c/gone/1").text
+
+        assert ">Estimate</span>" in body
+        assert json.loads(chart_series(body, "ev"))["estimate"] is not None
+
     def test_the_page_says_why_there_is_none(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
@@ -687,7 +691,7 @@ class TestEstimateLine:
         body = client.get("/c/gap/1").text
 
         assert "Estimate − close EV" in body and "Estimate (" not in body
-        assert body.count("No estimate: 3 of the 3 bets have none recorded.") == 2
+        assert body.count(ESTIMATE_OMITTED) == 2
         assert json.loads(chart_series(body, "ev"))["estimate"] is None
 
 
@@ -708,6 +712,9 @@ class TestNoScoringInOddsWeb:
             "CandidateSummary",
             "Checkpoint",
             "EstimateGap",
+            "Estimates",
+            "BOOTSTRAP_SEED",
+            "DEFAULT_BOOTSTRAP_SAMPLES",
             "CheckpointProgress",
             "LeagueBreakdown",
             "RunningScore",
@@ -716,11 +723,11 @@ class TestNoScoringInOddsWeb:
             "checkpoint_progress",
             "checkpoints_through_next",
             "close_probabilities",
-            "estimate_gap",
+            "estimates_of",
             "expected_value",
             "kill_reason",
             "running_score",
-            "stored_with_close",
+            "stored_scored_bets",
             "unscored_version",
         }
         imported: set[str] = set()

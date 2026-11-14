@@ -20,7 +20,7 @@ from odds_lambda.candidate_rules.gap import EXCHANGE_GAP, POLYMARKET_GAP
 from odds_lambda.candidate_rules.last_result_overreaction import LAST_RESULT_OVERREACTION
 from odds_lambda.candidate_rules.retail_ev_model import RETAIL_EV_MODEL
 from odds_lambda.candidate_rules.retail_quorum_lag import RETAIL_QUORUM_LAG
-from odds_lambda.candidate_rules.rules import ModelRuleSpec, RuleParams, RuleSpec
+from odds_lambda.candidate_rules.rules import EstimateBasis, ModelRuleSpec, RuleParams, RuleSpec
 from odds_lambda.candidate_rules.single_book_outlier import SINGLE_BOOK_OUTLIER
 from odds_lambda.candidate_rules.subsidised_outcome import SUBSIDISED_OUTCOME
 
@@ -50,6 +50,13 @@ RULES: dict[str, RuleSpec | ModelRuleSpec] = {
     "crowded_gap": CROWDED_GAP,
     "last_result_overreaction": LAST_RESULT_OVERREACTION,
 }
+
+
+def estimate_basis(rule: str) -> EstimateBasis | None:
+    """The fair price ``rule``'s estimates are against; None for a rule without one, or a name
+    that is not a rule."""
+    spec = RULES.get(rule)
+    return None if spec is None else spec.estimate_basis
 
 
 def resolve_rule(candidate: MechanicalCandidate) -> tuple[RuleSpec | ModelRuleSpec, RuleParams]:

@@ -678,11 +678,11 @@ class TestEstimateBasis:
             ("subsidised_outcome", EstimateBasis.RETAIL_CONSENSUS),
             ("favourite_price", EstimateBasis.EXCHANGE),
             ("crowded_gap", EstimateBasis.EXCHANGE),
-            ("last_result_overreaction", EstimateBasis.NONE),
+            ("last_result_overreaction", None),
         ],
     )
     def test_each_rule_declares_the_fair_price_of_its_estimate(
-        self, rule: str, basis: EstimateBasis
+        self, rule: str, basis: EstimateBasis | None
     ) -> None:
         assert RULES[rule].estimate_basis is basis
 
@@ -788,7 +788,7 @@ class TestApplyRule:
             lambda state, params: [BetIntent(HOME, "bet365", 2.0, 1.0)],
             GapParams,
             EXCHANGE,
-            estimate_basis=EstimateBasis.NONE,
+            estimate_basis=None,
         )
         empty = MarketState(1, "soccer_epl", "1x2", KICKOFF, T)
         assert apply_rule(always, PARAMS, empty)[1] == []
@@ -802,7 +802,7 @@ class TestApplyRule:
             ],
             GapParams,
             EXCHANGE,
-            estimate_basis=EstimateBasis.NONE,
+            estimate_basis=None,
         )
         state = _rule_state({}, None)
         assert apply_rule(both, PARAMS, state, bet_selections={(HOME, None)})[1] == [
@@ -818,7 +818,7 @@ class TestApplyRule:
             ],
             GapParams,
             EXCHANGE,
-            estimate_basis=EstimateBasis.NONE,
+            estimate_basis=None,
         )
         state = _totals_state({}, {})
         assert apply_rule(overs, PARAMS, state, bet_selections={(OVER, 2.5)})[1] == [
@@ -1167,7 +1167,7 @@ def new_rule(state: MarketState, params: RuleParams) -> list[BetIntent]:
 
 
 NEW_RULE = RuleSpec(
-    new_rule, RuleParams, frozenset({SharpInput.EXCHANGE}), estimate_basis=EstimateBasis.NONE
+    new_rule, RuleParams, frozenset({SharpInput.EXCHANGE}), estimate_basis=None
 )
 """
 

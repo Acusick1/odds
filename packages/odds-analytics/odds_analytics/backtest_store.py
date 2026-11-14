@@ -198,7 +198,7 @@ async def store_runs(session: AsyncSession, records: Sequence[RunRecord]) -> Non
     await session.commit()
 
 
-def stored_with_close(
+def stored_scored_bets(
     run: CandidateBacktest, bets: Sequence[CandidateBacktestBet]
 ) -> list[ScoredBet]:
     """A stored run's settled bets with a close, in placement order, as the report scores them."""

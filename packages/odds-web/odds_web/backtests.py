@@ -12,18 +12,26 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 
-from odds_analytics.backtest_store import kill_reason, stored_with_close
-from odds_analytics.candidate_report import EstimateGap, estimate_gap, running_score
+from odds_analytics.backtest_store import kill_reason, stored_scored_bets
+from odds_analytics.candidate_report import (
+    BOOTSTRAP_SEED,
+    DEFAULT_BOOTSTRAP_SAMPLES,
+    EstimateGap,
+    estimates_of,
+    running_score,
+)
 from odds_core.candidate_backtest_models import (
     CandidateBacktest,
     CandidateBacktestBet,
     WindowKind,
 )
+from odds_lambda.candidate_rules import EstimateBasis
+from odds_lambda.candidate_rules.registry import estimate_basis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from odds_web.candidate_page import Interval, Series, rule_basis, series_of
+from odds_web.candidate_page import Interval, Series, running_series
 from odds_web.portfolio import BacktestForest, backtest_forest
 
 
@@ -81,12 +89,15 @@ def estimate_of(run: CandidateBacktest) -> Estimate | None:
 
 
 def run_series(
-    run: CandidateBacktest, bets: Sequence[CandidateBacktestBet], estimate: Estimate | None
+    run: CandidateBacktest,
+    bets: Sequence[CandidateBacktestBet],
+    estimate: Estimate | None,
+    basis: EstimateBasis | None,
 ) -> tuple[Series | None, EstimateGap | None]:
     """The running mean EV and estimated EV and cumulative Σ stake·EV and P&L over the run's
     settled bets with a close, with the run's estimate as the one interval drawn, and the gap
     between the estimate and the EV over those bets."""
-    with_close = stored_with_close(run, bets)
+    with_close = stored_scored_bets(run, bets)
     if not with_close or estimate is None:
         return None, None
     intervals = [
@@ -100,13 +111,19 @@ def run_series(
             label=f"{run.window_kind.value} estimate",
         )
     ]
-    series = series_of(running_score(with_close), intervals, [], rule_basis(run.rule))
-    return series, estimate_gap(with_close) if series.estimate_percent is not None else None
+    estimates = estimates_of(with_close, DEFAULT_BOOTSTRAP_SAMPLES, BOOTSTRAP_SEED)
+    series = running_series(running_score(with_close), intervals, [], estimates, basis)
+    return series, None if estimates is None else estimates.gap
 
 
-def figures_of(run: CandidateBacktest, bets: Sequence[CandidateBacktestBet]) -> RunFigures:
+def figures_of(
+    run: CandidateBacktest,
+    bets: Sequence[CandidateBacktestBet],
+    basis: EstimateBasis | None = None,
+) -> RunFigures:
+    """``basis`` labels the run's estimate."""
     estimate = estimate_of(run)
-    series, gap = run_series(run, bets, estimate)
+    series, gap = run_series(run, bets, estimate, basis)
     return RunFigures(
         kind=run.window_kind,
         start=run.start_date,
@@ -166,7 +183,7 @@ async def load_runs(session: AsyncSession, name: str, version: int) -> list[RunF
             .where(col(CandidateBacktestBet.backtest_id) == run.id)
             .order_by(col(CandidateBacktestBet.position))
         )
-        figures.append(figures_of(run, list(bets.scalars())))
+        figures.append(figures_of(run, list(bets.scalars()), estimate_basis(run.rule)))
     return figures
 
 

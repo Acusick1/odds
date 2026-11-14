@@ -120,7 +120,7 @@ class TestReplayRecord:
         (run,) = await runs(pglite_async_session)
         rows = await stored_bets(pglite_async_session, run)
         assert [r.estimated_ev for r in rows] == [0.06, None]
-        assert [b.estimated_ev for b in store.stored_with_close(run, rows)] == [0.06, None]
+        assert [b.estimated_ev for b in store.stored_scored_bets(run, rows)] == [0.06, None]
 
     async def test_a_run_with_no_bet_with_a_close_has_no_estimate(
         self, pglite_async_session: Any
