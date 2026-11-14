@@ -38,7 +38,7 @@ The wiki lint (`scripts.wiki_lint.WikiLinter`) runs as the `wiki-lint` pre-commi
 
 Vale rejects change-narrating words in [README.md](../../README.md), [AGENTS.md](../../AGENTS.md), `docs/adr/`, `docs/agents/` and `wiki/`; `.vale.ini` turns both rules off for `docs/adr/*.md` because ADRs are point-in-time records. Every page describes the current state.
 
-`docs/agents/domain.md` tells agents to read [wiki/index.md](../index.md) and the ADRs under `docs/adr/` before exploring and to flag any contradiction of an accepted ADR.
+`docs/agents/domain.md` tells agents to read the [glossary](glossary.md), [wiki/index.md](../index.md) and the ADRs under `docs/adr/` before exploring, to use the glossary's terms, and to flag any contradiction of an accepted ADR. The glossary gives each domain term one line and links the page that defines it, which stays authoritative.
 
 ## Issue tracker
 
