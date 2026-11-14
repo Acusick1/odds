@@ -24,6 +24,7 @@ from odds_lambda.candidate_rules.market_state import (
 )
 from odds_lambda.candidate_rules.rules import (
     BetIntent,
+    EstimateBasis,
     EvPredictor,
     LookbackParams,
     ModelRuleSpec,
@@ -43,6 +44,7 @@ from odds_lambda.candidate_rules.rules import (
 
 __all__ = [
     "BetIntent",
+    "EstimateBasis",
     "EvPredictor",
     "FixtureContext",
     "FixtureInput",

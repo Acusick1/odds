@@ -24,7 +24,12 @@ from odds_core.config import Settings, get_settings
 
 from odds_web.backtests import BacktestOverview, RunFigures, load_overview, load_runs
 from odds_web.cache import Cached, Failure, SingleFlightCache
-from odds_web.candidate_page import CandidatePage, build_candidate_page, reads_decisions
+from odds_web.candidate_page import (
+    CandidatePage,
+    build_candidate_page,
+    name_rule,
+    reads_decisions,
+)
 from odds_web.closes import WEEKS as CLOSE_WEEKS
 from odds_web.closes import CloseWeeks, close_coverage
 from odds_web.coverage import (
@@ -195,7 +200,10 @@ def create_app(
                 raise HTTPException(status_code=404, detail=f"No candidate {name} v{version}")
             summary, running = unscored_version(name, version, datetime.now(UTC))
         replay = report.value.book_replays.get((name, version))
-        built = listings.map(lambda found: build_candidate_page(summary, running, *found, replay))
+        rule = name_rule(report.value.summaries, name)
+        built = listings.map(
+            lambda found: build_candidate_page(summary, running, *found, replay, rule)
+        )
         # The page is as old as the older of its two reads.
         as_of = (
             None if built.as_of is None or report.as_of is None else min(built.as_of, report.as_of)

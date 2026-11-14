@@ -182,6 +182,13 @@ class PaperTrade(SQLModel, table=True):
         default=None,
         description="Implied probability of price_decimal minus sharp_probability",
     )
+    estimated_ev: float | None = Field(
+        default=None,
+        description=(
+            "EV per unit staked the candidate's rule estimated at decision time, against its "
+            "rule's estimate basis; null for the agent's bets and a rule without one"
+        ),
+    )
 
     # Agent reasoning
     reasoning: str | None = Field(default=None, description="Why this bet was placed")

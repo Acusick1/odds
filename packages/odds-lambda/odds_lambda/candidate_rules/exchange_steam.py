@@ -10,6 +10,7 @@ from odds_lambda.candidate_rules.inputs import SharpInput
 from odds_lambda.candidate_rules.market_state import MarketState
 from odds_lambda.candidate_rules.rules import (
     BetIntent,
+    EstimateBasis,
     LookbackParams,
     RuleParams,
     RuleSpec,
@@ -29,7 +30,7 @@ def exchange_steam(state: MarketState, params: ExchangeSteamParams) -> list[BetI
     the lookback and whose longest retail price still has EV above ``gap`` against the fair
     price now, the one of the highest EV."""
     before = state.lookbacks[params.lookbacks[0].minutes_before_decision].exchange
-    scored: list[tuple[BetIntent, float]] = []
+    scored: list[BetIntent] = []
     for line, now in state.exchange.items():
         earlier = before.get(line)
         if earlier is None:
@@ -41,8 +42,13 @@ def exchange_steam(state: MarketState, params: ExchangeSteamParams) -> list[BetI
             price, book = longest
             ev = now.fair[outcome] * price - 1
             if ev > params.gap:
-                scored.append((BetIntent(outcome, book, price, 1.0, line), ev))
+                scored.append(BetIntent(outcome, book, price, 1.0, line, estimated_ev=ev))
     return best_bet(state.market, scored)
 
 
-EXCHANGE_STEAM = RuleSpec(exchange_steam, ExchangeSteamParams, frozenset({SharpInput.EXCHANGE}))
+EXCHANGE_STEAM = RuleSpec(
+    exchange_steam,
+    ExchangeSteamParams,
+    frozenset({SharpInput.EXCHANGE}),
+    estimate_basis=EstimateBasis.EXCHANGE,
+)

@@ -7,7 +7,14 @@ from pydantic import Field, NonNegativeFloat, PositiveFloat, PositiveInt
 from odds_lambda.candidate_rules.fixture_context import FixtureInput
 from odds_lambda.candidate_rules.inputs import SharpInput
 from odds_lambda.candidate_rules.market_state import MarketState
-from odds_lambda.candidate_rules.rules import BetIntent, RuleParams, RuleSpec, best_bet, gap_bets
+from odds_lambda.candidate_rules.rules import (
+    BetIntent,
+    EstimateBasis,
+    RuleParams,
+    RuleSpec,
+    best_bet,
+    gap_bets,
+)
 
 
 class CrowdedGapParams(RuleParams):
@@ -23,10 +30,7 @@ def crowded_gap(state: MarketState, params: CrowdedGapParams) -> list[BetIntent]
     if concurrent is None or concurrent < params.min_concurrent_kickoffs:
         return []
     fairs = {line: p.fair for line, p in state.exchange.items()}
-    bets = gap_bets(state, fairs, params.threshold, params.stake)
-    return best_bet(
-        state.market, ((b, fairs[b.line][b.outcome] * b.price_decimal - 1) for b in bets)
-    )
+    return best_bet(state.market, gap_bets(state, fairs, params.threshold, params.stake))
 
 
 CROWDED_GAP = RuleSpec(
@@ -34,4 +38,5 @@ CROWDED_GAP = RuleSpec(
     CrowdedGapParams,
     frozenset({SharpInput.EXCHANGE}),
     fixture_inputs=frozenset({FixtureInput.CONCURRENT_KICKOFFS}),
+    estimate_basis=EstimateBasis.EXCHANGE,
 )

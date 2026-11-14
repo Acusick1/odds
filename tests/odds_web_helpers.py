@@ -22,7 +22,14 @@ LONG_AGO = NOW - timedelta(days=30)
 N_BOOT = 400
 
 
-def bet(index: int, ev: float, *, name: str = "gap", p_close: bool = True) -> ScoredBet:
+def bet(
+    index: int,
+    ev: float,
+    *,
+    name: str = "gap",
+    p_close: bool = True,
+    estimated_ev: float | None = None,
+) -> ScoredBet:
     """A settled trade at price 3.0 whose EV is ``ev``; without a close when ``p_close`` is False."""
     return ScoredBet(
         candidate_name=name,
@@ -41,6 +48,7 @@ def bet(index: int, ev: float, *, name: str = "gap", p_close: bool = True) -> Sc
         bookmaker="bet365",
         p_close_power=None,
         close_source=Source.BETFAIR if p_close else None,
+        estimated_ev=estimated_ev,
     )
 
 
