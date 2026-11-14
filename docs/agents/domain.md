@@ -6,16 +6,17 @@ How the engineering skills should consume this repo's domain documentation when 
 
 This is a single-context repo.
 
-- **`wiki/index.md`**: the area index for the code you're about to touch, and its concept pages, which define the domain vocabulary.
+- **[`wiki/foundations/glossary.md`](../../wiki/foundations/glossary.md)**: the domain vocabulary, one line per term, each linking to the page that defines it.
+- **`wiki/index.md`**: the area index for the code you're about to touch, and its concept pages.
 - **`docs/adr/`**: read ADRs that touch the area you're about to work in.
 
-If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
+The glossary takes the place of the `GLOSSARY.md` the `/domain-modeling` skill describes. When a term is resolved, add or edit its line there: the term, a one- or two-sentence definition on the same line ending with a link to the page that defines it, and an `_Avoid_` line of synonyms. Code strings such as market keys may appear as examples; the definition itself stays free of implementation detail. Never create a root `GLOSSARY.md`.
 
 ## Use the wiki's vocabulary
 
-When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, a test name), use the term as defined on its wiki concept page. Don't drift to synonyms.
+When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, a test name), use the glossary's term. Don't use the words it lists under `_Avoid_`.
 
-If the concept you need has no concept page yet, that's a signal: either you're inventing language the project doesn't use (reconsider) or there's a real gap (add a concept page).
+If the concept you need is not in the glossary, that's a signal: either you're inventing language the project doesn't use (reconsider) or there's a real gap (add the term).
 
 ## Flag ADR conflicts
 

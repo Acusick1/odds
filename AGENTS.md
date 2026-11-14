@@ -45,4 +45,4 @@ Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-
 
 ### Domain docs
 
-Concept pages in the wiki carry the domain vocabulary, and `docs/adr/` carries decisions. See `docs/agents/domain.md`.
+The [glossary](wiki/foundations/glossary.md) carries the domain vocabulary, and `docs/adr/` carries decisions. The glossary is the `GLOSSARY.md` the domain-modeling skill maintains; never create a root `GLOSSARY.md`. See `docs/agents/domain.md`.
