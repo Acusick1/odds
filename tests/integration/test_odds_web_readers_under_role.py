@@ -11,6 +11,11 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from odds_core.candidate_backtest_models import (
+    CandidateBacktest,
+    CandidateBacktestBet,
+    WindowKind,
+)
 from odds_core.candidates import AgentCandidate, CandidateStatus, MechanicalCandidate
 from odds_core.config import SchedulerConfig, Settings, get_settings
 from odds_core.mlb_data_models import MlbProbablePitchers
@@ -114,6 +119,50 @@ async def populated(odds_web_session: AsyncSession) -> AsyncSession:
             session,
             make_tagged_snapshot(event_id, PLAYED - timedelta(minutes=minutes), books, source),
         )
+    stored = CandidateBacktest(
+        candidate_name="epl-gap",
+        candidate_version=1,
+        issue=1,
+        market="1x2",
+        rule="exchange_gap",
+        params=PARAMS,
+        window_kind=WindowKind.DEVELOPMENT,
+        start_date=PLAYED.date(),
+        end_date=PLAYED.date(),
+        leagues=["soccer_epl"],
+        git_sha="a" * 40,
+        cell_index=0,
+        eligible=True,
+        selected=True,
+        events=1,
+        bets=1,
+        bets_with_close=1,
+        stake=1.0,
+        pnl=1.0,
+        mean_ev=0.02,
+        ci_lower=0.0,
+        ci_upper=0.04,
+        ci_level=0.9,
+    )
+    session.add(stored)
+    await session.flush()
+    session.add(
+        CandidateBacktestBet(
+            backtest_id=stored.id,
+            position=1,
+            event_id=1,
+            league="soccer_epl",
+            kickoff=PLAYED,
+            decision_time=PLAYED - timedelta(minutes=60),
+            outcome="home",
+            bookmaker="bet365",
+            price=3.0,
+            stake=1.0,
+            pnl=2.0,
+            p_close=0.4,
+            ev=0.2,
+        )
+    )
     for candidate in CANDIDATES:
         event_id = PLAYED_EVENT[candidate.name]
         session.add(

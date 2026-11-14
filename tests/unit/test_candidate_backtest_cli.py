@@ -553,3 +553,34 @@ class TestCloseSources:
             "odds_api",
             None,
         ]
+
+
+class TestStoreAfterReplay:
+    def test_the_replays_pooled_connections_are_dropped_before_storing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A second event loop cannot reuse connections the first loop opened."""
+        from odds_cli.commands import candidates
+
+        calls: list[bool] = []
+
+        class Engine:
+            class sync_engine:  # noqa: N801
+                @staticmethod
+                def dispose(close: bool = True) -> None:
+                    calls.append(close)
+
+        async def store(_session: Any, _records: list[Any]) -> None:
+            assert calls == [False]
+
+        @asynccontextmanager
+        async def session():
+            yield None
+
+        monkeypatch.setattr(candidates, "get_engine", lambda: Engine)
+        monkeypatch.setattr(candidates, "async_session_maker", session)
+        monkeypatch.setattr("odds_analytics.backtest_store.store_runs", store)
+
+        candidates._store([])
+
+        assert calls == [False]

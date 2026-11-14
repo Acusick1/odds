@@ -34,7 +34,7 @@ from odds_core.candidates import (
     load_candidate_file,
     load_candidates,
 )
-from odds_core.database import async_session_maker
+from odds_core.database import async_session_maker, get_engine
 from odds_core.git_info import current_git_sha
 from odds_core.vocabulary import Source
 from odds_lambda.candidate_rules import ModelRuleSpec
@@ -533,6 +533,8 @@ def _git_sha() -> str:
 
 def _store(records: list[backtest_store.RunRecord]) -> None:
     """Write ``records`` in one transaction on a read-write session."""
+    # The replay's event loop is closed, and its pooled connections belong to it.
+    get_engine().sync_engine.dispose(close=False)
 
     async def run() -> None:
         async with async_session_maker() as session:
