@@ -174,9 +174,9 @@ class BackfillReplay:
 
 # Shared by the backfill replay and guard tests.
 BACKFILLS = Path(__file__).resolve().parents[2] / "backfills"
-MANIFEST_FILES = tuple(sorted(path.name for path in BACKFILLS.glob("*.yaml")))
-# The history backfill the guard tests are written against, one per sport; a sport's other
-# manifests (a sample, a top-up) are not in it.
+MANIFEST_FILES: tuple[str, ...] = tuple(sorted(path.name for path in BACKFILLS.glob("*.yaml")))
+# The history backfill the replay and guard tests that need one real grid are written against,
+# one per sport; a sport's other manifests (a sample, a top-up) are not in it.
 HISTORY_MANIFESTS: dict[SportKey, str] = {
     "soccer_epl": "odds-api-epl-2022-26.yaml",
     "soccer_spain_la_liga": "odds-api-la-liga-2024-26.yaml",

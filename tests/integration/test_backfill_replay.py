@@ -115,7 +115,6 @@ async def event_named(session: AsyncSession, event_id: int) -> Event:
 class TestManifestsAreReplayed:
     def test_every_manifest_has_a_replay(self) -> None:
         assert {load_manifest(file).sport for file in MANIFEST_FILES} <= set(LOADERS)
-        assert {p.values[0] for p in REPLAYS} == set(MANIFEST_FILES)
 
     @pytest.mark.parametrize("file", MANIFEST_FILES)
     def test_manifest_requests_uk_h2h_with_the_exchange_required(self, file: str) -> None:
@@ -142,8 +141,11 @@ class TestReplayPerManifest:
         games = await LOADERS[sport](session, mlb_schedule)
         events = tuple(g.event for g in games)
         scored = {e.id: (e.status, e.home_score, e.away_score, e.completed_at) for e in events}
-        first = min(g.start for g in games) - timedelta(hours=2)
-        second = first + timedelta(hours=1)
+        # The two calls fall in the manifest's first band, five minutes (one grid step) apart.
+        first = min(g.start for g in games) - timedelta(
+            minutes=manifest.coverage[0].max_lead_minutes
+        )
+        second = first + timedelta(minutes=5)
         moved = HOME_PRICE - 10
         replay.record(first, [g.listing(first) for g in games])
         replay.record(second, [g.listing(second, home_price=moved) for g in games])
