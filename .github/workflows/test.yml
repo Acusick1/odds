@@ -3,25 +3,50 @@ name: Test
 on:
   push:
     branches-ignore: [main]
-    # Lint checks the wiki and docs. The how-to page is re-included because
-    # tests/unit/test_candidates.py validates its example draft.
-    paths:
-      - '**'
-      - '!wiki/**'
-      - '!docs/**'
-      - '!**/*.md'
-      - 'wiki/evaluation/howto-take-an-idea-to-a-verdict.md'
   workflow_call:
   workflow_dispatch:
 
-# A newer push to the same branch supersedes a run still in progress.
+# A newer push to the same branch supersedes a run still in progress. The event is in the group
+# so a manual ci-cd.yml run cannot cancel the push run, the only one a ruleset counts.
 concurrency:
-  group: test-${{ github.ref }}
+  group: test-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # The test check is required on main, so a branch that touches only docs must report it as
+  # skipped (which passes) rather than never run it. The whole branch is compared with main so
+  # a docs-only push after a code change still runs the tests; renames count as a deletion and
+  # an addition so moving the how-to page still runs them.
+  changes:
+    name: Detect code changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Lint checks the wiki and docs. The how-to page counts as code because
+      # tests/unit/test_candidates.py validates its example draft.
+      - name: Compare with main
+        id: diff
+        run: |
+          changed="$(git diff --no-renames --name-only origin/main...HEAD)"
+          code="$(printf '%s\n' "$changed" | grep -v -E '^(wiki|docs)/|\.md$' || true)"
+          if [[ -n "$code" ]] || grep -qx 'wiki/evaluation/howto-take-an-idea-to-a-verdict.md' <<<"$changed"; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
   test:
     name: Run Unit and Integration Tests
+    needs: changes
+    # A failed detection runs the tests: a job skipped by a failed dependency would pass the
+    # required check.
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.code == 'true' || github.event_name != 'push') }}
     runs-on: ubuntu-latest
     environment: development
 
