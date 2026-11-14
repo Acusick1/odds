@@ -63,7 +63,7 @@ The dump holds the schema of the code that was running when it was taken: restor
 
    > [!WARNING]
    > This replaces the production data with the dump. Everything written since the dump is lost, so take a fresh dump first if any of it matters.
-3. **Check out the matching code.** For a `pre-deploy-*` dump that is the commit before the deploy, which a failed `deploy.sh` prints when the scheduler is down: `git checkout <previous head> && uv sync`. When only the web UI is down the scheduler is already on the new code and schema, so do not restore. Check `uv run alembic current` names the revision the dump was taken at.
+3. **Check out the matching code.** For a `pre-deploy-*` dump that is the commit before the deploy, which a failed `deploy.sh` prints when the scheduler is down: `git checkout <previous head> && uv sync`, then `uv run python -m odds_web.grants` when it also printed that step (the grants had been applied). When only the web UI is down the scheduler is already on the new code and schema, so do not restore. Check `uv run alembic current` names the revision the dump was taken at.
 4. **Start the scheduler.** `sudo systemctl start odds-scheduler`, then `uv run odds scheduler list-jobs`.
 
 ## Related

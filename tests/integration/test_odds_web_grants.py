@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import pytest
-from odds_core import (  # noqa: F401  (tables outside the allowlist, to be revoked)
+from odds_core import (  # noqa: F401  (every table of the allowlist, and some outside it, must exist)
     agent_wakeup_models,
+    candidate_backtest_models,
     match_brief_models,
+    mlb_data_models,
+    models,
+    paper_trade_models,
 )
 from odds_web import grants
 from odds_web.grants import GrantsFailed, apply_grants

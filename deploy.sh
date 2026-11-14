@@ -70,6 +70,7 @@ fi
 scheduler_down=0
 web_down=0
 migration_committed=0
+grants_applied=0
 previous_head=""
 previous_revision=""
 report_services_down() {
@@ -93,7 +94,13 @@ report_services_down() {
                 echo "  uv run alembic downgrade $previous_revision   # run first: the downgrade lives in the new code"
                 echo "  (rows the migration deleted do not come back; restore the pre-deploy dump in \${ODDS_BACKUP_DIR:-~/backups} for those)"
             fi
-            echo "  git checkout $previous_head && uv sync && sudo $SYSTEMCTL start $SERVICE $WEB_SERVICE"
+            if (( grants_applied == 1 )); then
+                echo "  git checkout $previous_head && uv sync"
+                echo "  uv run python -m odds_web.grants   # on the old code: re-grants the tables it reads (skip if it predates odds_web.grants)"
+                echo "  sudo $SYSTEMCTL start $SERVICE $WEB_SERVICE"
+            else
+                echo "  git checkout $previous_head && uv sync && sudo $SYSTEMCTL start $SERVICE $WEB_SERVICE"
+            fi
             echo "Or fix the failure and rerun ./deploy.sh."
         } >&2
     fi
@@ -145,6 +152,7 @@ SCHEDULER_DRY_RUN=true uv run odds scheduler smoke
 # that adds a table the UI reads cannot reach a restart with the role unable to read it.
 echo "==> odds_web grants"
 uv run python -m odds_web.grants
+grants_applied=1
 echo "==> odds_web role check"
 uv run python -m odds_web.role_check
 

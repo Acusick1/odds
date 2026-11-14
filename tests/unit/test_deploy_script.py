@@ -258,6 +258,9 @@ class TestDeploy:
         assert "alembic downgrade abc123" in result.stderr
         if failing == "odds_web.grants":
             assert not any("odds_web.role_check" in c for c in calls(host))
+            assert "uv run python -m odds_web.grants" not in result.stderr
+        else:
+            assert "uv run python -m odds_web.grants   # on the old code" in result.stderr
 
     def test_a_failed_role_check_without_a_migration_leaves_the_services_running(
         self, host: Path

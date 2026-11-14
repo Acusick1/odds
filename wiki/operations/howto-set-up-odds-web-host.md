@@ -34,7 +34,7 @@ Re-running the wizard is safe: each run generates a new password, resets the rol
 1. **Back up the database** with `./scripts/backup-prod-db.sh odds-web-grants`.
 2. **Apply them** from the repo root: `uv run python -m odds_web.grants`, then `uv run python -m odds_web.role_check`.
 
-No restart is needed: the next query on the role sees the new grant. Do not re-run the wizard's role stage for this, because it sets a new password that only the next stage writes into `.env`.
+No restart is needed: the next query on the role sees the new grant. A failed `deploy.sh` that had applied the grants prints this command among its rollback steps, to run on the old code. Do not re-run the wizard's role stage for this, because it sets a new password that only the next stage writes into `.env`.
 
 ## Related
 
