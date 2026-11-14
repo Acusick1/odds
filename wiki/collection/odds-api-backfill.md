@@ -53,13 +53,15 @@ Each manifest holds:
 - **Snapshot grid:** steps by date, each a snapshot interval from its start until the next step's start. A step's start carries the provider's phase to the second, so the grid's times are the snapshots' own: every manifest has 5-minute snapshots from `2022-09-01T00:00:38Z`, since the probes found each 5-minute snapshot 37 to 42 s past its 5-minute mark, varying by date ([#729](https://github.com/Acusick1/odds/issues/729)). The 10-minute snapshots before September 2022 fall at 5, 15, 25 minutes past the hour and so on, with no seconds; no manifest reaches back to them.
 - **Probe:** the snapshot times to request before the full run and what each must return: fixtures at least `min_fixture_lead_hours` ahead, the `required_bookmakers` on each market, and an `x-requests-last` of the manifest's `odds_analytics.backfill_plan.Manifest.units_per_call`. Validation rejects a lead shorter than the earliest band's farthest lead plus its max age, required markets the manifest does not request, required books its named bookmakers leave out (a region's books are known only from a response), and a snapshot outside every season or off the grid. `odds backfill probe` makes these calls and checks each response against the manifest ([probe](#probing-a-manifest)).
 
-The bands are a 10-minute max age to KO−2h, 1 hour to KO−1d and 6 hours to KO−7d ([#740](https://github.com/Acusick1/odds/issues/740)), each ending at the fixture horizon the probes found ([#787](https://github.com/Acusick1/odds/issues/787)):
+The history manifests' bands are a 10-minute max age to KO−2h, 1 hour to KO−1d and 6 hours to KO−7d ([#740](https://github.com/Acusick1/odds/issues/740)), each ending at the fixture horizon the probes found ([#787](https://github.com/Acusick1/odds/issues/787)):
 
 | Manifests | Bands | `min_fixture_lead_hours` | Farthest fixture listed |
 | --- | --- | --- | --- |
 | EPL, La Liga, Serie A, Bundesliga, Ligue 1 | to KO−2h, KO−1d, KO−7d | 174 | La Liga 154 to 346 h |
 | Championship | to KO−2h, KO−1d, KO−4d | 102 | 125 to 172 h |
 | NBA, MLB | to KO−2h, KO−8h | 9 | NBA 604 to 674 min, MLB 584 to 612 min |
+
+The NBA close sample (`backfills/odds-api-nba-close-sample-2026-27.yaml`) has one band, from KO−6 to KO−1 minutes with a 5-minute max age, for the two grid snapshots before tip-off.
 
 The probes confirmed the documented billing, 10 units per market per region, for named bookmakers and for `regions=uk` ([vendor facts](odds-api-facts.md#billing)).
 
@@ -144,7 +146,7 @@ The result counts calls made, skipped and would-be-made, the provider gaps, the 
 
 ## Tests
 
-`tests/integration/test_backfill_guards.py` replays recorded responses that pass and fail each probe check and each run guard, the providers' recorded holes as gaps that are stored, recorded and skipped on rerun (also when a later check raises, and within a hole, ended on the grid's phase or off it, only when its next snapshot is later than the gap call's request time), off-phase snapshots that a run stores and continues past, and where each returned snapshot lies, and `tests/unit/test_backfill_probe_cli.py` runs a dry-run probe offline. `tests/integration/test_backfill_replay.py` replays a constructed historical response for each manifest, in the API's documented shape, through the real client and executor on the test database, with `uk`-region keys stored under their canonical books (`betfair_ex_uk` and `betfair_sb_uk` apart, an unaliased key as given); `tests/integration/test_backfill_guards.py` also checks that the legacy `betfair` key satisfies a required `betfair_ex_uk`: one test per football league, NBA and MLB, then the rerun cases and the MLB doubleheader and postponed game. `tests/integration/test_historical_fixture_attach.py` covers matching a listing to a stored fixture.
+`tests/integration/test_backfill_guards.py` replays recorded responses that pass and fail each probe check and each run guard, the providers' recorded holes as gaps that are stored, recorded and skipped on rerun (also when a later check raises, and within a hole, ended on the grid's phase or off it, only when its next snapshot is later than the gap call's request time), off-phase snapshots that a run stores and continues past, and where each returned snapshot lies, and `tests/unit/test_backfill_probe_cli.py` runs a dry-run probe offline. `tests/integration/test_backfill_replay.py` replays a constructed historical response for each manifest file, at calls inside the manifest's first band, in the API's documented shape, through the real client and executor on the test database, with `uk`-region keys stored under their canonical books (`betfair_ex_uk` and `betfair_sb_uk` apart, an unaliased key as given), then the rerun cases and the MLB doubleheader and postponed game; `tests/integration/test_backfill_guards.py` also checks that the legacy `betfair` key satisfies a required `betfair_ex_uk`. `tests/integration/test_historical_fixture_attach.py` covers matching a listing to a stored fixture.
 
 ## Related
 

@@ -23,6 +23,17 @@ from tests.test_helpers import add_event
 
 REPO = Path(__file__).resolve().parents[2]
 COMMITTED = sorted((REPO / "backfills").glob("*.yaml"))
+REFERENCE: Manifest = Manifest.load(REPO / "backfills" / "odds-api-epl-2022-26.yaml")
+# A close sample covers only the last minutes before kick-off, with a band of its own; every other
+# manifest is a full grid and starts with the reference's nearest band.
+CLOSE_SAMPLE_REACH_MINUTES = 10
+
+
+def is_full_grid(manifest: Manifest) -> bool:
+    return max(band.max_lead_minutes for band in manifest.coverage) > CLOSE_SAMPLE_REACH_MINUTES
+
+
+FULL_GRIDS: list[Path] = [path for path in COMMITTED if is_full_grid(Manifest.load(path))]
 FIVE_MINUTES_FROM = datetime(2022, 9, 1, 0, 0, 38, tzinfo=UTC)
 
 
@@ -195,16 +206,32 @@ class TestManifest:
 
     @pytest.mark.parametrize("path", COMMITTED, ids=lambda p: p.stem)
     def test_every_committed_manifest_requests_the_same_prices(self, path: Path) -> None:
-        reference = Manifest.load(REPO / "backfills" / "odds-api-epl-2022-26.yaml")
         committed = Manifest.load(path)
 
         assert (committed.bookmakers, committed.regions) == (
-            reference.bookmakers,
-            reference.regions,
+            REFERENCE.bookmakers,
+            REFERENCE.regions,
         )
-        assert committed.probe.required_bookmakers == reference.probe.required_bookmakers
-        assert committed.markets == reference.markets
-        assert committed.coverage[0] == reference.coverage[0]
+        assert committed.probe.required_bookmakers == REFERENCE.probe.required_bookmakers
+        assert committed.markets == REFERENCE.markets
+
+    @pytest.mark.parametrize("path", FULL_GRIDS, ids=lambda p: p.stem)
+    def test_a_full_grid_manifest_starts_with_the_reference_close_band(self, path: Path) -> None:
+        assert Manifest.load(path).coverage[0] == REFERENCE.coverage[0]
+
+    @pytest.mark.parametrize(
+        ("bands", "full"),
+        [
+            ([band(1, 6, 5)], False),
+            ([band(1, 1, 5)], False),
+            ([band(1, 90, 10)], True),
+            ([band(1, 120, 10), band(121, 480, 60)], True),
+        ],
+    )
+    def test_a_manifest_is_a_full_grid_unless_it_covers_only_the_last_minutes(
+        self, bands: list[dict[str, int]], full: bool
+    ) -> None:
+        assert is_full_grid(Manifest.model_validate(manifest_data(coverage=bands))) is full
 
     @pytest.mark.parametrize(
         ("books", "regions", "units"),

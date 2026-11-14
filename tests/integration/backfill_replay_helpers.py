@@ -174,7 +174,10 @@ class BackfillReplay:
 
 # Shared by the backfill replay and guard tests.
 BACKFILLS = Path(__file__).resolve().parents[2] / "backfills"
-MANIFEST_FILES: dict[SportKey, str] = {
+MANIFEST_FILES: tuple[str, ...] = tuple(sorted(path.name for path in BACKFILLS.glob("*.yaml")))
+# The history backfill the replay and guard tests that need one real grid are written against,
+# one per sport; a sport's other manifests (a sample, a top-up) are not in it.
+HISTORY_MANIFESTS: dict[SportKey, str] = {
     "soccer_epl": "odds-api-epl-2022-26.yaml",
     "soccer_spain_la_liga": "odds-api-la-liga-2024-26.yaml",
     "soccer_italy_serie_a": "odds-api-serie-a-2024-26.yaml",
@@ -197,8 +200,12 @@ LISTED_BOOKS = ("betfair_ex_uk", "betfair_sb_uk", "williamhill", "ladbrokes_uk",
 STORED_BOOKS = {"betfair_exchange", "betfair_sportsbook", "williamhill", "ladbrokes", "leovegas"}
 
 
-def load_manifest(sport: SportKey) -> Manifest:
-    return Manifest.load(BACKFILLS / MANIFEST_FILES[sport])
+def load_manifest(file: str) -> Manifest:
+    return Manifest.load(BACKFILLS / file)
+
+
+def history_manifest(sport: SportKey) -> Manifest:
+    return load_manifest(HISTORY_MANIFESTS[sport])
 
 
 @dataclass(frozen=True)
