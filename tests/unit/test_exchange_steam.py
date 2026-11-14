@@ -81,25 +81,25 @@ BEFORE = exchange(0.45, 0.275, 0.275)
 class TestQualifies:
     def test_a_rise_with_a_longer_retail_price_is_bet(self) -> None:
         bets = exchange_steam(state({"bet365": {HOME: 2.5}}, NOW, BEFORE), params())
-        assert bets == [BetIntent(HOME, "bet365", 2.5, 1.0)]
+        assert bets == [BetIntent(HOME, "bet365", 2.5, 1.0, estimated_ev=pytest.approx(0.25))]
 
     def test_the_longest_price_across_books_is_bet(self) -> None:
         retail = {"bet365": {HOME: 2.4}, "betway": {HOME: 2.6}, "coral": {HOME: 2.5}}
         assert exchange_steam(state(retail, NOW, BEFORE), params()) == [
-            BetIntent(HOME, "betway", 2.6, 1.0)
+            BetIntent(HOME, "betway", 2.6, 1.0, estimated_ev=pytest.approx(0.3))
         ]
 
     def test_equal_prices_go_to_the_first_book_key(self) -> None:
         retail = {"coral": {HOME: 2.5}, "betway": {HOME: 2.5}}
         assert exchange_steam(state(retail, NOW, BEFORE), params()) == [
-            BetIntent(HOME, "betway", 2.5, 1.0)
+            BetIntent(HOME, "betway", 2.5, 1.0, estimated_ev=pytest.approx(0.25))
         ]
 
     def test_the_lookback_read_is_the_declared_point(self) -> None:
         lookback = {"minutes_before_decision": 25, "max_input_age_minutes": 10}
         late = state({"bet365": {HOME: 2.5}}, NOW, BEFORE, minutes=25)
         assert exchange_steam(late, params(lookbacks=[lookback])) == [
-            BetIntent(HOME, "bet365", 2.5, 1.0)
+            BetIntent(HOME, "bet365", 2.5, 1.0, estimated_ev=pytest.approx(0.25))
         ]
 
 
@@ -111,7 +111,9 @@ class TestEachConditionFailing:
     def test_a_rise_of_exactly_min_rise_is_bet(self) -> None:
         # 0.5 - 0.25 is exactly 0.25 in binary floating point.
         steam = state({"bet365": {HOME: 2.5}}, NOW, exchange(0.25, 0.375, 0.375))
-        assert exchange_steam(steam, params(min_rise=0.25)) == [BetIntent(HOME, "bet365", 2.5, 1.0)]
+        assert exchange_steam(steam, params(min_rise=0.25)) == [
+            BetIntent(HOME, "bet365", 2.5, 1.0, estimated_ev=pytest.approx(0.25))
+        ]
         assert exchange_steam(steam, params(min_rise=0.2501)) == []
 
     def test_a_fall_is_not_a_rise(self) -> None:
@@ -121,7 +123,9 @@ class TestEachConditionFailing:
         # 0.5 * 2.5 - 1 = 0.25: the gap is strict.
         steam = state({"bet365": {HOME: 2.5}}, NOW, BEFORE)
         assert exchange_steam(steam, params(gap=0.25)) == []
-        assert exchange_steam(steam, params(gap=0.2499)) == [BetIntent(HOME, "bet365", 2.5, 1.0)]
+        assert exchange_steam(steam, params(gap=0.2499)) == [
+            BetIntent(HOME, "bet365", 2.5, 1.0, estimated_ev=pytest.approx(0.25))
+        ]
 
     def test_a_retail_price_at_the_fair_price_is_not_bet_at_gap_zero(self) -> None:
         assert exchange_steam(state({"bet365": {HOME: 2.0}}, NOW, BEFORE), params()) == []
@@ -147,7 +151,7 @@ class TestOneBetPerDecision:
         # EVs: home 0.5 * 2.6 - 1 = 0.3, draw 0.25 * 6 - 1 = 0.5, away 0.25 * 5 - 1 = 0.25.
         retail = {"bet365": {HOME: 2.6, DRAW: 6.0, AWAY: 5.0}}
         assert exchange_steam(state(retail, NOW, self.BEFORE), params(min_rise=0.1)) == [
-            BetIntent(DRAW, "bet365", 6.0, 1.0)
+            BetIntent(DRAW, "bet365", 6.0, 1.0, estimated_ev=pytest.approx(0.5))
         ]
 
     def test_an_outcome_below_min_rise_does_not_compete(self) -> None:
@@ -155,21 +159,23 @@ class TestOneBetPerDecision:
         before = exchange(0.45, 0.125, 0.125)
         retail = {"bet365": {HOME: 3.2, DRAW: 6.0}}
         assert exchange_steam(state(retail, NOW, before), params(min_rise=0.1)) == [
-            BetIntent(DRAW, "bet365", 6.0, 1.0)
+            BetIntent(DRAW, "bet365", 6.0, 1.0, estimated_ev=pytest.approx(0.5))
         ]
 
     def test_equal_ev_goes_to_the_outcome_first_in_market_order(self) -> None:
         # Each EV is exactly 0.25.
         retail = {"bet365": {HOME: 2.5, DRAW: 5.0, AWAY: 5.0}}
         steam = state(retail, NOW, self.BEFORE)
-        assert exchange_steam(steam, params(min_rise=0.1)) == [BetIntent(HOME, "bet365", 2.5, 1.0)]
+        assert exchange_steam(steam, params(min_rise=0.1)) == [
+            BetIntent(HOME, "bet365", 2.5, 1.0, estimated_ev=pytest.approx(0.25))
+        ]
         no_home = state({"bet365": {DRAW: 5.0, AWAY: 5.0}}, NOW, self.BEFORE)
         assert exchange_steam(no_home, params(min_rise=0.1)) == [
-            BetIntent(DRAW, "bet365", 5.0, 1.0)
+            BetIntent(DRAW, "bet365", 5.0, 1.0, estimated_ev=pytest.approx(0.25))
         ]
         only_away = state({"bet365": {AWAY: 5.0}}, NOW, self.BEFORE)
         assert exchange_steam(only_away, params(min_rise=0.1)) == [
-            BetIntent(AWAY, "bet365", 5.0, 1.0)
+            BetIntent(AWAY, "bet365", 5.0, 1.0, estimated_ev=pytest.approx(0.25))
         ]
 
 

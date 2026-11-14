@@ -1,11 +1,13 @@
 ---
 type: reference
 title: Parity check
-description: What odds candidates parity replays, how it rebuilds each decision from its recorded input snapshots and events, how it reports data differences from the current database, and its exit code.
+description: What odds candidates parity replays, how it rebuilds each decision from its recorded input snapshots and events, how it reports data differences from the current database, its exit code, and the backfill that fills live trades' estimated EV from the same replay.
 sources:
   - odds_analytics.candidate_parity
   - odds_cli.commands.candidates.parity
   - odds_core.paper_trade_models.CandidateDecision
+  - odds_analytics.estimate_backfill
+  - odds_cli.commands.candidates.backfill_estimates
 mentions:
   - odds_lambda.candidate_rules.rules.apply_rule
   - odds_lambda.candidate_rules.rules.run_rule
@@ -38,3 +40,9 @@ Run it on the production host: `odds copy from-prod` copies no trades or decisio
 |---|---|
 | `match` | The recorded-input replay reproduces the live bets |
 | `mismatch` | It does not |
+
+## Estimate backfill
+
+`odds candidates backfill-estimates [--apply]` fills `odds_core.paper_trade_models.PaperTrade.estimated_ev` of candidate trades placed without one, from the replay of their decisions. `odds_analytics.estimate_backfill.plan_backfill` takes every decision-placed trade grouped by candidate version. Every version of a name the registry holds as a mechanical candidate whose rule is not a [model rule](candidate-rules.md#model-rules) is replayed decision by decision under the registry entry's rule, params and [book set](candidate-rules.md#book-set): the registry holds only a name's current version, and a name's rule never changes across versions, so an earlier version is replayed with the current entry, in the order and with the once-per-selection chaining of the parity comparison above (`odds_analytics.candidate_parity.recorded_quotes` and `odds_analytics.candidate_parity.recorded_intents`, `bet_selections` from the paper trades of the match's earlier decisions). Each trade takes the `odds_lambda.candidate_rules.BetIntent.estimated_ev` of the replayed bet with its outcome, line, bookmaker and price (`odds_analytics.estimate_backfill.TradeEstimate`). A trade with no such bet, including one of an earlier version whose params or book set differ from the current entry's where that changes the bet, is unmatched and keeps none. The trades of a name the registry does not hold, or whose rule is a model rule, are counted as skipped.
+
+`odds_cli.commands.candidates.backfill_estimates` prints, per version, the trades, how many matched and how many carry an estimate, the unmatched ones with their decision and event, the count to write, and the skipped versions. Without `--apply` it writes nothing. With it, `odds_analytics.estimate_backfill.apply_backfill` writes each matched estimate that differs from the stored one (`odds_analytics.estimate_backfill.VersionBackfill.to_write`) and commits, so a rerun writes nothing. It writes to whatever `DATABASE_URL` names, so on the production host back the database up first ([back up production](../foundations/howto-back-up-production-database.md)).

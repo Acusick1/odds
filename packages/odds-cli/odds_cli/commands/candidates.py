@@ -10,7 +10,13 @@ from pathlib import Path
 from typing import Annotated, Any, cast
 
 import typer
-from odds_analytics import backtest_store, cell_selection, holdout, holdout_run
+from odds_analytics import (
+    backtest_store,
+    cell_selection,
+    estimate_backfill,
+    holdout,
+    holdout_run,
+)
 from odds_analytics.candidate_backtest import BacktestResult, Coverage, HashStatus, replay
 from odds_analytics.candidate_parity import ParityReport, ParityStatus, check_parity
 from odds_analytics.candidate_rehash import rehash as record_rehash
@@ -121,7 +127,7 @@ def _backtest_verdict(verdict: Verdict) -> str:
 
 def _bet_json(bet: ScoredBet) -> dict[str, Any]:
     """A placed bet as ``--json`` writes it; ``p_close``, ``ev`` and ``close_source`` are null
-    without a close."""
+    without a close, ``estimated_ev`` for a rule without an estimate."""
     return {
         "event_id": bet.event_id,
         "league": bet.sport_key,
@@ -134,6 +140,7 @@ def _bet_json(bet: ScoredBet) -> dict[str, Any]:
         "p_close": bet.p_close,
         "ev": bet.ev,
         "close_source": bet.close_source,
+        "estimated_ev": bet.estimated_ev,
     }
 
 
@@ -911,6 +918,54 @@ def parity(
         )
     if not report.ok:
         raise typer.Exit(1)
+
+
+@app.command("backfill-estimates")
+def backfill_estimates(
+    apply: bool = typer.Option(False, "--apply", help="Write; without it only the plan is shown"),
+) -> None:
+    """Fill each live candidate trade's estimated EV from a replay of its decision.
+
+    Replays every decision of each version of a registered mechanical candidate from its
+    recorded inputs under the registry's rule, params and book set, as `odds candidates parity`
+    does, and takes the estimate of the replayed bet on the trade's selection, line, bookmaker
+    and price. A trade with no such bet keeps none and is listed. Safe to re-run.
+
+    Example:
+        odds candidates backfill-estimates --apply
+    """
+    registry = _load_registry()
+
+    async def run() -> tuple[estimate_backfill.EstimateBackfill, int]:
+        async with async_session_maker() as session:
+            plan = await estimate_backfill.plan_backfill(session, registry)
+            written = await estimate_backfill.apply_backfill(session, plan) if apply else 0
+            return plan, written
+
+    plan, written = asyncio.run(run())
+    for v in plan.versions:
+        with_estimate = [t for t in v.trades if t.estimated_ev is not None]
+        console.print(
+            f"{v.name} v{v.version}: {len(v.trades)} trades, "
+            f"{len(v.trades) - len(v.unmatched)} matched ({len(with_estimate)} with an estimate), "
+            f"{len(v.unmatched)} unmatched, {len(v.to_write)} to write",
+            soft_wrap=True,
+        )
+        for t in v.unmatched:
+            console.print(
+                f"  [yellow]unmatched trade {t.trade_id} (decision {t.decision_id}, "
+                f"event {t.event_id}): {t.key}[/yellow]",
+                soft_wrap=True,
+            )
+    for (name, version), count in plan.skipped.items():
+        console.print(
+            f"{name} v{version}: {count} trades skipped, no registered mechanical rule to replay",
+            soft_wrap=True,
+        )
+    if apply:
+        console.print(f"Wrote the estimate of {written} trades.")
+    else:
+        console.print("Dry run: nothing written. Re-run with --apply.")
 
 
 @app.command("rehash")

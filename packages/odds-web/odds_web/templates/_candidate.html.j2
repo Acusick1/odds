@@ -20,6 +20,11 @@
     <div class="v num {{ 'pos' if c.current.mean_ev >= 0 else 'neg' }}">{{ c.current.mean_ev | percent }}</div>
     <div class="sub num">95% CI {{ c.current.ci95[0] | percent }} … {{ c.current.ci95[1] | percent }}</div>
     {% else %}<div class="v sub">{{ c.no_ev_reason }}</div>{% endif %}</div>
+  <div class="tile"><div class="k">Estimate − close EV</div>
+    {% if c.estimate_gap %}
+    <div class="v num">{{ c.estimate_gap.mean_gap | percent }}</div>
+    <div class="sub num">95% CI {{ c.estimate_gap.ci95[0] | percent }} … {{ c.estimate_gap.ci95[1] | percent }} · n={{ c.estimate_gap.n }}</div>
+    {% else %}<div class="v sub">{{ c.series.estimate_omitted if c.series else c.no_ev_reason }}</div>{% endif %}</div>
   <div class="tile"><div class="k">P&amp;L (stake units)</div>
     <div class="v num">{{ c.pnl | signed }}u</div><div class="sub num">ROI {{ c.roi | percent }}</div></div>
   {% if c.decisions %}
@@ -35,7 +40,8 @@
 <h3>Mean EV as bets accumulate</h3>
 <div class="sub">Running mean EV over the bets with a close in the settled, final prefix. Intervals are drawn only at the checkpoints reached and at the current n; a current estimate at a checkpoint's n with a larger family sits just left of it. The verdict is read only at checkpoints.</div>
 <div class="chart" data-chart="ev" data-series='{{ c.series.ev_chart() | tojson }}'></div>
-<div class="legend"><span><svg width="26" height="10"><line class="ci" x1="2" y1="5" x2="24" y2="5"/></svg>95% CI</span><span><svg width="26" height="10"><line class="promote" x1="2" y1="5" x2="24" y2="5"/></svg>promote CI</span><span>Dashed lines: zero EV, checkpoints</span></div>
+<div class="legend">{% if c.series.estimate_label %}<span><svg width="26" height="10"><line class="estimate" x1="2" y1="5" x2="24" y2="5"/></svg>Estimate ({{ c.series.estimate_label }})</span>{% endif %}<span><svg width="26" height="10"><line class="ci" x1="2" y1="5" x2="24" y2="5"/></svg>95% CI</span><span><svg width="26" height="10"><line class="promote" x1="2" y1="5" x2="24" y2="5"/></svg>promote CI</span><span>Dashed lines: zero EV, checkpoints</span></div>
+{% if c.series.estimate_omitted %}<div class="sub">{{ c.series.estimate_omitted }}</div>{% endif %}
 
 <h3>Expected profit vs realised P&amp;L</h3>
 <div class="sub">Cohort: settled bets with a close in the scoreable prefix ({{ c.bets_with_close }}); other bets are not in either line.</div>

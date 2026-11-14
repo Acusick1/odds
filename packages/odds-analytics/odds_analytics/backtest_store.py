@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from odds_analytics.candidate_backtest import BacktestResult
-from odds_analytics.candidate_report import RunningScore, ScoredBet, running_score
+from odds_analytics.candidate_report import ScoredBet
 from odds_analytics.cell_selection import INTERVAL_LEVEL, MIN_BETS, GridSelection
 from odds_analytics.holdout_run import SpentReplay, pooled_draft
 
@@ -190,6 +190,7 @@ async def store_runs(session: AsyncSession, records: Sequence[RunRecord]) -> Non
                         "p_close": bet.p_close,
                         "ev": bet.ev,
                         "close_source": bet.close_source,
+                        "estimated_ev": bet.estimated_ev,
                     }
                     for position, bet in enumerate(record.bets, 1)
                 ],
@@ -197,11 +198,10 @@ async def store_runs(session: AsyncSession, records: Sequence[RunRecord]) -> Non
     await session.commit()
 
 
-def stored_running_score(
+def stored_with_close(
     run: CandidateBacktest, bets: Sequence[CandidateBacktestBet]
-) -> RunningScore | None:
-    """The report's running totals over a stored run's settled bets with a close, in placement
-    order; None when it has none."""
+) -> list[ScoredBet]:
+    """A stored run's settled bets with a close, in placement order, as the report scores them."""
     scored = [
         ScoredBet(
             candidate_name=run.candidate_name,
@@ -220,11 +220,11 @@ def stored_running_score(
             bookmaker=b.bookmaker,
             p_close_power=None,
             close_source=b.close_source,
+            estimated_ev=b.estimated_ev,
         )
         for b in bets
     ]
-    with_close = [b for b in scored if b.ev is not None and b.pnl is not None]
-    return running_score(with_close) if with_close else None
+    return [b for b in scored if b.ev is not None and b.pnl is not None]
 
 
 def kill_reason(cells: Sequence[CandidateBacktest]) -> str:

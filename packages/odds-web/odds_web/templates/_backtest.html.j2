@@ -20,6 +20,11 @@ Code <span class="num">{{ run.git_sha[:10] }}</span>, stored {{ run.stored_at | 
     <div class="v num {{ 'pos' if run.estimate.mean_ev >= 0 else 'neg' }}">{{ run.estimate.mean_ev | percent }}</div>
     <div class="sub num">{{ (run.estimate.level * 100) | round | int }}% CI {{ run.estimate.ci[0] | percent }} … {{ run.estimate.ci[1] | percent }}</div>
     {% else %}<div class="v sub">no bets with a close</div>{% endif %}</div>
+  <div class="tile"><div class="k">Estimate − close EV</div>
+    {% if run.estimate_gap %}
+    <div class="v num">{{ run.estimate_gap.mean_gap | percent }}</div>
+    <div class="sub num">95% CI {{ run.estimate_gap.ci95[0] | percent }} … {{ run.estimate_gap.ci95[1] | percent }} · n={{ run.estimate_gap.n }}</div>
+    {% else %}<div class="v sub">{{ run.series.estimate_omitted if run.series else 'no bets with a close' }}</div>{% endif %}</div>
   <div class="tile"><div class="k">P&amp;L (stake units)</div>
     <div class="v num">{{ run.pnl | signed }}u</div><div class="sub num">ROI {{ run.roi | percent }}</div></div>
 </div>
@@ -38,7 +43,8 @@ Code <span class="num">{{ run.git_sha[:10] }}</span>, stored {{ run.stored_at | 
 {% endif %}
 {% if run.series %}
 <div class="chart" data-chart="ev" data-series='{{ run.series.ev_chart() | tojson }}'></div>
-<div class="legend"><span><svg width="26" height="10"><line class="ci" x1="2" y1="5" x2="24" y2="5"/></svg>{{ (run.estimate.level * 100) | round | int }}% CI of the whole run</span><span>Dashed line: zero EV</span></div>
+<div class="legend">{% if run.series.estimate_label %}<span><svg width="26" height="10"><line class="estimate" x1="2" y1="5" x2="24" y2="5"/></svg>Estimate ({{ run.series.estimate_label }})</span>{% endif %}<span><svg width="26" height="10"><line class="ci" x1="2" y1="5" x2="24" y2="5"/></svg>{{ (run.estimate.level * 100) | round | int }}% CI of the whole run</span><span>Dashed line: zero EV</span></div>
+{% if run.series.estimate_omitted %}<div class="sub">{{ run.series.estimate_omitted }}</div>{% endif %}
 <div class="chart" data-chart="cumulative" data-series='{{ run.series.cumulative_chart() | tojson }}'></div>
 <div class="legend"><span><span class="sw sw-expected"></span>Σ stake·EV (signal)</span><span><span class="sw sw-pnl"></span>P&amp;L (signal + luck)</span></div>
 {% endif %}

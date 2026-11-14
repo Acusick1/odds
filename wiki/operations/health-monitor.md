@@ -9,7 +9,8 @@ sources:
   - odds_lambda.health_monitor.StaleSource
   - odds_lambda.health_monitor.HealthMonitor.check_missing_betfair_closes
   - odds_lambda.health_monitor.MissingBetfairClose
-  - odds_core.paper_trade_models.PaperTrade
+  - odds_core.paper_trade_models.PaperTrade.line
+  - odds_core.paper_trade_models.PaperTrade.market
   - odds_core.close.LIVE_CLOSE_WINDOW
   - odds_core.close.live_close_quotes
   - odds_core.close.close_status
@@ -120,7 +121,7 @@ The thresholds are computed from each job's cadence, not configured. The Odds AP
 - `odds_core.config.BetfairConfig.enabled` is true, `fetch-betfair-exchange` is in the default or configured `odds_core.config.SchedulerConfig.bootstrap_jobs`, its sport is among the job's target sports (`odds_lambda.scheduling.jobs.resolve_target_sports`), and Betfair has written a snapshot of that sport before (a snapshot with source `betfair`), so a league whose collection has not started raises nothing.
 - Its status is not postponed or cancelled, and it has at least one live Betfair snapshot (source `betfair`) in the 72 h before kick-off. A ghost, an unannounced postponement and a twin whose prices sit on the other event therefore raise nothing.
 - It has no live close: `odds_core.close.close_status` for the event's sport, over the Betfair Exchange backs of its live Betfair snapshots within `odds_core.close.LIVE_CLOSE_WINDOW` (30 min) before kick-off (`odds_core.close.live_close_quotes`), is not `odds_core.close.CloseKind` `live`. That is the close the [candidate report](../evaluation/candidate-registry.md#odds-candidates-report) scores against: a snapshot that is not in-play, prices every outcome of the market and has a back overround of at most `odds_core.exchange_price.MAX_EXCHANGE_OVERROUND` ([ADR-0014](../../docs/adr/0014-ignore-wide-exchange-prices.md)).
-- It has no live close on the line (`line`) of a totals paper trade (`odds_core.paper_trade_models.PaperTrade`, market `totals`) placed on it: `odds_core.close.close_status` with that `line`, over the `totals` quotes from `odds_core.close.live_close_quotes`. An event is missing when it lacks either close, and the alert names which.
+- It has no live close on the line (`odds_core.paper_trade_models.PaperTrade.line`) of a totals paper trade (`odds_core.paper_trade_models.PaperTrade.market` `totals`) placed on it: `odds_core.close.close_status` with that `line`, over the `totals` quotes from `odds_core.close.live_close_quotes`. An event is missing when it lacks either close, and the alert names which.
 
 The missing events of a run are one critical `missing_betfair_close` listing every event with its sport, so a matchday cannot storm. Its `alert_history` context holds the integer event ids (`event_ids`). A later run reports only events not named in an alert inside the lookback, so an event drops out of `issues_detected` once its alert was recorded; a run whose send failed, or whose alerts are off, records nothing and lists the events again next run. A snapshot whose back book is wider than the cap is not a close, so an event whose only window snapshots are wide is reported.
 

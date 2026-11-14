@@ -9,6 +9,7 @@ from odds_lambda.candidate_rules.fixture_context import FixtureInput
 from odds_lambda.candidate_rules.market_state import MarketState
 from odds_lambda.candidate_rules.rules import (
     BetIntent,
+    EstimateBasis,
     RuleParams,
     RuleSpec,
     best_bet,
@@ -25,18 +26,18 @@ def last_result_overreaction(state: MarketState, params: LastResultParams) -> li
     """Bet the longest retail price of the home or away side whose previous league match was a
     loss by at least ``min_margin`` goals.
 
-    The rule has no fair price, so every qualifying bet scores the same and ``best_bet``'s tie
-    order, home first, picks the one when both sides qualify.
+    The rule has no fair price, so its bets carry no estimate and ``best_bet``'s tie order, home
+    first, picks the one when both sides qualify.
     """
     retail = state.retail.get(None, {})
-    scored: list[tuple[BetIntent, float]] = []
+    scored: list[BetIntent] = []
     for side in (Outcome.HOME, Outcome.AWAY):
         previous = state.fixture.previous.get(side)
         longest = longest_retail(retail, side)
         if previous is None or longest is None or previous.goal_difference > -params.min_margin:
             continue
         price, book = longest
-        scored.append((BetIntent(side, book, price, params.stake), 0.0))
+        scored.append(BetIntent(side, book, price, params.stake))
     return best_bet(state.market, scored)
 
 
@@ -45,4 +46,5 @@ LAST_RESULT_OVERREACTION = RuleSpec(
     LastResultParams,
     frozenset(),
     fixture_inputs=frozenset({FixtureInput.PREVIOUS_RESULT}),
+    estimate_basis=EstimateBasis.NONE,
 )

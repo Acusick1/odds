@@ -9,8 +9,9 @@ unchanged.
 from __future__ import annotations
 
 from collections.abc import Callable, Collection, Iterable, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
+from enum import StrEnum
 from functools import partial
 from typing import Any
 
@@ -36,11 +37,15 @@ Selection = tuple[Outcome, Line]
 
 @dataclass(frozen=True)
 class BetIntent:
+    """A bet a rule takes. ``estimated_ev`` is the EV per unit staked the rule estimated for it
+    at decision time, against its spec's ``estimate_basis``; None for a rule without one."""
+
     outcome: Outcome
     bookmaker: str
     price_decimal: float
     stake: float
     line: Line = None
+    estimated_ev: float | None = None
 
     @property
     def selection(self) -> Selection:
@@ -135,28 +140,39 @@ def gap_bets(
             if longest is None:
                 continue
             price, book = longest
-            if fair[outcome] * price - 1 > threshold:
-                bets.append(BetIntent(outcome, book, price, stake, line))
+            ev = fair[outcome] * price - 1
+            if ev > threshold:
+                bets.append(BetIntent(outcome, book, price, stake, line, estimated_ev=ev))
     return bets
 
 
-def best_bet(market: Market, scored: Iterable[tuple[BetIntent, float]]) -> list[BetIntent]:
-    """The one bet of ``scored``, qualifying bets in ``market`` with their estimated EV, of the
-    highest EV; empty when there is none. Ties go to the lowest line, then the outcome first in
-    ``market_outcomes`` order, then the first bookmaker key."""
+def best_bet(market: Market, bets: Iterable[BetIntent]) -> list[BetIntent]:
+    """The one of ``bets``, qualifying bets in ``market``, of the highest estimated EV; empty
+    when there is none. Bets without an estimate tie. Ties go to the lowest line, then the
+    outcome first in ``market_outcomes`` order, then the first bookmaker key."""
     order = {outcome: i for i, outcome in enumerate(market_outcomes(market))}
 
-    def rank(item: tuple[BetIntent, float]) -> tuple[float, float, int, str]:
-        bet, ev = item
+    def rank(bet: BetIntent) -> tuple[float, float, int, str]:
         return (
-            -ev,
+            0.0 if bet.estimated_ev is None else -bet.estimated_ev,
             float("-inf") if bet.line is None else bet.line,
             order[bet.outcome],
             bet.bookmaker,
         )
 
-    best = min(scored, key=rank, default=None)
-    return [] if best is None else [best[0]]
+    best = min(bets, key=rank, default=None)
+    return [] if best is None else [best]
+
+
+class EstimateBasis(StrEnum):
+    """The fair price a rule's ``BetIntent.estimated_ev`` is taken against."""
+
+    EXCHANGE = "exchange"
+    POLYMARKET = "polymarket"
+    RETAIL_CONSENSUS = "retail_consensus"
+    MODEL = "model"
+    # The rule has no fair price, so its bets carry no estimate.
+    NONE = "none"
 
 
 @dataclass(frozen=True)
@@ -166,7 +182,8 @@ class RuleSpec:
     ``also_markets`` are extra markets the rule reads, read-only, in ``MarketState.also``: a
     decision without an input for each of them has no inputs. ``fixture_inputs`` are the
     fixture inputs the rule reads, in ``MarketState.fixture``: a decision with a team whose
-    previous result is not known has no inputs."""
+    previous result is not known has no inputs. ``estimate_basis`` is what the rule's bets'
+    ``estimated_ev`` is against."""
 
     # Each rule takes its own params model, which a shared Callable cannot express.
     function: Callable[[MarketState, Any], list[BetIntent]]
@@ -174,6 +191,7 @@ class RuleSpec:
     sharp_inputs: frozenset[SharpInput]
     also_markets: frozenset[Market] = frozenset()
     fixture_inputs: frozenset[FixtureInput] = frozenset()
+    estimate_basis: EstimateBasis = field(kw_only=True)
 
 
 # Predicted EV of each (outcome, UK retail book) quote in a state of a market without lines.
@@ -197,6 +215,7 @@ class ModelRuleSpec:
     markets: frozenset[Market]
     also_markets: frozenset[Market] = frozenset()
     fixture_inputs: frozenset[FixtureInput] = frozenset()
+    estimate_basis: EstimateBasis = field(kw_only=True)
 
     def bind(self, predict: EvPredictor) -> RuleSpec:
         return RuleSpec(
@@ -205,6 +224,7 @@ class ModelRuleSpec:
             self.sharp_inputs,
             self.also_markets,
             self.fixture_inputs,
+            estimate_basis=self.estimate_basis,
         )
 
 

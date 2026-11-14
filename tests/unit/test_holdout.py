@@ -86,6 +86,7 @@ def scored_bet(
         "bet365",
         p_close,
         Source.BETFAIR,
+        None,
     )
 
 

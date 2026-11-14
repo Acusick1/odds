@@ -34,7 +34,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from odds_analytics.retail_ev_metrics import event_clustered_ratio
+from odds_analytics.retail_ev_metrics import CI_LEVEL, event_clustered_ratio
 
 if TYPE_CHECKING:
     from odds_analytics.book_replays import BookReplay
@@ -87,6 +87,8 @@ class ScoredBet:
     p_close_power: float | None
     # Which source's price the close is (``CloseProbability.source``); None without a close.
     close_source: Source | None
+    # The EV the rule estimated at decision time (``BetIntent.estimated_ev``); None without one.
+    estimated_ev: float | None
 
     @property
     def settled(self) -> bool:
@@ -158,6 +160,8 @@ class CandidateSummary:
     verdict: Verdict
     family_versions: int
     leagues: tuple[LeagueBreakdown, ...]
+    # Over every bet with a close, as ``current``; None when one of them has no estimate.
+    estimate_gap: EstimateGap | None
 
     @property
     def status(self) -> CandidateStatus | None:
@@ -172,16 +176,36 @@ class CandidateSummary:
 @dataclass(frozen=True)
 class RunningScore:
     """Running totals after each bet with a close in the scoreable prefix, in placement order:
-    the stake, Σ stake·EV and realised P&L so far."""
+    the stake, Σ stake·EV and realised P&L so far, and Σ stake·estimated EV, None when
+    ``without_estimate`` of the bets have no estimate."""
 
     staked: tuple[float, ...]
     expected: tuple[float, ...]
     pnl: tuple[float, ...]
+    estimated: tuple[float, ...] | None
+    without_estimate: int
 
     @property
     def mean_ev(self) -> tuple[float, ...]:
         """The stake-weighted mean EV after each bet, the checkpoint score at every n."""
         return tuple(e / s for e, s in zip(self.expected, self.staked, strict=True))
+
+    @property
+    def mean_estimated_ev(self) -> tuple[float, ...] | None:
+        """The stake-weighted mean estimated EV after each bet, over the bets of ``mean_ev``."""
+        if self.estimated is None:
+            return None
+        return tuple(e / s for e, s in zip(self.estimated, self.staked, strict=True))
+
+
+@dataclass(frozen=True)
+class EstimateGap:
+    """Σ stake·(estimated EV − EV) / Σ stake over ``n`` bets with a close, and its
+    event-clustered 95% interval."""
+
+    n: int
+    mean_gap: float
+    ci95: tuple[float, float]
 
 
 @dataclass(frozen=True)
@@ -435,6 +459,19 @@ def stake_weighted_mean_ev(with_close: Sequence[ScoredBet]) -> float | None:
     return sum(t.stake * t.ev for t in with_close if t.ev is not None) / stake
 
 
+def estimate_gap(with_close: Sequence[ScoredBet]) -> EstimateGap | None:
+    """How far the estimated EV of ``with_close``, bets with a close, overstates their EV; None
+    without a bet or when one has no estimate."""
+    if not with_close or any(t.estimated_ev is None for t in with_close):
+        return None
+    estimate = event_clustered_ratio(
+        np.array([t.event_id for t in with_close]),
+        np.array([t.stake * (t.estimated_ev - t.ev) for t in with_close]),  # type: ignore[operator]
+        np.array([t.stake for t in with_close]),
+    )
+    return EstimateGap(len(with_close), estimate.point, estimate.intervals[CI_LEVEL])
+
+
 def scored_intent(
     candidate_name: str,
     candidate_version: int,
@@ -477,6 +514,7 @@ def scored_intent(
         bookmaker=intent.bookmaker,
         p_close_power=None if p_close is None else p_close.power,
         close_source=None if p_close is None else p_close.source,
+        estimated_ev=intent.estimated_ev,
     )
 
 
@@ -501,19 +539,29 @@ def league_breakdown(trades: Sequence[ScoredBet], now: datetime) -> tuple[League
 
 def running_score(with_close: Sequence[ScoredBet]) -> RunningScore:
     """The running totals over ``with_close``, bets with a close in placement order."""
-    staked = expected = pnl = 0.0
+    staked = expected = pnl = estimated = 0.0
     staked_after: list[float] = []
     expected_after: list[float] = []
     pnl_after: list[float] = []
+    estimated_after: list[float] = []
     for bet in with_close:
         assert bet.ev is not None and bet.pnl is not None
         staked += bet.stake
         expected += bet.stake * bet.ev
         pnl += bet.pnl
+        estimated += 0.0 if bet.estimated_ev is None else bet.stake * bet.estimated_ev
         staked_after.append(staked)
         expected_after.append(expected)
         pnl_after.append(pnl)
-    return RunningScore(tuple(staked_after), tuple(expected_after), tuple(pnl_after))
+        estimated_after.append(estimated)
+    without = sum(bet.estimated_ev is None for bet in with_close)
+    return RunningScore(
+        tuple(staked_after),
+        tuple(expected_after),
+        tuple(pnl_after),
+        None if without else tuple(estimated_after),
+        without,
+    )
 
 
 def summarize_candidate(
@@ -551,6 +599,7 @@ def summarize_candidate(
         verdict=verdict,
         family_versions=checkpoint.family_versions if checkpoint else family_size(now),
         leagues=league_breakdown(trades, now),
+        estimate_gap=estimate_gap(with_close),
     )
 
 
@@ -694,6 +743,7 @@ async def load_scored_trades(session: AsyncSession) -> list[ScoredBet]:
                 bookmaker=trade.bookmaker,
                 p_close_power=None if p_close is None else p_close.power,
                 close_source=None if p_close is None else p_close.source,
+                estimated_ev=trade.estimated_ev,
             )
         )
     return scored

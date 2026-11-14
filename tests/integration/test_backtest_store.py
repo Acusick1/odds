@@ -30,7 +30,13 @@ SHA = "a" * 40
 START, END = date(2025, 1, 1), date(2025, 6, 30)
 
 
-def bet(event_id: int, ev: float | None, minutes: int = 0, pnl: float | None = 1.0) -> ScoredBet:
+def bet(
+    event_id: int,
+    ev: float | None,
+    minutes: int = 0,
+    pnl: float | None = 1.0,
+    estimated_ev: float | None = None,
+) -> ScoredBet:
     when = datetime(2025, 3, 1, 12, tzinfo=UTC) + timedelta(minutes=minutes)
     return ScoredBet(
         "back-longest",
@@ -49,6 +55,7 @@ def bet(event_id: int, ev: float | None, minutes: int = 0, pnl: float | None = 1
         "bet365",
         None,
         None if ev is None else Source.BETFAIR,
+        estimated_ev,
     )
 
 
@@ -103,6 +110,17 @@ class TestReplayRecord:
         assert [r.event_id for r in rows] == list(range(40, 0, -1))
         assert rows[0].price == 2.0 and rows[0].close_source is Source.BETFAIR
         assert rows[0].ev == pytest.approx(0.02)
+
+    async def test_each_bets_estimate_round_trips(self, pglite_async_session: Any) -> None:
+        bets = [bet(1, 0.02, estimated_ev=0.06), bet(2, 0.04, minutes=1)]
+        record = store.replay_record(draft(), result(bets), WindowKind.DEVELOPMENT, SHA)
+
+        await store.store_runs(pglite_async_session, [record])
+
+        (run,) = await runs(pglite_async_session)
+        rows = await stored_bets(pglite_async_session, run)
+        assert [r.estimated_ev for r in rows] == [0.06, None]
+        assert [b.estimated_ev for b in store.stored_with_close(run, rows)] == [0.06, None]
 
     async def test_a_run_with_no_bet_with_a_close_has_no_estimate(
         self, pglite_async_session: Any

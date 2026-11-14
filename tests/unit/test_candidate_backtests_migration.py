@@ -20,19 +20,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 WHEN = datetime(2026, 11, 13, tzinfo=UTC)
 
 
-@pytest.fixture(scope="module")
-def migration() -> ModuleType:
-    path = (
-        Path(__file__).resolve().parents[2]
-        / "migrations"
-        / "versions"
-        / "a4c8e2f61b93_add_candidate_backtests.py"
-    )
-    spec = importlib.util.spec_from_file_location("ma4c8e2f61b93", path)
+def _load(filename: str) -> ModuleType:
+    path = Path(__file__).resolve().parents[2] / "migrations" / "versions" / filename
+    spec = importlib.util.spec_from_file_location(f"m{filename.split('_')[0]}", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+@pytest.fixture(scope="module")
+def migration() -> ModuleType:
+    return _load("a4c8e2f61b93_add_candidate_backtests.py")
+
+
+# The later migrations of the tables, applied after it so the tables match the models.
+LATER = ("b7e3d1f9c2a4_add_estimated_ev.py",)
 
 
 def _run(connection: Any, migration: ModuleType, step: str) -> None:
@@ -42,8 +45,13 @@ def _run(connection: Any, migration: ModuleType, step: str) -> None:
 
 async def _migrated(session: AsyncSession, migration: ModuleType) -> None:
     connection = await session.connection()
+    later = [_load(name) for name in LATER]
+    for module in reversed(later):
+        await connection.run_sync(lambda c, m=module: _run(c, m, "downgrade"))
     for step in ("downgrade", "upgrade"):
         await connection.run_sync(lambda c, step=step: _run(c, migration, step))
+    for module in later:
+        await connection.run_sync(lambda c, m=module: _run(c, m, "upgrade"))
 
 
 def backtest(**changes: Any) -> CandidateBacktest:

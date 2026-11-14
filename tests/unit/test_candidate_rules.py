@@ -17,6 +17,7 @@ from odds_core.quotes import Quote
 from odds_core.vocabulary import Market, Side, Source, TimeBasis
 from odds_lambda.candidate_rules import (
     BetIntent,
+    EstimateBasis,
     MarketState,
     ModelRuleSpec,
     RuleSpec,
@@ -515,14 +516,18 @@ class TestExchangeGap:
         at = GapParams(threshold=0.25, minutes_before_kickoff=(60,), max_input_age_minutes=10)
         below = GapParams(threshold=0.2499, minutes_before_kickoff=(60,), max_input_age_minutes=10)
         assert exchange_gap(state, at) == []
-        assert exchange_gap(state, below) == [BetIntent(HOME, "bet365", 2.5, 1.0)]
+        assert exchange_gap(state, below) == [
+            BetIntent(HOME, "bet365", 2.5, 1.0, estimated_ev=pytest.approx(0.25))
+        ]
 
     def test_longest_price_across_books_is_chosen(self) -> None:
         state = _rule_state(
             {"bet365": {HOME: 2.4}, "betway": {HOME: 2.6}, "coral": {HOME: 2.5}},
             _exchange(0.5, 0.25, 0.25),
         )
-        assert exchange_gap(state, PARAMS) == [BetIntent(HOME, "betway", 2.6, 1.0)]
+        assert exchange_gap(state, PARAMS) == [
+            BetIntent(HOME, "betway", 2.6, 1.0, estimated_ev=pytest.approx(0.5 * 2.6 - 1))
+        ]
 
     def test_tie_goes_to_the_alphabetically_first_book(self) -> None:
         state = _rule_state(
@@ -537,8 +542,8 @@ class TestExchangeGap:
         )
         bets = exchange_gap(state, PARAMS)
         assert bets == [
-            BetIntent(DRAW, "bet365", 5.0, 1.0),
-            BetIntent(AWAY, "betway", 6.0, 1.0),
+            BetIntent(DRAW, "bet365", 5.0, 1.0, estimated_ev=pytest.approx(0.25)),
+            BetIntent(AWAY, "betway", 6.0, 1.0, estimated_ev=pytest.approx(0.5)),
         ]
 
     def test_stake_comes_from_params(self) -> None:
@@ -554,7 +559,9 @@ class TestExchangeGap:
             {2.5: {"bet365": {OVER: 2.2, UNDER: 1.7}, "betway": {OVER: 2.1}}},
             {2.5: _totals_exchange(0.5)},
         )
-        assert exchange_gap(state, PARAMS) == [BetIntent(OVER, "bet365", 2.2, 1.0, 2.5)]
+        assert exchange_gap(state, PARAMS) == [
+            BetIntent(OVER, "bet365", 2.2, 1.0, 2.5, estimated_ev=pytest.approx(0.1))
+        ]
 
     def test_totals_retail_is_compared_on_the_exchange_line_only(self) -> None:
         state = _totals_state(
@@ -569,8 +576,8 @@ class TestExchangeGap:
             {2.5: _totals_exchange(0.5), 3.5: _totals_exchange(0.25)},
         )
         assert exchange_gap(state, PARAMS) == [
-            BetIntent(UNDER, "bet365", 2.2, 1.0, 2.5),
-            BetIntent(OVER, "betway", 4.5, 1.0, 3.5),
+            BetIntent(UNDER, "bet365", 2.2, 1.0, 2.5, estimated_ev=pytest.approx(0.1)),
+            BetIntent(OVER, "betway", 4.5, 1.0, 3.5, estimated_ev=pytest.approx(0.125)),
         ]
 
     @pytest.mark.parametrize("field", ["threshold", "stake", "max_input_age_minutes"])
@@ -625,31 +632,67 @@ def _predicting(evs: dict[tuple[Outcome, str], float]) -> Any:
     return predict
 
 
-def _bet(outcome: Outcome, book: str = "bet365", line: float | None = None) -> BetIntent:
-    return BetIntent(outcome, book, 2.0, 1.0, line)
+def _bet(
+    outcome: Outcome, book: str = "bet365", line: float | None = None, ev: float | None = 0.05
+) -> BetIntent:
+    return BetIntent(outcome, book, 2.0, 1.0, line, estimated_ev=ev)
 
 
 class TestBestBet:
     def test_keeps_the_highest_estimated_ev(self) -> None:
-        scored = [(_bet(HOME), 0.02), (_bet(AWAY), 0.05), (_bet(DRAW), 0.03)]
-        assert best_bet(Market.ONE_X_TWO, scored) == [_bet(AWAY)]
+        bets = [_bet(HOME, ev=0.02), _bet(AWAY, ev=0.05), _bet(DRAW, ev=0.03)]
+        assert best_bet(Market.ONE_X_TWO, bets) == [_bet(AWAY, ev=0.05)]
 
     def test_no_qualifying_bet_gives_none(self) -> None:
         assert best_bet(Market.ONE_X_TWO, []) == []
 
     def test_a_tie_goes_to_the_lowest_line(self) -> None:
-        scored = [(_bet(OVER, line=3.5), 0.05), (_bet(UNDER, line=2.5), 0.05)]
-        assert best_bet(Market.TOTALS, scored) == [_bet(UNDER, line=2.5)]
+        bets = [_bet(OVER, line=3.5), _bet(UNDER, line=2.5)]
+        assert best_bet(Market.TOTALS, bets) == [_bet(UNDER, line=2.5)]
 
     def test_then_to_the_outcome_first_in_market_order(self) -> None:
-        scored = [(_bet(AWAY), 0.05), (_bet(DRAW), 0.05)]
-        assert best_bet(Market.ONE_X_TWO, scored) == [_bet(DRAW)]
-        totals = [(_bet(UNDER, line=2.5), 0.05), (_bet(OVER, line=2.5), 0.05)]
+        assert best_bet(Market.ONE_X_TWO, [_bet(AWAY), _bet(DRAW)]) == [_bet(DRAW)]
+        totals = [_bet(UNDER, line=2.5), _bet(OVER, line=2.5)]
         assert best_bet(Market.TOTALS, totals) == [_bet(OVER, line=2.5)]
 
     def test_then_to_the_first_bookmaker_key(self) -> None:
-        scored = [(_bet(HOME, "williamhill"), 0.05), (_bet(HOME, "betfred"), 0.05)]
-        assert best_bet(Market.ONE_X_TWO, scored) == [_bet(HOME, "betfred")]
+        bets = [_bet(HOME, "williamhill"), _bet(HOME, "betfred")]
+        assert best_bet(Market.ONE_X_TWO, bets) == [_bet(HOME, "betfred")]
+
+    def test_bets_without_an_estimate_tie(self) -> None:
+        bets = [_bet(AWAY, ev=None), _bet(HOME, ev=None)]
+        assert best_bet(Market.ONE_X_TWO, bets) == [_bet(HOME, ev=None)]
+
+
+class TestEstimateBasis:
+    @pytest.mark.parametrize(
+        ("rule", "basis"),
+        [
+            ("exchange_gap", EstimateBasis.EXCHANGE),
+            ("exchange_steam", EstimateBasis.EXCHANGE),
+            ("team_news_lag", EstimateBasis.EXCHANGE),
+            ("polymarket_gap", EstimateBasis.POLYMARKET),
+            ("retail_ev_model", EstimateBasis.MODEL),
+            ("retail_quorum_lag", EstimateBasis.RETAIL_CONSENSUS),
+            ("single_book_outlier", EstimateBasis.EXCHANGE),
+            ("subsidised_outcome", EstimateBasis.RETAIL_CONSENSUS),
+            ("favourite_price", EstimateBasis.EXCHANGE),
+            ("crowded_gap", EstimateBasis.EXCHANGE),
+            ("last_result_overreaction", EstimateBasis.NONE),
+        ],
+    )
+    def test_each_rule_declares_the_fair_price_of_its_estimate(
+        self, rule: str, basis: EstimateBasis
+    ) -> None:
+        assert RULES[rule].estimate_basis is basis
+
+    def test_every_rule_is_covered(self) -> None:
+        assert len(RULES) == 11
+
+    def test_a_bound_model_rule_keeps_its_basis(self) -> None:
+        spec = RULES["retail_ev_model"]
+        assert isinstance(spec, ModelRuleSpec)
+        assert spec.bind(_predicting({})).estimate_basis is EstimateBasis.MODEL
 
 
 class TestPolymarketGap:
@@ -658,7 +701,9 @@ class TestPolymarketGap:
             _rule_state({"bet365": {HOME: 2.5, DRAW: 3.0}}, None),
             polymarket={None: _polymarket(0.5, 0.3, 0.2)},
         )
-        assert polymarket_gap(state, PARAMS) == [BetIntent(HOME, "bet365", 2.5, 1.0)]
+        assert polymarket_gap(state, PARAMS) == [
+            BetIntent(HOME, "bet365", 2.5, 1.0, estimated_ev=pytest.approx(0.25))
+        ]
 
     def test_ignores_the_exchange(self) -> None:
         state = _rule_state({"bet365": {HOME: 2.5}}, _exchange(0.5, 0.25, 0.25))
@@ -677,8 +722,8 @@ class TestRetailEvModel:
         )
         state = _rule_state(self.RETAIL, _exchange(0.5, 0.25, 0.25))
         assert retail_ev_model(state, MODEL_PARAMS, predict) == [
-            BetIntent(HOME, "bet365", 2.1, 1.0),
-            BetIntent(DRAW, "betway", 3.5, 1.0),
+            BetIntent(HOME, "bet365", 2.1, 1.0, estimated_ev=0.02),
+            BetIntent(DRAW, "betway", 3.5, 1.0, estimated_ev=0.011),
         ]
         assert predict.seen == [state]
 
@@ -691,7 +736,7 @@ class TestRetailEvModel:
         predict = _predicting({(AWAY, "bet365"): 0.05, (AWAY, "betway"): 0.0})
         state = _rule_state(self.RETAIL, _exchange(0.5, 0.25, 0.25))
         assert retail_ev_model(state, MODEL_PARAMS, predict) == [
-            BetIntent(AWAY, "bet365", 4.0, 1.0)
+            BetIntent(AWAY, "bet365", 4.0, 1.0, estimated_ev=0.05)
         ]
 
     def test_no_exchange_no_prediction_and_no_bets(self) -> None:
@@ -734,13 +779,16 @@ class TestRetailEvModel:
         predict = _predicting({(HOME, "bet365"): 0.5})
         state = _rule_state(self.RETAIL, _exchange(0.5, 0.25, 0.25))
         _, bets = apply_rule(spec.bind(predict), MODEL_PARAMS, state, bet_selections={(DRAW, None)})
-        assert bets == [BetIntent(HOME, "bet365", 2.1, 1.0)]
+        assert bets == [BetIntent(HOME, "bet365", 2.1, 1.0, estimated_ev=0.5)]
 
 
 class TestApplyRule:
     def test_state_without_input_gives_no_bets_whatever_the_rule(self) -> None:
         always = RuleSpec(
-            lambda state, params: [BetIntent(HOME, "bet365", 2.0, 1.0)], GapParams, EXCHANGE
+            lambda state, params: [BetIntent(HOME, "bet365", 2.0, 1.0)],
+            GapParams,
+            EXCHANGE,
+            estimate_basis=EstimateBasis.NONE,
         )
         empty = MarketState(1, "soccer_epl", "1x2", KICKOFF, T)
         assert apply_rule(always, PARAMS, empty)[1] == []
@@ -754,6 +802,7 @@ class TestApplyRule:
             ],
             GapParams,
             EXCHANGE,
+            estimate_basis=EstimateBasis.NONE,
         )
         state = _rule_state({}, None)
         assert apply_rule(both, PARAMS, state, bet_selections={(HOME, None)})[1] == [
@@ -769,6 +818,7 @@ class TestApplyRule:
             ],
             GapParams,
             EXCHANGE,
+            estimate_basis=EstimateBasis.NONE,
         )
         state = _totals_state({}, {})
         assert apply_rule(overs, PARAMS, state, bet_selections={(OVER, 2.5)})[1] == [
@@ -1102,14 +1152,23 @@ class TestRuleSha256:
 
 
 NEW_RULE = """
-from odds_lambda.candidate_rules import BetIntent, MarketState, RuleParams, RuleSpec, SharpInput
+from odds_lambda.candidate_rules import (
+    BetIntent,
+    EstimateBasis,
+    MarketState,
+    RuleParams,
+    RuleSpec,
+    SharpInput,
+)
 
 
 def new_rule(state: MarketState, params: RuleParams) -> list[BetIntent]:
     return []
 
 
-NEW_RULE = RuleSpec(new_rule, RuleParams, frozenset({SharpInput.EXCHANGE}))
+NEW_RULE = RuleSpec(
+    new_rule, RuleParams, frozenset({SharpInput.EXCHANGE}), estimate_basis=EstimateBasis.NONE
+)
 """
 
 

@@ -18,7 +18,7 @@ from odds_core.bookmakers import BOOK_SETS, BookSet
 from odds_core.candidates import MechanicalCandidate
 from odds_core.models import Event, EventStatus
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
-from odds_lambda.candidate_rules import RuleSpec, SharpInput
+from odds_lambda.candidate_rules import EstimateBasis, RuleSpec, SharpInput
 from odds_lambda.candidate_rules import rules as rules_module
 from odds_lambda.candidate_rules.pinning import rule_sha256
 from odds_lambda.candidate_rules.registry import RULES
@@ -37,6 +37,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from tests.candidate_rule_fixtures import (
+    ESTIMATED_EV,
     FixtureRuleParams,
     bet_home,
     bet_longest,
@@ -65,7 +66,12 @@ def rules(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setitem(
             RULES,
             function.__name__,
-            RuleSpec(function, FixtureRuleParams, frozenset({SharpInput.EXCHANGE})),
+            RuleSpec(
+                function,
+                FixtureRuleParams,
+                frozenset({SharpInput.EXCHANGE}),
+                estimate_basis=EstimateBasis.EXCHANGE,
+            ),
         )
 
 
@@ -153,6 +159,7 @@ class TestDecisions:
         [trade] = await all_of(pglite_async_session, PaperTrade)
         assert (trade.candidate_name, trade.candidate_version) == ("cand", 1)
         assert trade.decision_id == decision.id
+        assert trade.estimated_ev == ESTIMATED_EV
         assert (trade.selection, trade.bookmaker, trade.price_decimal) == ("home", "bet365", 2.0)
         assert trade.market == "1x2"
         assert trade.bankroll_before is None and trade.stake == 1.0
