@@ -7,6 +7,7 @@ sources:
   - odds_cli.commands.candidates.select_command
   - odds_cli.commands.candidates._selection_table
   - odds_cli.commands.candidates._selection_json
+  - odds_analytics.backtest_store.grid_records
 mentions:
   - odds_analytics.holdout.load_preregistration
   - odds_analytics.holdout_run.pooled_draft
@@ -22,13 +23,13 @@ status: stable
 
 ## Command
 
-`odds_cli.commands.candidates.select_command` takes the path of a grid file, `candidates/preregistrations/<issue>-<market>-v<version>.yaml` ([sealed holdout files](candidate-registry.md#sealed-holdout-files)), and `--json <path>`. It opens one database session in a read-only transaction and calls `odds_analytics.cell_selection.select_cell`; it never writes to the database.
+`odds_cli.commands.candidates.select_command` takes the path of a grid file, `candidates/preregistrations/<issue>-<market>-v<version>.yaml` ([sealed holdout files](candidate-registry.md#sealed-holdout-files)), `--json <path>` and `--store`. It opens one database session in a read-only transaction and calls `odds_analytics.cell_selection.select_cell`; it writes to the database only with `--store` ([storing the grid](#storing-the-grid)).
 
 Before anything is replayed, `odds_analytics.cell_selection.load_selectable` refuses, printing the reason and exiting 1:
 
 - a file outside `candidates/preregistrations/`, or one not named by its own issue, market and version (`odds_analytics.holdout.load_preregistration`);
 - a file whose `selection_rule` is not `odds_analytics.cell_selection.ROUND_ONE_RULE`;
-- a grid whose selection file already exists, since a selection is never changed;
+- a grid whose selection file already exists, since a selection is never changed (with `--store` the replay is instead [checked against it](#storing-the-grid));
 - any cell that does not resolve as a pooled draft: a rule that is not registered (the error lists the registered rules), a market a league has no rule for, or params the rule rejects (`odds_lambda.candidate_rules.registry.resolve_rule`).
 
 ## Replay
@@ -47,12 +48,18 @@ These are the development seasons of [ADR-0021](../../docs/adr/0021-sealed-holdo
 
 ## Score and pick
 
-`odds_analytics.cell_selection.score_cell` scores a cell over its bets with a close, each bet's EV that of the [replay backtest](candidate-backtest.md#replay) (`odds_analytics.candidate_report.ScoredBet.ev`): the bet count, the distinct events, each block's bets and mean EV, the pooled mean EV (total EV over the bet count), the lower bound, and the bets counted by the source of their close (`odds_analytics.cell_selection.CellScore.closes`), for information.
+`odds_analytics.cell_selection.score_cell` scores a cell over its bets with a close, each bet's EV that of the [replay backtest](candidate-backtest.md#replay) (`odds_analytics.candidate_report.ScoredBet.ev`): the bet count, the distinct events, each block's bets and mean EV, the pooled mean EV (total EV over the bet count), the lower bound, and the interval's upper bound (`odds_analytics.cell_selection.CellScore.upper_bound`, for information) and the bets counted by the source of their close (`odds_analytics.cell_selection.CellScore.closes`), for information.
 
 - **Eligible** (`odds_analytics.cell_selection.is_eligible`): at least `odds_analytics.cell_selection.MIN_BETS` (50) bets in at least `odds_analytics.cell_selection.MIN_EVENTS` (30) events, and a mean EV above 0 in every block with at least `odds_analytics.cell_selection.MIN_BLOCK_BETS` (20) bets.
-- **Lower bound** (`odds_analytics.cell_selection.lower_bound`): the lower end of the 90% (`odds_analytics.cell_selection.INTERVAL_LEVEL`) event-clustered percentile bootstrap interval of the mean EV, from `odds_analytics.retail_ev_metrics.event_clustered_ratio` with `odds_analytics.cell_selection.RESAMPLES` (10,000) resamples and seed `odds_analytics.cell_selection.SEED` (821), its generator created afresh for each cell. Each resample draws the events, in id order, with replacement, and its mean is its bets' total EV over their count. The bound is the 5% quantile.
+- **Lower bound** (`odds_analytics.cell_selection.lower_bound`): the lower end of the 90% (`odds_analytics.cell_selection.INTERVAL_LEVEL`) event-clustered percentile bootstrap interval of the mean EV, from `odds_analytics.retail_ev_metrics.event_clustered_ratio` (`odds_analytics.cell_selection.bootstrap_interval`) with `odds_analytics.cell_selection.RESAMPLES` (10,000) resamples and seed `odds_analytics.cell_selection.SEED` (821), its generator created afresh for each cell. Each resample draws the events, in id order, with replacement, and its mean is its bets' total EV over their count. The bound is the 5% quantile.
 - **Pick** (`odds_analytics.cell_selection.pick`): the eligible cell with the highest lower bound; ties go to the higher mean EV, then more events, then the earlier cell in grid order.
 - **Power devig.** When any cell placed a bet above `odds_analytics.cell_selection.LONGSHOT_PRICE` (4.0), every cell also reports its mean EV against the close devigged by the power method (`odds_analytics.candidate_report.ScoredBet.ev_power`, [#770](https://github.com/Acusick1/odds/issues/770)), for information. It never changes eligibility or the pick.
+
+## Storing the grid
+
+`--store` writes every cell of the grid to the database as a `development` [stored run](candidate-backtest.md#stored-runs) (`odds_analytics.backtest_store.grid_records`), after the selection file, if any, is written. A cell's run covers its bets pooled over the development blocks: its day range runs from the first block's start to the last block's end, its leagues are the file's, and it lists each block with its bets and mean EV. Its estimate is the cell's mean EV with the 90% interval of the [lower bound](#score-and-pick), and it records whether the cell was eligible and whether it was picked. Only the picked cell keeps its bets, which a page charts; the other cells are scores alone, so a killed idea's best cell is never charted, since choosing it after the fact biases what its series suggests.
+
+A grid that already has a selection file is replayed, not refused, when `--store` is given: `odds_analytics.cell_selection.check_recorded` requires the grid file's hash to be the one the selection records and the replay to pick the cell the file records, and the command exits 1 with nothing stored otherwise. The file is left alone. This stores the results of a selection made before runs were stored.
 
 ## Output
 

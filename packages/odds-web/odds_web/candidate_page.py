@@ -44,9 +44,13 @@ class Interval:
 
     n: int
     mean_percent: float
-    ci95_percent: tuple[float, float]
-    promote_percent: tuple[float, float]
+    ci_percent: tuple[float, float]
+    promote_percent: tuple[float, float] | None
     at_checkpoint: bool
+    # The confidence level of ``ci_percent``; a stored backtest's is not always the report's 95%.
+    level: float = 0.95
+    # What the estimate is called in the chart's tooltip, when not "checkpoint" or "current".
+    label: str | None = None
 
 
 @dataclass(frozen=True)
@@ -69,9 +73,11 @@ class Series:
                 {
                     "n": i.n,
                     "mean": i.mean_percent,
-                    "ci95": list(i.ci95_percent),
-                    "promote": list(i.promote_percent),
+                    "ci": list(i.ci_percent),
+                    "level": i.level,
+                    "promote": None if i.promote_percent is None else list(i.promote_percent),
                     "checkpoint": i.at_checkpoint,
+                    "label": i.label,
                 }
                 for i in self.intervals
             ],
@@ -115,16 +121,16 @@ def _interval(point: Checkpoint, at_checkpoint: bool) -> Interval:
     return Interval(
         n=point.n,
         mean_percent=point.mean_ev * 100,
-        ci95_percent=(point.ci95[0] * 100, point.ci95[1] * 100),
+        ci_percent=(point.ci95[0] * 100, point.ci95[1] * 100),
         promote_percent=(point.promote_ci[0] * 100, point.promote_ci[1] * 100),
         at_checkpoint=at_checkpoint,
     )
 
 
-def _axis_percent(running: Sequence[float], intervals: Sequence[Interval]) -> float:
+def axis_percent(running: Sequence[float], intervals: Sequence[Interval]) -> float:
     """The EV axis' half-width: the intervals and the settled part of the running mean,
     rounded up to a multiple of ``MIN_AXIS_PERCENT``."""
-    reach = [abs(bound) for i in intervals for bound in (*i.ci95_percent, *i.promote_percent)]
+    reach = [abs(bound) for i in intervals for bound in (*i.ci_percent, *(i.promote_percent or ()))]
     reach += [abs(v) for v in running[AXIS_FROM_BETS - 1 :]] or [abs(v) for v in running]
     widest = max(reach, default=0.0) * 1.1
     return max(MIN_AXIS_PERCENT, math.ceil(widest / MIN_AXIS_PERCENT) * MIN_AXIS_PERCENT)
@@ -144,7 +150,7 @@ def build_series(summary: CandidateSummary, running: RunningScore) -> Series:
         pnl_units=list(running.pnl),
         intervals=intervals,
         checkpoints=checkpoints_through_next(len(running_percent)),
-        axis_percent=_axis_percent(running_percent, intervals),
+        axis_percent=axis_percent(running_percent, intervals),
     )
 
 

@@ -29,7 +29,15 @@ from odds_web.decisions import Decision, DecisionDay, DecisionHistory, DecisionK
 from odds_web.ledger import LedgerPage, LedgerRow
 from sqlalchemy.exc import DBAPIError
 
-from tests.odds_web_helpers import LONG_AGO, NOW, agent, bet, mechanical, report
+from tests.odds_web_helpers import (
+    LONG_AGO,
+    NOW,
+    agent,
+    bet,
+    mechanical,
+    report,
+    stub_stored_backtests,
+)
 
 
 def ledger_row(trade_id: int = 1, **fields: object) -> LedgerRow:
@@ -90,6 +98,7 @@ def data(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
     monkeypatch.setattr("odds_web.app.load_decision_history", decisions)
     monkeypatch.setattr("odds_web.app.load_ledger_page", ledger)
     monkeypatch.setattr("odds_web.app.load_candidates", lambda _directory: state["registry"])
+    stub_stored_backtests(monkeypatch)
     return state
 
 
@@ -505,7 +514,7 @@ class TestNoScoringInOddsWeb:
         assert series.expected_units == list(running.expected)
         assert series.pnl_units == list(running.pnl)
 
-    def test_odds_web_takes_only_report_data_and_ledger_closes_from_odds_analytics(self) -> None:
+    def test_odds_web_takes_only_report_and_stored_run_data_from_odds_analytics(self) -> None:
         allowed = {
             "CandidateReport",
             "CandidateSummary",
@@ -519,6 +528,8 @@ class TestNoScoringInOddsWeb:
             "checkpoints_through_next",
             "close_probabilities",
             "expected_value",
+            "kill_reason",
+            "stored_running_score",
             "unscored_version",
         }
         imported: set[str] = set()

@@ -9,6 +9,8 @@
 <span class="sub">{{ c.scope }}</span>
 <span class="verdict">{{ c.verdict }}</span>{% if c.verdict_note %} <span class="sub">{{ c.verdict_note }}</span>{% endif %}</h3>
 
+{% include "_backtest.html.j2" %}
+
 <div class="tiles">
   <div class="tile"><div class="k">Bets with a close</div>
     <div class="v num">{{ c.bets_with_close }}{% if c.progress %}<span class="sub"> / {{ c.progress.next_checkpoint }}</span>{% endif %}</div>

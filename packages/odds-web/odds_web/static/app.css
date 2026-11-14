@@ -16,7 +16,7 @@
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 body { margin: 0; font: 13px/1.4 system-ui, sans-serif; background: var(--background); color: var(--foreground); }
-main { max-width: 960px; margin: 0 auto; padding: 8px 16px 48px; }
+main { max-width: 1120px; margin: 0 auto; padding: 8px 16px 48px; }
 h2 { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted-foreground); margin: 28px 0 10px; font-weight: 600; }
 .num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 .sub { color: var(--muted-foreground); font-size: 12px; }
@@ -49,7 +49,7 @@ svg circle { stroke: var(--background); stroke-width: 2; }
 svg circle.pos { fill: var(--pos); }
 svg circle.neg { fill: var(--neg); }
 svg .clip { fill: var(--foreground); font-size: 12px; }
-header.top { max-width: 960px; margin: 0 auto; padding: 8px 16px 0; border-bottom: 1px solid var(--border); }
+header.top { max-width: 1120px; margin: 0 auto; padding: 8px 16px 0; border-bottom: 1px solid var(--border); }
 header.top nav { display: flex; gap: 16px; font-size: 12px; margin-bottom: 6px; }
 header.top nav a { color: var(--foreground); text-decoration: none; }
 header.top nav a:hover { text-decoration: underline; }
@@ -105,3 +105,8 @@ svg line.axis { stroke: var(--border); }
 td.text { font-family: system-ui, sans-serif; }
 tr.void { color: var(--muted-foreground); font-style: italic; }
 .pager { display: flex; gap: 12px; }
+h4.run { font-size: 12px; margin: 16px 0 4px; font-weight: 600; }
+/* A version's league list wraps, so the portfolio's columns fit beside it. */
+.sub.scope { white-space: normal; max-width: 26em; }
+table.blocks td.text { white-space: normal; }
+#killed td.text { white-space: normal; }

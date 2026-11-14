@@ -49,7 +49,7 @@ class TestRoleCheck:
                 report = await check_role(conn)
 
         assert "INSERT rejected (SQLSTATE 25006)" in report
-        assert any("can SELECT from 10 tables" in line for line in report)
+        assert any(f"can SELECT from {len(READ_TABLES)} tables" in line for line in report)
 
     async def test_passes_when_only_the_privileges_reject_the_write(
         self, odds_web_session: AsyncSession

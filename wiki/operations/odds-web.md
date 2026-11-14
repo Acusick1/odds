@@ -1,7 +1,7 @@
 ---
 type: reference
 title: odds-web, the read-only web UI
-description: What odds web serve runs, the database role and session it reads through, the report data behind the portfolio and candidate pages, the status strip and the data-health page, its cache and failure bounds, the vendored scripts, and how deploy.sh and systemd run it.
+description: What odds web serve runs, the database role and session it reads through, the report data and stored backtest runs behind the portfolio and candidate pages, the status strip and the data-health page, its cache and failure bounds, the vendored scripts, and how deploy.sh and systemd run it.
 sources:
   - odds_cli.commands.web
   - odds_web.app
@@ -13,6 +13,7 @@ sources:
   - odds_web.closes
   - odds_web.candidate_page
   - odds_web.ledger
+  - odds_web.backtests
   - odds_web.decisions
   - odds_web.role_check
   - odds_lambda.health_readers.source_freshness
@@ -31,6 +32,8 @@ sources:
   - odds_analytics.candidate_report.close_probabilities
   - odds_analytics.candidate_report.checkpoint_progress
   - odds_analytics.candidate_report.checkpoints_through_next
+  - odds_analytics.backtest_store.stored_running_score
+  - odds_analytics.backtest_store.kill_reason
   - odds_core.config.DatabaseConfig
   - odds-web.service
   - scripts/odds_web_grants.sql
@@ -52,7 +55,7 @@ Systemd runs it as `odds-web.service` beside `odds-scheduler.service`, with `CPU
 
 The app never uses `odds_core.database.async_session_maker`, which binds to `DATABASE_URL` only. `odds_web.db.web_database_from_settings` builds its own engine from `odds_core.config.DatabaseConfig.web_url` (`WEB_DATABASE_URL`) and every reader takes a session from that factory (`odds_web.db.WebDatabase`).
 
-- **The role.** `WEB_DATABASE_URL` names the `odds_web` role, which `scripts/odds_web_grants.sql` limits to `SELECT` on the tables the pages read, each of which `odds_web.role_check.READ_TABLES` also probes: `events`, `odds_snapshots`, `prices`, `paper_trades`, `candidate_decisions`, `fetch_logs`, `alert_history`, `mlb_probable_pitchers` and the APScheduler `schedules` and `jobs` tables. It grants nothing else and sets no default privileges, so a table a reader starts using must be added to the file. The file also sets the role's `default_transaction_read_only`.
+- **The role.** `WEB_DATABASE_URL` names the `odds_web` role, which `scripts/odds_web_grants.sql` limits to `SELECT` on the tables the pages read, each of which `odds_web.role_check.READ_TABLES` also probes: `events`, `odds_snapshots`, `prices`, `paper_trades`, `candidate_decisions`, `candidate_backtests`, `candidate_backtest_bets`, `fetch_logs`, `alert_history`, `mlb_probable_pitchers` and the APScheduler `schedules` and `jobs` tables. It grants nothing else and sets no default privileges, so a table a reader starts using must be added to the file. The file also sets the role's `default_transaction_read_only`.
 - **The engine.** `odds_web.db.build_web_database` opens at most `odds_web.db.POOL_SIZE` connections. Every transaction on it is `READ ONLY` and carries `odds_web.db.STATEMENT_TIMEOUT_MS` as its statement timeout (`odds_web.db.restrict_transactions`), so a DSN that is not the restricted role still cannot write through the app.
 - **`odds copy` and `--db`.** `odds_cli.db_override.override_database_url` swaps the database name in `WEB_DATABASE_URL` like the agent's DSN.
 
@@ -81,10 +84,17 @@ Each section is rendered on its own, so a fault in one leaves the others and the
 
 The current estimate and the verdict's checkpoint are separate fields: the estimate moves with every bet, and the checkpoint is the one the verdict is read at ([Verdict](../evaluation/candidate-registry.md#odds-candidates-report)).
 
+- **Backtest mean EV.** Beside the forward estimate, on the same axis, the mean EV of the version's [stored backtest](../evaluation/candidate-backtest.md#stored-runs) with its interval at the run's own level (`odds_web.portfolio.backtest_forest`): the latest holdout run when the version has one, else its latest development run, labelled by its kind. It has no promote interval, and a version with no stored run shows a dash. The figures are the stored run's (`odds_web.backtests.load_overview`), read under their own cache key, so a missing grant or a failed read leaves the table and shows "Stored backtests unavailable" below it.
+
+### Killed ideas
+
+Below the table, a "Killed" list shows each idea whose latest stored [grid](../evaluation/cell-selection.md#storing-the-grid) selected no cell (`odds_web.backtests.killed_ideas`): its name, version, issue, leagues and market, the number of cells, the best cell's mean EV with its 90% interval and bets with a close (the cell with the highest lower bound, the selection rule's own order; its params are in the tooltip), and why no cell was eligible (`odds_analytics.backtest_store.kill_reason`: no cell reached the minimum bets, no cell had a positive mean EV, or otherwise the eligibility rule). The best cell is picked after the fact, so it is a figure and is never charted. Nothing is listed until a killed grid has been stored.
+
 ## Candidate page
 
 `odds_web.app.create_app` serves `/c/{name}/{version}` and `/fragments/c/{name}/{version}`, the same section, which htmx re-fetches every 60 seconds with the ledger page in view; the ledger's `?page=` links are plain page loads. A name the report does not hold answers 404, and so does a version of a held name that has no trades in the report and recorded no decisions; an earlier version that recorded decisions only is shown with those decisions and an empty score (`odds_web.decisions.load_decision_history`), and the section reports a failed read as the other pages do. The portfolio links each row here. The page caches its own reads (the version's decisions and one ledger page) under a key per version and page, and is built from them and the cached report on every request. The figures are the report's, read from `odds_analytics.candidate_report.CandidateSummary` as on the portfolio page and from the version's `odds_analytics.candidate_report.RunningScore`; `odds_web.candidate_page.build_candidate_page` only lays them out:
 
+- **Backtest.** Above the forward test, a "Backtest" section shows the version's latest stored development run and latest holdout run (`odds_web.backtests.load_runs`), each separately and each read under its own cache key, so a failed read leaves the forward test standing and says "Stored backtests unavailable". A run shows its day range, leagues, the git commit that replayed it and when it was stored; tiles for its bets with a close, its mean EV with its interval at the run's own level (90% for a selected development cell, 95% for a replay or a holdout) and its P&L and ROI; for a pooled development run, a table of its blocks; and, when the run kept its bets (a replay, the selected cell, a holdout), the same running mean EV and expected-against-realised charts as the forward test (`odds_web.backtests.series_of`, from `odds_analytics.backtest_store.stored_running_score`, which is `odds_analytics.candidate_report.running_score` over the stored bets). The one interval drawn is the run's own estimate, with no promote interval and no checkpoints, since a backtest never promotes. The text says the selected cell's development EV is optimistic, because the cell was picked from its grid on that data.
 - **Tiles.** The bets with a close against the next checkpoint (`odds_web.portfolio.progress_of`, shown only for an active version), the current mean EV with its 95% interval (`odds_analytics.candidate_report.CandidateSummary.current`, green or red by sign and nowhere else), the P&L and ROI of the settled bets with no colour, and, for a mechanical candidate, the share of its decisions that were missed. The registry status, the verdict and the checkpoint it rests on sit in the heading, so `promote` and `kill` never appear below `odds_analytics.candidate_report.CHECKPOINT_SIZE` bets with a close.
 - **Mean EV chart.** `odds_web.candidate_page.build_series` plots `odds_analytics.candidate_report.RunningScore.mean_ev`, the running stake-weighted mean EV over the bets with a close in the scoreable prefix. A 95% and a promote interval are drawn only at the checkpoints the verdict reached and at the current estimate, taken from `odds_analytics.candidate_report.CandidateSummary.checkpoints` and `current`; no interval is bootstrapped per bet. The current estimate is the last checkpoint itself when both score the same bets at the same k. When the family has grown since that checkpoint, the current estimate at the same n has a wider promote interval and is drawn just left of the checkpoint's. Dashed lines mark zero and every checkpoint up to the next one (`odds_analytics.candidate_report.checkpoints_through_next`). The axis ignores the first `odds_web.candidate_page.AXIS_FROM_BETS` running means, which swing too wildly to scale it.
 - **Expected profit against realised P&L.** The cumulative Σ stake·EV and the cumulative P&L over the same bets (`odds_analytics.candidate_report.RunningScore.expected` and `pnl`), as two lines in the stake's own units. The cohort is stated above the chart: settled bets with a close in the scoreable prefix, so it is neither the verdict's cohort nor the headline P&L.

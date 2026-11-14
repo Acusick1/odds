@@ -23,8 +23,8 @@
     // the frame even at the last checkpoint.
     const besideCheckpoint = (d) => !d.checkpoint && checkpointed.has(d.n);
     const intervals = (rows, dx) => [
-      Plot.ruleX(rows, { x: "n", dx, y1: (d) => d.promote[0], y2: (d) => d.promote[1], stroke: colour("--foreground"), strokeOpacity: 0.25, strokeWidth: 6, strokeLinecap: "round", clip: true }),
-      Plot.ruleX(rows, { x: "n", dx, y1: (d) => d.ci95[0], y2: (d) => d.ci95[1], stroke: colour("--foreground"), strokeWidth: 2, clip: true }),
+      Plot.ruleX(rows.filter((d) => d.promote), { x: "n", dx, y1: (d) => d.promote[0], y2: (d) => d.promote[1], stroke: colour("--foreground"), strokeOpacity: 0.25, strokeWidth: 6, strokeLinecap: "round", clip: true }),
+      Plot.ruleX(rows, { x: "n", dx, y1: (d) => d.ci[0], y2: (d) => d.ci[1], stroke: colour("--foreground"), strokeWidth: 2, clip: true }),
       Plot.dot(rows, {
         x: "n",
         y: "mean",
@@ -34,7 +34,7 @@
         strokeWidth: 2,
         r: 4,
         clip: true,
-        title: (d) => `${d.checkpoint ? "checkpoint" : "current"} n=${d.n}\nmean EV ${d.mean.toFixed(1)}%\n95% CI ${d.ci95[0].toFixed(1)} … ${d.ci95[1].toFixed(1)}\npromote CI ${d.promote[0].toFixed(1)} … ${d.promote[1].toFixed(1)}`,
+        title: (d) => `${d.label ?? (d.checkpoint ? "checkpoint" : "current")} n=${d.n}\nmean EV ${d.mean.toFixed(1)}%\n${Math.round(d.level * 100)}% CI ${d.ci[0].toFixed(1)} … ${d.ci[1].toFixed(1)}` + (d.promote ? `\npromote CI ${d.promote[0].toFixed(1)} … ${d.promote[1].toFixed(1)}` : ""),
       }),
     ];
     const reach = Math.max(...data.checkpoints, data.running.length);

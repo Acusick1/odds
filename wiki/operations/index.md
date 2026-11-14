@@ -14,7 +14,7 @@ How the system is deployed, verified and watched: production is deployed with `d
 - [AWS infrastructure and deployment](aws-infrastructure.md) — The dormant AWS stack — the Lambda function and image, Terraform and bootstrap layout and variables, IAM, SSM, logs, secrets, constraints and costs.
 - [CI/CD workflows](ci-cd-workflows.md) — What each GitHub Actions workflow runs and when — tests, lint, ephemeral dev deploy, the AWS prod deploy that must not run, daily validation, live-API and schedule health checks — and what they do not exercise.
 - [Health monitor, check-health job and odds status](health-monitor.md) — HealthMonitor, the check-health job's six checks, heartbeat purge, its own alert path, and what odds status show, quota and events print and read.
-- [odds-web, the read-only web UI](odds-web.md) — What odds web serve runs, the database role and session it reads through, the report data behind the portfolio and candidate pages, the status strip and the data-health page, its cache and failure bounds, the vendored scripts, and how deploy.sh and systemd run it.
+- [odds-web, the read-only web UI](odds-web.md) — What odds web serve runs, the database role and session it reads through, the report data and stored backtest runs behind the portfolio and candidate pages, the status strip and the data-health page, its cache and failure bounds, the vendored scripts, and how deploy.sh and systemd run it.
 
 ### Explanation
 

@@ -6,7 +6,7 @@ and lays out the forest plot.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from odds_analytics.candidate_report import (
@@ -16,6 +16,7 @@ from odds_analytics.candidate_report import (
     Verdict,
     checkpoint_progress,
 )
+from odds_core.candidate_backtest_models import WindowKind
 from odds_core.candidates import Candidate, CandidateStatus, MechanicalCandidate
 from odds_core.close import close_spec
 
@@ -43,6 +44,23 @@ class Forest:
 
 
 @dataclass(frozen=True)
+class BacktestForest:
+    """A row's stored backtest estimate on the shared EV axis: pixel positions, and the figures
+    in percent for the label and tooltip."""
+
+    kind: WindowKind
+    mean_percent: float
+    ci_percent: tuple[float, float]
+    level: float
+    n: int
+    zero_x: float
+    mean_x: float
+    ci_x: tuple[float, float]
+    clipped_low: bool
+    clipped_high: bool
+
+
+@dataclass(frozen=True)
 class PortfolioRow:
     name: str
     version: int
@@ -56,12 +74,19 @@ class PortfolioRow:
     roi: float
     verdict: str
     verdict_note: str
+    # The stored backtest's estimate, beside the forward test's: the version's holdout run when
+    # it has one, else its development run.
+    backtest: BacktestForest | None
+
+
+def axis_x(percent: float) -> float:
+    """The pixel position of ``percent`` on the shared EV axis, clamped to its ends."""
+    clamped = max(-AXIS_PERCENT, min(AXIS_PERCENT, percent))
+    return round((clamped + AXIS_PERCENT) / (2 * AXIS_PERCENT) * FOREST_WIDTH, 1)
 
 
 def forest_for(current: Checkpoint) -> Forest:
-    def x(percent: float) -> float:
-        clamped = max(-AXIS_PERCENT, min(AXIS_PERCENT, percent))
-        return round((clamped + AXIS_PERCENT) / (2 * AXIS_PERCENT) * FOREST_WIDTH, 1)
+    x = axis_x
 
     ci95 = (current.ci95[0] * 100, current.ci95[1] * 100)
     promote = (current.promote_ci[0] * 100, current.promote_ci[1] * 100)
@@ -77,6 +102,24 @@ def forest_for(current: Checkpoint) -> Forest:
         promote_x=(x(promote[0]), x(promote[1])),
         clipped_low=reach[0] < -AXIS_PERCENT,
         clipped_high=reach[1] > AXIS_PERCENT,
+    )
+
+
+def backtest_forest(
+    kind: WindowKind, n: int, mean_ev: float, ci: tuple[float, float], level: float
+) -> BacktestForest:
+    low, high = ci[0] * 100, ci[1] * 100
+    return BacktestForest(
+        kind=kind,
+        mean_percent=mean_ev * 100,
+        ci_percent=(low, high),
+        level=level,
+        n=n,
+        zero_x=axis_x(0.0),
+        mean_x=axis_x(mean_ev * 100),
+        ci_x=(axis_x(low), axis_x(high)),
+        clipped_low=low < -AXIS_PERCENT,
+        clipped_high=high > AXIS_PERCENT,
     )
 
 
@@ -137,7 +180,10 @@ def no_ev_reason(summary: CandidateSummary, entry: Candidate | None = None) -> s
     return "too few events"
 
 
-def portfolio_rows(summaries: Sequence[CandidateSummary]) -> list[PortfolioRow]:
+def portfolio_rows(
+    summaries: Sequence[CandidateSummary],
+    backtests: Mapping[tuple[str, int], BacktestForest] | None = None,
+) -> list[PortfolioRow]:
     rows: list[PortfolioRow] = []
     for s in summaries:
         entry = s.registered
@@ -156,6 +202,7 @@ def portfolio_rows(summaries: Sequence[CandidateSummary]) -> list[PortfolioRow]:
                 roi=s.roi,
                 verdict=verdict,
                 verdict_note=note,
+                backtest=(backtests or {}).get((s.name, s.version)),
             )
         )
     return rows

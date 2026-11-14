@@ -2,7 +2,8 @@
 reservations and results, and the gate verdict.
 
 ``odds_analytics.candidate_backtest.final_events`` calls ``require_clear``, so no replay of a
-sealed range runs without a ``HoldoutAccess``, which only a ``Reservation`` issues. The module
+sealed range runs without a ``HoldoutAccess``, which only a ``Reservation`` (the one run) or a
+``SpentRun`` (a later replay of a result the ledger holds) issues. The module
 imports nothing from the replay, which imports it, and lies outside the rule import closure.
 """
 
@@ -109,8 +110,9 @@ _ISSUER = object()
 
 @dataclass(frozen=True)
 class HoldoutAccess:
-    """The capability to replay one sport's sealed window. Only ``Reservation.access`` issues
-    one, so a replay of sealed days is reachable only from a reserved holdout run."""
+    """The capability to replay one sport's sealed window. Only ``Reservation.access`` and
+    ``SpentRun.access`` issue one, so a replay of sealed days is reachable only from a reserved
+    holdout run or one the ledger has a result for."""
 
     window: Window
     _token: object = field(repr=False)
@@ -517,6 +519,52 @@ def _spend(root: Path, key: str, sha: str, started_at: datetime) -> None:
         os.close(directory)
 
 
+def _access(plan: Plan, sport: str) -> HoldoutAccess:
+    windows = windows_of(sport)
+    if sport not in plan.prereg.leagues or len(windows) != 1:
+        raise HoldoutRefused(f"{sport} is not a league of this pre-registration's holdout")
+    return HoldoutAccess(windows[0], _ISSUER)
+
+
+@dataclass(frozen=True)
+class SpentRun:
+    """A holdout run the ledger already holds a result for, issued by ``spent_run`` only. It
+    opens the run's windows again so the result can be stored and checked against ``row``; the
+    version stays spent and no new gate is recorded."""
+
+    plan: Plan
+    row: HoldoutResult
+    _token: object = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if self._token is not _ISSUER:
+            raise HoldoutRefused("a SpentRun is issued by spent_run() only")
+
+    def access(self, sport: str) -> HoldoutAccess:
+        """The access to the window the ledger recorded for ``sport``, not the seal's current."""
+        for window in self.row.windows:
+            if window.sport == sport:
+                return HoldoutAccess(window, _ISSUER)
+        raise HoldoutRefused(
+            f"{sport} has no window in the recorded run of {self.plan.prereg.stem}"
+        )
+
+
+def spent_run(plan: Plan, directory: Path) -> SpentRun:
+    """The ledger's result row of ``plan``'s version, which must hold the plan's cell."""
+    for row in load_ledger(directory):
+        if isinstance(row, HoldoutResult) and stem(row.issue, row.market, row.version) == (
+            plan.prereg.stem
+        ):
+            if row.cell != plan.cell:
+                raise HoldoutRefused(f"{plan.prereg.stem} ran on another cell than its selection")
+            return SpentRun(plan, row, _ISSUER)
+    raise HoldoutRefused(
+        f"{plan.prereg.stem} has no result in {HOLDOUT_LEDGER}: only `odds candidates holdout` "
+        "runs it for the first time"
+    )
+
+
 @dataclass(frozen=True)
 class Reservation:
     """The idea's one run, reserved in the ledger and in the repository's shared spent file.
@@ -537,10 +585,7 @@ class Reservation:
             raise HoldoutRefused("a Reservation is issued by reserve() only")
 
     def access(self, sport: str) -> HoldoutAccess:
-        windows = windows_of(sport)
-        if sport not in self.plan.prereg.leagues or len(windows) != 1:
-            raise HoldoutRefused(f"{sport} is not a league of this pre-registration's holdout")
-        return HoldoutAccess(windows[0], _ISSUER)
+        return _access(self.plan, sport)
 
     def record(
         self, rule_sha: str, windows: list[Window], ran_on: date, result: Gate

@@ -16,6 +16,8 @@ GRANT SELECT ON
     prices,
     paper_trades,
     candidate_decisions,
+    candidate_backtests,
+    candidate_backtest_bets,
     fetch_logs,
     alert_history,
     schedules,

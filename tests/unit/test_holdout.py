@@ -797,3 +797,177 @@ class TestRun:
             json.loads(line) for line in (holdout_repo / "holdout.jsonl").read_text().splitlines()
         ]
         assert [r["kind"] for r in rows] == ["reserved", "result"]
+
+
+class TestSpentReplay:
+    """A spent holdout replays again to be stored, and only if it reproduces the ledger."""
+
+    @pytest.fixture
+    def stub(self, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+        """La Liga's and the Bundesliga's holdout bets, ``per_league`` of them each."""
+        state: dict[str, Any] = {"per_league": 40, "access": 0, "ranges": None, "windows": None}
+
+        async def collect(
+            _session: object, candidate: MechanicalCandidate, ranges: object, **kw: Any
+        ) -> bt.Replayed:
+            state["access"] = len(kw["access"])
+            state["ranges"] = ranges
+            state["windows"] = [a.window for a in kw["access"]]
+            return replayed(
+                [
+                    scored_bet(
+                        n * 100 + i, 0.6 if sport == "soccer_spain_la_liga" else 0.3, 2025, sport
+                    )
+                    for n, sport in enumerate(candidate.sports)
+                    for i in range(state["per_league"])
+                ]
+            )
+
+        async def no_backfill(_session: object) -> None:
+            return None
+
+        monkeypatch.setattr(holdout_run, "collect", collect)
+        monkeypatch.setattr(holdout_run, "earliest_backfill", no_backfill)
+        return state
+
+    @pytest.fixture
+    def spent(self, holdout_repo: Path, stub: dict[str, Any]) -> Path:
+        path = holdout_repo / "selections" / f"{STEM}.yaml"
+        asyncio.run(holdout_run.run_holdout(None, path, holdout_repo, NOW))  # type: ignore[arg-type]
+        git_commit(holdout_repo.parent)
+        stub["access"] = 0
+        return path
+
+    def replay(self, path: Path, directory: Path) -> holdout_run.SpentReplay:
+        return asyncio.run(holdout_run.replay_spent(None, path, directory, NOW))  # type: ignore[arg-type]
+
+    def test_a_replay_that_reproduces_the_ledger_returns_the_pooled_result(
+        self, holdout_repo: Path, spent: Path, stub: dict[str, Any]
+    ) -> None:
+        replay = self.replay(spent, holdout_repo)
+
+        assert stub["access"] == 2
+        assert replay.result.overall is not None and replay.result.overall.n == 80
+        assert [w.sport for w in replay.windows] == [
+            "soccer_spain_la_liga",
+            "soccer_germany_bundesliga",
+        ]
+        assert replay.row == holdout.load_ledger(holdout_repo)[-1]
+
+    def test_the_windows_are_the_ledgers_not_the_seals_current_ones(
+        self,
+        holdout_repo: Path,
+        spent: Path,
+        stub: dict[str, Any],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        recorded = holdout.load_ledger(holdout_repo)[-1].windows  # type: ignore[union-attr]
+        later = [
+            holdout.Window(sport=w.sport, start=date(2026, 8, 1), end=date(2027, 7, 31))
+            for w in recorded
+        ]
+        monkeypatch.setattr(holdout, "holdout_windows", lambda: later)
+
+        replay = self.replay(spent, holdout_repo)
+
+        assert replay.windows == recorded
+        assert stub["windows"] == recorded
+        assert stub["ranges"] == {w.sport: [(w.start, w.end)] for w in recorded}
+
+    def test_it_appends_nothing_to_the_ledger_and_spends_nothing(
+        self, holdout_repo: Path, spent: Path
+    ) -> None:
+        before = (holdout_repo / "holdout.jsonl").read_text()
+
+        self.replay(spent, holdout_repo)
+
+        assert (holdout_repo / "holdout.jsonl").read_text() == before
+
+    def test_a_replay_with_other_bets_than_the_ledger_is_a_mismatch(
+        self, holdout_repo: Path, spent: Path, stub: dict[str, Any]
+    ) -> None:
+        stub["per_league"] = 39
+
+        with pytest.raises(holdout_run.HoldoutMismatch, match="bets: ledger 80, replay 78"):
+            self.replay(spent, holdout_repo)
+
+    def test_a_rule_that_hashes_differently_now_is_a_mismatch(
+        self, holdout_repo: Path, spent: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(holdout_run, "rule_sha256", lambda _rule: "0" * 64)
+
+        with pytest.raises(holdout_run.HoldoutMismatch, match="the code that ran is not"):
+            self.replay(spent, holdout_repo)
+
+    def test_an_idea_with_no_result_in_the_ledger_is_refused_without_reading_the_windows(
+        self, holdout_repo: Path, stub: dict[str, Any]
+    ) -> None:
+        path = holdout_repo / "selections" / f"{STEM}.yaml"
+
+        with pytest.raises(holdout.HoldoutRefused, match="has no result"):
+            self.replay(path, holdout_repo)
+        assert stub["access"] == 0
+
+    def test_a_spent_run_cannot_be_made_outside_spent_run(self, holdout_repo: Path) -> None:
+        plan = holdout.load_plan(holdout_repo / "selections" / f"{STEM}.yaml", holdout_repo)
+
+        with pytest.raises(holdout.HoldoutRefused, match="issued by spent_run"):
+            holdout.SpentRun(plan, result_row(), object())
+
+    def test_the_command_stores_the_replayed_run_and_leaves_the_ledger_alone(
+        self,
+        holdout_repo: Path,
+        spent: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        stored: list[Any] = []
+
+        @asynccontextmanager
+        async def session() -> Any:
+            yield MagicMock(execute=AsyncMock())
+
+        async def store(_session: object, records: list[Any]) -> None:
+            stored.extend(records)
+
+        monkeypatch.setattr("odds_cli.commands.candidates.candidates_dir", lambda: holdout_repo)
+        monkeypatch.setattr("odds_cli.commands.candidates.async_session_maker", session)
+        monkeypatch.setattr("odds_analytics.backtest_store.store_runs", store)
+        monkeypatch.setattr("odds_cli.commands.candidates.current_git_sha", lambda: "c" * 40)
+
+        done = RUNNER.invoke(app, ["candidates", "store-holdout", str(spent)])
+
+        assert done.exit_code == 0, done.stdout
+        assert "reproduces the ledger" in done.stdout
+        (record,) = stored
+        assert (record.run.window_kind.value, record.run.bets, len(record.bets)) == (
+            "holdout",
+            80,
+            80,
+        )
+        assert record.run.git_sha == "c" * 40
+
+    def test_the_command_stops_on_a_mismatch_and_stores_nothing(
+        self,
+        holdout_repo: Path,
+        spent: Path,
+        stub: dict[str, Any],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        stored: list[Any] = []
+
+        @asynccontextmanager
+        async def session() -> Any:
+            yield MagicMock(execute=AsyncMock())
+
+        async def store(_session: object, records: list[Any]) -> None:
+            stored.extend(records)
+
+        monkeypatch.setattr("odds_cli.commands.candidates.candidates_dir", lambda: holdout_repo)
+        monkeypatch.setattr("odds_cli.commands.candidates.async_session_maker", session)
+        monkeypatch.setattr("odds_analytics.backtest_store.store_runs", store)
+        stub["per_league"] = 10
+
+        done = RUNNER.invoke(app, ["candidates", "store-holdout", str(spent)])
+
+        assert done.exit_code == 1 and "does not reproduce the ledger" in done.stdout
+        assert stored == []

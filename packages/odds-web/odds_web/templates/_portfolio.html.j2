@@ -7,13 +7,14 @@
 <thead><tr>
 <th>Candidate</th><th>Next checkpoint</th>
 <th>Mean EV, 95% CI <span class="num axis-label">(−{{ axis_percent }}% … +{{ axis_percent }}%)</span></th>
+<th>Backtest mean EV, CI <span class="num axis-label">(same axis)</span></th>
 <th class="r">P&amp;L</th><th>Verdict</th>
 </tr></thead>
 <tbody>
 {% for row in portfolio.value %}
 <tr>
 <td><a href="{{ url_path('candidate', name=row.name, version=row.version) }}"><b>{{ row.name }}</b></a> <span class="sub num">v{{ row.version }}</span> <span class="status">{{ row.status }}</span>
-<div class="sub">{{ row.scope }}</div></td>
+<div class="sub scope">{{ row.scope }}</div></td>
 <td>{% if row.progress %}
 <span class="bar"><i style="width: {{ (row.progress.fraction * 100) | round | int }}%"></i></span><span class="num">{{ row.progress.bets_with_close }} / {{ row.progress.next_checkpoint }}</span>
 {% else %}<span class="sub">—</span>{% endif %}</td>
@@ -33,11 +34,25 @@ n={{ f.n }}</title>
 <text x="{{ forest_width + 6 }}" y="13">{{ f.mean_percent | signed }}%</text>
 </svg>
 {% else %}<span class="sub">{{ row.no_ev_reason }}</span>{% endif %}</td>
+<td class="fp">{% if row.backtest %}{% set b = row.backtest %}
+<svg width="{{ forest_width + 56 }}" height="18" role="img" aria-label="{{ b.kind.value }} backtest mean EV {{ b.mean_percent | signed }}%">
+<title>{{ row.name }} v{{ row.version }} {{ b.kind.value }} backtest
+mean EV {{ b.mean_percent | signed }}%
+{{ (b.level * 100) | round | int }}% CI {{ b.ci_percent[0] | signed }} … {{ b.ci_percent[1] | signed }}
+n={{ b.n }}</title>
+<line class="zero" x1="{{ b.zero_x }}" x2="{{ b.zero_x }}" y1="0" y2="18"/>
+<line class="ci" x1="{{ b.ci_x[0] }}" x2="{{ b.ci_x[1] }}" y1="9" y2="9"/>
+{% if b.clipped_low %}<text class="clip" x="0" y="13">‹</text>{% endif %}
+{% if b.clipped_high %}<text class="clip" x="{{ forest_width - 6 }}" y="13">›</text>{% endif %}
+<circle class="{{ 'pos' if b.mean_percent >= 0 else 'neg' }}" cx="{{ b.mean_x }}" cy="9" r="4"/>
+<text x="{{ forest_width + 6 }}" y="13">{{ b.mean_percent | signed }}%</text>
+</svg> <span class="sub">{{ b.kind.value }}</span>
+{% else %}<span class="sub">—</span>{% endif %}</td>
 <td class="r num">{{ row.pnl | signed }}u</td>
 <td><span class="verdict">{{ row.verdict }}</span>{% if row.verdict_note %} <span class="sub">{{ row.verdict_note }}</span>{% endif %}</td>
 </tr>
 {% else %}
-<tr><td colspan="5" class="sub">No candidates registered and no candidate trades.</td></tr>
+<tr><td colspan="6" class="sub">No candidates registered and no candidate trades.</td></tr>
 {% endfor %}
 </tbody>
 </table>
@@ -46,7 +61,31 @@ n={{ f.n }}</title>
 <span><svg width="26" height="10"><line class="ci" x1="2" y1="5" x2="24" y2="5"/></svg>95% CI</span>
 <span><svg width="26" height="10"><line class="promote" x1="2" y1="5" x2="24" y2="5"/></svg>promote CI (99%/k)</span>
 <span>Dashed line = zero EV</span>
-<span>Estimate over all bets with a close; the verdict is read only at checkpoints</span>
+<span>Forward estimate over all bets with a close; the verdict is read only at checkpoints</span>
+<span>Backtest: the holdout run when there is one, else the development run; it never promotes</span>
+</div>
+{% endif %}
+{% if overview.failure %}
+<p class="unavailable" title="{{ overview.failure.exception }}: {{ overview.failure.message }}">Stored backtests unavailable{% if overview.failure.kind != "unavailable" %} (odds-web error {{ overview.failure.exception }}, see the server log){% endif %}</p>
+{% endif %}
+{% if overview.value and overview.value.killed %}
+<h3>Killed</h3>
+<div class="sub">Ideas whose grid, scored on development data, had no eligible cell. The best cell is the one with the highest lower bound; it is chosen after the fact, so it is a figure and not a chart.</div>
+<div class="scroll">
+<table id="killed">
+<thead><tr><th>Idea</th><th class="r">Cells</th><th>Best cell mean EV, 90% CI</th><th>Why it was killed</th></tr></thead>
+<tbody>
+{% for k in overview.value.killed %}
+<tr>
+<td><b>{{ k.name }}</b> <span class="sub num">v{{ k.version }} · #{{ k.issue }}</span>
+<div class="sub scope">{{ k.leagues | join(', ') }} · {{ k.market }}</div></td>
+<td class="r num">{{ k.cells }}</td>
+<td class="num">{% if k.best %}<span title="{{ k.best_cell | tojson }}"><span class="{{ 'pos' if k.best.mean_ev >= 0 else 'neg' }}">{{ k.best.mean_ev | percent }}</span> <span class="sub">[{{ k.best.ci[0] | percent }}, {{ k.best.ci[1] | percent }}] n={{ k.best.n }}</span></span>{% else %}<span class="sub">no bets with a close</span>{% endif %}</td>
+<td class="text">{{ k.reason }}</td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
 </div>
 {% endif %}
 </div>

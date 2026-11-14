@@ -16,7 +16,7 @@ from odds_web.db import build_web_database
 from odds_web.portfolio import AXIS_PERCENT, forest_for, portfolio_rows
 from sqlalchemy.exc import DBAPIError
 
-from tests.odds_web_helpers import agent, bet, mechanical, summaries
+from tests.odds_web_helpers import agent, bet, mechanical, stub_stored_backtests, summaries
 
 
 @pytest.fixture
@@ -31,6 +31,7 @@ def report(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         return CandidateReport(state["summaries"], {})  # type: ignore[arg-type]
 
     monkeypatch.setattr("odds_web.app.candidate_report", fake)
+    stub_stored_backtests(monkeypatch)
     return state
 
 
