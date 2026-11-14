@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Make a candidate's book set part of its definition
