@@ -32,7 +32,7 @@ from tests.integration.backfill_replay_helpers import (
     MLB,
     BackfillReplay,
     count,
-    load_manifest,
+    history_manifest,
     load_mlb,
 )
 from tests.test_helpers import (
@@ -81,7 +81,7 @@ def response_check(manifest: Manifest, planned: datetime, returned: datetime) ->
 def ten_then_five(boundary: datetime, sport: SportKey = "soccer_epl") -> Manifest:
     """``sport``'s manifest on 10-minute snapshots at 5, 15, 25 minutes past the hour and so on,
     then 5-minute ones from ``boundary``."""
-    return load_manifest(sport).model_copy(
+    return history_manifest(sport).model_copy(
         update={
             "snapshot_grid": (
                 GridStep(start=datetime(2020, 6, 6, 0, 5, tzinfo=UTC), step_minutes=10),
@@ -108,7 +108,7 @@ class TestRunGuards:
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
         session = pglite_async_session
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         games = await load_mlb(session, mlb_schedule)
         first, second = times(2)
         for at in (first, second):
@@ -131,7 +131,7 @@ class TestRunGuards:
         replay: BackfillReplay,
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         games = await load_mlb(pglite_async_session, mlb_schedule)
         at = times(1)[0]
         replay.record(at, [g.listing(at) for g in games], bill_header=False)
@@ -145,7 +145,7 @@ class TestRunGuards:
         replay: BackfillReplay,
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         games = await load_mlb(pglite_async_session, mlb_schedule)
         calls = []
         for at in times(3):
@@ -165,7 +165,7 @@ class TestRunGuards:
         cap: int,
         made: int,
     ) -> None:
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         games = await load_mlb(pglite_async_session, mlb_schedule)
         calls = []
         for at in times(3):
@@ -187,7 +187,7 @@ class TestRunGuards:
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
         session = pglite_async_session
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         games = await load_mlb(session, mlb_schedule)
         first, second = PLANNED, PLANNED + timedelta(minutes=5)
         late = first + timedelta(minutes=2, seconds=31)
@@ -225,7 +225,7 @@ class TestRunGuards:
         returned: str,
     ) -> None:
         session = pglite_async_session
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         games = await load_mlb(session, mlb_schedule)
         taken = PLANNED - offset
         replay.record(PLANNED, [g.listing(taken) for g in games], snapshot=taken)
@@ -243,7 +243,7 @@ class TestRunGuards:
         mlb_schedule: type[FakeMlbStatsFetcher],
         offset_seconds: int,
     ) -> None:
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         games = await load_mlb(pglite_async_session, mlb_schedule)
         calls = []
         for at in (PLANNED, PLANNED + timedelta(minutes=5)):
@@ -261,7 +261,7 @@ class TestRunGuards:
         replay: BackfillReplay,
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         await load_mlb(pglite_async_session, mlb_schedule)
         calls = []
         for at in times(4):
@@ -279,7 +279,7 @@ class TestRunGuards:
         replay: BackfillReplay,
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         games = await load_mlb(pglite_async_session, mlb_schedule)
         calls = []
         for at in times(3):
@@ -297,7 +297,7 @@ class TestRunGuards:
         replay: BackfillReplay,
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         games = await load_mlb(pglite_async_session, mlb_schedule)
         calls = []
         for i in range(3):
@@ -315,7 +315,7 @@ class TestRunGuards:
         replay: BackfillReplay,
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         games = await load_mlb(pglite_async_session, mlb_schedule)
         calls = []
         for at in times(4):
@@ -334,7 +334,7 @@ class TestRunGuards:
         replay: BackfillReplay,
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         await load_mlb(pglite_async_session, mlb_schedule)
         calls = []
         for at, header in zip(times(3), (True, False, True), strict=True):
@@ -354,7 +354,7 @@ class TestRunGuards:
         mlb_schedule: type[FakeMlbStatsFetcher],
         billed: int,
     ) -> None:
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         await load_mlb(pglite_async_session, mlb_schedule)
         calls = []
         for at in times(2):
@@ -372,7 +372,7 @@ class TestRunGuards:
         replay: BackfillReplay,
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         await load_mlb(pglite_async_session, mlb_schedule)
         at = times(1)[0]
         replay.record(at, [], billed=35)
@@ -400,7 +400,7 @@ class TestOffPhaseSnapshots:
         offset: timedelta,
     ) -> None:
         session = pglite_async_session
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         games = await load_mlb(session, mlb_schedule)
         off_phase = PLANNED + offset
         later = PLANNED + timedelta(minutes=5)
@@ -451,7 +451,7 @@ class TestProviderGaps:
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
         session = pglite_async_session
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         games = await load_mlb(session, mlb_schedule)
         later = PLANNED + timedelta(minutes=5)
         earlier = PLANNED - timedelta(minutes=10, seconds=1)
@@ -482,7 +482,7 @@ class TestProviderGaps:
         replay: BackfillReplay,
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         games = await load_mlb(pglite_async_session, mlb_schedule)
         earlier = PLANNED - timedelta(minutes=15)
         replay.record(PLANNED, [g.listing(earlier) for g in games], snapshot=earlier)
@@ -500,7 +500,7 @@ class TestProviderGaps:
         replay: BackfillReplay,
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         games = await load_mlb(pglite_async_session, mlb_schedule)
         earlier = PLANNED - timedelta(minutes=55)
         # The provider has nothing from ``earlier`` until an hour later.
@@ -525,7 +525,7 @@ class TestProviderGaps:
         replay: BackfillReplay,
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         games = await load_mlb(pglite_async_session, mlb_schedule)
         # As on 2025-10-20: the provider has nothing from 16:31:34 until 19:32:57, off the
         # grid's phase, and the call for 19:30:38 returns 19:32:57.
@@ -558,7 +558,7 @@ class TestProviderGaps:
         replay: BackfillReplay,
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         games = await load_mlb(pglite_async_session, mlb_schedule)
         returned = PLANNED - timedelta(minutes=5)
         after = PLANNED + timedelta(minutes=10)
@@ -584,7 +584,7 @@ class TestProviderGaps:
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
         session = pglite_async_session
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         games = await load_mlb(session, mlb_schedule)
         # The provider's last snapshot before a hole was stamped off the grid's phase.
         returned = PLANNED - timedelta(minutes=2, seconds=41)
@@ -602,7 +602,7 @@ class TestProviderGaps:
         replay: BackfillReplay,
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         games = await load_mlb(pglite_async_session, mlb_schedule)
         earlier = PLANNED - timedelta(minutes=55)
         inside = PLANNED - timedelta(minutes=10)
@@ -629,7 +629,7 @@ class TestProviderGaps:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         session = pglite_async_session
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         games = await load_mlb(session, mlb_schedule)
         earlier = PLANNED - timedelta(minutes=10)
         replay.record(PLANNED, [g.listing(earlier) for g in games], snapshot=earlier)
@@ -655,7 +655,7 @@ class TestProviderGaps:
         replay: BackfillReplay,
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         games = await load_mlb(pglite_async_session, mlb_schedule)
         own = PLANNED - timedelta(minutes=10)
         returned = own - timedelta(seconds=1)
@@ -679,7 +679,7 @@ class TestProviderGaps:
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
         session = pglite_async_session
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         games = await load_mlb(session, mlb_schedule)
         calls = []
         for at in grid_times(3):
@@ -700,7 +700,7 @@ class TestProviderGaps:
         replay: BackfillReplay,
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         games = await load_mlb(pglite_async_session, mlb_schedule)
         calls = []
         for i, at in enumerate(grid_times(3)):
@@ -720,7 +720,7 @@ class TestProbe:
         replay: BackfillReplay,
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         for at in (FIRST_PROBE, SECOND_PROBE):
             replay.record(at, [far_game(at, "betfair", "williamhill")])
 
@@ -734,7 +734,7 @@ class TestProbe:
         replay: BackfillReplay,
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         for at in (FIRST_PROBE, SECOND_PROBE):
             replay.record(at, [far_game(at, "betfair_ex_uk", "williamhill")])
 
@@ -760,7 +760,7 @@ class TestProbe:
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
         session = pglite_async_session
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         games = await load_mlb(session, mlb_schedule)
         for at in (FIRST_PROBE, SECOND_PROBE):
             replay.record(at, [games[0].listing(at)])
@@ -795,7 +795,7 @@ class TestProbe:
         field: str,
         setup: dict[str, Any],
     ) -> None:
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         for at in (FIRST_PROBE, SECOND_PROBE):
             replay.record(
                 at,
@@ -826,7 +826,7 @@ class TestProbe:
         replay: BackfillReplay,
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         for at in (FIRST_PROBE, SECOND_PROBE):
             listings = [
                 far_game(at, "williamhill"),
@@ -849,7 +849,7 @@ class TestProbe:
         mlb_schedule: type[FakeMlbStatsFetcher],
         lag_seconds: int,
     ) -> None:
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         for at in (FIRST_PROBE, SECOND_PROBE):
             replay.record(
                 at,
@@ -871,7 +871,7 @@ class TestProbe:
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
         session = pglite_async_session
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         replay.record(FIRST_PROBE, [far_game(FIRST_PROBE, "betfair_ex_uk")], snapshot=FIRST_PROBE)
 
         with pytest.raises(AssertionError, match="no recorded response for 2026-07-18T15:58:08Z"):
@@ -898,7 +898,9 @@ class TestResponseCheck:
         self, sport: SportKey, planned: str, returned: str
     ) -> None:
         check = response_check(
-            load_manifest(sport), datetime.fromisoformat(planned), datetime.fromisoformat(returned)
+            history_manifest(sport),
+            datetime.fromisoformat(planned),
+            datetime.fromisoformat(returned),
         )
 
         assert (check.lag_ok, check.provider_gap) == (False, True)
@@ -924,7 +926,7 @@ class TestResponseCheck:
     def test_a_snapshot_is_placed_against_the_planned_one_and_the_request_time(
         self, lag: timedelta, returned: ReturnedSnapshot
     ) -> None:
-        check = response_check(load_manifest(MLB), PLANNED, PLANNED - lag)
+        check = response_check(history_manifest(MLB), PLANNED, PLANNED - lag)
 
         assert check.returned is returned
         assert check.provider_gap is (returned is ReturnedSnapshot.PROVIDER_GAP)
@@ -971,7 +973,7 @@ class TestResponseCheck:
         next_snapshot: datetime | None,
         covered: bool,
     ) -> None:
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
 
         assert gap_covers(manifest, modelled, PLANNED, returned, next_snapshot) is covered
 
@@ -1029,7 +1031,7 @@ class TestResponseCheck:
 
     def test_the_grid_step_in_force_at_each_neighbour_is_the_expected_gap(self) -> None:
         boundary = datetime(2022, 9, 1, 0, 0, 38, tzinfo=UTC)
-        epl = load_manifest("soccer_epl").model_copy(
+        epl = history_manifest("soccer_epl").model_copy(
             update={
                 "snapshot_grid": (
                     GridStep(start=datetime(2020, 6, 6, 0, 0, 38, tzinfo=UTC), step_minutes=10),
@@ -1063,14 +1065,14 @@ class TestResponseCheck:
     def test_books_are_judged_as_far_ahead_as_the_manifest_needs_fixtures_up_to_a_day(
         self, sport: SportKey, hours: int
     ) -> None:
-        assert book_judged_lead(load_manifest(sport)) == timedelta(hours=hours)
+        assert book_judged_lead(history_manifest(sport)) == timedelta(hours=hours)
 
 
 class TestGuardSettings:
     def test_a_streak_limit_below_one_is_refused(self) -> None:
         with pytest.raises(ValueError, match="max_consecutive_gaps must be at least 1"):
-            BackfillExecutor(load_manifest(MLB), max_consecutive_gaps=0)
+            BackfillExecutor(history_manifest(MLB), max_consecutive_gaps=0)
 
     def test_a_provider_gap_limit_below_one_is_refused(self) -> None:
         with pytest.raises(ValueError, match="max_consecutive_provider_gaps must be at least 1"):
-            BackfillExecutor(load_manifest(MLB), max_consecutive_provider_gaps=0)
+            BackfillExecutor(history_manifest(MLB), max_consecutive_provider_gaps=0)

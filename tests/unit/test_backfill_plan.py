@@ -23,6 +23,15 @@ from tests.test_helpers import add_event
 
 REPO = Path(__file__).resolve().parents[2]
 COMMITTED = sorted((REPO / "backfills").glob("*.yaml"))
+REFERENCE = Manifest.load(REPO / "backfills" / "odds-api-epl-2022-26.yaml")
+# A full grid reaches beyond the reference's nearest band, the common close grid. A close sample
+# ends inside it, with a band of its own, and is held to the shared prices only.
+FULL_GRIDS = [
+    path
+    for path in COMMITTED
+    if max(band.max_lead_minutes for band in Manifest.load(path).coverage)
+    >= REFERENCE.coverage[0].max_lead_minutes
+]
 FIVE_MINUTES_FROM = datetime(2022, 9, 1, 0, 0, 38, tzinfo=UTC)
 
 
@@ -195,16 +204,24 @@ class TestManifest:
 
     @pytest.mark.parametrize("path", COMMITTED, ids=lambda p: p.stem)
     def test_every_committed_manifest_requests_the_same_prices(self, path: Path) -> None:
-        reference = Manifest.load(REPO / "backfills" / "odds-api-epl-2022-26.yaml")
         committed = Manifest.load(path)
 
         assert (committed.bookmakers, committed.regions) == (
-            reference.bookmakers,
-            reference.regions,
+            REFERENCE.bookmakers,
+            REFERENCE.regions,
         )
-        assert committed.probe.required_bookmakers == reference.probe.required_bookmakers
-        assert committed.markets == reference.markets
-        assert committed.coverage[0] == reference.coverage[0]
+        assert committed.probe.required_bookmakers == REFERENCE.probe.required_bookmakers
+        assert committed.markets == REFERENCE.markets
+
+    @pytest.mark.parametrize("path", FULL_GRIDS, ids=lambda p: p.stem)
+    def test_a_full_grid_manifest_starts_with_the_reference_close_band(self, path: Path) -> None:
+        assert Manifest.load(path).coverage[0] == REFERENCE.coverage[0]
+
+    def test_a_close_sample_is_not_a_full_grid(self) -> None:
+        sample = REPO / "backfills" / "odds-api-nba-close-sample-2026-27.yaml"
+
+        assert sample not in FULL_GRIDS
+        assert REPO / "backfills" / "odds-api-nba-2024-26.yaml" in FULL_GRIDS
 
     @pytest.mark.parametrize(
         ("books", "regions", "units"),

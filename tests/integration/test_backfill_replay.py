@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -35,7 +36,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from tests.integration.backfill_replay_helpers import (
     ACQUISITION_KEY,
     AFTERNOON,
-    BACKFILLS,
     EVENING,
     HOME_PRICE,
     MANIFEST_FILES,
@@ -49,6 +49,7 @@ from tests.integration.backfill_replay_helpers import (
     Loader,
     count,
     final_event,
+    history_manifest,
     load_football,
     load_manifest,
     load_mlb,
@@ -72,11 +73,12 @@ def football_loader(league: LeagueFixture) -> Loader:
     return load
 
 
-REPLAYS = [
-    *(pytest.param(f.sport, football_loader(f), id=f.sport) for f in LEAGUE_FIXTURES),
-    pytest.param(NBA, load_nba, id=NBA),
-    pytest.param(MLB, load_mlb, id=MLB),
-]
+LOADERS: dict[SportKey, Loader] = {
+    **{f.sport: football_loader(f) for f in LEAGUE_FIXTURES},
+    NBA: load_nba,
+    MLB: load_mlb,
+}
+REPLAYS = [pytest.param(file, id=Path(file).stem) for file in MANIFEST_FILES]
 
 
 async def stored_rows(
@@ -112,12 +114,12 @@ async def event_named(session: AsyncSession, event_id: int) -> Event:
 
 class TestManifestsAreReplayed:
     def test_every_manifest_has_a_replay(self) -> None:
-        assert {f.name for f in BACKFILLS.glob("*.yaml")} == set(MANIFEST_FILES.values())
+        assert {load_manifest(file).sport for file in MANIFEST_FILES} <= set(LOADERS)
         assert {p.values[0] for p in REPLAYS} == set(MANIFEST_FILES)
 
-    @pytest.mark.parametrize("sport", MANIFEST_FILES)
-    def test_manifest_requests_uk_h2h_with_the_exchange_required(self, sport: SportKey) -> None:
-        manifest = load_manifest(sport)
+    @pytest.mark.parametrize("file", MANIFEST_FILES)
+    def test_manifest_requests_uk_h2h_with_the_exchange_required(self, file: str) -> None:
+        manifest = load_manifest(file)
         assert [str(m) for m in manifest.markets] == ["h2h"]
         assert (manifest.regions, manifest.bookmakers) == (("uk",), ())
         assert manifest.units_per_call == 10
@@ -125,19 +127,19 @@ class TestManifestsAreReplayed:
 
 
 @pytest.mark.asyncio
-class TestReplayPerSport:
-    @pytest.mark.parametrize(("sport", "load"), REPLAYS)
+class TestReplayPerManifest:
+    @pytest.mark.parametrize("file", REPLAYS)
     async def test_prices_attach_to_the_final_events_and_a_rerun_changes_nothing(
         self,
         pglite_async_session: AsyncSession,
         replay: BackfillReplay,
         mlb_schedule: type[FakeMlbStatsFetcher],
-        sport: SportKey,
-        load: Loader,
+        file: str,
     ) -> None:
         session = pglite_async_session
-        manifest = load_manifest(sport)
-        games = await load(session, mlb_schedule)
+        manifest = load_manifest(file)
+        sport = manifest.sport
+        games = await LOADERS[sport](session, mlb_schedule)
         events = tuple(g.event for g in games)
         scored = {e.id: (e.status, e.home_score, e.away_score, e.completed_at) for e in events}
         first = min(g.start for g in games) - timedelta(hours=2)
@@ -225,7 +227,7 @@ class TestMlbReplay:
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
         session = pglite_async_session
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         game_one, game_two, other = await load_mlb(session, mlb_schedule)
         at = AFTERNOON - timedelta(hours=2)
         replay.record(at, [g.listing(at) for g in (game_two, other, game_one)])
@@ -246,7 +248,7 @@ class TestMlbReplay:
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
         session = pglite_async_session
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         original = EVENING - timedelta(days=1)
         played = with_game_pk(final_event(1, MLB, YANKEES, RED_SOX, EVENING), 813001)
         await add_event(session, played)
@@ -282,7 +284,7 @@ class TestMlbReplay:
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
         session = pglite_async_session
-        manifest = load_manifest(MLB)
+        manifest = history_manifest(MLB)
         game_one, _, _ = await load_mlb(session, mlb_schedule)
         stranger = Listed(
             game_one.event, "mlb-9", "Seattle Mariners", "Texas Rangers", EVENING, "MLB"
@@ -308,7 +310,7 @@ class TestNbaReplay:
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
         session = pglite_async_session
-        manifest = load_manifest(NBA)
+        manifest = history_manifest(NBA)
         regular, _ = await load_nba(session, mlb_schedule)
         preseason = Listed(
             regular.event,
@@ -340,7 +342,7 @@ class TestRerunSemantics:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         session = pglite_async_session
-        manifest = load_manifest(NBA)
+        manifest = history_manifest(NBA)
         games = await load_nba(session, mlb_schedule)
         events = tuple(g.event for g in games)
         at = games[0].start - timedelta(hours=2)
@@ -382,7 +384,7 @@ class TestRerunSemantics:
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
         session = pglite_async_session
-        manifest = load_manifest(NBA)
+        manifest = history_manifest(NBA)
         early, late = await load_nba(session, mlb_schedule)
         at = early.start - timedelta(hours=2)
         replay.record(at, [early.listing(at)])
@@ -404,7 +406,7 @@ class TestRerunSemantics:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         session = pglite_async_session
-        manifest = load_manifest(NBA)
+        manifest = history_manifest(NBA)
         early, late = await load_nba(session, mlb_schedule)
         times = [early.start - timedelta(hours=3) + timedelta(hours=i) for i in range(3)]
         for at in times:
@@ -440,7 +442,7 @@ class TestRerunSemantics:
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
         session = pglite_async_session
-        nba = load_manifest(NBA)
+        nba = history_manifest(NBA)
         manifest = nba.model_copy(
             update={
                 "markets": (Market.H2H, Market.TOTALS),
@@ -464,7 +466,7 @@ class TestRerunSemantics:
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
         session = pglite_async_session
-        manifest = load_manifest(NBA)
+        manifest = history_manifest(NBA)
         [game, _] = await load_nba(session, mlb_schedule)
         at = game.start - timedelta(hours=2)
         fetched_at = at - timedelta(minutes=2, seconds=21)
@@ -499,7 +501,7 @@ class TestRerunSemantics:
         mlb_schedule: type[FakeMlbStatsFetcher],
     ) -> None:
         session = pglite_async_session
-        manifest = load_manifest(NBA)
+        manifest = history_manifest(NBA)
         [game, _] = await load_nba(session, mlb_schedule)
         at = game.start - timedelta(hours=2)
         narrow = game.listing(at)
