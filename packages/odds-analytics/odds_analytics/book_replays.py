@@ -24,6 +24,7 @@ from odds_core.models import Event
 from odds_core.paper_trade_models import CandidateDecision
 from odds_lambda.candidate_rules import BetIntent, ModelRuleSpec, Selection
 from odds_lambda.candidate_rules.registry import resolve_rule
+from odds_lambda.paper_trading import VOIDING_STATUSES
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -180,6 +181,7 @@ async def replay_variants(
                 ),
             )
             for decision, intents in per_decision
+            if events[decision.event_id].status not in VOIDING_STATUSES
             for intent in intents
         ]
         for per_decision in placed

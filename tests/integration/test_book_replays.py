@@ -10,6 +10,7 @@ from odds_analytics.book_replays import book_replays, replay_variants
 from odds_analytics.candidate_parity import check_parity
 from odds_analytics.candidate_report import candidate_report, load_scored_trades
 from odds_core.bookmakers import BOOK_SETS, BookSet
+from odds_core.models import Event, EventStatus
 from odds_core.paper_trade_models import PaperTrade, TradeResult
 from sqlalchemy import select
 
@@ -124,6 +125,20 @@ class TestReplayVariants:
 
         assert replayed is not None
         assert len(replayed.by_set[OWN]) == len(replayed.by_set[ODDS_API]) == 1
+
+    async def test_a_cancelled_match_places_no_bet(
+        self, pglite_async_session: Any, midnite_event: list[int]
+    ) -> None:
+        await add_decision(pglite_async_session, midnite_event, [("home", "midnite", 2.6)])
+        event = await pglite_async_session.get(Event, 1)
+        event.status = EventStatus.CANCELLED
+        await pglite_async_session.commit()
+
+        replayed = await replay_variants(pglite_async_session, candidate())
+
+        assert replayed is not None and replayed.decisions == 1
+        assert all(not bets for bets in replayed.by_set.values())
+        assert all(not bets for bets in replayed.without.values())
 
     async def test_a_missed_decision_is_not_replayed(
         self, pglite_async_session: Any, midnite_event: list[int]
