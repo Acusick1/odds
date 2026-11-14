@@ -13,6 +13,7 @@ from odds_analytics.candidate_report import (
     checkpoint_at,
     checkpoint_progress,
     checkpoints_through_next,
+    estimate_gap,
     family_size_at,
     family_starts,
     judge,
@@ -66,6 +67,7 @@ def trade(
     commence_time: datetime = LONG_AGO,
     close_grace: timedelta = FDUK_GRACE,
     sport_key: str = "soccer_epl",
+    estimated_ev: float | None = None,
 ) -> ScoredBet:
     """A trade at price 3.0 whose EV is ``ev`` (p_close = (1 + ev) / 3), None for no close."""
     return ScoredBet(
@@ -85,6 +87,7 @@ def trade(
         bookmaker="bet365",
         p_close_power=None,
         close_source=None if ev is None else Source.BETFAIR,
+        estimated_ev=estimated_ev,
     )
 
 
@@ -132,6 +135,7 @@ class TestEv:
             bookmaker="bet365",
             p_close_power=0.45,
             close_source=Source.BETFAIR,
+            estimated_ev=None,
         )
         assert t.ev == pytest.approx(0.25)
         assert t.ev_power == pytest.approx(0.125)
@@ -810,6 +814,67 @@ def _paper_trade(event_id: int, minutes: int, **fields) -> PaperTrade:
     return PaperTrade(**{**defaults, **fields})
 
 
+class TestEstimate:
+    def test_the_running_estimate_is_stake_weighted_over_the_same_bets(self) -> None:
+        sequence = [
+            trade(0, 0.3, stake=2.0, estimated_ev=0.5),
+            trade(1, None, estimated_ev=0.9),
+            trade(2, -0.1, estimated_ev=0.2),
+        ]
+
+        running = report_candidates(sequence, [], NOW, n_boot=N_BOOT).running[("cand", 1)]
+
+        assert running.estimated == pytest.approx((1.0, 1.2))
+        assert running.mean_estimated_ev == pytest.approx((0.5, 0.4))
+        assert running.without_estimate == 0
+
+    def test_a_bet_without_an_estimate_leaves_no_running_estimate(self) -> None:
+        sequence = [trade(0, 0.3, estimated_ev=0.5), trade(1, 0.1), trade(2, 0.1)]
+
+        running = report_candidates(sequence, [], NOW, n_boot=N_BOOT).running[("cand", 1)]
+
+        assert (running.estimated, running.mean_estimated_ev) == (None, None)
+        assert running.without_estimate == 2
+
+    def test_the_gap_is_the_stake_weighted_mean_of_estimate_minus_ev(self) -> None:
+        sequence = [
+            trade(0, 0.3, stake=2.0, estimated_ev=0.5),
+            trade(1, -0.1, estimated_ev=0.2),
+            trade(2, 0.0, estimated_ev=0.1),
+        ]
+
+        gap = estimate_gap(sequence)
+
+        assert gap is not None
+        assert gap.n == 3
+        assert gap.mean_gap == pytest.approx((2 * 0.2 + 0.3 + 0.1) / 4)
+        assert gap.ci95[0] <= gap.mean_gap <= gap.ci95[1]
+
+    def test_events_are_resampled_whole(self) -> None:
+        one_event = [trade(i, 0.1, estimated_ev=0.1 + i / 10, event_id=7) for i in range(3)]
+
+        gap = estimate_gap(one_event)
+
+        assert gap is not None and gap.ci95 == pytest.approx((gap.mean_gap, gap.mean_gap))
+
+    def test_no_gap_without_a_bet_or_with_a_bet_lacking_an_estimate(self) -> None:
+        assert estimate_gap([]) is None
+        assert estimate_gap([trade(0, 0.1, estimated_ev=0.2), trade(1, 0.1)]) is None
+
+    def test_the_summarys_gap_covers_its_bets_with_a_close(self) -> None:
+        sequence = [
+            trade(0, 0.3, estimated_ev=0.5),
+            trade(1, None),
+            trade(2, -0.1, estimated_ev=0.2),
+        ]
+
+        [summary] = report_candidates(sequence, [], NOW, n_boot=N_BOOT).summaries
+
+        assert summary.estimate_gap is not None
+        assert summary.estimate_gap.n == summary.bets_with_close == 2
+        assert summary.estimate_gap.mean_gap == pytest.approx(0.25)
+
+
 class TestLoadScoredBets:
     @pytest.mark.asyncio
     async def test_report_from_database(self, test_session: AsyncSession) -> None:
@@ -879,6 +944,21 @@ class TestLoadScoredBets:
         assert home.ev == pytest.approx(0.5 * 2.2 - 1)
         assert draw.p_close == pytest.approx(0.25)
         assert draw.ev == pytest.approx(0.25 * 4.5 - 1)
+
+    @pytest.mark.asyncio
+    async def test_each_trade_carries_its_stored_estimate(self, test_session: AsyncSession) -> None:
+        from odds_analytics.candidate_report import load_scored_trades
+
+        session = test_session
+        session.add(make_epl_event(1, KICKOFF, status=EventStatus.FINAL))
+        await session.flush()
+        session.add(_paper_trade(1, 1, estimated_ev=0.07))
+        session.add(_paper_trade(1, 2, selection="draw"))
+        await session.flush()
+
+        home, draw = await load_scored_trades(session)
+
+        assert (home.estimated_ev, draw.estimated_ev) == (0.07, None)
 
     @pytest.mark.asyncio
     async def test_each_trade_is_scored_against_the_close_on_its_line(

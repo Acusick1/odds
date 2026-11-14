@@ -12,6 +12,7 @@ from odds_core.market_prices import Outcome
 from odds_core.quotes import Quote
 from odds_core.vocabulary import Market
 from odds_lambda.candidate_rules import (
+    EstimateBasis,
     MarketState,
     RuleSpec,
     SharpInput,
@@ -120,7 +121,13 @@ class TestMissingOrStaleExtraMarket:
     def test_apply_rule_bets_nothing_without_the_extra_input(
         self, cross_market_run: RunQuotes
     ) -> None:
-        spec = RuleSpec(exchange_gap, RULES["exchange_gap"].params_model, EXCHANGE, TOTALS)
+        spec = RuleSpec(
+            exchange_gap,
+            RULES["exchange_gap"].params_model,
+            EXCHANGE,
+            TOTALS,
+            estimate_basis=EstimateBasis.EXCHANGE,
+        )
         params = spec.params_model(
             threshold=0.01, minutes_before_kickoff=[60], max_input_age_minutes=10
         )

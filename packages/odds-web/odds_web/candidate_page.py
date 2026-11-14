@@ -17,11 +17,14 @@ from odds_analytics.candidate_report import (
     CandidateSummary,
     Checkpoint,
     CheckpointProgress,
+    EstimateGap,
     LeagueBreakdown,
     RunningScore,
     checkpoints_through_next,
 )
-from odds_core.candidates import AgentCandidate, Candidate
+from odds_core.candidates import AgentCandidate, Candidate, MechanicalCandidate
+from odds_lambda.candidate_rules import EstimateBasis
+from odds_lambda.candidate_rules.registry import RULES
 
 from odds_web.decisions import DecisionHistory
 from odds_web.ledger import LedgerPage
@@ -37,6 +40,45 @@ from odds_web.portfolio import (
 # Running means over fewer bets than this swing too wildly to set the EV axis.
 AXIS_FROM_BETS = 10
 MIN_AXIS_PERCENT = 5.0
+
+# What the estimate line's legend says each basis is.
+BASIS_LABELS: dict[EstimateBasis, str] = {
+    EstimateBasis.EXCHANGE: "exchange at decision",
+    EstimateBasis.POLYMARKET: "Polymarket at decision",
+    EstimateBasis.RETAIL_CONSENSUS: "retail consensus at decision",
+    EstimateBasis.MODEL: "model prediction at decision",
+}
+
+
+def rule_basis(rule: str | None) -> EstimateBasis | None:
+    """The estimate basis of the registered rule ``rule``; None for an unknown rule."""
+    spec = None if rule is None else RULES.get(rule)
+    return None if spec is None else spec.estimate_basis
+
+
+def name_rule(summaries: Sequence[CandidateSummary], name: str) -> str | None:
+    """The rule of ``name``'s registered mechanical entry, which every version of a name shares;
+    None for an agent or a name the registry no longer holds."""
+    return next(
+        (
+            s.registered.rule
+            for s in summaries
+            if s.name == name and isinstance(s.registered, MechanicalCandidate)
+        ),
+        None,
+    )
+
+
+def estimate_omitted(basis: EstimateBasis | None, running: RunningScore) -> str | None:
+    """Why a series over ``running`` has no estimate line, or None when it has one."""
+    if basis is None:
+        return "No estimate: only a registered mechanical rule records one."
+    if basis is EstimateBasis.NONE:
+        return "No estimate: the rule has no fair price at decision time."
+    if running.estimated is None:
+        n = len(running.staked)
+        return f"No estimate: {running.without_estimate} of the {n} bets have none recorded."
+    return None
 
 
 @dataclass(frozen=True)
@@ -65,11 +107,20 @@ class Series:
     intervals: list[Interval]
     checkpoints: list[int]
     axis_percent: float
+    # The running mean estimated EV over the same bets, in percent, and its legend label; or
+    # why it is omitted.
+    estimate_percent: list[float] | None
+    estimate_label: str | None
+    estimate_omitted: str | None
 
     def ev_chart(self) -> dict[str, Any]:
-        """The running mean EV, its intervals and the checkpoint markers, for ``charts.js``."""
+        """The running mean EV and estimated EV, the intervals and the checkpoint markers, for
+        ``charts.js``."""
         return {
             "running": [[n, ev] for n, ev in enumerate(self.running_ev_percent, 1)],
+            "estimate": None
+            if self.estimate_percent is None
+            else [[n, ev] for n, ev in enumerate(self.estimate_percent, 1)],
             "intervals": [
                 {
                     "n": i.n,
@@ -135,6 +186,7 @@ class CandidatePage:
     settled_bets: int
     pending_bets: int
     series: Series | None
+    estimate_gap: EstimateGap | None
     # Shown only for a version that bet in more than one league; it never changes the verdict.
     leagues: tuple[LeagueBreakdown, ...]
     # Shown only when the report holds replays of the version's decisions; it never changes the
@@ -175,22 +227,43 @@ def build_book_replay(replay: BookReplay | None) -> BookReplayView | None:
     return BookReplayView(replay, axis_percent(settled, ()))
 
 
-def build_series(summary: CandidateSummary, running: RunningScore) -> Series:
-    """The version's running score, with an interval at each checkpoint reached and at the
-    current estimate (``CandidateSummary.checkpoints`` and ``current``), never per bet. The
-    current estimate is drawn beside a checkpoint at the same n unless it is that checkpoint."""
+def series_of(
+    running: RunningScore,
+    intervals: list[Interval],
+    checkpoints: list[int],
+    basis: EstimateBasis | None,
+) -> Series:
+    """The series of ``running``, with the estimate line of a rule of ``basis`` when every bet
+    has an estimate; the axis covers both lines."""
     running_percent = [ev * 100 for ev in running.mean_ev]
-    intervals = [_interval(c, True) for c in summary.checkpoints]
-    if summary.current is not None and summary.current not in summary.checkpoints:
-        intervals.append(_interval(summary.current, False))
+    omitted = estimate_omitted(basis, running)
+    estimated = running.mean_estimated_ev
+    estimate_percent = None if omitted or estimated is None else [ev * 100 for ev in estimated]
     return Series(
         running_ev_percent=running_percent,
         expected_units=list(running.expected),
         pnl_units=list(running.pnl),
         intervals=intervals,
-        checkpoints=checkpoints_through_next(len(running_percent)),
-        axis_percent=axis_percent(running_percent, intervals),
+        checkpoints=checkpoints,
+        axis_percent=max(
+            axis_percent(line, intervals) for line in (running_percent, estimate_percent or [])
+        ),
+        estimate_percent=estimate_percent,
+        estimate_label=None if estimate_percent is None or basis is None else BASIS_LABELS[basis],
+        estimate_omitted=omitted,
     )
+
+
+def build_series(
+    summary: CandidateSummary, running: RunningScore, basis: EstimateBasis | None
+) -> Series:
+    """The version's running score, with an interval at each checkpoint reached and at the
+    current estimate (``CandidateSummary.checkpoints`` and ``current``), never per bet. The
+    current estimate is drawn beside a checkpoint at the same n unless it is that checkpoint."""
+    intervals = [_interval(c, True) for c in summary.checkpoints]
+    if summary.current is not None and summary.current not in summary.checkpoints:
+        intervals.append(_interval(summary.current, False))
+    return series_of(running, intervals, checkpoints_through_next(len(running.staked)), basis)
 
 
 def build_candidate_page(
@@ -199,9 +272,13 @@ def build_candidate_page(
     decisions: DecisionHistory | None,
     ledger: LedgerPage,
     book_replay: BookReplay | None = None,
+    rule: str | None = None,
 ) -> CandidatePage:
+    """``rule`` is the rule of the version's name (``name_rule``), which labels its estimate."""
     entry = summary.registered
     verdict, note = verdict_of(summary)
+    basis = rule_basis(rule)
+    series = build_series(summary, running, basis) if summary.bets_with_close else None
     return CandidatePage(
         name=summary.name,
         version=summary.version,
@@ -218,7 +295,8 @@ def build_candidate_page(
         roi=summary.roi,
         settled_bets=summary.settled_bets,
         pending_bets=summary.pending_bets,
-        series=build_series(summary, running) if summary.bets_with_close else None,
+        series=series,
+        estimate_gap=summary.estimate_gap if series and series.estimate_percent else None,
         leagues=summary.leagues if len(summary.leagues) > 1 else (),
         book_replay=build_book_replay(book_replay),
         decisions=shown_decisions(entry, decisions),

@@ -193,7 +193,9 @@ def _without(state: MarketState, *books: str, now: bool = True, then: bool = Tru
 
 class TestRetailQuorumLag:
     def test_backs_the_unchanged_price_the_groups_moved_past(self) -> None:
-        assert retail_quorum_lag(_lag_state(), LAG_PARAMS) == [BetIntent(HOME, "bet365", 2.2, 1.0)]
+        assert retail_quorum_lag(_lag_state(), LAG_PARAMS) == [
+            BetIntent(HOME, "bet365", 2.2, 1.0, estimated_ev=pytest.approx(0.1))
+        ]
 
     def test_a_changed_price_does_not_qualify(self) -> None:
         state = _lag_state(then={"bet365": {**LAGGING, HOME: 2.25}})
@@ -206,7 +208,9 @@ class TestRetailQuorumLag:
 
     def test_needs_three_groups_whose_probability_rose_a_point(self) -> None:
         still = _lag_state(then=_groups("betvictor", p=NOW))
-        assert retail_quorum_lag(still, LAG_PARAMS) == [BetIntent(HOME, "bet365", 2.2, 1.0)]
+        assert retail_quorum_lag(still, LAG_PARAMS) == [
+            BetIntent(HOME, "bet365", 2.2, 1.0, estimated_ev=pytest.approx(0.1))
+        ]
         two = _lag_state(then=_groups("betvictor", "williamhill", p=(0.495, 0.27, 0.235)))
         assert retail_quorum_lag(two, LAG_PARAMS) == []
 
@@ -219,13 +223,17 @@ class TestRetailQuorumLag:
         now = {"paddypower": LAGGING, "skybet": _book(*NOW)}
         then = {"paddypower": LAGGING, "skybet": _book(*THEN)}
         state = _without(_lag_state(now, then), "bet365")
-        assert retail_quorum_lag(state, LAG_PARAMS) == [BetIntent(HOME, "paddypower", 2.2, 1.0)]
+        assert retail_quorum_lag(state, LAG_PARAMS) == [
+            BetIntent(HOME, "paddypower", 2.2, 1.0, estimated_ev=pytest.approx(0.1))
+        ]
         fewer = _without(_lag_state(now, {**then, **_groups("betvictor", p=NOW)}), "bet365")
         assert retail_quorum_lag(fewer, LAG_PARAMS) == []
 
     def test_needs_three_other_groups_for_the_consensus(self) -> None:
         state = _without(_lag_state(), "betvictor")
-        assert retail_quorum_lag(state, LAG_PARAMS) == [BetIntent(HOME, "bet365", 2.2, 1.0)]
+        assert retail_quorum_lag(state, LAG_PARAMS) == [
+            BetIntent(HOME, "bet365", 2.2, 1.0, estimated_ev=pytest.approx(0.1))
+        ]
         assert retail_quorum_lag(_without(state, "williamhill", then=False), LAG_PARAMS) == []
 
     def test_ev_must_exceed_the_threshold(self) -> None:
@@ -235,9 +243,13 @@ class TestRetailQuorumLag:
     def test_bets_the_highest_ev_then_the_first_book(self) -> None:
         longer = _prices(2.3, 3.4, 4.0)
         state = _lag_state({"betway": longer}, {"betway": longer})
-        assert retail_quorum_lag(state, LAG_PARAMS) == [BetIntent(HOME, "betway", 2.3, 1.0)]
+        assert retail_quorum_lag(state, LAG_PARAMS) == [
+            BetIntent(HOME, "betway", 2.3, 1.0, estimated_ev=pytest.approx(0.15))
+        ]
         tied = _lag_state({"betway": LAGGING}, {"betway": LAGGING})
-        assert retail_quorum_lag(tied, LAG_PARAMS) == [BetIntent(HOME, "bet365", 2.2, 1.0)]
+        assert retail_quorum_lag(tied, LAG_PARAMS) == [
+            BetIntent(HOME, "bet365", 2.2, 1.0, estimated_ev=pytest.approx(0.1))
+        ]
 
     def test_takes_exactly_one_lookback(self) -> None:
         point = {"minutes_before_decision": 30, "max_input_age_minutes": 10}
@@ -268,7 +280,7 @@ def _subsidy_state(**books: Prices) -> MarketState:
 class TestSubsidisedOutcome:
     def test_backs_the_outcome_priced_above_the_consensus(self) -> None:
         assert subsidised_outcome(_subsidy_state(bet365=SUBSIDISED), SUBSIDY_PARAMS) == [
-            BetIntent(HOME, "bet365", 2.1, 1.0)
+            BetIntent(HOME, "bet365", 2.1, 1.0, estimated_ev=pytest.approx(0.05))
         ]
 
     def test_the_overround_must_reach_the_minimum(self) -> None:
@@ -291,7 +303,9 @@ class TestSubsidisedOutcome:
     def test_a_grouped_book_is_compared_with_the_other_groups(self) -> None:
         three = {b: _book(*NOW) for b in GROUPED[:3]}
         state = _state({**three, "betvictor": SUBSIDISED})
-        assert subsidised_outcome(state, SUBSIDY_PARAMS) == [BetIntent(HOME, "betvictor", 2.1, 1.0)]
+        assert subsidised_outcome(state, SUBSIDY_PARAMS) == [
+            BetIntent(HOME, "betvictor", 2.1, 1.0, estimated_ev=pytest.approx(0.05))
+        ]
         two = {b: _book(*NOW) for b in GROUPED[:2]}
         assert subsidised_outcome(_state({**two, "betvictor": SUBSIDISED}), SUBSIDY_PARAMS) == []
 
@@ -299,9 +313,13 @@ class TestSubsidisedOutcome:
         # Home EV 0.075; draw and away implied 0.053 and 0.048 above the consensus.
         higher = _prices(2.15, 3.1, 3.6)
         state = _subsidy_state(bet365=SUBSIDISED, betway=higher)
-        assert subsidised_outcome(state, SUBSIDY_PARAMS) == [BetIntent(HOME, "betway", 2.15, 1.0)]
+        assert subsidised_outcome(state, SUBSIDY_PARAMS) == [
+            BetIntent(HOME, "betway", 2.15, 1.0, estimated_ev=pytest.approx(0.075))
+        ]
         tied = _subsidy_state(bet365=SUBSIDISED, betway=SUBSIDISED)
-        assert subsidised_outcome(tied, SUBSIDY_PARAMS) == [BetIntent(HOME, "bet365", 2.1, 1.0)]
+        assert subsidised_outcome(tied, SUBSIDY_PARAMS) == [
+            BetIntent(HOME, "bet365", 2.1, 1.0, estimated_ev=pytest.approx(0.05))
+        ]
 
     @pytest.mark.parametrize("field", ["threshold", "min_overround"])
     def test_params_must_be_positive(self, field: str) -> None:
@@ -324,7 +342,7 @@ OUTLIER_RETAIL = {
 class TestSingleBookOutlier:
     def test_backs_the_book_far_above_every_other(self) -> None:
         assert single_book_outlier(_state(OUTLIER_RETAIL, exchange=FAIR), OUTLIER_PARAMS) == [
-            BetIntent(HOME, "bet365", 2.5, 1.0)
+            BetIntent(HOME, "bet365", 2.5, 1.0, estimated_ev=pytest.approx(0.125))
         ]
 
     def test_the_ratio_must_reach_the_minimum(self) -> None:
@@ -357,10 +375,12 @@ class TestSingleBookOutlier:
         }
         richer_draw = _state(retail, exchange=_exchange(0.45, 0.46, 0.09))
         assert single_book_outlier(richer_draw, OUTLIER_PARAMS) == [
-            BetIntent(DRAW, "bet365", 2.5, 1.0)
+            BetIntent(DRAW, "bet365", 2.5, 1.0, estimated_ev=pytest.approx(0.15))
         ]
         tied = _state(retail, exchange=_exchange(0.45, 0.45, 0.1))
-        assert single_book_outlier(tied, OUTLIER_PARAMS) == [BetIntent(HOME, "bet365", 2.5, 1.0)]
+        assert single_book_outlier(tied, OUTLIER_PARAMS) == [
+            BetIntent(HOME, "bet365", 2.5, 1.0, estimated_ev=pytest.approx(0.125))
+        ]
 
     def test_min_ratio_must_exceed_one_and_gap_be_non_negative(self) -> None:
         base = OUTLIER_PARAMS.model_dump()

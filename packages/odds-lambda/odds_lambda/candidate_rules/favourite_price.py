@@ -9,6 +9,7 @@ from odds_lambda.candidate_rules.inputs import SharpInput
 from odds_lambda.candidate_rules.market_state import MarketState
 from odds_lambda.candidate_rules.rules import (
     BetIntent,
+    EstimateBasis,
     RuleParams,
     RuleSpec,
     best_bet,
@@ -29,7 +30,7 @@ def favourite_price(state: MarketState, params: FavouriteParams) -> list[BetInte
     if exchange is None:
         return []
     retail = state.retail.get(None, {})
-    scored: list[tuple[BetIntent, float]] = []
+    scored: list[BetIntent] = []
     for outcome in market_outcomes(state.market):
         fair = exchange.fair[outcome]
         longest = longest_retail(retail, outcome)
@@ -38,8 +39,13 @@ def favourite_price(state: MarketState, params: FavouriteParams) -> list[BetInte
         price, book = longest
         ev = fair * price - 1
         if ev > params.threshold:
-            scored.append((BetIntent(outcome, book, price, params.stake), ev))
+            scored.append(BetIntent(outcome, book, price, params.stake, estimated_ev=ev))
     return best_bet(state.market, scored)
 
 
-FAVOURITE_PRICE = RuleSpec(favourite_price, FavouriteParams, frozenset({SharpInput.EXCHANGE}))
+FAVOURITE_PRICE = RuleSpec(
+    favourite_price,
+    FavouriteParams,
+    frozenset({SharpInput.EXCHANGE}),
+    estimate_basis=EstimateBasis.EXCHANGE,
+)

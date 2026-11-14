@@ -54,6 +54,7 @@ def bet(
         bookmaker="bet365",
         p_close_power=None if ev is None else (1 + (ev if power is None else power)) / price,
         close_source=None if ev is None else Source.BETFAIR,
+        estimated_ev=None,
     )
 
 
@@ -405,6 +406,7 @@ class TestCommand:
             "p_close",
             "ev",
             "close_source",
+            "estimated_ev",
         }
         assert placed["close_source"] == "betfair"
         assert payload["cells"][1]["closes"] == {"betfair": 60}

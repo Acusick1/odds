@@ -10,6 +10,7 @@ from odds_lambda.candidate_rules.inputs import SharpInput
 from odds_lambda.candidate_rules.market_state import MarketState
 from odds_lambda.candidate_rules.rules import (
     BetIntent,
+    EstimateBasis,
     RuleParams,
     RuleSpec,
     best_bet,
@@ -27,7 +28,7 @@ def single_book_outlier(state: MarketState, params: SingleBookOutlierParams) -> 
     """Back the one selection of highest exchange EV whose longest retail price, on a line with
     an exchange price, is at least ``min_ratio`` times the longest of any other book on it, and
     whose EV against the exchange fair price exceeds ``gap``."""
-    scored: list[tuple[BetIntent, float]] = []
+    scored: list[BetIntent] = []
     for line, exchange in state.exchange.items():
         retail = state.retail.get(line, {})
         for outcome in market_outcomes(state.market):
@@ -40,10 +41,13 @@ def single_book_outlier(state: MarketState, params: SingleBookOutlierParams) -> 
                 continue
             ev = exchange.fair[outcome] * price - 1
             if ev > params.gap:
-                scored.append((BetIntent(outcome, book, price, params.stake, line), ev))
+                scored.append(BetIntent(outcome, book, price, params.stake, line, estimated_ev=ev))
     return best_bet(state.market, scored)
 
 
 SINGLE_BOOK_OUTLIER = RuleSpec(
-    single_book_outlier, SingleBookOutlierParams, frozenset({SharpInput.EXCHANGE})
+    single_book_outlier,
+    SingleBookOutlierParams,
+    frozenset({SharpInput.EXCHANGE}),
+    estimate_basis=EstimateBasis.EXCHANGE,
 )

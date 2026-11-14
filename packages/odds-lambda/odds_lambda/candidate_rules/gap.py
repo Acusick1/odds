@@ -6,7 +6,13 @@ from pydantic import PositiveFloat
 
 from odds_lambda.candidate_rules.inputs import SharpInput
 from odds_lambda.candidate_rules.market_state import MarketState
-from odds_lambda.candidate_rules.rules import BetIntent, RuleParams, RuleSpec, gap_bets
+from odds_lambda.candidate_rules.rules import (
+    BetIntent,
+    EstimateBasis,
+    RuleParams,
+    RuleSpec,
+    gap_bets,
+)
 
 
 class GapParams(RuleParams):
@@ -26,5 +32,15 @@ def polymarket_gap(state: MarketState, params: GapParams) -> list[BetIntent]:
     return gap_bets(state, fairs, params.threshold, params.stake)
 
 
-EXCHANGE_GAP = RuleSpec(exchange_gap, GapParams, frozenset({SharpInput.EXCHANGE}))
-POLYMARKET_GAP = RuleSpec(polymarket_gap, GapParams, frozenset({SharpInput.POLYMARKET}))
+EXCHANGE_GAP = RuleSpec(
+    exchange_gap,
+    GapParams,
+    frozenset({SharpInput.EXCHANGE}),
+    estimate_basis=EstimateBasis.EXCHANGE,
+)
+POLYMARKET_GAP = RuleSpec(
+    polymarket_gap,
+    GapParams,
+    frozenset({SharpInput.POLYMARKET}),
+    estimate_basis=EstimateBasis.POLYMARKET,
+)

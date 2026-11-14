@@ -108,7 +108,8 @@ class CandidateBacktest(SQLModel, table=True):
 
 class CandidateBacktestBet(SQLModel, table=True):
     """A bet a stored run placed, in placement order: ``position`` counts from 1.
-    ``p_close``, ``ev`` and ``close_source`` are null without a close."""
+    ``p_close``, ``ev`` and ``close_source`` are null without a close. ``estimated_ev`` is the
+    EV the rule estimated at decision time, null for a rule without one."""
 
     __tablename__ = "candidate_backtest_bets"
 
@@ -135,6 +136,7 @@ class CandidateBacktestBet(SQLModel, table=True):
     p_close: float | None = Field(default=None, sa_column=Column(Float))
     ev: float | None = Field(default=None, sa_column=Column(Float))
     close_source: Source | None = Field(default=None, sa_column=Column(StrEnumText(Source)))
+    estimated_ev: float | None = Field(default=None, sa_column=Column(Float))
 
     __table_args__ = (
         UniqueConstraint("backtest_id", "position", name="uq_candidate_backtest_bets_position"),

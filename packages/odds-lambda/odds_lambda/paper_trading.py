@@ -92,12 +92,14 @@ async def place_trade(
     candidate_version: int | None = None,
     decision_id: int | None = None,
     sharp: SharpReading | None = None,
+    estimated_ev: float | None = None,
 ) -> PaperTrade:
     """Place a new paper trade. Validates stake against bankroll and the candidate.
 
     ``bankroll=None`` places a flat-stake candidate trade, which records no bankroll. ``line``
     is the selection's line, a half line in a market with lines and None otherwise. ``sharp``
     is the sharp market's reading of the selection at placement, if one was taken and found.
+    ``estimated_ev`` is the EV a candidate's rule estimated for the bet at decision time.
     """
     if price_decimal <= 1.0:
         raise ValueError(f"Decimal price must exceed 1.0, got {price_decimal}")
@@ -156,6 +158,7 @@ async def place_trade(
         candidate_version=candidate_version,
         decision_id=decision_id,
         git_sha=current_git_sha(),
+        estimated_ev=estimated_ev,
     )
     if sharp is not None:
         trade.sharp_probability = sharp.probability
