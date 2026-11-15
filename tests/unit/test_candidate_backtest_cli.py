@@ -530,6 +530,7 @@ class TestCloseSources:
                 "bet365",
                 None,
                 source,
+                None,
             )
 
         bets = [bet(1, Source.BETFAIR), bet(2, Source.ODDS_API), bet(3, Source.ODDS_API)]

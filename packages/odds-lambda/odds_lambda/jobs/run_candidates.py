@@ -279,6 +279,7 @@ async def _decide(
             candidate_name=candidate.name,
             candidate_version=candidate.version,
             decision_id=decision.id,
+            estimated_ev=intent.estimated_ev,
         )
     decision.bets_placed = len(intents)
     decision.input_snapshot_ids = state.input_snapshot_ids

@@ -41,7 +41,7 @@ BET_FIELDS = (
 # league field is named differently across revisions) or the bets above, rather than what the
 # replay decided.
 SUMMARY_DROPPED = ("hash_status", "league_coverage", "bets", "books")
-CANDIDATE_SUMMARY_DROPPED = ("registered", "leagues")
+CANDIDATE_SUMMARY_DROPPED = ("registered", "leagues", "estimates")
 # Counts that only some revisions keep, which say nothing about the bets decided.
 COUNTS_DROPPED = ("with_book",)
 

@@ -1,3 +1,4 @@
+{% from "_macros.html.j2" import estimate_gap_tile, estimate_legend %}
 {% if backtests.failure %}
 <p class="unavailable" title="{{ backtests.failure.exception }}: {{ backtests.failure.message }}">Stored backtests unavailable{% if backtests.failure.kind != "unavailable" %} (odds-web error {{ backtests.failure.exception }}, see the server log){% endif %}</p>
 {% endif %}
@@ -20,6 +21,7 @@ Code <span class="num">{{ run.git_sha[:10] }}</span>, stored {{ run.stored_at | 
     <div class="v num {{ 'pos' if run.estimate.mean_ev >= 0 else 'neg' }}">{{ run.estimate.mean_ev | percent }}</div>
     <div class="sub num">{{ (run.estimate.level * 100) | round | int }}% CI {{ run.estimate.ci[0] | percent }} … {{ run.estimate.ci[1] | percent }}</div>
     {% else %}<div class="v sub">no bets with a close</div>{% endif %}</div>
+  {{ estimate_gap_tile(run.estimate_gap, run.series, 'no bets with a close') }}
   <div class="tile"><div class="k">P&amp;L (stake units)</div>
     <div class="v num">{{ run.pnl | signed }}u</div><div class="sub num">ROI {{ run.roi | percent }}</div></div>
 </div>
@@ -38,7 +40,8 @@ Code <span class="num">{{ run.git_sha[:10] }}</span>, stored {{ run.stored_at | 
 {% endif %}
 {% if run.series %}
 <div class="chart" data-chart="ev" data-series='{{ run.series.ev_chart() | tojson }}'></div>
-<div class="legend"><span><svg width="26" height="10"><line class="ci" x1="2" y1="5" x2="24" y2="5"/></svg>{{ (run.estimate.level * 100) | round | int }}% CI of the whole run</span><span>Dashed line: zero EV</span></div>
+<div class="legend">{{ estimate_legend(run.series) }}<span><svg width="26" height="10"><line class="ci" x1="2" y1="5" x2="24" y2="5"/></svg>{{ (run.estimate.level * 100) | round | int }}% CI of the whole run</span><span>Dashed line: zero EV</span></div>
+{% if run.series.estimate_omitted %}<div class="sub">{{ run.series.estimate_omitted }}</div>{% endif %}
 <div class="chart" data-chart="cumulative" data-series='{{ run.series.cumulative_chart() | tojson }}'></div>
 <div class="legend"><span><span class="sw sw-expected"></span>Σ stake·EV (signal)</span><span><span class="sw sw-pnl"></span>P&amp;L (signal + luck)</span></div>
 {% endif %}

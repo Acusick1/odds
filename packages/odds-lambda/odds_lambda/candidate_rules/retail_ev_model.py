@@ -13,6 +13,7 @@ from odds_lambda.candidate_rules.inputs import SharpInput
 from odds_lambda.candidate_rules.market_state import MarketState
 from odds_lambda.candidate_rules.rules import (
     BetIntent,
+    EstimateBasis,
     EvPredictor,
     ModelRuleSpec,
     RuleParams,
@@ -65,7 +66,7 @@ def retail_ev_model(
         price, book = longest
         ev = predicted.get((outcome, book))
         if ev is not None and ev > params.threshold:
-            bets.append(BetIntent(outcome, book, price, params.stake))
+            bets.append(BetIntent(outcome, book, price, params.stake, estimated_ev=ev))
     return bets
 
 
@@ -75,4 +76,5 @@ RETAIL_EV_MODEL = ModelRuleSpec(
     frozenset({SharpInput.EXCHANGE}),
     ("odds_analytics.candidate_model.ModelReplay",),
     frozenset({Market.ONE_X_TWO, Market.H2H}),
+    estimate_basis=EstimateBasis.MODEL,
 )

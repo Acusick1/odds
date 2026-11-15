@@ -15,6 +15,7 @@ from odds_lambda.candidate_rules.retail_consensus import (
 )
 from odds_lambda.candidate_rules.rules import (
     BetIntent,
+    EstimateBasis,
     LookbackParams,
     RuleParams,
     RuleSpec,
@@ -41,7 +42,7 @@ def retail_quorum_lag(state: MarketState, params: RetailQuorumLagParams) -> list
     then = state.lookbacks[params.lookbacks[0].minutes_before_decision].retail.get(None, {})
     groups_now = group_probabilities(now, state.market)
     groups_then = group_probabilities(then, state.market)
-    scored: list[tuple[BetIntent, float]] = []
+    scored: list[BetIntent] = []
     for book, prices in now.items():
         q = consensus(groups_now, book)
         if q is None:
@@ -58,8 +59,13 @@ def retail_quorum_lag(state: MarketState, params: RetailQuorumLagParams) -> list
             ]
             ev = q[outcome] * price - 1
             if len(risen) >= MIN_OTHER_GROUPS and ev > params.threshold:
-                scored.append((BetIntent(outcome, book, price, params.stake), ev))
+                scored.append(BetIntent(outcome, book, price, params.stake, estimated_ev=ev))
     return best_bet(state.market, scored)
 
 
-RETAIL_QUORUM_LAG = RuleSpec(retail_quorum_lag, RetailQuorumLagParams, frozenset())
+RETAIL_QUORUM_LAG = RuleSpec(
+    retail_quorum_lag,
+    RetailQuorumLagParams,
+    frozenset(),
+    estimate_basis=EstimateBasis.RETAIL_CONSENSUS,
+)
