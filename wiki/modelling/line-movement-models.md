@@ -10,7 +10,7 @@ status: stable
 
 # Line-movement model (XGBoost)
 
-`odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy` wraps an XGBoost regressor of the closing line move. It is the trainer behind `odds train` ([training pipeline](training-pipeline.md)) and the model behind [candidate replay](../evaluation/candidate-backtest.md#model-rules); it places no bets. Config `strategy_type` accepts only `xgboost_line_movement`.
+`odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy` wraps an XGBoost regressor of the line move to the [last snapshot](../foundations/glossary.md#last-snapshot). It is the trainer behind `odds train` ([training pipeline](training-pipeline.md)) and the model behind [candidate replay](../evaluation/candidate-backtest.md#model-rules); it places no bets. Config `strategy_type` accepts only `xgboost_line_movement`.
 
 ## Behaviour
 
@@ -18,8 +18,8 @@ status: stable
 
 ## Feature vector
 
-`odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy` takes feature arrays and their names as given and extracts no features itself. The arrays come from `odds_analytics.feature_groups.prepare_training_data` (integer event ids alongside), which extracts each configured group from the decision snapshot's price rows, measures the target against that snapshot's own source's close (it samples only of the sources whose close has a sharp book), and adds `hours_until_event` (from the XGBoost adapter) to the configured feature groups (`tabular`, `injuries`, `rest`), so the width depends on the config (#476; read from code, not run).
+`odds_analytics.xgboost_line_movement.XGBoostLineMovementStrategy` takes feature arrays and their names as given and extracts no features itself. The arrays come from `odds_analytics.feature_groups.prepare_training_data` (integer event ids alongside), which extracts each configured group from the decision snapshot's price rows, measures the target against that snapshot's own source's last snapshot (it samples only of the sources whose last snapshot has a sharp book), and adds `hours_until_event` (from the XGBoost adapter) to the configured feature groups (`tabular`, `injuries`, `rest`), so the width depends on the config (#476; read from code, not run).
 
 ## Related
 
-- [CLV target](clv-target.md)
+- [Training targets](clv-target.md)

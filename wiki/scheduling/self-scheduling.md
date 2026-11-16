@@ -25,13 +25,13 @@ status: stable
 
 There is no fixed external cron for the data jobs. Each run asks the [decision engine](decision-engine.md) when to run next and books that time through `odds_lambda.scheduling.backends.base.SchedulerBackend.schedule_next_execution` ([backends](scheduler-backends.md)). On AWS that rewrites one EventBridge rule; locally it replaces an APScheduler entry ([local scheduler](local-scheduler.md)). The shared helper is `odds_lambda.scheduling.helpers.self_schedule`, which builds a backend, passes `{"sport": ...}` as payload and logs `job_next_scheduled`. Its `job_name` must be the [compound name](job-registry.md#compound-job-names) so it matches the rule or schedule id.
 
-The cadence of a data job follows how close the next kickoff is, which only the job's own run can see (the decision functions read the stored events). A job therefore picks its next time at the end of each run instead of keeping a fixed rate `(inferred)`.
+The cadence of a data job follows how close the next kick-off is, which only the job's own run can see (the decision functions read the stored events). A job therefore picks its next time at the end of each run instead of keeping a fixed rate `(inferred)`.
 
 ## Pattern
 
 The odds collectors share `odds_lambda.scheduling.collection.run_collection`: it decides and prebooks before preparation or collection, writes a heartbeat without collection when dormant, and applies the source's `odds_lambda.scheduling.collection.PostbookTiming` policy. Its callback returns `odds_lambda.scheduling.collection.CollectionResult`, carrying whether to postbook and any failure that must be raised after that booking. Source callbacks retain their calendar lookup, error handling and row checks. Prebooking failure prevents collection; postbooking failure is logged and leaves the prebooked run in place. Cancellation propagates.
 
-1. Decide: `odds_lambda.scheduling.decision.decide_forward_resilient` or `odds_lambda.scheduling.decision.decide_backward_resilient`. The collectors that create their own events decide through `odds_lambda.collection_calendar.decide_collection_run` (one definition of dormancy; `fetch-betfair-exchange` also passes its own kickoff lookup, [lead runs](decision-engine.md#lead-runs)) and, with no fixture within the dormancy horizon only book a check-in and write their heartbeat ([dormancy](decision-engine.md#dormancy)). A job that must run a set time before each kickoff passes those times as leads, with its own start time ([lead runs](decision-engine.md#lead-runs)).
+1. Decide: `odds_lambda.scheduling.decision.decide_forward_resilient` or `odds_lambda.scheduling.decision.decide_backward_resilient`. The collectors that create their own events decide through `odds_lambda.collection_calendar.decide_collection_run` (one definition of dormancy; `fetch-betfair-exchange` also passes its own kick-off lookup, [lead runs](decision-engine.md#lead-runs)) and, with no event within the dormancy horizon only book a check-in and write their heartbeat ([dormancy](decision-engine.md#dormancy)). A job that must run a set time before each kick-off passes those times as leads, with its own start time ([lead runs](decision-engine.md#lead-runs)).
 2. Pre-schedule the next run before any work, so a crash or Lambda timeout leaves the chain intact.
 3. If the gate says skip, return.
 4. Do the work (usually inside `odds_core.alerts.job_alert_context`, which alerts once per outage; see [Alerts](../operations/alerts.md#delivery)). On the local scheduler `odds_lambda.scheduling.runner.run_chain_job` bounds the run and re-books the chain when it fails with nothing booked ([Local scheduler](local-scheduler.md#scheduling-primitives)).
@@ -39,7 +39,7 @@ The odds collectors share `odds_lambda.scheduling.collection.run_collection`: it
 
 A local scheduler restart keeps each job's pending run; only a job without one runs its bootstrap function to start the chain ([bootstrap](local-scheduler.md#bootstrap-jobs-and-cron-table)).
 
-`fetch-odds` syncs events from the free `/events` endpoint before deciding, so `odds_lambda.scheduling.helpers.get_next_kickoff` sees upstream fixtures ([fetch-odds job](../collection/fetch-odds-job.md)).
+`fetch-odds` syncs events from the free `/events` endpoint before deciding, so `odds_lambda.scheduling.helpers.get_next_kickoff` sees upstream events ([fetch-odds job](../collection/fetch-odds-job.md)).
 
 ## Failure policy by job
 
@@ -54,7 +54,7 @@ Five different failure behaviours exist across the jobs, and no code states whic
 
 `fetch-oddsportal-results`, `fetch-mlb-results`, and `check-health` schedule only after their work, so a kill or exception ends the chain (#438). A hard kill skips the results jobs' `finally`. An exception in `odds_lambda.health_monitor.check_system_health` skips the reschedule. The `fetch-oddsportal` and `fetch-betfair-exchange` jobs pre-schedule, so an `odds_lambda.collection_calendar.EmptyCollectionError` or a failed league ends only that run, not the chain. On the local scheduler the health monitor's [schedule chain check](../operations/health-monitor.md#schedule-chain-check) alerts on an ended chain. A rule that was never rescheduled stays `DISABLED` on its `rate(1 day)` placeholder; see [Deployed state](job-deployment-matrix.md#deployed-state) for how to find those. The deploy workflows invoke every job after `terraform apply` to (re)start chains ([Debug the AWS self-scheduling jobs](howto-debug-aws-scheduler.md), [CI/CD workflows](../operations/ci-cd-workflows.md)).
 
-`odds_lambda.jobs.fetch_odds.main`, `odds_lambda.jobs.fetch_scores.main` (both for one required sport, EPL or NBA for fetch-odds; the fetch-odds job also alerts `event_sync_failed:<job>` once per outage and logs a game that failed to ingest by its Odds API id) and `odds_lambda.jobs.update_status.main` book both runs through `odds_lambda.scheduling.helpers.book_next_run`, passing whether another booking survives a failure (the fetch-odds use is in its [flow](../collection/fetch-odds-job.md#flow)).
+`odds_lambda.jobs.fetch_odds.main`, `odds_lambda.jobs.fetch_scores.main` (both for one required league, EPL or NBA for fetch-odds; the fetch-odds job also alerts `event_sync_failed:<job>` once per outage and logs an event that failed to ingest by its Odds API id) and `odds_lambda.jobs.update_status.main` book both runs through `odds_lambda.scheduling.helpers.book_next_run`, passing whether another booking survives a failure (the fetch-odds use is in its [flow](../collection/fetch-odds-job.md#flow)).
 
 ## Related
 

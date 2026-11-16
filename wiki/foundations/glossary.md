@@ -1,207 +1,215 @@
 ---
 type: reference
 title: Glossary
-description: The project's domain terms, one line each, with the page that defines each one and the words to avoid for it.
+description: The definition of each domain term, the words to avoid for it, and the page that describes the machinery behind it.
 sources: []
 status: stable
 ---
 
 # Glossary
 
-One line per domain term, grouped by area. Each term links to the page that defines it, and that page is authoritative: when the two disagree, fix this line. Words under _Avoid_ are synonyms the wiki or code also uses; write the term instead. General programming terms are left out.
+This page defines the project's domain terms, and other pages link here instead of defining them again. Each term lists the words to avoid in prose; identifiers in code keep their own names. The linked page under each term describes the machinery, not the term.
 
-## Candidates and verdicts
+## Leagues, events and prices
 
-**Candidate**: any rule that decides bets, whether a mechanical rule on prices, a model or an LLM agent ([goal and strategy](goal-and-strategy.md#candidates)).
-_Avoid_: strategy, system
+### Sport
 
-**Idea**: a GitHub issue labelled `candidate`, before it is registered as a candidate ([goal and strategy](goal-and-strategy.md#candidates)).
+Football, baseball or basketball. A sport's leagues share its markets.
 
-**Mechanical candidate**: a candidate whose rule, or the model a model rule binds, runs on the market state at its decision times ([candidate registry](../evaluation/candidate-registry.md)).
+### League
 
-**Agent candidate**: a candidate whose bets an LLM betting agent places, defined by its prompts and model ([candidate registry](../evaluation/candidate-registry.md)).
+One competition a candidate bets in or a collector covers, such as the EPL, La Liga or MLB. The Odds API names each with a sport key ([sport and market keys](../collection/sport-and-market-keys.md#sport-keys)).
+_Avoid_: sport (for a league), competition
 
-**Model rule**: a mechanical candidate's rule that wraps a trained model ([candidate rules](../evaluation/candidate-rules.md#model-rules)).
+### Game
 
-**Candidate registry**: the YAML files in `candidates/`, one per candidate, holding its definition and its status: active, promoted or killed ([candidate registry](../evaluation/candidate-registry.md)).
+A real-world contest between two teams, as a source lists it. Each game resolves to an event.
+_Avoid_: match, fixture, listing
 
-**Version**: a candidate's whole-number version, bumped whenever its rule, parameters, model, book set or league set changes, or a collection fix changes the prices its earlier decisions saw ([goal and strategy](goal-and-strategy.md#candidates)).
+### Event
 
-**Rule**: the function a mechanical candidate runs on the market state at a decision time, returning the bets it wants ([candidate rules](../evaluation/candidate-rules.md#rule-interface)).
+The stored record of one game, which bets, briefs and decisions refer to. Several events stored for one game are twins, and are merged ([events table](../storage/events.md), [event merge](../storage/event-merge.md)).
+_Avoid_: match, fixture, game (for the stored record)
 
-**Bet intent**: one bet a rule returns: outcome, line, bookmaker, price and stake ([candidate rules](../evaluation/candidate-rules.md#rule-interface)).
+### Kick-off
 
-**Selection**: an outcome on a line, or the outcome alone in a market without lines ([candidate rules](../evaluation/candidate-rules.md#once-per-selection)).
-_Avoid_: pick
+The scheduled start of an event ([kick-off authority](../storage/kickoff-authority.md)).
+_Avoid_: kickoff, commence time, start time
 
-**Book set**: the named group of roster books a candidate prices from, part of its definition ([candidate rules](../evaluation/candidate-rules.md#book-set)).
+### Market
 
-**UK retail roster**: the UK retail books the user bets with, the largest book set ([candidate rules](../evaluation/candidate-rules.md#book-set)).
-_Avoid_: retail books (for the roster as a set), UK books
+A set of outcomes of an event priced together, such as the three-way result, the two-way result or totals ([sport and market keys](../collection/sport-and-market-keys.md#market-key-dialects)).
 
-**Decision time**: the instant a bet or prediction is taken to be made; for a candidate, a fixed number of minutes before kick-off ([candidate rules](../evaluation/candidate-rules.md#decision-times), [look-ahead bias](../modelling/look-ahead-bias.md)).
+### Selection
 
-**Market state**: what was known about one event's market at a decision time, built from one retail snapshot plus the sharp prices the rule reads ([candidate rules](../evaluation/candidate-rules.md#market-state)).
+One outcome of a market on one line, or the outcome alone in a market without lines.
+_Avoid_: pick, outcome (for an outcome on a line)
 
-**Max input age**: the oldest a snapshot may be at the decision time and still be an input ([candidate rules](../evaluation/candidate-rules.md#market-state)).
+### Book
 
-**Lookback point**: the market state as of a declared number of minutes before the decision time ([candidate rules](../evaluation/candidate-rules.md#lookback-points)).
+A bookmaker, exchange or prediction market that prices outcomes, such as bet365, Betfair Exchange or Polymarket.
+_Avoid_: bookmaker, bookie
 
-**Extra market**: a second market a rule reads beside its own, as read-only input ([candidate rules](../evaluation/candidate-rules.md#extra-markets)).
+### Retail book
 
-**Fixture context**: each team's previous league result and the number of matches kicking off together, as rule inputs ([candidate rules](../evaluation/candidate-rules.md#fixture-context)).
+A UK sportsbook the user can bet at. Exchanges, prediction markets and Pinnacle are not retail books ([sharp references](../modelling/sharp-benchmark.md#priority-semantics)).
+_Avoid_: soft book, bettable book
 
-**Rule pinning**: the hash of the first-party modules a rule imports, recorded in the candidate file ([candidate rules](../evaluation/candidate-rules.md#rule-pinning)).
+### Source
 
-**Rehash**: a pinned-hash change accepted at the same version because replays show every bet unchanged ([candidate registry](../evaluation/candidate-registry.md#rehash-ledger)).
-
-**Decision**: the record of one candidate version at one event and decision time, with its inputs and bets, including a missed decision that placed none ([run-candidates job](../evaluation/run-candidates-job.md#the-decision-record)).
-
-**Forward test**: a candidate's live paper trading from its start date at a fixed version, the only evidence that promotes ([goal and strategy](goal-and-strategy.md#how-a-candidate-is-judged)).
-_Avoid_: live test, trial
-
-**Development data**: stored history used to generate and kill ideas, never to promote one ([goal and strategy](goal-and-strategy.md#how-a-candidate-is-judged)).
-
-**Pre-registration**: the committed grid of parameter values, data range and selection rule, fixed before any backtest of an idea ([take an idea to a verdict](../evaluation/howto-take-an-idea-to-a-verdict.md)).
-
-**Cell**: one parameter combination of a pre-registered grid ([cell selection](../evaluation/cell-selection.md)).
-
-**Cell selection**: picking the one eligible cell of a grid from its development replays ([cell selection](../evaluation/cell-selection.md#score-and-pick)).
-
-**Sealed holdout**: a season of the non-EPL leagues kept out of development data, replayable once per idea and version as a one-shot gate ([candidate backtest](../evaluation/candidate-backtest.md#sealed-holdout)).
-
-**Pooled candidate**: a candidate betting in several leagues whose bets form one series and one verdict ([goal and strategy](goal-and-strategy.md#how-a-candidate-is-judged)).
-
-**Replay backtest**: scoring a rule on stored data with the report's code ([candidate backtest](../evaluation/candidate-backtest.md)).
-_Avoid_: simulation
-
-**Draft**: a candidate definition outside the registry, replayed by a backtest and counted as one more version of its family ([candidate backtest](../evaluation/candidate-backtest.md#command)).
-
-**Parity check**: rebuilding each live decision from its recorded inputs and comparing it with what the runner did ([parity check](../evaluation/candidate-parity.md)).
-
-**Book replay**: an information-only replay of a version's recorded decisions under other book sets ([book replays](../evaluation/book-replays.md)).
-
-**Checkpoint**: a fixed count of a candidate's first bets with a close, the only points at which it is scored ([goal and strategy](goal-and-strategy.md#how-a-candidate-is-judged)).
-
-**Verdict**: the report's judgement of a candidate: promote, kill, continue (checkpoint reached, neither bar met) or not yet (no checkpoint reached); the first promote or kill stands for good ([candidate registry](../evaluation/candidate-registry.md#odds-candidates-report)).
-
-**Family**: the versions sharing a candidate's rule and market whose league sets intersect its own; those that have decided set k in the promote bar ([goal and strategy](goal-and-strategy.md#how-a-candidate-is-judged)).
-_Avoid_: family (alone, for a rule module)
-
-**Promote bar**: the checkpoint test that the lower CI bound of mean retail EV, tightened for the family's size, is above zero ([goal and strategy](goal-and-strategy.md#how-a-candidate-is-judged)).
-
-**Kill bar**: the checkpoint test that the upper CI bound of mean retail EV is at or below zero, or that a fixed bet count passed without promotion ([goal and strategy](goal-and-strategy.md#how-a-candidate-is-judged)).
-
-## Prices and scoring
-
-**Retail EV**: the EV of a bet at a retail price against the devigged Betfair Exchange close, the score of every candidate ([retail-EV target](../modelling/clv-target.md#the-retail-ev-target)).
-_Avoid_: retail-EV (as a noun)
-
-**CLV**: closing line value, how much better a price is than the fair price at the close; retail EV is the measure of it that scores candidates ([CLV and the training target](../modelling/clv-target.md)).
-
-**Raw target**: the vig-inclusive move in implied probability or point from a decision snapshot to the close, the other training target ([CLV and the training target](../modelling/clv-target.md#the-raw-close-minus-snapshot-delta)).
-_Avoid_: CLV target, line movement target
-
-**Close**: the devigged Betfair Exchange price a bet is scored against: the live close, else the sport's fallback close. The raw target's close is a different thing, the last snapshot before kick-off ([retail-EV target](../modelling/clv-target.md#the-retail-ev-target)).
-_Avoid_: closing line
-
-**Live close**: the last fully priced, pre-play Betfair Exchange snapshot shortly before kick-off ([retail-EV target](../modelling/clv-target.md#the-retail-ev-target)).
-
-**Fallback close**: the close a sport takes when an event has no live close: FDUK's Betfair closing price for football, Polymarket for NBA h2h ([retail-EV target](../modelling/clv-target.md#the-retail-ev-target)).
-
-**Substitute close**: The Odds API's Betfair Exchange price, used as the close in EPL backtests only ([substitute close comparison](../evaluation/substitute-close-comparison.md)).
-
-**Sharp reference**: the sharp price one use reads; scoring uses Betfair Exchange, the agent tools and tabular features a Pinnacle-first list ([sharp references](../modelling/sharp-benchmark.md#which-reference-is-used-for-what)).
-_Avoid_: sharp benchmark
-
-**Retail book**: a bookmaker that takes bets and is not a sharp reference; Pinnacle and Polymarket never are ([sharp references](../modelling/sharp-benchmark.md#priority-semantics)).
-_Avoid_: soft book
-
-**Vig**: the amount by which one book's implied probabilities over a market sum to more than 1 ([devigging](devigging.md)).
-_Avoid_: margin, juice (in prose; code names keep hold and overround)
-
-**Devig**: rescaling one book's implied probabilities so they sum to 1 ([devigging](devigging.md)).
-
-**Fair probability**: a book's devigged implied probability for an outcome ([devigging](devigging.md)).
-
-**Vig-inclusive**: an implied probability taken as 1/price without devigging ([devigging](devigging.md#vig-inclusive-consumers)).
-
-**Retail-sharp divergence**: a retail book's vig-inclusive implied probability minus the sharp reference's ([sharp references](../modelling/sharp-benchmark.md#retail-sharp-divergence)).
-
-**Look-ahead bias**: reading data stamped after the decision time ([look-ahead bias](../modelling/look-ahead-bias.md)).
-
-**Paper trade**: a simulated bet, flat-stake for a candidate and bankroll-sized for an agent ([paper trading](../agent/paper-trading.md)).
-_Avoid_: paper bet (in prose; the MCP tool keeps the name)
-
-## Storage and collection
-
-**Event**: one match, held as one row of the events table ([events table](../storage/events.md)).
-_Avoid_: game, fixture (for a stored event)
-
-**Kick-off**: the start time of an event ([kick-off authority](../storage/kickoff-authority.md)).
-_Avoid_: kickoff, commence time, start (in prose; code names keep kickoff)
-
-**Kick-off authority**: the per-sport ranked list of sources allowed to move an event's kick-off ([kick-off authority](../storage/kickoff-authority.md#authority-order)).
-
-**Twin**: an event duplicating another event of the same match, written from a different source ([event merge](../storage/event-merge.md#detection)).
-_Avoid_: duplicate event
-
-**Kept event**: the event a twin is merged into ([event merge](../storage/event-merge.md#kept-event)).
-
-**External id**: a source's own id for an event, stored beside the event's integer id ([events table](../storage/events.md#external-ids)).
-
-**Event status**: where an event is in its lifecycle, from scheduled to final, cancelled, postponed or unmatched ([event status lifecycle](../collection/event-status-lifecycle.md)).
-
-**Source**: the feed that wrote a snapshot, such as The Odds API, OddsPortal, Betfair or FDUK ([data sources](../collection/data-sources.md)).
+A feed the pipeline collects prices or results from, such as The Odds API, OddsPortal, Betfair or football-data.co.uk (FDUK) ([data sources](../collection/data-sources.md)).
 _Avoid_: provider
 
-**FDUK**: football-data.co.uk, the historical source of football opening and closing prices ([data sources](../collection/data-sources.md)).
+### Snapshot
 
-**Snapshot**: one source's prices for one market of one event at one time ([odds storage model](../storage/odds-storage-model.md)).
+One source's prices for one market of one event at one time ([how odds are stored](../storage/odds-storage-model.md)).
 
-**Envelope**: the Odds-API-shaped JSON a source returns, archived in a snapshot payload ([odds tables](../storage/odds-tables.md#envelope-format)).
+### Price
 
-**Snapshot payload**: the stored row archiving one source run's envelope, shared by the snapshots of its markets ([price tables](../storage/price-tables.md#snapshot_payloads)).
+One book's decimal odds for one selection in a snapshot ([price tables](../storage/price-tables.md)).
+_Avoid_: quote, odds (for a single price)
 
-**Price row**: one quote of a snapshot: bookmaker, outcome, line, side and decimal price ([price tables](../storage/price-tables.md)).
+### Fetch tier
 
-**Side**: whether a price row is a back, lay, mid or traded price ([price tables](../storage/price-tables.md#closed-sets)).
+How long before kick-off a snapshot's prices held, from opening to in-play, derived from its time, time basis and source, and never stored ([fetch tier](../storage/fetch-tier.md)).
+_Avoid_: sharp (for the tier 12 to 24 hours out; say the day-before tier)
 
-**Time basis**: what a snapshot's time means: observed, source-stamped, an upper bound, or the close ([odds tables](../storage/odds-tables.md)).
+## Value and scoring
 
-**Known at**: a storage-time bound on a read, excluding snapshots stored after it ([candidate rules](../evaluation/candidate-rules.md#known_at-and-recorded-inputs)).
+### Vig
 
-**Fetch tier**: a label for how long before kick-off a snapshot was taken, from opening to in-play, derived and never stored ([fetch tier](../storage/fetch-tier.md)).
+The amount by which one book's implied probabilities over a market sum to more than 1 ([devigging](devigging.md)).
+_Avoid_: hold, margin, overround, juice
 
-**Market key**: the string naming a market, such as `1x2` for football's three-way market and `h2h` for a two-way one ([sport and market keys](../collection/sport-and-market-keys.md#market-key-dialects)).
+### Devig
 
-**Sport key**: The Odds API key naming a league or sport, such as `soccer_epl` ([sport and market keys](../collection/sport-and-market-keys.md#sport-keys)).
+To rescale one book's implied probabilities over a market so they sum to 1 ([devigging](devigging.md)).
 
-**Quota**: the per-key monthly balance of The Odds API units ([Odds API quota](../collection/odds-api-quota.md)).
+### Fair probability
 
-**Acquisition manifest**: a YAML file fixing what one historical Odds API purchase requests ([Odds API backfill](../collection/odds-api-backfill.md#acquisition-manifests)).
+A selection's devigged implied probability.
+_Avoid_: true probability, no-vig probability
 
-## Scheduling and operations
+### Sharp reference
 
-**Self-scheduling**: a job booking its own next run before it works, in place of a fixed cron ([self-scheduling](../scheduling/self-scheduling.md)).
+The book whose fair probability a given use treats as the truth. Scoring uses Betfair Exchange; the agent's tools and the tabular features use Pinnacle first ([sharp references](../modelling/sharp-benchmark.md#which-reference-is-used-for-what)).
+_Avoid_: sharp benchmark, sharp book (for the reference a use reads)
 
-**Cadence**: the hours between a collector's runs in each fetch tier ([decision engine](../scheduling/decision-engine.md#cadence)).
+### Close
 
-**Lead run**: a run at a fixed time before kick-off, whatever the cadence ([decision engine](../scheduling/decision-engine.md#lead-runs)).
+The fair probability at kick-off that a bet is scored against, from Betfair Exchange where it exists. Its kinds are the live close, from the Betfair feed just before kick-off; the fallback close, FDUK's last Betfair Exchange price for football or Polymarket for NBA two-way markets; and the substitute close, The Odds API's Betfair price, in EPL three-way backtests only ([retail-EV target](../modelling/clv-target.md#the-retail-ev-target)).
+_Avoid_: closing line, closing price (for the scoring close)
 
-**Overnight window**: the UTC hours in which a sport's runs are suppressed ([decision engine](../scheduling/decision-engine.md#overnight-windows)).
+### Last snapshot
 
-**Dormancy**: a collector's state with no fixture within its horizon, booking only a check-in ([decision engine](../scheduling/decision-engine.md#dormancy)).
+A source's latest closing-tier snapshot of a market before kick-off, which the raw training target measures to ([target functions](../modelling/clv-target-functions.md#last-snapshot-of-a-raw-target)).
+_Avoid_: close (for this snapshot)
 
-**Heartbeat**: the record a job writes on a clean exit, which the health monitor checks ([health monitor](../operations/health-monitor.md#heartbeats)).
+### Retail EV
+
+The expected value of a bet at a retail price against the close: the close's fair probability times the decimal price, minus 1. It scores every candidate in a league with a close ([retail-EV target](../modelling/clv-target.md#the-retail-ev-target)).
+_Avoid_: CLV, closing line value, EV at the price taken
+
+### Look-ahead bias
+
+Using data stamped after the decision time it is meant to inform ([look-ahead bias](../modelling/look-ahead-bias.md)).
+
+## Candidates
+
+### Idea
+
+A proposed way to profit, held as a GitHub issue labelled `candidate` until it is registered or killed ([take an idea to a verdict](../evaluation/howto-take-an-idea-to-a-verdict.md)).
+
+### Candidate
+
+A registered way of deciding bets, judged by its forward test. It lists the leagues it bets in, and a candidate listing several is judged on one series of bets ([goal and strategy](goal-and-strategy.md#candidates)).
+_Avoid_: strategy, system
+
+### Rule candidate
+
+A candidate whose bets a rule decides ([candidate registry](../evaluation/candidate-registry.md)).
+_Avoid_: mechanical candidate
+
+### Agent candidate
+
+A candidate whose bets an LLM betting agent decides, defined by its prompts and model ([betting agent](../agent/betting-agent.md)).
+
+### Rule
+
+The function a rule candidate runs on the market state at each decision time, returning the bets to place. A model rule is a rule that wraps a trained model ([candidate rules](../evaluation/candidate-rules.md#rule-interface)).
+_Avoid_: rule family, family (for the module holding a rule; say rule module)
+
+### Version
+
+A candidate's whole-number version. Anything that could change its bets is a new version: its rule, parameters, model, prompts, leagues or book set, or a fix to prices its earlier decisions saw ([candidate registry](../evaluation/candidate-registry.md)).
+
+### Book set
+
+A named set of retail books a rule candidate prices from. The `uk_retail` set is every retail book ([candidate rules](../evaluation/candidate-rules.md#book-set)).
+_Avoid_: roster, UK retail books (for a set)
+
+### Decision time
+
+The instant a bet or prediction is taken to be made. A candidate's are fixed offsets before kick-off ([candidate rules](../evaluation/candidate-rules.md#decision-times)).
+_Avoid_: as-of instant
+
+### Market state
+
+Everything known about one event's market at a decision time: the retail prices and the sharp prices a rule reads ([candidate rules](../evaluation/candidate-rules.md#market-state)).
+
+### Decision
+
+One rule candidate version's record at one event and decision time, with the inputs it read and the bets it placed, including a decision that placed none ([run-candidates job](../evaluation/run-candidates-job.md#the-decision-record)).
+
+### Bet
+
+A bet placed by a candidate or a betting agent, recorded without real money ([bets](../agent/paper-trading.md)).
+_Avoid_: paper trade, paper bet, trade
+
+### Cell
+
+One combination of parameter values from an idea's pre-registered grid ([cell selection](../evaluation/cell-selection.md)).
+
+### Backtest
+
+A replay of a rule over stored data, scored the way a forward test is ([candidate backtest](../evaluation/candidate-backtest.md)).
+_Avoid_: simulation
+
+### Development data
+
+Stored history that ideas are generated and killed on. It never promotes a candidate ([goal and strategy](goal-and-strategy.md#how-a-candidate-is-judged)).
+_Avoid_: dev data, training data (for this set)
+
+### Sealed holdout
+
+Seasons kept out of development data that an idea's selected cell may be backtested on once per version ([candidate backtest](../evaluation/candidate-backtest.md#sealed-holdout)).
+_Avoid_: test set, holdout (alone)
+
+### Forward test
+
+A candidate's live paper betting from its start date at a fixed version, the only evidence that promotes it ([goal and strategy](goal-and-strategy.md#how-a-candidate-is-judged)).
+_Avoid_: live test, trial, paper-trading test
+
+### Checkpoint
+
+A fixed count of a candidate's first bets with a close, the only points at which it is judged ([goal and strategy](goal-and-strategy.md#how-a-candidate-is-judged)).
+
+### Verdict
+
+The judgement at a checkpoint: promote, kill, continue or not yet. The first promote or kill stands ([candidate registry](../evaluation/candidate-registry.md#odds-candidates-report)).
+
+### Family
+
+The versions sharing a candidate's rule and market whose leagues overlap its own. The more of them have decided, the stricter the bar to promote ([goal and strategy](goal-and-strategy.md#how-a-candidate-is-judged)).
 
 ## Betting agent
 
-**Match brief**: the agent's note on one match at one wake-up, written once and never updated ([match briefs](../agent/match-briefs.md)).
+### Brief
 
-**Wake-up**: one agent run; the agent may request when the next one happens ([agent run job](../agent/agent-run-job.md#wake-up-requests)).
+The agent's note on one event at one wake-up, written once and never updated ([match briefs](../agent/match-briefs.md)).
+_Avoid_: match brief
 
-**Edge type**: one of the bases the agent names for a bet ([agent prompts](../agent/agent-prompts.md#edge-types)).
+### Wake-up
 
-**Conviction tier**: the agent's stake level, a share of bankroll ([agent prompts](../agent/agent-prompts.md#conviction-tiers)).
-_Avoid_: tier (alone, which means fetch tier)
+One run of a betting agent. The agent may book its next one ([agent run job](../agent/agent-run-job.md#wake-up-requests)).
+_Avoid_: session, run (for an agent run)

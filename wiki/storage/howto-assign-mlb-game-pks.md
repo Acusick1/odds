@@ -25,8 +25,8 @@ MLB events stored before the live jobs assigned MLB Stats API `gamePk`s hold no 
    ```
 
 2. **Read the summary, then the lines.** Each line starts with its kind, so `grep '^MERGE '` lists the merges.
-   - `MERGE_READ_ONLY` merges move paper trades, match briefs or candidate decisions to the kept event. Check that each kept event is the game the trade or brief was about.
-   - `REFUSED reason=paper_trade_clash` games would delete a candidate decision or paper trade, so they are left as they are; settle them in step 5.
+   - `MERGE_READ_ONLY` merges move bets, briefs or candidate decisions to the kept event. Check that each kept event is the event the bet or brief was about.
+   - `REFUSED reason=paper_trade_clash` games would delete a candidate decision or bet, so they are left as they are; settle them in step 5.
    - `moved_from=` shows the kept event's old and new start. A postponed slot can move by weeks, and all its snapshots' tiers follow the new start. `start=tbd` marks a game replayed with a TBD start: a kept event on the played date keeps its listed time, and a postponed slot's event moves to MLB's placeholder start, a few minutes after game 1, on the played date.
    - `score=` and `settled=` show where the kept event's result comes from. `settled=mlb` settles it from MLB's Final score; any `conflict` is left as stored for `repair-scores` (step 6).
    - `UNRESOLVED` events are left as they are; settle them in step 5.
@@ -41,7 +41,7 @@ MLB events stored before the live jobs assigned MLB Stats API `gamePk`s hold no 
 
 4. **Run it again.** The second dry run assigns nothing new; it lists only the events left unresolved, refused or failed.
 5. **Settle each unresolved or refused event by hand.** Find its game on the MLB schedule, then dry-run before adding `--apply`:
-   - it is a game: `odds events set-game-pk EVENT_ID GAME_PK` (`EVENT_ID` is the event's integer id, as the plan lists it). Add `--merge` when another event already holds that `gamePk`, to merge into it. A merge that would delete a candidate decision or trade is refused here too; resolve the clashing decision first.
+   - it is a game: `odds events set-game-pk EVENT_ID GAME_PK` (`EVENT_ID` is the event's integer id, as the plan lists it). Add `--merge` when another event already holds that `gamePk`, to merge into it. A merge that would delete a candidate decision or bet is refused here too; resolve the clashing decision first.
    - it has no game: `odds events mark-unassignable EVENT_ID --reason "..."`, so the `missing_game_pk` warning leaves it out.
 6. **Re-check the scores.** Merging moves results between events, so run `odds events repair-scores` ([results jobs](../collection/results-jobs.md#verifying-mlb-scores)).
 

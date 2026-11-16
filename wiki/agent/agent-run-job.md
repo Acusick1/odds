@@ -29,14 +29,14 @@ The runtime of the [betting agent](betting-agent.md) lives in `odds_lambda.jobs.
 
 ## Runtime
 
-`odds_lambda.jobs.agent_run.run_claude_agent` spawns `claude -p "/agent {sport}"` with `--model claude-sonnet-4-6` (hard-coded in the function, #414), `--output-format stream-json --verbose` and `--dangerously-skip-permissions`, working directory the repo root, a 15-minute timeout (`odds_lambda.jobs.agent_run.AGENT_TIMEOUT_SECONDS`). A cancelled run (the scheduler's own 20-minute limit, or shutdown) kills the subprocess before the cancellation propagates. `/agent` is the project skill `.claude/skills/agent/SKILL.md`, the one `.claude/` path `.gitignore` does not exclude. The function passes the full sport key; the skill maps `soccer_epl` (or `epl`) to `packages/odds-mcp/agents/epl/` and `baseball_mlb` (or `mlb`) to `packages/odds-mcp/agents/mlb/`, has the agent read that directory's `base.md` after `packages/odds-mcp/agents/common.md`, and stops for any other sport key; with no sport it runs EPL. A further `review` argument summarises recent briefs and paper trades without research or bets. The subprocess:
+`odds_lambda.jobs.agent_run.run_claude_agent` spawns `claude -p "/agent {sport}"` with `--model claude-sonnet-4-6` (hard-coded in the function, #414), `--output-format stream-json --verbose` and `--dangerously-skip-permissions`, working directory the repo root, a 15-minute timeout (`odds_lambda.jobs.agent_run.AGENT_TIMEOUT_SECONDS`). A cancelled run (the scheduler's own 20-minute limit, or shutdown) kills the subprocess before the cancellation propagates. `/agent` is the project skill `.claude/skills/agent/SKILL.md`, the one `.claude/` path `.gitignore` does not exclude. The function passes the full sport key; the skill maps `soccer_epl` (or `epl`) to `packages/odds-mcp/agents/epl/` and `baseball_mlb` (or `mlb`) to `packages/odds-mcp/agents/mlb/`, has the agent read that directory's `base.md` after `packages/odds-mcp/agents/common.md`, and stops for any other sport key; with no sport it runs EPL. A further `review` argument summarises recent briefs and bets without research or bets. The subprocess:
 
 - reaches the pipeline through the `odds` MCP server registered in `.mcp.json` (`uv run fastmcp run odds_mcp.server`), see [odds-mcp server](mcp-server.md);
 - researches with web search and Playwright;
 - runs under `AGENT_DATABASE_URL` when set, otherwise inherits the parent DSN with a logged warning (`odds_lambda.jobs.agent_run._build_agent_subprocess_env`), see [database role](#database-role);
-- writes a JSONL trace per run ([run traces](agent-run-traces.md)).
+- writes a JSONL trace per wake-up ([run traces](agent-run-traces.md)).
 
-Two entry paths: the scheduled `agent-run` job, and `odds agent run --sport S` for one wake-up with no scheduling side effects. the `agent-run` record in `odds_core.job_specs.JOB_SPECS` has `agent_trades=True` because it places paper bets (as does [`run-candidates`](../evaluation/run-candidates-job.md), which has its own `--include-candidates`), so `odds scheduler smoke` skips it unless `--include-agent` ([local scheduler](../scheduling/local-scheduler.md#cli)).
+Two entry paths: the scheduled `agent-run` job, and `odds agent run --sport S` for one wake-up with no scheduling side effects. the `agent-run` record in `odds_core.job_specs.JOB_SPECS` has `agent_trades=True` because it places bets (as does [`run-candidates`](../evaluation/run-candidates-job.md), which has its own `--include-candidates`), so `odds scheduler smoke` skips it unless `--include-agent` ([local scheduler](../scheduling/local-scheduler.md#cli)).
 
 ## The agent-run job
 
@@ -45,14 +45,14 @@ The job is opt-in and local-only: no EventBridge rule exists for it, and the def
 ### Flow
 
 1. Requires `ctx.sport`; otherwise raises `ValueError`.
-2. `schedule_next(sport)` pre-schedules the next wake-up before any work, so a crash does not break the chain ([self-scheduling](../scheduling/self-scheduling.md)). It calls `odds_lambda.scheduling.decision.decide_forward_resilient` with `odds_lambda.jobs.agent_run.CADENCE`, the sport's overnight window and no leads (so no `run_started`), and uses only `next_execution` (the run gate is ignored: the agent always wakes); kickoffs are the stored events' `commence_time`. Its off-season check-in does not apply the overnight skip ([decision engine](../scheduling/decision-engine.md#forward-decisions)). It raises `ValueError` for a sport missing from `odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS` (22:00-06:00 UTC for EPL and the five other football leagues, MLB 05:00-14:00, NBA 07:00-15:00).
+2. `schedule_next(sport)` pre-schedules the next wake-up before any work, so a crash does not break the chain ([self-scheduling](../scheduling/self-scheduling.md)). It calls `odds_lambda.scheduling.decision.decide_forward_resilient` with `odds_lambda.jobs.agent_run.CADENCE`, the sport's overnight window and no leads (so no `run_started`), and uses only `next_execution` (the run gate is ignored: the agent always wakes); kick-offs are the stored events' `commence_time`. Its off-season check-in does not apply the overnight skip ([decision engine](../scheduling/decision-engine.md#forward-decisions)). It raises `ValueError` for a sport missing from `odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS` (22:00-06:00 UTC for EPL and the five other football leagues, MLB 05:00-14:00, NBA 07:00-15:00).
 3. `odds_lambda.jobs.agent_run.run_claude_agent(sport)` runs the subprocess; a non-zero exit is logged, not raised.
 4. `_check_agent_requested_wakeup(sport)` reads and consumes the `agent_wakeups` row; a failure is logged and swallowed.
 5. A requested time in the past is ignored; otherwise `odds_lambda.scheduling.helpers.self_schedule` overrides the pre-scheduled time.
 
 ### Cadence
 
-The wake-up interval is the `agent-run` row of the [cadence table](../scheduling/decision-engine.md#cadence): bands come from [fetch tier](../storage/fetch-tier.md) boundaries via the decision engine, with 12 h when no fixture is within 7 days.
+The wake-up interval is the `agent-run` row of the [cadence table](../scheduling/decision-engine.md#cadence): bands come from [fetch tier](../storage/fetch-tier.md) boundaries via the decision engine, with 12 h when no event is within 7 days.
 
 ## Wake-up requests
 
@@ -71,11 +71,11 @@ If `AGENT_DATABASE_URL` (`odds_core.config.DatabaseConfig.agent_url`) is set, th
 
 ## Run traces
 
-Each run writes its `stream-json` output to a JSONL file under `logs/agent_runs/`, described in [Agent run traces](agent-run-traces.md).
+Each wake-up writes its `stream-json` output to a JSONL file under `logs/agent_runs/`, described in [Agent run traces](agent-run-traces.md).
 
 ## Related
 
 - [The betting agent](betting-agent.md)
 - [Agent prompts](agent-prompts.md)
 - [Agent run traces](agent-run-traces.md)
-- [Match briefs](match-briefs.md) and [paper trading](paper-trading.md), what the agent writes, each row keyed to an event by its integer id
+- [Briefs](match-briefs.md) and [bets](paper-trading.md), what the agent writes, each row keyed to an event by its integer id

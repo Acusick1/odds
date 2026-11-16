@@ -23,7 +23,7 @@ status: stable
 
 # Substitute-close comparison
 
-`scripts.compare_substitute_close` measures whether the Odds API's Betfair Exchange price near kick-off can stand in for a backtest's close where no Betfair close exists ([#730](https://github.com/Acusick1/odds/issues/730)). Its EPL result is the evidence of [ADR-0023](../../docs/adr/0023-odds-api-betfair-substitute-close-for-epl-backtests.md), which makes that price the EPL backtest's substitute close ([replay close](candidate-backtest.md#replay)), chosen by the same function within 10 minutes of kick-off. It reads only: its transaction is `SET TRANSACTION READ ONLY`, and it calls no API. The close it tests against is FDUK's Betfair Exchange closing price, which [scoring](../modelling/clv-target.md#the-retail-ev-target) uses for the football leagues in `odds_core.close.FDUK_CLOSED_LEAGUES`.
+`scripts.compare_substitute_close` measures whether the Odds API's Betfair Exchange price near kick-off can stand in for a backtest's close where no Betfair close exists ([#730](https://github.com/Acusick1/odds/issues/730)). Its EPL result is the evidence of [ADR-0023](../../docs/adr/0023-odds-api-betfair-substitute-close-for-epl-backtests.md), which makes that price the EPL backtest's substitute close ([replay close](candidate-backtest.md#replay)), chosen by the same function within 10 minutes of kick-off. It reads only: its transaction is `SET TRANSACTION READ ONLY`, and it calls no API. The close it tests against is FDUK's Betfair Exchange close, which [scoring](../modelling/clv-target.md#the-retail-ev-target) uses for the football leagues in `odds_core.close.FDUK_CLOSED_LEAGUES`.
 
 ## Usage
 
@@ -35,12 +35,12 @@ uv run python scripts/compare_substitute_close.py [--sport soccer_epl] [--from 2
 
 ## What is compared
 
-`scripts.compare_substitute_close.load_comparisons` takes each `FINAL` event of the sport in the range, then reads its quotes through `odds_core.quotes.quotes`:
+`scripts.compare_substitute_close.load_comparisons` takes each `FINAL` event of the sport in the range, then reads its prices through `odds_core.quotes.quotes`:
 
 - **FDUK close:** Betfair Exchange back prices of the source and time basis in `odds_core.close.FDUK_CLOSE`, picked by `odds_core.close.event_close`.
 - **Odds API price:** `betfair_exchange` back prices of source `odds_api` and time basis `source_stamped`, the historical backfill's ([stored shape](../collection/odds-api-backfill.md#executing-calls)). A live fetch (`observed`) is not read. With `--max-age-minutes`, only snapshots stamped at most that long before kick-off are read.
 
-`scripts.compare_substitute_close.compare_event` takes, for each event, the price `odds_core.close.substitute_close` picks with the script's `--max-age-minutes` (no age cap without it): the latest Odds API historical snapshot stamped at or before kick-off that is complete and whose back overround is at most `odds_core.exchange_price.MAX_EXCHANGE_OVERROUND`; a later, wider snapshot is skipped, as the close skips one ([ADR-0014](../../docs/adr/0014-ignore-wide-exchange-prices.md)). The FDUK close has the same overround cap. Both prices are devigged proportionally ([devigging](../foundations/devigging.md)), and `dp = p_oddsapi - p_fduk` in percentage points is one row per outcome and compared match.
+`scripts.compare_substitute_close.compare_event` takes, for each event, the price `odds_core.close.substitute_close` picks with the script's `--max-age-minutes` (no age cap without it): the latest Odds API historical snapshot stamped at or before kick-off that is complete and whose back vig is at most `odds_core.exchange_price.MAX_EXCHANGE_OVERROUND`; a later, wider snapshot is skipped, as the close skips one ([ADR-0014](../../docs/adr/0014-ignore-wide-exchange-prices.md)). The FDUK close has the same vig cap. Both prices are devigged proportionally ([devigging](../foundations/devigging.md)), and `dp = p_oddsapi - p_fduk` in percentage points is one row per outcome and compared event.
 
 ## Pass thresholds
 
@@ -53,8 +53,8 @@ Pre-set on #730, as constants in the script:
 ## Report
 
 - The overall verdict, then n, mean and sd in pp with a verdict for each outcome and each band.
-- Matches: final events in the range, those with a usable FDUK close, those compared, and the missing counts: no FDUK close stored, an FDUK close over the overround cap, no Odds API snapshot in the window, and Odds API snapshots that are all incomplete or wide.
-- The share of matches with a usable FDUK close whose Odds API price is within 5, 10, 30 and 60 minutes before kick-off, with the counts. The share is over every such match, so a match with no usable price counts against it.
+- Events: final events in the range, those with a usable FDUK close, those compared, and the missing counts: no FDUK close stored, an FDUK close over the vig cap, no Odds API snapshot in the window, and Odds API snapshots that are all incomplete or wide.
+- The share of events with a usable FDUK close whose Odds API price is within 5, 10, 30 and 60 minutes before kick-off, with the counts. The share is over every such event, so an event with no usable price counts against it.
 - The age of the prices used (minutes before kick-off): n, minimum, 25th, 50th, 75th and 90th percentiles, maximum and mean.
 
 Without `--max-age-minutes` the latest snapshot may be days old, so read the age distribution with the verdict; freshness alone does not make a valid substitute ([#730](https://github.com/Acusick1/odds/issues/730)).

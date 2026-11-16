@@ -27,7 +27,7 @@ status: stable
 
 # odds-mcp server
 
-`odds_mcp.server` defines `mcp = FastMCP("odds-mcp", ...)`, the tool interface the [betting agent](betting-agent.md) uses. Tools are thin wrappers around `odds_lambda.storage.readers.OddsReader` event queries, price reads through `odds_core.quotes.quotes` ([market tools](mcp-market-tools.md)), job code and the paper-trading service (the agent's bets carry a bankroll; flat-stake candidate trades come from the [run-candidates job](../evaluation/run-candidates-job.md)); they return JSON-safe dicts, open their own sessions with `odds_core.database.async_session_maker()` (on the database the current settings name) and report many failures as `{"error": ...}` dicts. All times are UTC. The `@mcp.tool()` definitions are the source of truth for the toolset (`odds_mcp.server.mcp`).
+`odds_mcp.server` defines `mcp = FastMCP("odds-mcp", ...)`, the tool interface the [betting agent](betting-agent.md) uses. Tools are thin wrappers around `odds_lambda.storage.readers.OddsReader` event queries, price reads through `odds_core.quotes.quotes` ([market tools](mcp-market-tools.md)), job code and the bet service (the agent's bets carry a bankroll; flat-stake candidate bets come from the [run-candidates job](../evaluation/run-candidates-job.md)); they return JSON-safe dicts, open their own sessions with `odds_core.database.async_session_maker()` (on the database the current settings name) and report many failures as `{"error": ...}` dicts. All times are UTC. The `@mcp.tool()` definitions are the source of truth for the toolset (`odds_mcp.server.mcp`).
 
 ## Launch
 
@@ -42,7 +42,7 @@ status: stable
 | `odds_mcp.server.get_upcoming_fixtures`, `odds_mcp.server.get_current_odds`, `odds_mcp.server.get_odds_history` | [market tools](mcp-market-tools.md) (`odds_mcp.server.get_odds_history` returns only snapshots of the requested market) |
 | `odds_mcp.server.find_retail_edges` (sharp price matched on outcome and line) | [market tools](mcp-market-tools.md#retail-edges) |
 | `odds_mcp.server.save_match_brief`, `odds_mcp.server.get_match_brief`, `odds_mcp.server.get_slate_briefs` | [briefs](match-briefs.md) |
-| `odds_mcp.server.paper_bet` (decimal price, optional candidate, sharp reading at placement), `odds_mcp.server.get_portfolio` (bankroll-sized portfolio and open trades, each trade with its selection and line, with candidate summaries, each with its family size k and promote interval, or the registry's error), `odds_mcp.server.settle_bets` | [paper trading](paper-trading.md) |
+| `odds_mcp.server.paper_bet` (decimal price, optional candidate, sharp reading at placement), `odds_mcp.server.get_portfolio` (bankroll-sized portfolio and open bets, each bet with its selection and line, with candidate summaries, each with its family size k and promote interval, or the registry's error), `odds_mcp.server.settle_bets` | [bets](paper-trading.md) |
 | `odds_mcp.server.refresh_scrape`, `odds_mcp.server.get_scrape_status`, `odds_mcp.server.get_scheduled_jobs`, `odds_mcp.server.schedule_next_wakeup` | [below](#scrape-and-scheduling-tools) |
 | `odds_mcp.tools.epl.get_team_context` (EPL), `odds_mcp.tools.mlb.get_probable_pitchers` (MLB) | [sport context tools](mcp-sport-context-tools.md) |
 
@@ -54,7 +54,7 @@ status: stable
 
 ## Shared vocabulary
 
-Every `event_id` argument is the integer `events.id`. `MarketKey = Literal["h2h", "1x2", "totals", "spreads"]` types the market argument; `league` and `sport` arguments take a `SportKey` ([sport and market keys](../collection/sport-and-market-keys.md#market-key-dialects)). The feed market keys that `odds_mcp.server.refresh_scrape` takes (`1x2`, `over_under_2_5`, `home_away`, `totals_ladder`, `spreads_ladder`; a ladder stores a game's main line and its neighbours) are a different vocabulary from the stored `MarketKey`. `odds_mcp.server._coerce_bookmaker_list` accepts a JSON-array string or comma-separated string for bookmaker lists because Claude Code's MCP client stringifies array parameters (anthropics/claude-code#22394, per the code comment).
+Every `event_id` argument is the integer `events.id`. `MarketKey = Literal["h2h", "1x2", "totals", "spreads"]` types the market argument; `league` and `sport` arguments take a `SportKey` ([sport and market keys](../collection/sport-and-market-keys.md#market-key-dialects)). The feed market keys that `odds_mcp.server.refresh_scrape` takes (`1x2`, `over_under_2_5`, `home_away`, `totals_ladder`, `spreads_ladder`; a ladder stores an event's main line and its neighbours) are a different vocabulary from the stored `MarketKey`. `odds_mcp.server._coerce_bookmaker_list` accepts a JSON-array string or comma-separated string for book lists because Claude Code's MCP client stringifies array parameters (anthropics/claude-code#22394, per the code comment).
 
 ## Dependencies
 

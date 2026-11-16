@@ -20,7 +20,7 @@ status: stable
 
 # Odds snapshots table
 
-`odds_core.models.OddsSnapshot` (table `odds_snapshots`) holds one source's prices for one market of an [event](events.md) at one time. Its prices are rows of the `prices` table, and the envelope they were read from is archived in `snapshot_payloads` ([Prices and snapshot payloads tables](price-tables.md)). Why odds are stored this way is on [How odds are stored](odds-storage-model.md). Every writer stores snapshots through `odds_lambda.storage.shaped_snapshots.store_shaped_snapshot` ([Writing price rows](price-tables.md#writing-price-rows)).
+`odds_core.models.OddsSnapshot` (table `odds_snapshots`) holds the [snapshots](../foundations/glossary.md#snapshot) of each [event](events.md). A snapshot's prices are rows of the `prices` table, and the envelope they were read from is archived in `snapshot_payloads` ([Prices and snapshot payloads tables](price-tables.md)). Why odds are stored this way is on [How odds are stored](odds-storage-model.md). Every writer stores snapshots through `odds_lambda.storage.shaped_snapshots.store_shaped_snapshot` ([Writing price rows](price-tables.md#writing-price-rows)).
 
 ## odds_snapshots
 
@@ -29,10 +29,10 @@ status: stable
 | `id` | integer key |
 | `event_id` | integer FK `events.id` |
 | `snapshot_time` | when the prices held, by `time_basis` |
-| `created_at` | when the row was stored; [as-of readers](price-tables.md#reading-quotes) read only rows stored by their `known_at` |
-| `source` | the provider (`odds_core.vocabulary.PRICE_SOURCES`) |
+| `created_at` | when the row was stored; [as-of readers](price-tables.md#reading-prices) read only rows stored by their `known_at` |
+| `source` | the source (`odds_core.vocabulary.PRICE_SOURCES`) |
 | `market` | `odds_core.vocabulary.Market`; NULL only for a snapshot whose envelope quoted no market |
-| `time_basis` | what `snapshot_time` means (`odds_core.vocabulary.TimeBasis`): `observed` (the fetch time), `source_stamped` (the source's own stamp), `upper_bound` (taken at or before it) or `close` (the closing price) |
+| `time_basis` | what `snapshot_time` means (`odds_core.vocabulary.TimeBasis`): `observed` (the fetch time), `source_stamped` (the source's own stamp), `upper_bound` (taken at or before it) or `close` (a closing snapshot) |
 | `in_play`, `market_status`, `total_matched`, `market_start_time` | the exchange market's state (Betfair only, `odds_core.vocabulary.MarketStatus` a closed set) |
 | `payload_id` | FK `snapshot_payloads.id`, the archived envelope ([snapshot_payloads](price-tables.md#snapshot_payloads)) |
 

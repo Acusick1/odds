@@ -16,15 +16,15 @@ These pages cover the training targets (the `retail_ev` target and the `raw` lin
 - [Feature pipeline](feature-pipeline.md) — The five layers of odds_analytics.feature_groups, samplers, adapters, orchestrator, NaN-fill and variance policy.
 - [Hyperparameter tuner (Optuna)](hyperparameter-tuner.md) — OptunaTuner, the objective, search-space schema, feature selection and CLI options, with the example search spaces cited by file.
 - [Line-movement model (XGBoost)](line-movement-models.md) — The XGBoost regressor wrapper behind odds train, covering fitting, base margin, config-driven training, and saving and loading.
-- [Target functions](clv-target-functions.md) — The retail-EV row builder, its features, weights and keep-bar metrics, the raw delta function, the `_compute_target` dispatch, closing-snapshot selection, and the target fields of FeatureConfig.
+- [Target functions](clv-target-functions.md) — The retail-EV row builder, its features, weights and keep-bar metrics, the raw delta function, the `_compute_target` dispatch, last-snapshot selection, and the target fields of FeatureConfig.
 - [Training config](training-config.md) — The MLTrainingConfig schema, every section's fields and defaults, data-source selection, and values the schema accepts that cannot train.
 - [Training pipeline](training-pipeline.md) — What odds train run, tune, validate and list-configs do step by step, the splits, verification artifacts and MLflow tracking.
 
 ### Explanation
 
-- [CLV and the training target](clv-target.md) — What CLV means here, the retail-EV target against the Betfair Exchange close and its baseline and weights, the raw close-minus-snapshot delta, and how sampling changes a target.
-- [Decision time and look-ahead bias](look-ahead-bias.md) — The as-of instant for bets and training rows, the no-future-data rule per layer, and where it breaks.
-- [Sharp references and retail-sharp divergence](sharp-benchmark.md) — Which sharp price each use reads (the scoring close, the retail-EV model, the mechanical rules, the tabular features and the agent tools), the priority semantics of the Pinnacle-first lists, the divergence feature and screener, and how the code copies differ.
+- [Decision time and look-ahead bias](look-ahead-bias.md) — Decision time for bets and training rows, the no-future-data rule per layer, and where it breaks.
+- [Sharp references and retail-sharp divergence](sharp-benchmark.md) — Which sharp price each use reads (the scoring close, the retail-EV model, the rules, the tabular features and the agent tools), the priority semantics of the Pinnacle-first lists, the divergence feature and screener, and how the code copies differ.
+- [Training targets](clv-target.md) — The retail-EV target against the Betfair Exchange close and its baseline and weights, the raw last-snapshot-minus-snapshot delta, and how sampling changes a target.
 
 ### How-to guides
 

@@ -43,7 +43,7 @@ Spend cannot be verified from the repo; check it with `aws ce get-cost-and-usage
 
 ## Secrets
 
-API keys come from environment variables and Terraform variables (`odds_api_key`, `odds_api_keys`, `database_url` in `deployment/aws/terraform/variables.tf`), passed to the functions as environment variables in `deployment/aws/terraform/lambda.tf`; each sport spends the key at its index ([keys](../collection/odds-api-client.md#retry-and-keys)).
+API keys come from environment variables and Terraform variables (`odds_api_key`, `odds_api_keys`, `database_url` in `deployment/aws/terraform/variables.tf`), passed to the functions as environment variables in `deployment/aws/terraform/lambda.tf`; each league spends the key at its index ([keys](../collection/odds-api-client.md#retry-and-keys)).
 
 ## Related
 

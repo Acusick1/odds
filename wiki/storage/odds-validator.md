@@ -23,8 +23,8 @@ status: stable
 
 `odds_lambda.storage.validators.OddsValidator.validate_odds_snapshot(data, event_id)` validates one event's envelope (`event_id`, the event's integer id, only labels the log) and returns `(is_valid, warnings)`:
 
-- No bookmakers: returns invalid immediately.
-- Bookmaker `last_update` in the future or unparseable.
+- No books: returns invalid immediately.
+- Book `last_update` in the future or unparseable.
 - Markets with no outcomes.
 - Each outcome price, read as a decimal through `odds_core.odds_math.outcome_price_decimal`: missing or unparseable is an error; a price that fails `odds_core.odds_math.is_valid_decimal_price` (finite and above 1.0, with no upper bound, since Betfair Exchange's price ladder runs to 1000 and a lay price that high on an outsider is a thin book, #684) is an error via `odds_lambda.storage.validators.OddsValidator.validate_odds_value`. A price row applies the same predicate ([Writing price rows](price-tables.md#reading-an-envelope)). The OddsPortal ingest skips prices at or below 1.0 before they reach it.
 - For two-outcome `h2h`/`spreads`/`totals` markets, `odds_lambda.storage.validators.OddsValidator.validate_vig`: vig (from decimal implied probabilities) above `MAX_VIG_PERCENT` (15), negative, or below `MIN_VIG_PERCENT` (2). The floor is skipped for `odds_core.bookmakers.ZERO_MARGIN_BOOKMAKERS`: the exchanges (betfair_exchange, betdaq, smarkets, matchbook) in `odds_core.bookmakers.EXCHANGE_BOOKMAKERS` and `polymarket`. Vig warnings do not affect `is_valid`.
@@ -37,7 +37,7 @@ If an envelope has any warnings, `odds_lambda.storage.writers.OddsWriter.store_e
 
 ## Configuration
 
-`odds_core.config.DataQualityConfig` has one env setting, `ENABLE_VALIDATION` (default true) ([Configuration](../foundations/configuration.md)). `odds_lambda.ingestion.OddsIngestionService.ingest_sport` is the only reader of `enable_validation`, as the default for its `validate` argument, which it passes to `odds_lambda.storage.writers.OddsWriter.store_envelope` for every event it stores (a game resolved through the event resolver; a dropped game is logged and stores nothing). Validation never blocks a write, so invalid odds are always stored.
+`odds_core.config.DataQualityConfig` has one env setting, `ENABLE_VALIDATION` (default true) ([Configuration](../foundations/configuration.md)). `odds_lambda.ingestion.OddsIngestionService.ingest_sport` is the only reader of `enable_validation`, as the default for its `validate` argument, which it passes to `odds_lambda.storage.writers.OddsWriter.store_envelope` for every event it stores (an event resolved through the event resolver; a dropped game is logged and stores nothing). Validation never blocks a write, so invalid odds are always stored.
 
 ## Related
 
