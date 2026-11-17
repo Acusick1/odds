@@ -48,6 +48,7 @@
           Plot.ruleX(data.checkpoints, { stroke: muted, strokeDasharray: "4 3" }),
           Plot.text(data.checkpoints, { x: (n) => n, y: data.axis, text: (n) => `${n}`, dy: 8, textAnchor: "end", dx: -3 }),
           Plot.line(data.running, { x: (d) => d[0], y: (d) => d[1], stroke: line, strokeWidth: 2, clip: true }),
+          ...(data.estimate ? [Plot.line(data.estimate, { x: (d) => d[0], y: (d) => d[1], stroke: colour("--chart-2"), strokeWidth: 2, strokeDasharray: "5 3", clip: true })] : []),
           ...intervals(data.intervals.filter((d) => !besideCheckpoint(d)), 0),
           ...intervals(data.intervals.filter(besideCheckpoint), -10),
         ],

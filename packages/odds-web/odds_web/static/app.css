@@ -45,6 +45,7 @@ svg text { font-family: var(--font-mono); font-size: 10px; fill: var(--muted-for
 svg .zero { stroke: var(--muted-foreground); stroke-dasharray: 2 3; }
 svg .ci { stroke: var(--foreground); stroke-width: 2; }
 svg .bookset-registered { stroke: var(--chart-1); stroke-width: 2.5; }
+svg .estimate { stroke: var(--chart-2); stroke-width: 2; stroke-dasharray: 5 3; }
 svg .bookset-other { stroke: var(--chart-2); stroke-width: 1.5; stroke-dasharray: 5 3; }
 svg .promote { stroke: var(--foreground); stroke-width: 6; opacity: .25; stroke-linecap: round; }
 svg circle { stroke: var(--background); stroke-width: 2; }

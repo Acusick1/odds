@@ -12,3 +12,15 @@
 {% macro quota_days(projection) -%}
 {%- if projection is none %}unknown{% elif projection.days_left is none %}no spend{% else %}~{{ projection.days_left | round(0) | int }}d left{% endif -%}
 {%- endmacro %}
+
+{% macro estimate_gap_tile(gap, series, fallback) -%}
+<div class="tile"><div class="k">Estimate − close EV</div>
+  {% if gap %}
+  <div class="v num">{{ gap.mean_gap | percent }}</div>
+  <div class="sub num">{{ (gap.level * 100) | round | int }}% CI {{ gap.interval[0] | percent }} … {{ gap.interval[1] | percent }} · n={{ gap.n }}</div>
+  {% else %}<div class="v sub">{{ series.estimate_omitted if series else fallback }}</div>{% endif %}</div>
+{%- endmacro %}
+
+{% macro estimate_legend(series) -%}
+{% if series.estimate_percent is not none %}<span><svg width="26" height="10"><line class="estimate" x1="2" y1="5" x2="24" y2="5"/></svg>{{ series.estimate_label }}</span>{% endif %}
+{%- endmacro %}

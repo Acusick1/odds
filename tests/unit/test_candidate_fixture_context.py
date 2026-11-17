@@ -85,7 +85,13 @@ class TestRuleReceivesContext:
             snapshot_time=KICKOFF - timedelta(hours=1, minutes=2),
             fixture=context,
         )
-        spec = RuleSpec(rule, object, frozenset({SharpInput.EXCHANGE}), fixture_inputs=BOTH)  # type: ignore[arg-type]
+        spec = RuleSpec(
+            rule,
+            object,  # type: ignore[arg-type]
+            frozenset({SharpInput.EXCHANGE}),
+            fixture_inputs=BOTH,
+            estimate_basis=None,
+        )
 
         _, intents = apply_rule(spec, object(), state)  # type: ignore[arg-type]
 

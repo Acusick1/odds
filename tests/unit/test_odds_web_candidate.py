@@ -24,9 +24,10 @@ from odds_analytics.candidate_report import (
 from odds_core.bookmakers import BookSet
 from odds_core.candidates import CandidateStatus
 from odds_core.paper_trade_models import TradeResult
+from odds_lambda.candidate_rules import EstimateBasis
 from odds_web.app import create_app
 from odds_web.cache import SingleFlightCache
-from odds_web.candidate_page import AXIS_FROM_BETS, build_series
+from odds_web.candidate_page import AXIS_FROM_BETS, ESTIMATE_OMITTED, build_series
 from odds_web.db import build_web_database
 from odds_web.decisions import Decision, DecisionDay, DecisionHistory, DecisionKind
 from odds_web.ledger import LedgerPage, LedgerRow
@@ -411,7 +412,7 @@ class TestSeries:
         bets = [bet(i, 1.0 if i % 2 else -1.0) for i in range(230)]
         summary, running = scored(bets)
 
-        series = build_series(summary, running)
+        series = build_series(summary, running, EstimateBasis.EXCHANGE)
 
         assert [i.n for i in series.intervals] == [100, 200, 230]
         assert [i.at_checkpoint for i in series.intervals] == [True, True, False]
@@ -422,7 +423,7 @@ class TestSeries:
         bets = [bet(i, 1.0 if i % 2 else -1.0) for i in range(200)]
         summary, running = scored(bets)
 
-        series = build_series(summary, running)
+        series = build_series(summary, running, EstimateBasis.EXCHANGE)
 
         assert [i.n for i in series.intervals] == [100, 200]
         assert series.checkpoints == [100, 200, 300]
@@ -431,7 +432,7 @@ class TestSeries:
         bets = [bet(i, 0.5) for i in range(40)]
         summary, running = scored(bets)
 
-        series = build_series(summary, running)
+        series = build_series(summary, running, EstimateBasis.EXCHANGE)
 
         assert [i.n for i in series.intervals] == [40]
         assert series.checkpoints == [100]
@@ -440,7 +441,7 @@ class TestSeries:
         bets = [bet(0, 0.3), bet(1, -0.1), bet(2, 0.5)]
         summary, running = scored(bets)
 
-        series = build_series(summary, running)
+        series = build_series(summary, running, EstimateBasis.EXCHANGE)
 
         assert series.running_ev_percent == pytest.approx([30.0, 10.0, 23.3333], rel=1e-3)
         assert series.expected_units == pytest.approx([0.3, 0.2, 0.7])
@@ -457,7 +458,7 @@ class TestSeries:
         )
         summary, running = scored([*bets, unsettled, bet(9, 0.5)])
 
-        series = build_series(summary, running)
+        series = build_series(summary, running, EstimateBasis.EXCHANGE)
 
         assert len(series.running_ev_percent) == summary.bets_with_close == 2
 
@@ -465,7 +466,7 @@ class TestSeries:
         bets = [bet(0, 0.9)] + [bet(i, 0.01) for i in range(1, AXIS_FROM_BETS + 20)]
         summary, running = scored(bets)
 
-        series = build_series(summary, running)
+        series = build_series(summary, running, EstimateBasis.EXCHANGE)
 
         assert series.running_ev_percent[0] == pytest.approx(90.0)
         assert series.axis_percent < 40
@@ -502,7 +503,7 @@ class TestCurrentBesideACheckpoint:
         assert summary.checkpoint is not None and summary.current is not None
         assert (summary.checkpoint.family_versions, summary.current.family_versions) == (1, 2)
 
-        series = build_series(summary, running)
+        series = build_series(summary, running, EstimateBasis.EXCHANGE)
 
         assert [(i.n, i.at_checkpoint) for i in series.intervals] == [(100, True), (100, False)]
         assert series.intervals[1].promote_percent == (
@@ -606,11 +607,99 @@ class TestBookReplays:
         assert client.get("/fragments/portfolio").text == before
 
 
+class TestEstimateLine:
+    def test_is_the_reports_running_mean_estimate_over_the_series_bets(self) -> None:
+        summary, running = scored([bet(i, 0.1, estimated_ev=0.1 + i / 100) for i in range(3)])
+
+        series = build_series(summary, running, EstimateBasis.EXCHANGE)
+
+        assert summary.estimates is not None
+        assert series.estimate_percent == [v * 100 for v in summary.estimates.mean_estimated_ev]
+        assert series.estimate_percent == pytest.approx([10.0, 10.5, 11.0])
+        assert series.estimate_label == "Estimate (exchange at decision)"
+        assert series.estimate_omitted is None
+        assert series.ev_chart()["estimate"] == [
+            [n, pytest.approx(v)] for n, v in enumerate([10.0, 10.5, 11.0], 1)
+        ]
+
+    def test_the_axis_covers_the_estimate_but_not_its_early_swings(self) -> None:
+        settled = [bet(i, 0.0, estimated_ev=0.3) for i in range(20)]
+        summary, running = scored(settled)
+        assert build_series(summary, running, EstimateBasis.EXCHANGE).axis_percent >= 30
+
+        swing = [bet(0, 0.0, estimated_ev=0.9)] + [
+            bet(i, 0.0, estimated_ev=0.01) for i in range(1, AXIS_FROM_BETS + 20)
+        ]
+        summary, running = scored(swing)
+        assert build_series(summary, running, EstimateBasis.EXCHANGE).axis_percent < 40
+
+    def test_a_bet_without_an_estimate_omits_it(self) -> None:
+        summary, running = scored([bet(0, 0.1, estimated_ev=0.2), bet(1, 0.1), bet(2, 0.1)])
+
+        series = build_series(summary, running, EstimateBasis.EXCHANGE)
+
+        assert series.estimate_percent is None
+        assert series.estimate_omitted == ESTIMATE_OMITTED
+        assert series.ev_chart()["estimate"] is None
+
+    def test_an_unknown_basis_still_draws_it_with_a_generic_label(self) -> None:
+        summary, running = scored([bet(i, 0.1, estimated_ev=0.2) for i in range(3)])
+
+        series = build_series(summary, running, None)
+
+        assert series.estimate_percent is not None and series.estimate_label == "Estimate"
+
+    def test_the_page_draws_it_and_shows_the_gap(
+        self, client: TestClient, data: dict[str, object]
+    ) -> None:
+        summary = seed(data, [bet(i, 0.1, estimated_ev=0.15) for i in range(10)], mechanical())
+        assert summary.estimates is not None
+        gap = summary.estimates.gap
+
+        body = client.get("/c/gap/1").text
+
+        assert "Estimate − close EV" in body
+        assert f"{gap.mean_gap * 100:+.1f}%" in body and "n=10" in body
+        assert "Estimate (exchange at decision)" in body
+        assert json.loads(chart_series(body, "ev"))["estimate"] is not None
+
+    def test_an_earlier_version_takes_its_names_basis(
+        self, client: TestClient, data: dict[str, object]
+    ) -> None:
+        current = mechanical().model_copy(update={"version": 2})
+        seed(data, [bet(i, 0.1, estimated_ev=0.15) for i in range(3)], current)
+
+        body = client.get("/c/gap/1").text
+
+        assert "Estimate (exchange at decision)" in body
+
+    def test_a_name_the_registry_no_longer_holds_draws_a_generic_estimate(
+        self, client: TestClient, data: dict[str, object]
+    ) -> None:
+        seed(data, [bet(i, 0.1, estimated_ev=0.15, name="gone") for i in range(3)], mechanical())
+
+        body = client.get("/c/gone/1").text
+
+        assert ">Estimate</span>" in body
+        assert json.loads(chart_series(body, "ev"))["estimate"] is not None
+
+    def test_the_page_says_why_there_is_none(
+        self, client: TestClient, data: dict[str, object]
+    ) -> None:
+        seed(data, [bet(i, 0.1) for i in range(3)], mechanical())
+
+        body = client.get("/c/gap/1").text
+
+        assert "Estimate − close EV" in body and "Estimate (" not in body
+        assert body.count(ESTIMATE_OMITTED) == 2
+        assert json.loads(chart_series(body, "ev"))["estimate"] is None
+
+
 class TestNoScoringInOddsWeb:
     def test_the_series_is_the_reports_running_score(self) -> None:
         summary, running = scored([bet(0, 0.3), bet(1, -0.1), bet(2, 0.5)])
 
-        series = build_series(summary, running)
+        series = build_series(summary, running, EstimateBasis.EXCHANGE)
 
         assert series.running_ev_percent == [ev * 100 for ev in running.mean_ev]
         assert series.expected_units == list(running.expected)
@@ -622,6 +711,10 @@ class TestNoScoringInOddsWeb:
             "CandidateReport",
             "CandidateSummary",
             "Checkpoint",
+            "EstimateGap",
+            "Estimates",
+            "BOOTSTRAP_SEED",
+            "DEFAULT_BOOTSTRAP_SAMPLES",
             "CheckpointProgress",
             "LeagueBreakdown",
             "RunningScore",
@@ -630,9 +723,11 @@ class TestNoScoringInOddsWeb:
             "checkpoint_progress",
             "checkpoints_through_next",
             "close_probabilities",
+            "estimates_of",
             "expected_value",
             "kill_reason",
-            "stored_running_score",
+            "running_score",
+            "stored_scored_bets",
             "unscored_version",
         }
         imported: set[str] = set()

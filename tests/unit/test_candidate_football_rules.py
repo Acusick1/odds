@@ -82,7 +82,9 @@ class TestFavouritePrice:
         s = state(
             {"bet365": {HOME: 1.8, AWAY: 9.0}, "betway": {HOME: 1.9}}, exchange(0.6, 0.25, 0.15)
         )
-        assert favourite_price(s, self.PARAMS) == [BetIntent(HOME, "betway", 1.9, 1.0)]
+        assert favourite_price(s, self.PARAMS) == [
+            BetIntent(HOME, "betway", 1.9, 1.0, estimated_ev=pytest.approx(0.6 * 1.9 - 1))
+        ]
 
     def test_an_outcome_below_the_minimum_probability_is_not_bet(self) -> None:
         s = state({"bet365": {HOME: 2.5, DRAW: 9.0}}, exchange(0.55, 0.35, 0.1))
@@ -90,14 +92,18 @@ class TestFavouritePrice:
 
     def test_the_minimum_probability_is_inclusive(self) -> None:
         s = state({"bet365": {HOME: 1.9}}, exchange(0.6, 0.25, 0.15))
-        assert favourite_price(s, self.PARAMS) == [BetIntent(HOME, "bet365", 1.9, 1.0)]
+        assert favourite_price(s, self.PARAMS) == [
+            BetIntent(HOME, "bet365", 1.9, 1.0, estimated_ev=pytest.approx(0.6 * 1.9 - 1))
+        ]
 
     def test_a_gap_at_or_below_the_threshold_is_not_bet(self) -> None:
         # 0.8 × 1.25 − 1 is exactly zero.
         s = state({"bet365": {HOME: 1.25}}, exchange(0.8, 0.1, 0.1))
         assert favourite_price(s, self.PARAMS) == []
         below = FavouriteParams(min_probability=0.6, threshold=-0.005, **BASE)
-        assert favourite_price(s, below) == [BetIntent(HOME, "bet365", 1.25, 1.0)]
+        assert favourite_price(s, below) == [
+            BetIntent(HOME, "bet365", 1.25, 1.0, estimated_ev=pytest.approx(0.0))
+        ]
 
     def test_a_longshot_with_a_gap_is_not_bet(self) -> None:
         s = state({"bet365": {HOME: 1.2, AWAY: 20.0}}, exchange(0.6, 0.25, 0.15))
@@ -145,7 +151,9 @@ class TestCrowdedGap:
 
     def test_the_gap_bet_when_enough_kickoffs_are_concurrent(self) -> None:
         s = state({"bet365": {HOME: 2.4}, "betway": {HOME: 2.6}}, self.FAIR, self.crowd(3))
-        assert crowded_gap(s, self.PARAMS) == [BetIntent(HOME, "betway", 2.6, 1.0)]
+        assert crowded_gap(s, self.PARAMS) == [
+            BetIntent(HOME, "betway", 2.6, 1.0, estimated_ev=pytest.approx(0.3))
+        ]
 
     def test_too_few_concurrent_kickoffs_no_bet(self) -> None:
         s = state({"bet365": {HOME: 2.6}}, self.FAIR, self.crowd(2))
@@ -169,13 +177,17 @@ class TestCrowdedGap:
 
     def test_only_the_bet_of_the_highest_ev(self) -> None:
         s = state({"bet365": {HOME: 2.4, DRAW: 5.0, AWAY: 4.4}}, self.FAIR, self.crowd(3))
-        assert crowded_gap(s, self.PARAMS) == [BetIntent(DRAW, "bet365", 5.0, 1.0)]
+        assert crowded_gap(s, self.PARAMS) == [
+            BetIntent(DRAW, "bet365", 5.0, 1.0, estimated_ev=pytest.approx(0.25))
+        ]
 
     def test_an_ev_tie_goes_to_the_outcome_first_in_market_order(self) -> None:
         s = state(
             {"bet365": {HOME: 3.0, DRAW: 3.0, AWAY: 1.0}}, exchange(0.4, 0.4, 0.2), self.crowd(3)
         )
-        assert crowded_gap(s, self.PARAMS) == [BetIntent(HOME, "bet365", 3.0, 1.0)]
+        assert crowded_gap(s, self.PARAMS) == [
+            BetIntent(HOME, "bet365", 3.0, 1.0, estimated_ev=pytest.approx(0.2))
+        ]
 
     def test_an_ev_tie_across_books_goes_to_the_first_book_by_name(self) -> None:
         s = state({"coral": {HOME: 2.6}, "betway": {HOME: 2.6}}, self.FAIR, self.crowd(3))
@@ -200,6 +212,11 @@ class TestLastResultOverreaction:
     def test_the_away_side_qualifies_too(self) -> None:
         s = state({"bet365": {HOME: 2.0, AWAY: 3.5}}, fixture=previous(away=lost_by(4)))
         assert last_result_overreaction(s, self.PARAMS) == [BetIntent(AWAY, "bet365", 3.5, 1.0)]
+
+    def test_a_bet_carries_no_estimate(self) -> None:
+        s = state({"bet365": {HOME: 2.0}}, fixture=previous(home=lost_by(2)))
+        [bet] = last_result_overreaction(s, self.PARAMS)
+        assert bet.estimated_ev is None
 
     def test_a_smaller_loss_does_not_qualify(self) -> None:
         s = state({"bet365": {HOME: 2.0}}, fixture=previous(home=lost_by(1)))
