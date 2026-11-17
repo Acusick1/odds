@@ -3,12 +3,6 @@ type: explanation
 title: Agent data sources and rejected sources
 description: Which sources are collected on a schedule and exposed through MCP versus researched live each wake-up, why lineups come from web search, and why every evaluated source was rejected.
 sources:
-  - odds_lambda.jobs.fetch_oddsportal.CADENCE
-  - odds_lambda.jobs.fetch_betfair_exchange.CADENCE
-  - odds_core.job_specs.JOB_SPECS
-  - odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP
-  - odds_lambda.espn_fixture_fetcher.EspnFixtureFetcher
-  - scripts.ingest_football_data_uk._ingest_one_match
   - scripts.ingest_espn_lineups
   - packages/odds-mcp/agents/epl/base.md
   - packages/odds-mcp/agents/mlb/base.md
@@ -21,20 +15,7 @@ The [betting agent](betting-agent.md) draws on two kinds of source. The split de
 
 ## Scheduled collection
 
-Collected by jobs or ingestion scripts into the database and available through [MCP tools](mcp-server.md). Where each job runs is in the [job deployment matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs).
-
-| Source | Provides | Collection | Page |
-|---|---|---|---|
-| OddsPortal | UK multi-book odds (`odds_lambda.oddsportal_common.BOOKMAKER_KEY_MAP`), upcoming and closing | Self-scheduling by kick-off proximity, plus a run 5 min before each rule candidate's decision time, dormant with no event in 28 days (`odds_lambda.jobs.fetch_oddsportal.CADENCE`, `odds_lambda.jobs.fetch_oddsportal.SCRAPE_LEAD`) | [OddsPortal](../collection/oddsportal-scraper.md) |
-| Betfair Exchange | Best back/lay Match Odds, the sharp reference | Self-scheduling by kick-off proximity, plus a run 5 min before each kick-off (taken late up to kick-off), dormant with no event in 28 days (`odds_lambda.jobs.fetch_betfair_exchange.CADENCE`, `odds_lambda.jobs.fetch_betfair_exchange.CLOSE_LEAD`) | [Betfair](../collection/betfair-exchange.md) |
-| The Odds API | US book odds | Self-scheduling by fetch tier, EPL and NBA (its `odds_core.job_specs.JOB_SPECS` `sports` allowlist; the NBA injury-report job spends none), each league on its own key; 500 units per month per free key, whether one `ODDS_API_KEY` or each of `ODDS_API_KEYS`; each key's plan size is read from the API's `x-requests-used` and `x-requests-remaining` headers, so a paid key needs no setting | [Odds API quota](../collection/odds-api-quota.md) |
-| football-data.co.uk | Historical opening and closing `1x2` odds of a football league, one league per run, from Pinnacle, Betfair Exchange and UK retail books, and the Betfair Exchange close on `totals` line 2.5 (stored as the CSV decimal) | Manual script (`scripts.ingest_football_data_uk._ingest_one_match`; snapshots and price rows with time basis `upper_bound` (opening) or `close`, tiered by that basis, an opening never closing beside its close ([fetch tier](../storage/fetch-tier.md#the-tier-a-snapshot-covers)); also fills missing results on existing events and sets the kick-off of events no better source holds an id on (read in the league's timezone, UK local time by default, stored as UTC, `scripts.ingest_football_data_uk.parse_kickoff`); it issues no id of its own, so it finds an event by sport, teams and kick-off, and skips a row whose event is ambiguous ([event resolver](../storage/event-resolver.md))) | [historical loads](../collection/historical-ingest-scripts.md) |
-| ESPN fixtures | All-competition EPL schedule | Daily job per sport (cron `0 6 * * *` UTC, its entry in `odds_core.job_specs.JOB_SPECS`, which allows EPL, NBA and five other football leagues; [football schedule](../collection/espn-football-schedule.md)) | [EPL context](../collection/epl-context-data.md) |
-| ESPN lineups | Starting XIs | Manual script | [EPL context](../collection/epl-context-data.md) |
-| MLB Stats API | Probable pitchers; MLB results by `gamePk` | Daily jobs (`fetch-mlb-probables`, `fetch-mlb-results`) | [MLB pitchers](../collection/mlb-probable-pitchers.md), [results jobs](../collection/results-jobs.md#fetch-mlb-results) |
-| Polymarket | EPL 1X2 midpoints and best bid and ask as `polymarket` snapshots at 5 min to 1 h spacing | Bootstrapped job, self-scheduling by kick-off proximity (`odds_lambda.jobs.fetch_polymarket_odds.CADENCE`) | [Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md) |
-
-The cadence column summarises code; the `odds_lambda.jobs.fetch_oddsportal.CADENCE` and `odds_core.job_specs.JOB_SPECS` values are authoritative. Every scheduled collector runs on the production host; the ESPN and MLB collectors are daily crons with heartbeat expectations and failing loudly on empty fetches, and every other collector self-schedules ([local scheduler](../scheduling/local-scheduler.md#bootstrap-jobs-and-cron-table)). ESPN is still used in the pipeline for past and upcoming fixtures (`odds_lambda.espn_fixture_fetcher.EspnFixtureFetcher`, [how it requests them](../collection/epl-context-data.md#espn-fixtures); it also [creates the upcoming events of five other football leagues](../collection/espn-football-schedule.md)) and a manual lineup ingestion script exists (`scripts.ingest_espn_lineups`); the lineup rejection below applies to lineup timing for the agent, not to those feeds. The [pipeline-side view](../collection/data-sources.md) of the same feeds lists every book and key.
+Every odds feed, and what each supplies, is on [data sources](../collection/data-sources.md); the agent reads them through the [MCP tools](mcp-server.md). Beside the odds feeds, the agent's tools read ESPN fixtures (the all-competition EPL schedule, [EPL context](../collection/epl-context-data.md)) and the MLB Stats API's probable pitchers ([MLB pitchers](../collection/mlb-probable-pitchers.md)). Every scheduled collector runs on the production host ([job deployment matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). ESPN lineups are loaded only by a manual script (`scripts.ingest_espn_lineups`); the lineup rejection below applies to lineup timing for the agent, not to ESPN fixtures.
 
 ## On-demand research
 
