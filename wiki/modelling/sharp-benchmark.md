@@ -76,7 +76,7 @@ It is the core tabular feature `retail_sharp_diff` ([feature groups](feature-gro
 |---|---|---|
 | Where | `odds_analytics.feature_extraction.TabularFeatureExtractor` | `odds_mcp.server.find_retail_edges`, sharp from `odds_mcp.prices.MarketWindow.sharp` |
 | Retail side | Mean of per-book implied probabilities for the outcome, over configured `retail_bookmakers` | One row per book, every non-sharp book in the window |
-| Sharp side | First book in the list with a price for the requested outcome (`odds_analytics.feature_extraction.select_sharp_quotes`) | Per outcome and line, the newest snapshot with a sharp price, then the first book in priority order within it, so outcomes can resolve to different books, and sharp and retail prices can come from different snapshots |
+| Sharp side | First book in the list with a price for the requested outcome ([priority semantics](#priority-semantics)) | Per outcome and line, newest snapshot first, then book priority ([priority semantics](#priority-semantics)); sharp and retail prices can come from different snapshots |
 | Defaults | `["pinnacle"]`; retail `fanduel`, `draftkings`, `betmgm_us` (`odds_analytics.feature_extraction.DEFAULT_RETAIL_BOOKMAKERS`; canonical keys, so US BetMGM is `betmgm_us`) | `["pinnacle", "betfair_exchange"]`; no retail list |
 | Time | Snapshot at decision time | Newest price per book within a lookback window (default 2 h) |
 

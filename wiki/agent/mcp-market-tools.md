@@ -67,11 +67,11 @@ Computation:
 
 Output: `event`, `snapshot_time` (newest contributing retail snapshot), `sharp_bookmakers` (the input list, not the resolved books), `per_outcome[]`, and `retail_edges[]`: rows with negative divergence only, sorted by divergence ascending, then `z_score` ascending (null last), then book, outcome and point. Each row carries `price` (derived American price), `price_decimal`, `snapshot_time` and `book_age_seconds`. Dispersion statistics mix prices from different snapshots, so weigh `book_age_seconds` when sizing a stake. Empty cases return `message` strings: no snapshots, no `market` odds in the window, or no retail books. The tool depends on `odds-analytics` only for `odds_analytics.utils.per_book_market_holds` ([workspace packages](../foundations/workspace-packages.md)).
 
-Divergence is vig-inclusive on both sides (each side is `1 / price_decimal`), with no devigging ([devigging](../foundations/devigging.md)). A retail book with a larger vig looks worse on every outcome; use `market_hold` to separate vig from divergence. The same holds for the `sharp_prob` and `retail_sharp_diff` model features, and the feature and screener copies of the sharp-price logic differ ([code copies](../modelling/sharp-benchmark.md#code-copies)).
+Divergence is vig-inclusive on both sides, so use `market_hold` to separate vig from it ([retail-sharp divergence](../modelling/sharp-benchmark.md#retail-sharp-divergence)); the feature and screener copies of the sharp-price logic differ ([code copies](../modelling/sharp-benchmark.md#code-copies)).
 
 Sharp prices are keyed by `(outcome, line)` as retail rows are bucketed by `(outcome, point)`, so on `totals` and `spreads` each retail row is compared with the sharp price at its own line, and a line with no sharp price has a null divergence. `odds_mcp.server.save_match_brief` stamps one sharp price per outcome, from the outcome's lowest line (`odds_mcp.prices.SharpLines.by_outcome`), and `odds_mcp.server.paper_bet` records the devigged sharp price of the selection on its line ([sharp fields](paper-trading.md#sharp-fields)).
 
-Under the default hybrid sharp list, outcomes resolve independently, so one outcome's sharp price can be Pinnacle and another's Betfair; read `sharp_snapshot_time` and `sharp_age_seconds` per row.
+Outcomes resolve their sharp price independently ([priority semantics](../modelling/sharp-benchmark.md#priority-semantics)), so read `sharp_snapshot_time` and `sharp_age_seconds` per row.
 
 `required_outcomes` for the vig calculation is the set of outcomes present among retail odds, so an outcome no retail book carries is not required.
 

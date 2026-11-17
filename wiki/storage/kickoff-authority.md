@@ -18,7 +18,8 @@ Every move of an [event](events.md)'s `commence_time` on behalf of a source goes
 | League | Order |
 |---|---|
 | `baseball_mlb` | MLB Stats API (`mlb_stats_api`) |
-| `soccer_epl`, `soccer_efl_champ`, `soccer_spain_la_liga`, `soccer_italy_serie_a`, `soccer_germany_bundesliga`, `soccer_france_ligue_one` | OddsPortal (`oddsportal`), then Odds API (`odds_api`), then football-data.co.uk (`football_data_uk`) |
+| `soccer_epl` | OddsPortal (`oddsportal`), then Odds API (`odds_api`), then football-data.co.uk (`football_data_uk`) |
+| `soccer_efl_champ`, `soccer_spain_la_liga`, `soccer_italy_serie_a`, `soccer_germany_bundesliga`, `soccer_france_ligue_one` | The EPL order, then ESPN (`espn`) last |
 | `basketball_nba` | ESPN (`espn`), then OddsPortal (`oddsportal`), then Odds API (`odds_api`) |
 
 A source outside its league's order never moves an event: Betfair and Polymarket move no EPL or NBA event, ESPN moves no EPL event, and football-data.co.uk moves no NBA event. A source in the order moves an event only when no source ranked above it holds an external id on that event ([external ids](events.md#external-ids)), so before [kick-off](../foundations/glossary.md#kick-off) ESPN moves any NBA event to its start, the Odds API moves an EPL event only while it holds no OddsPortal id and an NBA event only while it holds neither an ESPN nor an OddsPortal id, and football-data.co.uk moves an EPL event only while it holds neither an OddsPortal nor an Odds API id and no other source has a snapshot on it (see [Before and after the stored kick-off](#before-and-after-the-stored-kick-off)).
