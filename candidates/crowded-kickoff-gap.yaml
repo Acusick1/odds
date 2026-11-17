@@ -9,7 +9,7 @@ issue: 840
 start_date: 2026-11-13
 status: active
 rule: crowded_gap
-rule_sha256: 8daf47857abfb5f1847305da6a19fa2223fd548e913fa05bb9d6dddbd3b74eb9
+rule_sha256: 431b939e7585ff5f2171409325eb49aad0fb8f27175043f42aa59359e6289298
 params:
   min_concurrent_kickoffs: 6
   threshold: 0.01
