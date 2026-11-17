@@ -54,7 +54,7 @@ Costs a historical purchase before it is bought, buys it, audits what it stored,
    > [!WARNING]
    > `odds backfill execute` spends paid historical quota on the acquisition key (`ODDS_API_ACQUISITION_KEY_INDEX`, which must be set), whatever the manifest's league, 10 units per region per market per call. Confirm the prompt only when the estimated units fit the key's balance.
 
-   - Add `--max-units N` to cap the units the run may bill. The run's other stops are its [guards](odds-api-backfill.md#executing-calls); [provider gaps](odds-api-backfill.md#provider-gaps) and [off-phase snapshots](odds-api-backfill.md#where-the-returned-snapshot-lies) are stored and recorded, and the run carries on.
+   - Add `--max-units N` to cap the units the run may bill. The run's other stops are its [guards](odds-api-backfill.md#executing-calls); [provider gaps](odds-api-backfill.md#provider-gaps) and [off-phase snapshots](odds-api-backfill.md#where-the-returned-snapshot-lies) are stored, provider gaps are recorded so a rerun skips them, off-phase snapshots are counted, and the run carries on.
    - A guard that stops the run exits non-zero with its reason, and so does a call that fails. Rerun the same command: calls with a stored snapshot for any event they serve, and calls a recorded provider gap covers, are skipped, unless you pass `--no-skip-existing`.
    - A later-snapshot stop means the manifest's grid is wrong: correct its `snapshot_grid` to the returned snapshot's phase before rerunning, since an unchanged rerun either pays for the same call again or carries on with the wrong grid.
    - Add `--pause S` to wait S seconds after each paid call ([pace](odds-api-backfill.md#executing-calls)).
