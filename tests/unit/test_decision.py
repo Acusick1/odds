@@ -27,7 +27,7 @@ NOW = datetime(2026, 6, 2, 12, 0, tzinfo=UTC)
 CADENCE = CadenceConfig(
     closing=0.5,
     pregame=3.0,
-    sharp=12.0,
+    day_before=12.0,
     early=24.0,
     opening=48.0,
     no_game=99.0,
@@ -45,7 +45,7 @@ class TestCadenceConfig:
     def test_interval_per_tier(self) -> None:
         assert CADENCE.interval_for(FetchTier.CLOSING) == 0.5
         assert CADENCE.interval_for(FetchTier.PREGAME) == 3.0
-        assert CADENCE.interval_for(FetchTier.SHARP) == 12.0
+        assert CADENCE.interval_for(FetchTier.DAY_BEFORE) == 12.0
         assert CADENCE.interval_for(FetchTier.EARLY) == 24.0
         assert CADENCE.interval_for(FetchTier.OPENING) == 48.0
 
@@ -120,7 +120,7 @@ class TestDecideForward:
         [
             (1.0, FetchTier.CLOSING, 0.5),
             (8.0, FetchTier.PREGAME, 3.0),
-            (18.0, FetchTier.SHARP, 12.0),
+            (18.0, FetchTier.DAY_BEFORE, 12.0),
             (48.0, FetchTier.EARLY, 24.0),
             (120.0, FetchTier.OPENING, 48.0),
         ],
@@ -148,7 +148,7 @@ class TestDecideForward:
             (0.0, FetchTier.CLOSING, 0.5),  # IN_PLAY is only < 0
             (3.0, FetchTier.CLOSING, 0.5),
             (12.0, FetchTier.PREGAME, 3.0),
-            (24.0, FetchTier.SHARP, 12.0),
+            (24.0, FetchTier.DAY_BEFORE, 12.0),
             (72.0, FetchTier.EARLY, 24.0),
         ],
     )
@@ -283,7 +283,7 @@ class TestLeadRuns:
     LEAD_CADENCE = CadenceConfig(
         closing=0.25,
         pregame=0.5,
-        sharp=2.0,
+        day_before=2.0,
         early=2.0,
         opening=2.0,
         no_game=2.0,

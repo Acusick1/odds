@@ -354,7 +354,7 @@ class QualityMetrics:
         Get tier-based coverage analysis showing snapshot distribution across fetch tiers.
 
         This method dynamically integrates with the FetchTier system to validate that
-        intelligent scheduling is working correctly. For each tier (opening, early, sharp,
+        intelligent scheduling is working correctly. For each tier (opening, early, day_before,
         pregame, closing), it calculates:
         - How many games should have snapshots in that tier
         - How many games actually have snapshots

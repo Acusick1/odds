@@ -141,7 +141,7 @@ class CadenceConfig(Cadence):
             FetchTier.IN_PLAY: self.closing,
             FetchTier.CLOSING: self.closing,
             FetchTier.PREGAME: self.pregame,
-            FetchTier.SHARP: self.sharp,
+            FetchTier.DAY_BEFORE: self.day_before,
             FetchTier.EARLY: self.early,
             FetchTier.OPENING: self.opening,
         }

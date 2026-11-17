@@ -30,7 +30,7 @@ logger = structlog.get_logger()
 # Critical tiers contain essential betting data and must be present for validation success
 CRITICAL_TIERS = frozenset({FetchTier.PREGAME, FetchTier.CLOSING})
 # Warning tiers are supplementary; missing data generates warnings but doesn't fail validation
-WARNING_TIERS = frozenset({FetchTier.OPENING, FetchTier.EARLY, FetchTier.SHARP})
+WARNING_TIERS = frozenset({FetchTier.OPENING, FetchTier.EARLY, FetchTier.DAY_BEFORE})
 
 
 @dataclass(slots=True, frozen=True)
@@ -59,7 +59,7 @@ class TierCoverageReport:
 
     @property
     def warning_tiers_missing(self) -> frozenset[FetchTier]:
-        """Get missing tiers that are warnings only (OPENING, EARLY, SHARP)."""
+        """Get missing tiers that are warnings only (OPENING, EARLY, DAY_BEFORE)."""
         return frozenset(self.tiers_missing & WARNING_TIERS)
 
     @property
@@ -160,7 +160,7 @@ class TierCoverageValidator:
     DEFAULT_REQUIRED_TIERS = {
         FetchTier.OPENING,
         FetchTier.EARLY,
-        FetchTier.SHARP,
+        FetchTier.DAY_BEFORE,
         FetchTier.PREGAME,
         FetchTier.CLOSING,
     }

@@ -28,7 +28,7 @@ A [fetch tier](../foundations/glossary.md#fetch-tier) is never stored: `odds_lam
 |---|---|---|---|
 | opening | 72+ | 48 | initial line release |
 | early | 24-72 | 24 | line establishment |
-| day-before (SHARP) | 12-24 | 12 | professional betting |
+| day_before | 12-24 | 12 | professional betting |
 | pregame | 3-12 | 3 | active betting |
 | closing | 0-3 | 0.5 | critical line movement |
 | in_play | after kick-off | 0.5 | incidental collection |
@@ -37,7 +37,7 @@ The boundaries in the table are `odds_lambda.fetch_tier.FetchTier.max_hours` and
 
 ## The one hours-to-tier rule
 
-`odds_lambda.tier_utils.calculate_tier(hours_until)` is the only function that turns hours before kick-off into a tier. Negative hours are IN_PLAY. Otherwise a time belongs to the nearest tier whose `odds_lambda.fetch_tier.FetchTier.max_hours` it does not exceed (`<=`), so a time exactly 3, 12, 24 or 72 h out is CLOSING, PREGAME, SHARP or EARLY. The scheduler's cadence ([Decision engine](../scheduling/decision-engine.md#forward-decisions)) and the stale-source check use it for a kick-off's distance. A snapshot's tier also depends on what its time means, so snapshots are tiered through the next section's functions, which call it.
+`odds_lambda.tier_utils.calculate_tier(hours_until)` is the only function that turns hours before kick-off into a tier. Negative hours are IN_PLAY. Otherwise a time belongs to the nearest tier whose `odds_lambda.fetch_tier.FetchTier.max_hours` it does not exceed (`<=`), so a time exactly 3, 12, 24 or 72 h out is CLOSING, PREGAME, DAY_BEFORE or EARLY. The scheduler's cadence ([Decision engine](../scheduling/decision-engine.md#forward-decisions)) and the stale-source check use it for a kick-off's distance. A snapshot's tier also depends on what its time means, so snapshots are tiered through the next section's functions, which call it.
 
 ## The tier a snapshot covers
 

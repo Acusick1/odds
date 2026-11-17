@@ -72,7 +72,7 @@ _Avoid_: quote, odds (for a single price)
 ### Fetch tier
 
 How long before kick-off a snapshot's prices held, from opening to in-play, derived from its time, time basis and source, and never stored ([fetch tier](../storage/fetch-tier.md)).
-_Avoid_: sharp (for the tier 12 to 24 hours out; say the day-before tier)
+_Avoid_: sharp (for the tier 12 to 24 hours out; it is `day_before`, the day-before tier)
 
 ## Value and scoring
 

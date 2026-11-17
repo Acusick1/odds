@@ -264,7 +264,7 @@ async def test_job_self_scheduling_chain(test_session, mock_session_factory):
 
     test_cases = [
         (GAME_TIME - timedelta(days=5), FetchTier.OPENING, 48.0, "OPENING"),
-        (GAME_TIME - timedelta(hours=18), FetchTier.SHARP, 12.0, "SHARP"),
+        (GAME_TIME - timedelta(hours=18), FetchTier.DAY_BEFORE, 12.0, "DAY_BEFORE"),
         (GAME_TIME - timedelta(hours=1), FetchTier.CLOSING, fetch_odds.CADENCE.closing, "CLOSING"),
     ]
 

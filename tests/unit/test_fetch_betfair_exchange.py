@@ -56,7 +56,7 @@ class TestBetfairCadence:
         assert CADENCE.interval_for(FetchTier.PREGAME) == 0.5
 
     def test_far_bands_all_2h(self) -> None:
-        assert CADENCE.interval_for(FetchTier.SHARP) == 2.0
+        assert CADENCE.interval_for(FetchTier.DAY_BEFORE) == 2.0
         assert CADENCE.interval_for(FetchTier.EARLY) == 2.0
         assert CADENCE.interval_for(FetchTier.OPENING) == 2.0
 

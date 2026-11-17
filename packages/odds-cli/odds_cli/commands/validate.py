@@ -145,7 +145,7 @@ async def _validate_daily(
 
     # Exit with appropriate code
     # Critical failures: missing critical tiers (PREGAME, CLOSING), missing scores, missing games
-    # Warnings: missing supplementary tiers (OPENING, EARLY, SHARP)
+    # Warnings: missing supplementary tiers (OPENING, EARLY, DAY_BEFORE)
     if check_scores and check_discovery:
         # Full validation mode: fail only on critical issues
         has_critical_issues = (
@@ -404,7 +404,7 @@ def _save_to_json(report, output_path: str, check_scores=True, check_discovery=F
             for tier in [
                 FetchTier.OPENING,
                 FetchTier.EARLY,
-                FetchTier.SHARP,
+                FetchTier.DAY_BEFORE,
                 FetchTier.PREGAME,
                 FetchTier.CLOSING,
             ]
@@ -507,7 +507,7 @@ async def _validate_game(event_id: int, show_snapshots: bool):
     all_tiers = [
         FetchTier.OPENING,
         FetchTier.EARLY,
-        FetchTier.SHARP,
+        FetchTier.DAY_BEFORE,
         FetchTier.PREGAME,
         FetchTier.CLOSING,
     ]

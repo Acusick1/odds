@@ -208,5 +208,5 @@ class TestRetailEvTrainingData:
         config = _config().training.features
         with pytest.raises(ValueError, match="sampler"):
             await prepare_training_data(
-                [], retail_ev_events, config, sampler=TierSampler(FetchTier.SHARP)
+                [], retail_ev_events, config, sampler=TierSampler(FetchTier.DAY_BEFORE)
             )
