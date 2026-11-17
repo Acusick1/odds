@@ -1,7 +1,7 @@
 ---
 type: explanation
 title: About the system and its pivots
-description: What the system is, which sports are live, the goal in outline, what runs where in outline, the three pivots and the NBA-era defaults they left.
+description: What the system is, which leagues are live, the goal in outline, what runs where in outline, the three pivots and the NBA-era defaults they left.
 sources:
   - odds_core.sports.SportKey
   - odds_core.config.PolymarketConfig
@@ -20,11 +20,11 @@ Design principles `(inferred)`: robust collection and storage before analysis; a
 
 ## Sports
 
-`odds_core.sports.SportKey` allows the EPL, MLB and NBA, and five more football leagues (the Championship, La Liga, Serie A, the Bundesliga and Ligue 1) registered for historical loading only. The [deployment matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs) is authoritative for current collection and agent operation. NBA injury reports are scheduled; game logs and player stats use manual commands ([NBA collection](../collection/nba-injuries-and-stats.md#injury-reports)). Sport and market keys are listed in [Sport, market and bookmaker keys](../collection/sport-and-market-keys.md#market-key-dialects).
+`odds_core.sports.SportKey` allows the EPL, MLB and NBA, and five more football leagues (the Championship, La Liga, Serie A, the Bundesliga and Ligue 1) registered for historical loading only. The [deployment matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs) is authoritative for current collection and agent operation. NBA injury reports are scheduled; game logs and player stats use manual commands ([NBA collection](../collection/nba-injuries-and-stats.md#injury-reports)). Sport and market keys are listed in [Sport, market and book keys](../collection/sport-and-market-keys.md#market-key-dialects).
 
 ## Goal
 
-Profit. Any approach can be a candidate (mechanical rules, models, agents), run in parallel and judged on live paper trades by EV against the Betfair Exchange close ([Goal and strategy](goal-and-strategy.md)). See [The betting agent](../agent/betting-agent.md).
+Profit. Any approach can be a [candidate](glossary.md#candidate) (rules, models, agents), run in parallel and judged by retail EV on its bets in a live forward test ([Goal and strategy](goal-and-strategy.md)). See [The betting agent](../agent/betting-agent.md).
 
 ## What runs where
 
@@ -42,8 +42,8 @@ The repo carries the residue of three pivots (PRs `#214`, `#217`, `#267`, `#387`
 
 Each fails quietly on EPL and MLB data: the symptom is an empty result (no events, zero opportunities), not an error, so an NBA default and an empty EPL window look alike. The reference page for each states the default:
 
-- `backfill scores` hardcodes `sport_key="basketball_nba"` (`odds_cli.commands.backfill`) and spends no Odds API units. `odds_analytics.backfill_executor.BackfillExecutor.execute` and `odds_analytics.backfill_executor.BackfillExecutor.probe` (the `odds backfill probe` command) take their sport from the acquisition manifest, spend the acquisition key (`ODDS_API_ACQUISITION_KEY_INDEX`, which a real run requires) whatever that sport, request each planned grid snapshot half a grid step after its time, retrying a call the API rate-limits, and store every game a call returns on the stored event it attaches to through the [event resolver](../storage/event-resolver.md), creating none, and report once per run each game with no stored event or whose Odds API id another event holds, and stop on a call that returns a snapshot later than its request time or stamped for the next grid time (an earlier one is stored: off the grid's phase for the planned grid step, or a provider gap, also recorded and skipped on rerun), after a streak of provider gaps, or after a streak of calls that store none of the fixtures they serve ([Odds API historical backfill](../collection/odds-api-backfill.md)).
-- `odds polymarket discover` lists NBA events (`odds_cli.commands.polymarket.discover`); EPL and NBA match prices (fetched from Polymarket's public Gamma and CLOB APIs with `odds_lambda.polymarket_fetcher.PolymarketClient`) are stored as `polymarket` snapshots ([Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md)).
+- `backfill scores` hardcodes `sport_key="basketball_nba"` (`odds_cli.commands.backfill`) and spends no Odds API units. `odds_analytics.backfill_executor.BackfillExecutor.execute` and `odds_analytics.backfill_executor.BackfillExecutor.probe` (the `odds backfill probe` command) take their sport from the acquisition manifest, spend the acquisition key (`ODDS_API_ACQUISITION_KEY_INDEX`, which a real run requires) whatever that sport, request each planned grid snapshot half a grid step after its time, retrying a call the API rate-limits, and store every event a call lists on the stored event it attaches to through the [event resolver](../storage/event-resolver.md), creating none, and report once per run each listed event with no stored event or whose Odds API id another event holds, and stop on a call that returns a snapshot later than its request time or stamped for the next grid time (an earlier one is stored: off the grid's phase for the planned grid step, or a provider gap, also recorded and skipped on rerun), after a streak of provider gaps, or after a streak of calls that store none of the events they serve ([Odds API historical backfill](../collection/odds-api-backfill.md)).
+- `odds polymarket discover` lists NBA events (`odds_cli.commands.polymarket.discover`); EPL and NBA event prices (fetched from Polymarket's public Gamma and CLOB APIs with `odds_lambda.polymarket_fetcher.PolymarketClient`) are stored as `polymarket` snapshots ([Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md)).
 
 ## Related
 

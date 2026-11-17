@@ -20,7 +20,7 @@ status: stable
 
 # Power of the retail-EV keep bar
 
-This experiment estimates, for #538 on the map #506, how many fresh-season events [ADR-0012](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md)'s keep bar needs before a model with a real edge passes it. The target, baseline, weights and the two tests are on [CLV target](../modelling/clv-target.md#the-retail-ev-target). It resamples development events into synthetic seasons, gives each a synthetic model of known shape and gain, and runs the two tests.
+This experiment estimates, for #538 on the map #506, how many fresh-season events [ADR-0012](../../docs/adr/0012-retail-ev-against-betfair-exchange-close.md)'s keep bar needs before a model with a real edge passes it. The target, baseline, weights and the two tests are on [Training targets](../modelling/clv-target.md#the-retail-ev-target). It resamples development events into synthetic seasons, gives each a synthetic model of known shape and gain, and runs the two tests.
 
 - **The weighted-MSE condition is reachable in one season at a gain of about 4.5% to 6%** of the baseline's weighted MSE, with FDUK-only rows or with dense live rows when the model's errors persist across horizons. Only the optimistic bound, where errors renew at every exchange snapshot, brings that below 1%.
 - **The pick condition's power depends on the model's shape more than on its gain.** A diffuse model, with the same share of the move known on every row, needs a gain of about 16% to 21% to reach 80% power in one season. A concentrated edge needs far less: a model that knows the move exactly on 2% to 2.6% of events, and predicts the baseline elsewhere, has a gain of about that size and reaches 80% on FDUK-only rows.
@@ -30,7 +30,7 @@ The minimum detectable effects below are therefore conditional on the model shap
 
 ## Setup
 
-- **Script:** `experiments/scripts/retail_ev_power.py`, with outputs in `experiments/results/retail_ev_power/`. It builds the retail-EV decision rows (keyed by integer event id) for EPL events with a close (any status) from 2024-08-01 to 2026-07-31 on the local development database, with `odds_analytics.retail_ev.load_retail_ev_dataset` (at the current time) as it stood for the run (its row rules are on [CLV and the training target](../modelling/clv-target.md#the-retail-ev-target)), and trains no model. Its FDUK-only regime keeps the rows whose retail source is FDUK (`football_data_uk`) and whose exchange price comes from an FDUK opening snapshot. The end date leaves out 2026-27, the fresh season of [ADR-0016](../../docs/adr/0016-pre-register-retail-ev-evaluation.md). The main run uses 250 simulated seasons per cell, 2,000 bootstrap resamples per test and seed 42, and takes about 15 minutes on 18 worker processes. `--sweep-seeds` instead reruns the calibrated and sparse models at 380 events under several seeds, in about 9 minutes for six.
+- **Script:** `experiments/scripts/retail_ev_power.py`, with outputs in `experiments/results/retail_ev_power/`. It builds the retail-EV decision rows (keyed by integer event id) for EPL events with a close (any status) from 2024-08-01 to 2026-07-31 on the local development database, with `odds_analytics.retail_ev.load_retail_ev_dataset` (at the current time) as it stood for the run (its row rules are on [Training targets](../modelling/clv-target.md#the-retail-ev-target)), and trains no model. Its FDUK-only regime keeps the rows whose retail source is FDUK (`football_data_uk`) and whose exchange price comes from an FDUK opening snapshot. The end date leaves out 2026-27, the fresh season of [ADR-0016](../../docs/adr/0016-pre-register-retail-ev-evaluation.md). The main run uses 250 simulated seasons per cell, 2,000 bootstrap resamples per test and seed 42, and takes about 15 minutes on 18 worker processes. `--sweep-seeds` instead reruns the calibrated and sparse models at 380 events under several seeds, in about 9 minutes for six.
 - **The tests:** each simulated season is scored by `odds_analytics.retail_ev_metrics.mse_gain_of_event_totals` and `odds_analytics.retail_ev_metrics.pick_ev_gain_of_event_totals`, the event-total forms of the keep-bar functions, with the default resample count. A condition passes when its 95% CI lies above zero. Power is the share of seasons that pass.
 - **Seasons:** each simulated season draws N events with replacement from the regime's development events, keeping each event's rows, weights and realised targets whole. N is 100, 190, 380 (one EPL season), 760 and 1,140. `w_event` is recomputed within each regime.
 
@@ -46,7 +46,7 @@ The minimum detectable effects below are therefore conditional on the model shap
 
 ### The synthetic models
 
-The weighted squared error of a row is a squared probability error, `w_event × dp²`, where `dp = (target − baseline) / retail_decimal` is the move of the devigged exchange price from t to the close ([CLV target](../modelling/clv-target.md#the-retail-ev-target)). `dp` is the same for every book quoted against one exchange snapshot, and sums to zero across the three outcomes. Its scale depends on the price: on FDUK-only rows its RMS is about 3.0 pp at odds under 3 and 1.4 to 1.7 pp above (`summary.json` `by_odds_band`).
+The weighted squared error of a row is a squared probability error, `w_event × dp²`, where `dp = (target − baseline) / retail_decimal` is the move of the devigged exchange price from t to the close ([Training targets](../modelling/clv-target.md#the-retail-ev-target)). `dp` is the same for every book quoted against one exchange snapshot, and sums to zero across the three outcomes. Its scale depends on the price: on FDUK-only rows its RMS is about 3.0 pp at odds under 3 and 1.4 to 1.7 pp above (`summary.json` `by_odds_band`).
 
 Each model predicts a signal `s` for `dp`, and its EV prediction is `baseline + retail_decimal × s`. It bets a row when that prediction is positive. `σ` is the weighted RMS of `dp` in the row's cell of horizon bucket and odds band (under 2, 2–3, 3–4.5, 4.5–7, over 7), and `z` is unit normal noise, centred across the three outcomes.
 
@@ -157,4 +157,4 @@ Sparse model, as the share of informed events f; the 380-event rows are six-seed
 
 ## Related
 
-- [CLV target](../modelling/clv-target.md), [Target functions](../modelling/clv-target-functions.md#keep-bar-metrics)
+- [Training targets](../modelling/clv-target.md), [Target functions](../modelling/clv-target-functions.md#keep-bar-metrics)

@@ -83,7 +83,7 @@ status: stable
 
 ## Links
 
-Use relative markdown links: `[Text](slug.md)` or `[Text](../area/slug.md#heading)`. The first mention of another page's subject links to it. Every page is listed in its area index and has at least one other inbound link.
+Use relative markdown links: `[Text](slug.md)` or `[Text](../area/slug.md#heading)`. The first mention of another page's subject links to it. Domain terms are defined only in the [glossary](foundations/glossary.md): a page's first use of a term it relies on links to its anchor, such as `../foundations/glossary.md#retail-ev`, instead of defining it, and prose avoids the words the glossary lists under _Avoid_. Every page is listed in its area index and has at least one other inbound link.
 
 ## Staleness
 

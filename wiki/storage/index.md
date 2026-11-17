@@ -5,7 +5,7 @@ description: The events, odds_snapshots, prices and snapshot_payloads tables, ev
 
 # Storage
 
-Everything the pipeline persists about games and prices lives behind `packages/odds-lambda/odds_lambda/storage/` and the models in `odds_core.models`. Start with [how odds are stored](odds-storage-model.md) for how a fetch becomes rows, and [fetch-tier](fetch-tier.md) for the tier vocabulary used throughout.
+Everything the pipeline persists about events and prices lives behind `packages/odds-lambda/odds_lambda/storage/` and the models in `odds_core.models`. Start with [how odds are stored](odds-storage-model.md) for how a fetch becomes rows, and [fetch-tier](fetch-tier.md) for the tier vocabulary used throughout.
 
 ## Table map
 
@@ -23,8 +23,8 @@ Every table is a SQLModel class in `packages/odds-core/odds_core/`; migrations a
 | `fetch_logs` | `odds_core.models.FetchLog` | [Odds API ingestion](../collection/odds-ingestion-service.md) |
 | `odds_api_snapshot_gaps` | `odds_core.backfill_models.OddsApiSnapshotGap` | [Odds API historical backfill](../collection/odds-api-backfill.md#provider-gaps) |
 | `alert_history` | `odds_core.models.AlertHistory` | [Alerts and health](../operations/alerts.md) |
-| `match_briefs` | `odds_core.match_brief_models.MatchBrief` | [Match briefs](../agent/match-briefs.md) |
-| `paper_trades` | `odds_core.paper_trade_models.PaperTrade` | [Paper trading](../agent/paper-trading.md) |
+| `match_briefs` | `odds_core.match_brief_models.MatchBrief` | [Briefs](../agent/match-briefs.md) |
+| `paper_trades` | `odds_core.paper_trade_models.PaperTrade` | [Bets](../agent/paper-trading.md) |
 | `candidate_backtests` | `odds_core.candidate_backtest_models.CandidateBacktest` | [Replay backtest](../evaluation/candidate-backtest.md#stored-runs) |
 | `candidate_backtest_bets` | `odds_core.candidate_backtest_models.CandidateBacktestBet` | [Replay backtest](../evaluation/candidate-backtest.md#stored-runs) |
 | `agent_wakeups` | `odds_core.agent_wakeup_models.AgentWakeup` | [Agent runtime and the agent-run job](../agent/agent-run-job.md) |
@@ -39,13 +39,13 @@ Every table is a SQLModel class in `packages/odds-core/odds_core/`; migrations a
 <!-- pages:start -->
 ### Reference
 
-- [Coverage and completeness checks](coverage-checks.md) — TierCoverageValidator, a sport's league-local game day, odds validate, odds quality, QualityMetrics and the read-only scripts/check_games_in_database.py.
+- [Coverage and completeness checks](coverage-checks.md) — TierCoverageValidator, a league's local day, odds validate, odds quality, QualityMetrics and the read-only scripts/check_games_in_database.py.
 - [Event matching across sources](event-matching.md) — The matcher each ingest path uses to find its events row (window, team comparison, ambiguity rule) and the duplicates and NULL event ids that follow.
-- [Event merge](event-merge.md) — How events for one match are merged into one event, which event is kept, who merges, how twins and rescheduled duplicates are detected, how stored MLB events get their gamePk, and the odds events merge-twins, repair-names, assign-game-pks, set-game-pk and mark-unassignable commands.
-- [Event resolver](event-resolver.md) — How resolve_event finds or creates the one event of a listed game (lock, lookup order, ±2 h match, creation) and records the source's id, and which ids it refuses.
+- [Event merge](event-merge.md) — How twin events are merged into one event, which event is kept, who merges, how twins and rescheduled duplicates are detected, how stored MLB events get their gamePk, and the odds events merge-twins, repair-names, assign-game-pks, set-game-pk and mark-unassignable commands.
+- [Event resolver](event-resolver.md) — How resolve_event finds or creates the one event a source lists (lock, lookup order, ±2 h match, creation) and records the source's id, and which ids it refuses.
 - [Events table](events.md) — The events columns and statuses, the database-numbered event id, external ids, the legacy string ids kept for the downgrade, team-name normalizers, and the writers that create and update events.
 - [Fetch tier](fetch-tier.md) — The FetchTier enum and bounds, the one hours-to-tier rule, the tier a snapshot covers by its time basis, and where tiers are read.
-- [Kick-off authority](kickoff-authority.md) — Which source may move an event's commence_time for each sport, the move_kickoff function every move goes through, and what a move does to the event.
+- [Kick-off authority](kickoff-authority.md) — Which source may move an event's commence_time for each league, the move_kickoff function every move goes through, and what a move does to the event.
 - [Odds snapshots table](odds-tables.md) — The odds_snapshots columns, key and indexes, the envelope format writers build and archive as a snapshot's payload, and the tags producers put in it.
 - [Odds validation](odds-validator.md) — OddsValidator checks, the data_quality_logs rows it produces, and DataQualityConfig.
 - [OddsReader](odds-reader.md) — Every OddsReader query and its time-window semantics.

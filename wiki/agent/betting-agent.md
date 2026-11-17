@@ -1,7 +1,7 @@
 ---
 type: explanation
 title: The betting agent
-description: What the per-sport agent is, its three channels, why prompts are authoritative, the EPL matchday timeline, and its evaluation status.
+description: What the per-league agent is, its three channels, why prompts are authoritative, the EPL matchday timeline, and its evaluation status.
 sources:
   - odds_mcp.server.mcp
   - odds_mcp.server.find_retail_edges
@@ -18,7 +18,7 @@ status: stable
 
 # The betting agent
 
-An LLM agent per sport (EPL and MLB) synthesises odds, sharp-market prices and unstructured match context and records bets as paper trades, sized from a bankroll, at the decimal price quoted by the book, optionally under a registered candidate, which placement checks against the registry ([paper trading](paper-trading.md#candidate-fields)). Both agents run by hand and are paused: neither is being run. The prompt calls itself a "first-draft workflow" (`packages/odds-mcp/agents/common.md`, #290). Nothing in code enforces that they are not autonomous `(inferred)`. Each agent can be registered as a [candidate](../foundations/goal-and-strategy.md), one per sport; its thesis is breadth and speed of information synthesis. The thesis has no measured result: results exist only as paper trades, read through `odds_mcp.server.get_portfolio` (with per-candidate checkpoint results), `odds paper`, `odds candidates report` and the [web UI](../operations/odds-web.md) ([paper trading](paper-trading.md)). The runtime is described in [Agent runtime and the agent-run job](agent-run-job.md).
+An LLM agent per league (EPL and MLB) synthesises odds, sharp-market prices and unstructured event context and places [bets](../foundations/glossary.md#bet), sized from a bankroll, at the decimal price the book offers, optionally under a registered [candidate](../foundations/glossary.md#candidate), which placement checks against the registry ([bets](paper-trading.md#candidate-fields)). Both agents run by hand and are paused: neither is being run. The prompt calls itself a "first-draft workflow" (`packages/odds-mcp/agents/common.md`, #290). Nothing in code enforces that they are not autonomous `(inferred)`. Each agent can be registered as a candidate, one per league ([goal and strategy](../foundations/goal-and-strategy.md#candidates)); its thesis is breadth and speed of information synthesis. The thesis has no measured result: results exist only as bets, read through `odds_mcp.server.get_portfolio` (with per-candidate checkpoint results), `odds paper`, `odds candidates report` and the [web UI](../operations/odds-web.md) ([bets](paper-trading.md)). The runtime is described in [Agent runtime and the agent-run job](agent-run-job.md).
 
 ## Architecture
 
@@ -26,19 +26,19 @@ The runtime is a `claude` subprocess; everything it touches goes through one of 
 
 | Channel | Used for |
 |---|---|
-| `odds` MCP server (`odds_mcp.server.mcp`) | fixtures, odds, retail edges (vig-inclusive, against the sharp price at the same line), briefs, paper bets, portfolio |
+| `odds` MCP server (`odds_mcp.server.mcp`) | fixtures, odds, retail edges (vig-inclusive, against the sharp price at the same line), briefs, bets, portfolio |
 | Web search | press conferences, injury news |
 | Playwright MCP (not in `.mcp.json`, so supplied by the user's Claude configuration) | club sites, lineup pages, BBC and ESPN |
 
-The MCP server reads and writes these PostgreSQL tables: `events`, `odds_snapshots`, `prices`, `paper_trades`, `match_briefs` and `agent_wakeups` (`odds_core.models.Event` (its kick-off), `odds_core.models.OddsSnapshot` (one source's prices for one market of an event at one time; [columns and constraints](../storage/odds-tables.md#odds_snapshots)), `odds_core.paper_trade_models.PaperTrade` (the agent's trades, with the sharp market's reading at placement, and the flat-stake trades of mechanical candidates, with their rule's estimated EV and, on totals, their line, [paper trading](paper-trading.md#candidate-fields)), `odds_core.match_brief_models.MatchBrief`, `odds_core.agent_wakeup_models.AgentWakeup`). See [odds-mcp server](mcp-server.md) for the tools. The market tools resolve sharp and retail prices from a shared market window over the `prices` table and the snapshot's `source`, `market` and `time_basis` ([market tools](mcp-market-tools.md)); no tool reads `snapshot_payloads` or `event_external_ids`. Every table that refers to an event does so by its integer `events.id`. Merging duplicate events moves their paper trades and briefs to the kept event ([Event merge](../storage/event-merge.md#merging)).
+The MCP server reads and writes these PostgreSQL tables: `events`, `odds_snapshots`, `prices`, `paper_trades`, `match_briefs` and `agent_wakeups` (`odds_core.models.Event` (its kick-off), `odds_core.models.OddsSnapshot` (one source's prices for one market of an event at one time; [columns and constraints](../storage/odds-tables.md#odds_snapshots)), `odds_core.paper_trade_models.PaperTrade` (the agent's bets, with the sharp market's reading at placement, and the flat-stake bets of rule candidates, with their rule's estimated EV and, on totals, their line, [bets](paper-trading.md#candidate-fields)), `odds_core.match_brief_models.MatchBrief`, `odds_core.agent_wakeup_models.AgentWakeup`). See [odds-mcp server](mcp-server.md) for the tools. The market tools resolve sharp and retail prices from a shared market window over the `prices` table and the snapshot's `source`, `market` and `time_basis` ([market tools](mcp-market-tools.md)); no tool reads `snapshot_payloads` or `event_external_ids`. Every table that refers to an event does so by its integer `events.id`. Merging duplicate events moves their bets and briefs to the kept event ([Event merge](../storage/event-merge.md#merging)).
 
 ## Prompts
 
-The agent's behaviour is defined by prompt files in `packages/odds-mcp/agents/`: a common prompt (strategy and the wake-up workflow) plus one base prompt per sport (`epl` and `mlb` subdirectories). Those files are authoritative; the wiki summarises them in [Agent prompts](agent-prompts.md) and cannot verify them against code.
+The agent's behaviour is defined by prompt files in `packages/odds-mcp/agents/`: a common prompt (strategy and the wake-up workflow) plus one base prompt per league (`epl` and `mlb` subdirectories). Those files are authoritative; the wiki summarises them in [Agent prompts](agent-prompts.md) and cannot verify them against code.
 
 ## EPL matchday timeline
 
-A Saturday 3pm kickoff:
+A Saturday 3pm kick-off:
 
 | Window | Market activity | Agent action |
 |---|---|---|
@@ -47,7 +47,7 @@ A Saturday 3pm kickoff:
 | Sat morning | Team news leaks, odds move | Update briefs, early bets if edge found |
 | Sat ~14:00 | Confirmed lineups (about KO-60) | Deep research, final decisions |
 | Sat 14:00-15:00 | Final adjustments, late money | Bets placed, if any |
-| Sat evening | Matches complete | Settle bets, report P&L |
+| Sat evening | Events complete | Settle bets, report P&L |
 
 The table is `(inferred)` from the wake-up cadence of the `agent-run` `odds_core.job_specs.JobSpec` `cadence` field in `odds_core.job_specs.JOB_SPECS`, exposed as `odds_lambda.jobs.agent_run.CADENCE` (see [Cadence](../scheduling/decision-engine.md#cadence)) and the prompt's KO-60 lineup note (`packages/odds-mcp/agents/epl/base.md`); it is not a schedule in code. The cadence is what puts a wake-up inside the lineup window. Lineups come from web search because every structured lineup API was rejected ([ADR-0006](../../docs/adr/0006-lineups-from-web-research.md), [rejected sources](agent-data-sources.md#rejected-sources)). The timeline is an EPL example. MLB has its own overnight suppression window and sport file, and no MLB timeline is recorded ([overnight windows](../scheduling/decision-engine.md#overnight-windows)).
 
@@ -57,12 +57,12 @@ Recorded without a decision record, so the reasons are `(inferred)` (the sharp-p
 
 ## Supporting code
 
-The agent's supporting code is the [odds-mcp server](mcp-server.md), [match briefs](match-briefs.md), [paper trading](paper-trading.md) and the [agent data sources](agent-data-sources.md). The thesis has no measured result (see the opening section).
+The agent's supporting code is the [odds-mcp server](mcp-server.md), [briefs](match-briefs.md), [bets](paper-trading.md) and the [agent data sources](agent-data-sources.md). The thesis has no measured result (see the opening section).
 
 ## Related
 
 - [Agent runtime and the agent-run job](agent-run-job.md)
 - [Agent prompts](agent-prompts.md)
 - [Agent data sources and rejected sources](agent-data-sources.md)
-- [Match briefs](match-briefs.md) and [paper trading](paper-trading.md), what the agent writes
+- [Briefs](match-briefs.md) and [bets](paper-trading.md), what the agent writes
 - [About the system and its pivots](../foundations/project-overview.md)

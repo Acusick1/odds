@@ -65,7 +65,7 @@ The Lambda role in `deployment/aws/terraform/lambda.tf` grants only `PutRule`, `
 
 ### Rules and Terraform
 
-`deployment/aws/terraform/eventbridge.tf` pre-creates every self-scheduling rule `DISABLED` with a `rate(1 day)` placeholder and `lifecycle { ignore_changes = [schedule_expression, state] }`, so `terraform plan` never shows live cadences. The jobs with a rule are `fetch-odds` and `fetch-scores` per sport, `fetch-betfair-exchange` per sport when `betfair_enabled`, and the global `update-status` and `check-health`; no fixed-schedule rule is declared. A rule is named `{rule_prefix}-{job}[-{sport suffix}]`, which is why jobs use [compound names](job-registry.md#compound-job-names). The post-deploy Lambda invocations in the deploy workflows activate the placeholders, so a run of `deploy-prod.yml` re-enables every dormant rule ([CI/CD workflows](../operations/ci-cd-workflows.md)). Live state is not in the repo: run `odds scheduler list-jobs --backend aws` ([Deployed state](job-deployment-matrix.md#deployed-state)).
+`deployment/aws/terraform/eventbridge.tf` pre-creates every self-scheduling rule `DISABLED` with a `rate(1 day)` placeholder and `lifecycle { ignore_changes = [schedule_expression, state] }`, so `terraform plan` never shows live cadences. The jobs with a rule are `fetch-odds` and `fetch-scores` per league, `fetch-betfair-exchange` per league when `betfair_enabled`, and the global `update-status` and `check-health`; no fixed-schedule rule is declared. A rule is named `{rule_prefix}-{job}[-{sport suffix}]`, which is why jobs use [compound names](job-registry.md#compound-job-names). The post-deploy Lambda invocations in the deploy workflows activate the placeholders, so a run of `deploy-prod.yml` re-enables every dormant rule ([CI/CD workflows](../operations/ci-cd-workflows.md)). Live state is not in the repo: run `odds scheduler list-jobs --backend aws` ([Deployed state](job-deployment-matrix.md#deployed-state)).
 
 ### Env-var contract
 
@@ -84,7 +84,7 @@ EventBridge delivers the target `Input` written by the AWS backend or by Terrafo
 `job` may be a compound name (`fetch-odds-epl`). The handler:
 
 1. Raises `ValueError` if `job` is missing.
-2. Calls `odds_lambda.scheduling.jobs.resolve_job_name` to split it into base job and suffix-derived sport, consulting each `odds_core.job_specs.JobSpec` in `odds_core.job_specs.JOB_SPECS` for per-sport routing (its `sports` allowlist) (suffixes such as `laliga` map to sports through `odds_lambda.scheduling.jobs._SPORT_SUFFIX_MAP`). An explicit `sport` in the payload wins over the suffix.
+2. Calls `odds_lambda.scheduling.jobs.resolve_job_name` to split it into base job and suffix-derived league, consulting each `odds_core.job_specs.JobSpec` in `odds_core.job_specs.JOB_SPECS` for per-league routing (its `sports` allowlist) (suffixes such as `laliga` map to leagues through `odds_lambda.scheduling.jobs._SPORT_SUFFIX_MAP`). An explicit `sport` in the payload wins over the suffix.
 3. Binds `job`, `request_id` and `sport` into structlog context so CloudWatch can filter on them (`configure_logging(..., json_output=True)` runs at import).
 4. Builds `odds_lambda.scheduling.jobs.JobContext.from_payload` from every payload key except `job`, then runs `get_job_function(base)(ctx)` under `asyncio.run`.
 5. Returns `{"statusCode": 200, "body": ...}`, or 500 with `error` and `error_type` on any exception.
@@ -93,7 +93,7 @@ Failures return a 500 body rather than raising, so Lambda counts the invocation 
 
 On an exception the handler logs `lambda_failed` and calls `odds_core.alerts.send_critical` directly with the job name, in addition to the job's own alert (#442). That path does not touch `odds_core.models.AlertHistory`, so it is never rate limited. A job wrapped in [`odds_core.alerts.job_alert_context`](../operations/alerts.md#delivery) that raises sends its own critical first, once per outage; jobs without the wrapper send their own `odds_core.alerts.send_critical` before re-raising ([Alerts](../operations/alerts.md)). The local backend has no handler: `odds_lambda.scheduling.runner.run_scheduled_job` bounds each run, alerts a timeout and re-books a failed chain instead ([Local scheduler](local-scheduler.md#scheduling-primitives)).
 
-A per-sport job invoked without a sport raises `ValueError`, so the handler returns the 500 body. Pass `sport` or a sport-suffixed job name ([Debug the AWS self-scheduling jobs](howto-debug-aws-scheduler.md#invoke-manually)).
+A per-league job invoked without a sport raises `ValueError`, so the handler returns the 500 body. Pass `sport` or a sport-suffixed job name ([Debug the AWS self-scheduling jobs](howto-debug-aws-scheduler.md#invoke-manually)).
 
 ## Related
 

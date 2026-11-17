@@ -1,10 +1,10 @@
 # Betting Odds Pipeline & Agent
 
-Single-user, sport-agnostic betting odds pipeline with per-sport LLM betting agents (EPL and MLB price collection active, NBA from OddsPortal and Betfair configured and waiting on the ESPN NBA schedule; the agents run by hand on the production host and are paused).
+Single-user, sport-agnostic betting odds pipeline with per-league LLM betting agents (EPL and MLB price collection active, NBA from OddsPortal and Betfair configured and waiting on the ESPN NBA schedule; the agents run by hand on the production host and are paused).
 
 ## Goal
 
-The goal is profit. Any approach that might get there is fair game, and candidates run in parallel; mechanical rules are the current focus. Development data generates ideas and never promotes one. A candidate is promoted or killed at fixed checkpoints of a live paper-trading forward test, scored by EV at the price taken against the Betfair Exchange close. See [goal and strategy](wiki/foundations/goal-and-strategy.md); the steps from an idea to a verdict are in [take an idea to a verdict](wiki/evaluation/howto-take-an-idea-to-a-verdict.md).
+The goal is profit. Any approach that might get there is fair game, and candidates run in parallel; rule candidates are the current focus. Development data generates ideas and never promotes one. A candidate is promoted or killed at fixed checkpoints of its forward test, scored by retail EV against the close. Terms are defined in the [glossary](wiki/foundations/glossary.md). See [goal and strategy](wiki/foundations/goal-and-strategy.md); the steps from an idea to a verdict are in [take an idea to a verdict](wiki/evaluation/howto-take-an-idea-to-a-verdict.md).
 
 ## Documentation
 
@@ -21,9 +21,9 @@ A PR that replaces code deletes what it replaces, with its tests and wiki pages;
 - **Never point `DATABASE_URL` at production** from a development machine. Only `deploy.sh` on the production host migrates it. That rules out migrations, fetches, test runs and `odds copy from-prod` without an explicit production URL. See [databases](wiki/foundations/databases-and-environments.md#environments).
 - **AWS is dormant, and its deployed state is not in the repo.** Every scheduled job runs on the production host; the EventBridge rules and the Deploy to Production workflow are disabled; re-enabling the workflow and running it re-enables every rule. `odds scheduler list-jobs --backend aws` is the only record of the AWS state. See [jobs and deployment](wiki/scheduling/job-deployment-matrix.md#dormant-aws-rules) and [ADR-0008](docs/adr/0008-mini-pc-is-production.md).
 - **The Odds API costs quota units.** Check `odds status quota` before bulk or historical fetches. See [quota](wiki/collection/odds-api-quota.md).
-- **Pass `--sport` and the sport's market key.** Several CLI defaults are NBA. EPL odds use `1x2` and MLB uses `h2h`. See [sources and keys](wiki/collection/sport-and-market-keys.md).
+- **Pass `--sport` and the league's market key.** Several CLI defaults are NBA. EPL odds use `1x2` and MLB uses `h2h`. See [sources and keys](wiki/collection/sport-and-market-keys.md).
 - **Historical analysis uses only data at or before decision time.** Bound `odds_core.quotes.quotes` with `until` (and `known_at`). See [look-ahead](wiki/modelling/look-ahead-bias.md).
-- **The retail-EV model's target, EV against the Betfair Exchange close, is `target_type: retail_ev`.** See [target](wiki/modelling/clv-target.md).
+- **The retail-EV model's target, retail EV against the close, is `target_type: retail_ev`.** See [training targets](wiki/modelling/clv-target.md).
 - **Each use has its own sharp reference.** Scoring and the retail-EV model use Betfair Exchange; Pinnacle sits only in the agent tools' and the tabular features' sharp lists. See [sharp references](wiki/modelling/sharp-benchmark.md#which-reference-is-used-for-what).
 - **Use one `async with async_session_maker() as session` per task.** Lambda gets `NullPool` automatically. See [databases](wiki/foundations/databases-and-environments.md).
 
@@ -45,4 +45,4 @@ Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-
 
 ### Domain docs
 
-Concept pages in the wiki carry the domain vocabulary, and `docs/adr/` carries decisions. See `docs/agents/domain.md`.
+The [glossary](wiki/foundations/glossary.md) carries the domain vocabulary, and `docs/adr/` carries decisions. The glossary is the `GLOSSARY.md` the domain-modeling skill maintains; never create a root `GLOSSARY.md`. See `docs/agents/domain.md`.

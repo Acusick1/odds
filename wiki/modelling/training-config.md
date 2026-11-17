@@ -40,7 +40,7 @@ Every model forbids unknown keys (`extra="forbid"`). A file has `experiment` (na
 - `retail_ev` needs the `xgboost` adapter, market `1x2` or `h2h` and `feature_groups` drawn only from `odds_analytics.training.config.RetailEvFeatureGroupName` (`polymarket_at_t`, `dynamics`, `schedule_as_of_t`, `standings_as_of_t`; empty is the price features alone) (`odds_analytics.training.config.FeatureConfig`), and `use_kfold` with `cv_method: walk_forward`, `test_split: 0` and `validation_split: 0` (`odds_analytics.training.config.TrainingConfig`, and again in `odds_analytics.training.cross_validation.run_cv`). It rejects a value other than the default for the fields it does not read: `outcome`, `sampling`, `sharp_bookmakers` and `retail_bookmakers`. Its price features are built in, and `standings_as_of_t` reads `form_window` ([target functions](clv-target-functions.md#retail-ev-features)). `experiments/configs/xgboost_epl_retail_ev.yaml` is its EPL config, from 2024-08-01 under expanding-380:50. Its loss weights have a fixed scale, so `min_child_weight` and `reg_lambda` are in units of about 156 per event ([target functions](clv-target-functions.md#retail-ev-rows)).
 - `sharp_bookmakers` sets the tabular features' sharp book, Pinnacle only by default, while the hybrid list is `[pinnacle, betfair_exchange]`; the MCP default differs on purpose (#421, [ADR-0003](../../docs/adr/0003-hybrid-sharp-reference.md)). It never sets the close ([sharp references](sharp-benchmark.md#which-reference-is-used-for-what)).
 - `feature_groups` accepts the names in `odds_analytics.training.config.FeatureGroupName` for the `raw` target and only `retail_ev`'s own groups for `retail_ev`, must be non-empty for the `xgboost` adapter under `raw`, and each `feature_groups` choice in a tuning search space is validated by `odds_analytics.training.config.MLTrainingConfig` at load.
-- The primary market is `markets[0]` by position (#475). `odds_analytics.training.config.FeatureConfig` carries bookmaker rosters, sampling, movement and form settings, so every committed YAML serialises fields its target does not read.
+- The primary market is `markets[0]` by position (#475). `odds_analytics.training.config.FeatureConfig` carries book lists, sampling, movement and form settings, so every committed YAML serialises fields its target does not read.
 
 **`tuning`**
 
@@ -57,4 +57,4 @@ Any other target rejects `residual`. `odds_analytics.training.config.MLTrainingC
 
 ## Related
 
-- [Training pipeline](training-pipeline.md), [Hyperparameter tuner](hyperparameter-tuner.md), [CLV target](clv-target.md)
+- [Training pipeline](training-pipeline.md), [Hyperparameter tuner](hyperparameter-tuner.md), [Training targets](clv-target.md)

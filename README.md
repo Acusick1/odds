@@ -1,18 +1,18 @@
 # Betting Odds Pipeline & Agent
 
-A single-user, sport-agnostic betting odds pipeline with sport-specific LLM betting agents.
-The goal is profit; any approach (mechanical rules, models, agents) is a candidate judged on
-live paper trades ([goal and strategy](wiki/foundations/goal-and-strategy.md)).
-Shared infrastructure (odds collection, storage, paper trading, scheduling, alerting) is
-reused across sports; each sport adds its own data sources, feature extractors, agent
+A single-user, sport-agnostic betting odds pipeline with per-league LLM betting agents.
+The goal is profit; any approach (rules, models, agents) is a candidate judged on
+live paper bets ([goal and strategy](wiki/foundations/goal-and-strategy.md)).
+Shared infrastructure (odds collection, storage, paper betting, scheduling, alerting) is
+reused across leagues; each league adds its own data sources, feature extractors, agent
 prompts, and MCP tools.
 
 Current collection and agent status: [deployment matrix](wiki/scheduling/job-deployment-matrix.md#where-each-job-runs).
 
-The pipeline collects bookmaker odds (The Odds API), UK retail odds (OddsPortal,
+The pipeline collects book prices (The Odds API), UK retail odds (OddsPortal,
 football-data.co.uk) and Betfair Exchange prices, stores hybrid raw + normalized data, and
-trains models on that data. The betting agent researches matches via web search and Playwright,
-consumes pipeline data through MCP tools, and places paper trades with explicit reasoning.
+trains models on that data. The betting agent researches events via web search and Playwright,
+consumes pipeline data through MCP tools, and places paper bets with explicit reasoning.
 
 ## Repository Layout
 

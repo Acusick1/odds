@@ -1,8 +1,8 @@
 # Wiki
 
-This repo is a single-user, sport-agnostic betting data pipeline (odds collection, storage, scheduling, alerting, paper trading) with per-sport LLM betting agents for EPL and MLB. The goal is profit; any approach (mechanical rules, models, agents) is a candidate judged on live paper trades ([goal and strategy](foundations/goal-and-strategy.md)).
+This repo is a single-user, sport-agnostic betting data pipeline (odds collection, storage, scheduling, alerting, paper trading) with per-sport LLM betting agents for EPL and MLB. The goal is profit; any approach (mechanical rules, models, agents) is a candidate judged on live bets ([goal and strategy](foundations/goal-and-strategy.md)).
 
-Read this page, then one area index, then the page, then the cited code. Code is authoritative. Page rules: [SCHEMA.md](SCHEMA.md).
+Read this page, then one area index, then the page, then the cited code. Code is authoritative. Page rules: [SCHEMA.md](SCHEMA.md). Domain terms: [glossary](foundations/glossary.md).
 
 ## Areas
 
@@ -13,7 +13,7 @@ Read this page, then one area index, then the page, then the cited code. Code is
 - [Operations](operations/index.md) — read when deploying, touching Terraform or workflows, or changing alerts, health checks or reports.
 - [Modelling](modelling/index.md) — read when changing features, the retail-EV target or training config.
 - [Backtests and model research](evaluation/index.md) — read when running a backtest or an experiment, or looking up a retail-EV result.
-- [Betting agent](agent/index.md) — read when changing the agent, its prompts or MCP tools, or its briefs and paper trades.
+- [Betting agent](agent/index.md) — read when changing the agent, its prompts or MCP tools, or its briefs and bets.
 
 ## Constraints
 

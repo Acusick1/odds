@@ -12,7 +12,7 @@ status: stable
 
 # OddsReader
 
-`odds_lambda.storage.readers.OddsReader` is the read side for events, snapshots and the operational logs: one class, 10 async methods, built on an `AsyncSession`. It reads no prices; price rows are read through `odds_core.quotes.quotes` ([Reading quotes](price-tables.md#reading-quotes)). Module map and commit rules are on [Storage layer](storage-layer.md).
+`odds_lambda.storage.readers.OddsReader` is the read side for events, snapshots and the operational logs: one class, 10 async methods, built on an `AsyncSession`. It reads no prices; price rows are read through `odds_core.quotes.quotes` ([Reading quotes](price-tables.md#reading-prices)). Module map and commit rules are on [Storage layer](storage-layer.md).
 
 ## Methods
 
@@ -23,7 +23,7 @@ status: stable
 ## Other behaviour
 
 - `odds_lambda.storage.readers.OddsReader.get_database_stats()` returns `events_by_status`, `total_events`, `total_price_rows` (rows of the `prices` table), `total_snapshots` (distinct event and snapshot-time pairs), `api_quota_by_key` (the newest remaining and used quota per Odds API key, with the plan size and remaining fraction they give, from `odds_lambda.storage.readers.OddsReader.get_latest_quota_by_key`, which ignores rows over 31 days old or without a used count); used by `odds status` and the [health monitor](../operations/health-monitor.md). `odds_lambda.storage.readers.OddsReader.get_fetch_logs` skips null quotas only with `with_quota=True` ([Odds API quota](../collection/odds-api-quota.md#where-quota-is-recorded-alerted-and-checked)).
-- `odds_lambda.storage.readers.OddsReader.get_games_by_date(target_date, sport_key, status=FINAL)` returns one sport's events that commence on a calendar day in the league's timezone (`odds_core.sports.game_day_window`); `validate daily` reads it with every status ([Coverage and completeness checks](coverage-checks.md#tiercoveragevalidator)).
+- `odds_lambda.storage.readers.OddsReader.get_games_by_date(target_date, sport_key, status=FINAL)` returns one league's events that commence on a calendar day in the league's timezone (`odds_core.sports.game_day_window`); `validate daily` reads it with every status ([Coverage and completeness checks](coverage-checks.md#tiercoveragevalidator)).
 
 ## Naming
 
@@ -35,4 +35,4 @@ status: stable
 - [Storage layer](storage-layer.md)
 - [How odds are stored](odds-storage-model.md)
 - [Event matching across sources](event-matching.md)
-- [CLV and the training target](../modelling/clv-target.md) and [Replay backtest](../evaluation/candidate-backtest.md) consume these queries
+- [Training targets](../modelling/clv-target.md) and [Replay backtest](../evaluation/candidate-backtest.md) consume these queries
