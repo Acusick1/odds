@@ -10,15 +10,22 @@ import argparse
 import asyncio
 import dataclasses
 import json
+import typing
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
 import yaml
 from odds_analytics.candidate_backtest import _Counts, _decide, final_events, replay
-from odds_core.candidates import RuleCandidate
 from odds_core.database import async_session_maker
 from sqlalchemy import text
+
+try:
+    from odds_core.candidates import RuleCandidate
+except ImportError:
+    from odds_core.candidates import (
+        MechanicalCandidate as RuleCandidate,  # type: ignore[attr-defined,no-redef]
+    )
 
 # Fixed so the summary's pending counts do not depend on when it runs.
 NOW = datetime(2000, 1, 1, tzinfo=UTC)
@@ -66,8 +73,8 @@ def resolve(candidate: RuleCandidate) -> tuple[Any, Any]:
 
 def load(path: Path) -> RuleCandidate:
     """The candidate file parsed by this checkout's model: a revision before pooled leagues
-    names its one league ``sport``, a later one lists ``sports``, and a revision before book
-    sets has no ``books``."""
+    names its one league ``sport``, a later one lists ``sports``, a revision before book
+    sets has no ``books``, and a revision before rule candidates calls the kind ``mechanical``."""
     raw = yaml.safe_load(path.read_text())
     if "books" not in RuleCandidate.model_fields:
         raw.pop("books", None)
@@ -76,6 +83,7 @@ def load(path: Path) -> RuleCandidate:
             raw["sports"] = [raw.pop("sport")]
     elif "sports" in raw:
         (raw["sport"],) = raw.pop("sports")
+    (raw["kind"],) = typing.get_args(RuleCandidate.model_fields["kind"].annotation)
     return RuleCandidate.model_validate(raw)
 
 

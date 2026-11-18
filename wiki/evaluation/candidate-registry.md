@@ -116,7 +116,7 @@ The [version check](#version-check) validates each row with `odds_core.rehash_le
 1. The range runs forwards, no other rehash holds the repository's lock, and the working tree has no uncommitted change outside `candidates/`, so the head commit is the code replayed.
 2. Every registered candidate of the rule records one hash. When all record the current hash, there is nothing to do.
 3. It opens a read-only repeatable-read transaction on the database and exports its snapshot (`odds_analytics.candidate_rehash.frozen_snapshot`). Both replays and the parity checks read that one snapshot.
-4. It replays every candidate of the rule with `scripts.replay_candidates` under the base revision's code (`--base`, by default the merge-base of `HEAD` with `origin/main`, resolved to a commit SHA), checked out in a temporary git worktree in `worktrees/`, and computes the rule's hash there. That hash must be the one the candidates record.
+4. It replays every candidate of the rule with `scripts.replay_candidates`, which reads the current candidate files into the base revision's candidate model, under the base revision's code (`--base`, by default the merge-base of `HEAD` with `origin/main`, resolved to a commit SHA), checked out in a temporary git worktree in `worktrees/`, and computes the rule's hash there. That hash must be the one the candidates record.
 5. It replays them again under the head's code, whose hash must be the current one. The two outputs, every decision's counts, bets and backtest summary as canonical JSON, must be byte-identical.
 6. Each candidate needs a decision with inputs in the replay, and the replay needs a bet. The [parity check](candidate-parity.md) of each candidate must match every recorded decision.
 

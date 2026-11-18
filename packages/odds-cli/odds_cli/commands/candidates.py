@@ -968,7 +968,7 @@ def backfill_estimates(
             )
     for (name, version), count in plan.skipped.items():
         console.print(
-            f"{name} v{version}: {count} trades skipped, no registered rule to replay",
+            f"{name} v{version}: {count} trades skipped, not a registered rule candidate",
             soft_wrap=True,
         )
     if apply:

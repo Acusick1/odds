@@ -1,4 +1,4 @@
-"""Rule candidate rules, shared by the live runner and the replay backtest.
+"""Rules that rule candidates run, shared by the live runner and the replay backtest.
 
 This package's ``__init__`` is in every rule's hash, so it exports only the framework every
 rule's closure contains: never the registry (``registry``) or a rule module.
