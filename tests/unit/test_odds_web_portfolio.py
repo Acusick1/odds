@@ -16,7 +16,7 @@ from odds_web.db import build_web_database
 from odds_web.portfolio import AXIS_PERCENT, forest_for, portfolio_rows
 from sqlalchemy.exc import DBAPIError
 
-from tests.odds_web_helpers import agent, bet, mechanical, stub_stored_backtests, summaries
+from tests.odds_web_helpers import agent, bet, rule_candidate, stub_stored_backtests, summaries
 
 
 @pytest.fixture
@@ -53,7 +53,7 @@ class TestPortfolioPage:
     def test_shows_the_numbers_of_the_report(
         self, client: TestClient, report: dict[str, object], registry: list
     ) -> None:
-        registry.append(mechanical())
+        registry.append(rule_candidate())
         bets = [bet(i, 0.5) for i in range(100)]
         report["summaries"] = summaries(bets, registry)
         summary = report["summaries"][0]  # type: ignore[index]
@@ -70,7 +70,7 @@ class TestPortfolioPage:
     def test_never_shows_promote_or_kill_below_100_bets_with_a_close(
         self, client: TestClient, report: dict[str, object], registry: list
     ) -> None:
-        registry.append(mechanical())
+        registry.append(rule_candidate())
         # Strongly positive and strongly negative, each short of a checkpoint.
         report["summaries"] = summaries(
             [bet(i, 0.9) for i in range(99)] + [bet(i, -0.9, name="loser") for i in range(99)],
@@ -99,7 +99,7 @@ class TestPortfolioPage:
     def test_p_and_l_never_takes_the_ev_colours(
         self, client: TestClient, report: dict[str, object], registry: list
     ) -> None:
-        registry.append(mechanical())
+        registry.append(rule_candidate())
         report["summaries"] = summaries([bet(i, 0.5) for i in range(10)], registry)
 
         body = client.get("/").text
@@ -120,7 +120,7 @@ class TestPortfolioPage:
     def test_after_a_good_load_a_failure_shows_the_last_cached_time(
         self, report: dict[str, object], registry: list
     ) -> None:
-        registry.append(mechanical())
+        registry.append(rule_candidate())
         report["summaries"] = summaries([bet(i, 0.5) for i in range(10)], registry)
         database = build_web_database("postgresql+asyncpg://odds_web:pw@localhost:1/odds")
         with TestClient(create_app(database, Path("."), SingleFlightCache(ttl=0.0))) as client:
@@ -144,7 +144,7 @@ class TestPortfolioPage:
     def test_a_healthy_section_says_when_its_data_was_loaded(
         self, client: TestClient, report: dict[str, object], registry: list
     ) -> None:
-        registry.append(mechanical())
+        registry.append(rule_candidate())
         report["summaries"] = summaries([bet(i, 0.5) for i in range(10)], registry)
 
         body = client.get("/").text
@@ -155,7 +155,7 @@ class TestPortfolioPage:
     def test_the_fragment_is_the_portfolio_without_the_page(
         self, client: TestClient, report: dict[str, object], registry: list
     ) -> None:
-        registry.append(mechanical())
+        registry.append(rule_candidate())
         report["summaries"] = summaries([bet(i, 0.5) for i in range(10)], registry)
 
         fragment = client.get("/fragments/portfolio").text
@@ -189,7 +189,7 @@ class TestPortfolioRows:
         assert row.status == "not current" and row.scope == "—"
 
     def test_a_killed_candidate_shows_its_status_and_no_next_checkpoint(self) -> None:
-        killed = mechanical().model_copy(update={"status": CandidateStatus.KILLED})
+        killed = rule_candidate().model_copy(update={"status": CandidateStatus.KILLED})
 
         [row] = portfolio_rows(summaries([], [killed]))
 
@@ -197,14 +197,14 @@ class TestPortfolioRows:
         assert row.verdict == "not yet"
 
     def test_a_promoted_candidate_shows_no_next_checkpoint(self) -> None:
-        promoted = mechanical().model_copy(update={"status": CandidateStatus.PROMOTED})
+        promoted = rule_candidate().model_copy(update={"status": CandidateStatus.PROMOTED})
 
         [row] = portfolio_rows(summaries([], [promoted]))
 
         assert row.status == "promoted" and row.progress is None
 
     def test_a_historical_version_does_not_take_the_current_versions_scope(self) -> None:
-        v2 = mechanical(sport="basketball_nba", market="h2h").model_copy(update={"version": 2})
+        v2 = rule_candidate(sport="basketball_nba", market="h2h").model_copy(update={"version": 2})
         old, current = portfolio_rows(summaries([bet(i, 0.5) for i in range(3)], [v2]))
 
         assert (old.version, old.scope, old.status) == (1, "—", "not current")
@@ -212,14 +212,16 @@ class TestPortfolioRows:
 
     def test_progress_is_toward_the_next_checkpoint(self) -> None:
         noise = [bet(i, 1.0 if i % 2 else -1.0) for i in range(130)]
-        [row] = portfolio_rows(summaries(noise, [mechanical()]))
+        [row] = portfolio_rows(summaries(noise, [rule_candidate()]))
 
         assert row.progress is not None
         assert (row.progress.bets_with_close, row.progress.next_checkpoint) == (130, 200)
         assert row.verdict == "continue" and row.verdict_note == "at 100 bets"
 
     def test_forest_clips_an_interval_past_the_axis_and_marks_it(self) -> None:
-        [summary] = summaries([bet(i, 1.0 if i % 2 else -1.0) for i in range(4)], [mechanical()])
+        [summary] = summaries(
+            [bet(i, 1.0 if i % 2 else -1.0) for i in range(4)], [rule_candidate()]
+        )
         assert summary.current is not None
 
         forest = forest_for(summary.current)

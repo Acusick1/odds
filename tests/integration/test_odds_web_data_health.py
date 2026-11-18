@@ -12,7 +12,7 @@ import pytest
 from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS, BookSet
 from odds_core.candidates import (
     CandidateStatus,
-    MechanicalCandidate,
+    RuleCandidate,
     candidates_dir,
     load_candidates,
 )
@@ -52,8 +52,8 @@ BOOKS = [
 ]
 
 
-def candidate(rule: str = "exchange_gap", name: str = "exchange-gap-epl") -> MechanicalCandidate:
-    return MechanicalCandidate(
+def candidate(rule: str = "exchange_gap", name: str = "exchange-gap-epl") -> RuleCandidate:
+    return RuleCandidate(
         name=name,
         description="d",
         sports=("soccer_epl",),
@@ -61,7 +61,7 @@ def candidate(rule: str = "exchange_gap", name: str = "exchange-gap-epl") -> Mec
         issue=1,
         start_date="2026-01-01",
         status=CandidateStatus.ACTIVE,
-        kind="mechanical",
+        kind="rule",
         books=BookSet.UK_RETAIL,
         market="1x2",
         rule=rule,
@@ -211,7 +211,7 @@ class TestDecisionWindowCoverage:
 
     def test_every_registered_rule_hash_still_matches_its_registry_entry(self) -> None:
         for entry in load_candidates(candidates_dir()):
-            if isinstance(entry, MechanicalCandidate):
+            if isinstance(entry, RuleCandidate):
                 assert rule_sha256(entry.rule) == entry.rule_sha256, entry.name
 
 

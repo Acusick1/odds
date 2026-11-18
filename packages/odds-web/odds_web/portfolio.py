@@ -17,7 +17,7 @@ from odds_analytics.candidate_report import (
     checkpoint_progress,
 )
 from odds_core.candidate_backtest_models import WindowKind
-from odds_core.candidates import Candidate, CandidateStatus, MechanicalCandidate
+from odds_core.candidates import Candidate, CandidateStatus, RuleCandidate
 from odds_core.close import close_spec
 
 # The forest plot's EV axis, shared by every row so intervals compare; an interval running past it
@@ -129,7 +129,7 @@ def scope_of(entry: Candidate | None) -> str:
     if entry is None:
         return "—"
     leagues = ", ".join(entry.sports)
-    if isinstance(entry, MechanicalCandidate):
+    if isinstance(entry, RuleCandidate):
         return f"{leagues} · {entry.market}"
     return f"{leagues} · agent"
 
@@ -169,11 +169,11 @@ def is_agent(entry: Candidate | None) -> bool:
 
 
 def no_ev_reason(summary: CandidateSummary, entry: Candidate | None = None) -> str:
-    """Why there is no current estimate: the market has no close (known from a mechanical
+    """Why there is no current estimate: the market has no close (known from a rule
     candidate's registry entry, else from its bets lacking one), or the events are too few."""
     if summary.bets_with_close == 0:
         no_close = summary.bets_without_close > 0 or (
-            isinstance(entry, MechanicalCandidate)
+            isinstance(entry, RuleCandidate)
             and all(close_spec(sport, entry.market) is None for sport in entry.sports)
         )
         return "EV not scoreable" if no_close else "no bets with a close"

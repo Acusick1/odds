@@ -289,7 +289,7 @@ class TestCurrentEstimate:
         assert summary.current is summary.checkpoint
 
     def test_the_estimate_uses_the_family_size_now(self) -> None:
-        registry = [mechanical("a"), mechanical("b")]
+        registry = [rule_candidate("a"), rule_candidate("b")]
         decisions = {
             ("a", 1): DecisionStart(LONG_AGO, frozenset({"soccer_epl"})),
             ("b", 1): DecisionStart(NOW - timedelta(days=1), frozenset({"soccer_epl"})),
@@ -471,14 +471,14 @@ class TestCheckpointProgress:
         assert checkpoints_through_next(900) == [100, 200, 300, 400, 500]
 
 
-def mechanical(name: str, version: int = 1, start: str = "2026-01-01", **overrides: object):
-    from odds_core.candidates import MechanicalCandidate
+def rule_candidate(name: str, version: int = 1, start: str = "2026-01-01", **overrides: object):
+    from odds_core.candidates import RuleCandidate
 
-    return MechanicalCandidate.model_validate(
+    return RuleCandidate.model_validate(
         {
             "name": name,
             "description": "d",
-            "kind": "mechanical",
+            "kind": "rule",
             "books": "uk_retail",
             "market": "1x2",
             "sports": ["soccer_epl"],
@@ -530,7 +530,7 @@ def decided(day: int, *sports: str) -> DecisionStart:
 class TestFamilyStarts:
     def starts(self, registry, decisions=None, draft=None, draft_start=None):
         return family_starts(
-            mechanical("epl"),
+            rule_candidate("epl"),
             registry,
             decisions or {},
             draft,
@@ -538,7 +538,7 @@ class TestFamilyStarts:
         )
 
     def test_a_version_counts_from_its_first_decision(self) -> None:
-        registry = [mechanical("a", version=3), mechanical("b")]
+        registry = [rule_candidate("a", version=3), rule_candidate("b")]
         decisions = {
             ("a", 1): decided(2),
             ("a", 2): decided(9),
@@ -548,19 +548,19 @@ class TestFamilyStarts:
         assert self.starts(registry, decisions) == [at(2), at(5), at(9), at(21)]
 
     def test_registered_versions_without_a_decision_do_not_count(self) -> None:
-        registry = [mechanical("a"), mechanical("b", start="2026-01-01")]
+        registry = [rule_candidate("a"), rule_candidate("b", start="2026-01-01")]
         assert self.starts(registry, {("a", 1): decided(4)}) == [at(4)]
 
     def test_killed_siblings_count(self) -> None:
-        registry = [mechanical("a"), mechanical("b", status="killed")]
+        registry = [rule_candidate("a"), rule_candidate("b", status="killed")]
         assert len(self.starts(registry, {("a", 1): decided(1), ("b", 1): decided(2)})) == 2
 
     def test_other_rule_sport_or_market_or_unregistered_name_is_another_family(self) -> None:
         registry = [
-            mechanical("a"),
-            mechanical("b", rule="polymarket_gap"),
-            mechanical("c", sports=["baseball_mlb"], market="h2h"),
-            mechanical("d", market="totals"),
+            rule_candidate("a"),
+            rule_candidate("b", rule="polymarket_gap"),
+            rule_candidate("c", sports=["baseball_mlb"], market="h2h"),
+            rule_candidate("d", market="totals"),
         ]
         decisions = {
             (name, 1): decided(1, "baseball_mlb" if name == "c" else EPL)
@@ -569,11 +569,11 @@ class TestFamilyStarts:
         assert self.starts(registry, decisions) == [at(1)]
 
     def test_a_pooled_version_shares_the_family_of_each_league_it_lists(self) -> None:
-        registry = [mechanical("pooled", sports=[EPL, SERIE_A])]
+        registry = [rule_candidate("pooled", sports=[EPL, SERIE_A])]
         assert self.starts(registry, {("pooled", 1): decided(1, EPL, SERIE_A)}) == [at(1)]
 
     def test_draft_counts_once_from_the_given_time(self) -> None:
-        registry = [mechanical("a")]
+        registry = [rule_candidate("a")]
         decisions = {("a", 1): decided(3)}
         assert self.starts(registry, decisions, ("new", 1), at(30)) == [at(3), at(30)]
         assert self.starts(registry, decisions, ("a", 1), at(30)) == [at(3)]
@@ -587,9 +587,9 @@ class TestFamilyStarts:
 
 
 class TestFamilyOfIntersectingLeagues:
-    epl = mechanical("epl")
-    serie_a = mechanical("serie-a", sports=[SERIE_A])
-    pooled = mechanical("pooled", sports=[EPL, SERIE_A])
+    epl = rule_candidate("epl")
+    serie_a = rule_candidate("serie-a", sports=[SERIE_A])
+    pooled = rule_candidate("pooled", sports=[EPL, SERIE_A])
     registry = [epl, serie_a, pooled]
     decisions = {
         ("epl", 1): decided(1),
@@ -607,15 +607,15 @@ class TestFamilyOfIntersectingLeagues:
         assert self.k(self.epl) == self.k(self.serie_a) == 2
 
     def test_another_market_with_the_same_leagues_is_another_family(self) -> None:
-        totals = mechanical("totals", sports=[EPL, SERIE_A], market="totals")
+        totals = rule_candidate("totals", sports=[EPL, SERIE_A], market="totals")
         assert family_starts(totals, self.registry, self.decisions) == []
 
 
 class TestPastVersionLeagues:
     """v1 listed EPL and v2 lists EPL and Serie A: each counts by the leagues it decided with."""
 
-    v2 = mechanical("gap", version=2, sports=[EPL, SERIE_A])
-    serie_a = mechanical("serie-a", sports=[SERIE_A])
+    v2 = rule_candidate("gap", version=2, sports=[EPL, SERIE_A])
+    serie_a = rule_candidate("serie-a", sports=[SERIE_A])
     registry = [v2, serie_a]
     decisions = {
         ("gap", 1): decided(1, EPL),
@@ -648,9 +648,9 @@ class TestFamilyUsesTheNamesRuleAndMarket:
     def test_every_version_of_a_name_takes_the_current_entrys_rule_and_market(self) -> None:
         # The version check keeps a name's rule and market fixed, so the entry's are every
         # version's: v1 of "sibling" counts although only v2 is registered.
-        registry = [mechanical("a"), mechanical("sibling", version=2)]
+        registry = [rule_candidate("a"), rule_candidate("sibling", version=2)]
         decisions = {("a", 1): decided(1), ("sibling", 1): decided(2), ("sibling", 2): decided(3)}
-        assert family_starts(mechanical("a"), registry, decisions) == [at(1), at(2), at(3)]
+        assert family_starts(rule_candidate("a"), registry, decisions) == [at(1), at(2), at(3)]
 
 
 class TestLeagueBreakdown:
@@ -682,7 +682,7 @@ class TestLeagueBreakdown:
 
 
 class TestKAtEachCheckpoint:
-    registry = [mechanical("a"), mechanical("b")]
+    registry = [rule_candidate("a"), rule_candidate("b")]
 
     def judged(self, decisions: dict):
         sequence = [trade(i, 0.5, name="a") for i in range(100)]
@@ -715,7 +715,7 @@ class TestKAtEachCheckpoint:
         assert [c.family_versions for c in checkpoints] == [1, 1, 3]
 
     def test_every_version_of_a_name_takes_the_family_of_its_registry_entry(self) -> None:
-        registry = [mechanical("a", version=2)]
+        registry = [rule_candidate("a", version=2)]
         sequence = [trade(i, name="a", version=1) for i in range(3)]
         decisions = {
             ("a", 1): DecisionStart(LONG_AGO, frozenset({"soccer_epl"})),
@@ -730,7 +730,7 @@ class TestKAtEachCheckpoint:
     def test_unregistered_name_and_agent_have_k_1(self) -> None:
         summaries = summarize_candidates(
             [trade(0, name="ghost"), trade(1, name="cand")],
-            [registry_entry("cand"), mechanical("a"), mechanical("b")],
+            [registry_entry("cand"), rule_candidate("a"), rule_candidate("b")],
             NOW,
             {("a", 1): decided(1), ("b", 1): decided(1)},
             n_boot=N_BOOT,

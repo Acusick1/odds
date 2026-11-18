@@ -15,7 +15,7 @@ from odds_analytics.candidate_report import (
     load_decision_starts,
 )
 from odds_core.bookmakers import BOOK_SETS, BookSet
-from odds_core.candidates import MechanicalCandidate
+from odds_core.candidates import RuleCandidate
 from odds_core.models import Event, EventStatus
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade, TradeResult
 from odds_core.vocabulary import Source, TimeBasis
@@ -45,11 +45,11 @@ EXCHANGE = (2.0, 4.0, 4.0)
 RETAIL = (2.2, 3.0, 3.0)
 
 
-def candidate(**overrides: Any) -> MechanicalCandidate:
+def candidate(**overrides: Any) -> RuleCandidate:
     fields: dict[str, Any] = {
         "name": "gap",
         "description": "d",
-        "kind": "mechanical",
+        "kind": "rule",
         "books": "uk_retail",
         "market": "1x2",
         "sports": ["soccer_epl"],
@@ -62,13 +62,13 @@ def candidate(**overrides: Any) -> MechanicalCandidate:
         "params": {"threshold": 0.02, "minutes_before_kickoff": [60], "max_input_age_minutes": 10},
         **overrides,
     }
-    return MechanicalCandidate.model_validate(fields)
+    return RuleCandidate.model_validate(fields)
 
 
 POLYMARKET = (0.5, 0.25, 0.25)
 
 
-def polymarket_candidate() -> MechanicalCandidate:
+def polymarket_candidate() -> RuleCandidate:
     return candidate(rule="polymarket_gap", rule_sha256=rule_sha256("polymarket_gap"))
 
 
@@ -138,7 +138,7 @@ async def add_event(
     await session.commit()
 
 
-async def run(session: Any, cand: MechanicalCandidate | None = None, **kwargs: Any):
+async def run(session: Any, cand: RuleCandidate | None = None, **kwargs: Any):
     return await replay(
         session,
         cand or candidate(),
@@ -720,7 +720,7 @@ class TestPooledLeagues:
         assert (await self.replay(session, k)).summary.family_versions == 2
 
 
-def model_candidate(**params: Any) -> MechanicalCandidate:
+def model_candidate(**params: Any) -> RuleCandidate:
     return candidate(
         name="model",
         rule="retail_ev_model",
@@ -752,7 +752,7 @@ async def add_weeks(session: Any, n: int) -> list[int]:
     return ids
 
 
-async def run_model(session: Any, cand: MechanicalCandidate, **kwargs: Any):
+async def run_model(session: Any, cand: RuleCandidate, **kwargs: Any):
     return await replay(
         session, cand, date(2026, 4, 1), date(2026, 6, 30), 1, now=NOW, n_boot=N_BOOT, **kwargs
     )

@@ -19,7 +19,7 @@ from odds_analytics import candidate_backtest as bt
 from odds_analytics import holdout, holdout_run
 from odds_analytics.candidate_report import Checkpoint, ScoredBet
 from odds_cli.main import app
-from odds_core.candidates import MechanicalCandidate
+from odds_core.candidates import RuleCandidate
 from odds_core.vocabulary import Source
 from typer.testing import CliRunner
 
@@ -31,7 +31,7 @@ from tests.unit.conftest import (
     preregistration,
     selection,
 )
-from tests.unit.test_candidates import MECHANICAL
+from tests.unit.test_candidates import RULE_CANDIDATE
 
 RUNNER = CliRunner(env={"COLUMNS": "250"})
 START, END = date(2025, 9, 1), date(2025, 9, 30)
@@ -44,14 +44,14 @@ def git(root: Path, *args: str) -> str:
     ).stdout.strip()
 
 
-def draft(**changes: object) -> MechanicalCandidate:
+def draft(**changes: object) -> RuleCandidate:
     data = {
-        **{k: v for k, v in MECHANICAL.items() if k != "rule_sha256"},
+        **{k: v for k, v in RULE_CANDIDATE.items() if k != "rule_sha256"},
         "sports": ["soccer_spain_la_liga"],
         "params": dict(HOLDOUT_CELL),
         **changes,
     }
-    return MechanicalCandidate.model_validate(data)
+    return RuleCandidate.model_validate(data)
 
 
 def checkpoint(n: int, mean_ev: float, low: float, high: float) -> Checkpoint:
@@ -609,7 +609,7 @@ class TestRun:
 
         async def collect(
             _session: object,
-            candidate: MechanicalCandidate,
+            candidate: RuleCandidate,
             ranges: dict[str, list[tuple[date, date]]],
             **kw: Any,
         ) -> bt.Replayed:
@@ -809,7 +809,7 @@ class TestSpentReplay:
         state: dict[str, Any] = {"per_league": 40, "access": 0, "ranges": None, "windows": None}
 
         async def collect(
-            _session: object, candidate: MechanicalCandidate, ranges: object, **kw: Any
+            _session: object, candidate: RuleCandidate, ranges: object, **kw: Any
         ) -> bt.Replayed:
             state["access"] = len(kw["access"])
             state["ranges"] = ranges

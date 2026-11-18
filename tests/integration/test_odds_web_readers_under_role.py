@@ -17,7 +17,7 @@ from odds_core.candidate_backtest_models import (
     CandidateBacktestBet,
     WindowKind,
 )
-from odds_core.candidates import AgentCandidate, CandidateStatus, MechanicalCandidate
+from odds_core.candidates import AgentCandidate, CandidateStatus, RuleCandidate
 from odds_core.config import SchedulerConfig, Settings, get_settings
 from odds_core.mlb_data_models import MlbProbablePitchers
 from odds_core.models import AlertHistory, EventStatus, FetchLog
@@ -49,8 +49,8 @@ SPORTS = ["soccer_epl", "basketball_nba", "baseball_mlb"]
 JOBS = ["check-health", "fetch-oddsportal", "fetch-betfair-exchange", "run-candidates"]
 
 
-def mechanical(name: str, sport: str, market: str, rule: str) -> MechanicalCandidate:
-    return MechanicalCandidate(
+def rule_candidate(name: str, sport: str, market: str, rule: str) -> RuleCandidate:
+    return RuleCandidate(
         name=name,
         description="d",
         sports=(sport,),
@@ -58,7 +58,7 @@ def mechanical(name: str, sport: str, market: str, rule: str) -> MechanicalCandi
         issue=1,
         start_date="2026-01-01",
         status=CandidateStatus.ACTIVE,
-        kind="mechanical",
+        kind="rule",
         books=BookSet.UK_RETAIL,
         market=market,
         rule=rule,
@@ -67,10 +67,10 @@ def mechanical(name: str, sport: str, market: str, rule: str) -> MechanicalCandi
     )
 
 
-CANDIDATES: list[MechanicalCandidate | AgentCandidate] = [
-    mechanical("epl-gap", "soccer_epl", "1x2", "exchange_gap"),
-    mechanical("nba-gap", "basketball_nba", "h2h", "polymarket_gap"),
-    mechanical("mlb-gap", "baseball_mlb", "h2h", "exchange_gap"),
+CANDIDATES: list[RuleCandidate | AgentCandidate] = [
+    rule_candidate("epl-gap", "soccer_epl", "1x2", "exchange_gap"),
+    rule_candidate("nba-gap", "basketball_nba", "h2h", "polymarket_gap"),
+    rule_candidate("mlb-gap", "baseball_mlb", "h2h", "exchange_gap"),
     AgentCandidate(
         name="mlb-agent",
         description="d",
@@ -182,7 +182,7 @@ async def populated(odds_web_session: AsyncSession) -> AsyncSession:
                 pnl=1.2,
             )
         )
-        if candidate.kind == "mechanical":
+        if candidate.kind == "rule":
             session.add(
                 CandidateDecision(
                     candidate_name=candidate.name,
@@ -273,7 +273,7 @@ class TestEveryReaderUnderTheRole:
         closes = pages["/fragments/closes"]
         assert all(market in closes for market in ("soccer_epl", "basketball_nba", "baseball_mlb"))
         coverage = pages["/fragments/coverage"]
-        assert all(c.name in coverage for c in CANDIDATES if c.kind == "mechanical")
+        assert all(c.name in coverage for c in CANDIDATES if c.kind == "rule")
         for candidate in CANDIDATES:
             assert "bet365" in pages[f"/c/{candidate.name}/{candidate.version}"]
 

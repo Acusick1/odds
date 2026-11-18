@@ -1,6 +1,6 @@
 name: single-book-outlier
 description: Back a UK retail book whose price on an outcome is at least 1.05 times every other book's, when the Betfair Exchange fair probability times the price minus 1 exceeds 1%, 60 and 30 minutes before kick-off in six football leagues, one outcome per decision and at most once per outcome
-kind: mechanical
+kind: rule
 market: 1x2
 books: uk_retail
 sports: [soccer_epl, soccer_spain_la_liga, soccer_italy_serie_a, soccer_germany_bundesliga, soccer_france_ligue_one, soccer_efl_champ]
@@ -9,7 +9,7 @@ issue: 833
 start_date: 2026-11-13
 status: active
 rule: single_book_outlier
-rule_sha256: 4c71b03416f652d3221153aa9fff63d5f513283b3fdcd599069fd23f53cae5fd
+rule_sha256: 4d53f8caa630d1e1264e1b5899b0f5450a0170c7430c2c313d49dfe5959a935e
 params:
   min_ratio: 1.05
   gap: 0.01

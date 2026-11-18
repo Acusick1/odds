@@ -1,4 +1,4 @@
-"""Rule pinning: the hash of the code a rule's bets depend on, and the check that each mechanical
+"""Rule pinning: the hash of the code a rule's bets depend on, and the check that each rule
 candidate records it.
 
 Kept out of the package's ``__init__`` so the hasher, which reads module sources through
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from odds_core.candidates import Candidate, MechanicalCandidate
+from odds_core.candidates import Candidate, RuleCandidate
 from odds_core.close import CLOSES
 
 from odds_lambda.candidate_rules.code_hash import code_sha256
@@ -43,10 +43,10 @@ def rule_sha256(rule_name: str) -> str:
 
 
 def validate_candidate_rules(candidates: Sequence[Candidate]) -> None:
-    """Raise ``ValueError`` naming a mechanical candidate that is invalid, bets in a league
+    """Raise ``ValueError`` naming a rule candidate that is invalid, bets in a league
     whose market is not in ``CLOSES``, or whose rule code changed."""
     for candidate in candidates:
-        if not isinstance(candidate, MechanicalCandidate):
+        if not isinstance(candidate, RuleCandidate):
             continue
         resolve_rule(candidate)
         if unclosed := [s for s in candidate.sports if (s, candidate.market) not in CLOSES]:

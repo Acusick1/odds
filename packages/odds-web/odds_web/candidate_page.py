@@ -23,7 +23,7 @@ from odds_analytics.candidate_report import (
     RunningScore,
     checkpoints_through_next,
 )
-from odds_core.candidates import AgentCandidate, Candidate, MechanicalCandidate
+from odds_core.candidates import AgentCandidate, Candidate, RuleCandidate
 from odds_lambda.candidate_rules import EstimateBasis
 from odds_lambda.candidate_rules.registry import estimate_basis
 
@@ -53,14 +53,14 @@ ESTIMATE_OMITTED = "No estimate: not every bet in the series has one recorded."
 
 
 def name_basis(summaries: Sequence[CandidateSummary], name: str) -> EstimateBasis | None:
-    """The estimate basis of the rule of ``name``'s registered mechanical entry, which every
+    """The estimate basis of the rule of ``name``'s registered rule-candidate entry, which every
     version of a name shares; None for an agent, a rule without one or a name the registry no
     longer holds."""
     rule = next(
         (
             s.registered.rule
             for s in summaries
-            if s.name == name and isinstance(s.registered, MechanicalCandidate)
+            if s.name == name and isinstance(s.registered, RuleCandidate)
         ),
         None,
     )
@@ -313,7 +313,7 @@ def reads_decisions(entry: Candidate | None) -> bool:
 def shown_decisions(
     entry: Candidate | None, history: DecisionHistory | None
 ) -> DecisionHistory | None:
-    """The timeline of a mechanical version, or of an earlier one that recorded decisions."""
+    """The timeline of a rule-candidate version, or of an earlier one that recorded decisions."""
     if history is None or (entry is None and history.total == 0):
         return None
     return history

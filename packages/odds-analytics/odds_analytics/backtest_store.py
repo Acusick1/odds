@@ -12,7 +12,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from odds_core.candidate_backtest_models import CandidateBacktest, CandidateBacktestBet, WindowKind
-from odds_core.candidates import MechanicalCandidate
+from odds_core.candidates import RuleCandidate
 from odds_lambda.candidate_rules.pinning import rule_sha256
 from sqlalchemy import delete, insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,7 +42,7 @@ def _placement_order(bets: Sequence[ScoredBet]) -> list[ScoredBet]:
 
 
 def _run(
-    candidate: MechanicalCandidate,
+    candidate: RuleCandidate,
     kind: WindowKind,
     start: date,
     end: date,
@@ -83,7 +83,7 @@ def _run(
 
 
 def replay_record(
-    candidate: MechanicalCandidate, result: BacktestResult, kind: WindowKind, git_sha: str
+    candidate: RuleCandidate, result: BacktestResult, kind: WindowKind, git_sha: str
 ) -> RunRecord:
     """A replay's run: the bets it placed, estimated over every bet with a close
     (``BacktestResult.overall``)."""

@@ -20,7 +20,7 @@ from functools import partial
 from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
-from odds_core.candidates import Candidate, CandidateStatus, MechanicalCandidate
+from odds_core.candidates import Candidate, CandidateStatus, RuleCandidate
 from odds_core.close import close_grace, close_quotes, event_close
 from odds_core.exchange_price import ExchangePrice
 from odds_core.market_prices import Outcome
@@ -213,7 +213,7 @@ class Estimates:
 class CandidateReport:
     """Every candidate version's summary and running score, from one read of the trades.
     ``book_replays`` holds, for information only, the counterfactual book replays of each
-    registered mechanical version that has them (``candidate_report`` with ``replays``); no
+    registered rule-candidate version that has them (``candidate_report`` with ``replays``); no
     summary, checkpoint or verdict reads them."""
 
     summaries: list[CandidateSummary]
@@ -322,7 +322,7 @@ class DecisionStart(NamedTuple):
 
 
 def family_starts(
-    candidate: MechanicalCandidate,
+    candidate: RuleCandidate,
     registry: Sequence[Candidate],
     decisions: Mapping[tuple[str, int], DecisionStart],
     draft: tuple[str, int] | None = None,
@@ -343,8 +343,7 @@ def family_starts(
     members = {
         c.name
         for c in registry
-        if isinstance(c, MechanicalCandidate)
-        and (c.rule, c.market) == (candidate.rule, candidate.market)
+        if isinstance(c, RuleCandidate) and (c.rule, c.market) == (candidate.rule, candidate.market)
     }
     starts = {
         key: d.first
@@ -647,7 +646,7 @@ def summarize_candidates(
 
     def family_size(name: str, version: int) -> Callable[[datetime], int]:
         entry = current.get(name)
-        if not isinstance(entry, MechanicalCandidate):
+        if not isinstance(entry, RuleCandidate):
             return lambda _: 1
         recorded = decisions.get((name, version))
         if recorded is not None:
@@ -790,7 +789,7 @@ async def candidate_report(
     decision starts.
 
     The bootstrap runs on ``executor`` (the loop's default one when None), so a server can hold
-    it to a single thread. With ``replays``, each registered mechanical version's book replays
+    it to a single thread. With ``replays``, each registered rule-candidate version's book replays
     are added (``odds_analytics.book_replays``), which read every recorded decision's inputs.
     """
     # book_replays scores with this module's functions, so it cannot be imported above.

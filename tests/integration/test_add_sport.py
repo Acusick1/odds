@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from odds_core.bookmakers import BookSet
-from odds_core.candidates import CandidateStatus, MechanicalCandidate
+from odds_core.candidates import CandidateStatus, RuleCandidate
 from odds_core.close import close_spec
 from odds_core.config import SchedulerConfig, Settings, get_settings
 from odds_core.models import Event, EventStatus
@@ -123,7 +123,7 @@ class TestAddedSport:
         }
 
     def test_its_candidates_resolve_and_have_a_close(self) -> None:
-        candidate = MechanicalCandidate(
+        candidate = RuleCandidate(
             name="exchange-gap-laliga",
             description="d",
             sports=(SPORT,),
@@ -131,7 +131,7 @@ class TestAddedSport:
             issue=1,
             start_date="2026-01-01",
             status=CandidateStatus.ACTIVE,
-            kind="mechanical",
+            kind="rule",
             books=BookSet.UK_RETAIL,
             market="1x2",
             rule="exchange_gap",

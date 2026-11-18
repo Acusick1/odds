@@ -8,7 +8,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
 from odds_core.bookmakers import BOOK_SETS
-from odds_core.candidates import Candidate, CandidateStatus, MechanicalCandidate
+from odds_core.candidates import Candidate, CandidateStatus, RuleCandidate
 from odds_core.models import Event, EventStatus
 from odds_core.paper_trade_models import CandidateDecision
 from odds_core.quotes import Quote
@@ -125,7 +125,7 @@ class _EventInputs:
 
 
 async def candidate_coverage(
-    session: AsyncSession, candidate: MechanicalCandidate, now: datetime
+    session: AsyncSession, candidate: RuleCandidate, now: datetime
 ) -> CandidateCoverage:
     """The candidate's coverage over its leagues' events kicking off from ``PAST`` before
     ``now`` to ``UPCOMING`` after it.
@@ -211,10 +211,8 @@ async def candidate_coverage(
     )
 
 
-def coverage_candidates(registry: Sequence[Candidate]) -> list[MechanicalCandidate]:
-    """The active mechanical candidates, at the version the registry holds."""
+def coverage_candidates(registry: Sequence[Candidate]) -> list[RuleCandidate]:
+    """The active rule candidates, at the version the registry holds."""
     return [
-        c
-        for c in registry
-        if isinstance(c, MechanicalCandidate) and c.status == CandidateStatus.ACTIVE
+        c for c in registry if isinstance(c, RuleCandidate) and c.status == CandidateStatus.ACTIVE
     ]

@@ -35,7 +35,7 @@ from odds_core.candidate_backtest_models import WindowKind
 from odds_core.candidates import (
     Candidate,
     CandidateStatus,
-    MechanicalCandidate,
+    RuleCandidate,
     candidates_dir,
     load_candidate_file,
     load_candidates,
@@ -103,7 +103,7 @@ def list_candidates(
 
 @app.command("rule-hash")
 def rule_hash(rule: Annotated[str, typer.Argument(help="Rule name")]) -> None:
-    """Print the rule_sha256 a mechanical candidate records for the rule."""
+    """Print the rule_sha256 a rule candidate records for the rule."""
     if rule not in RULES:
         console.print(
             f"[red]unknown rule {rule!r}, known rules {sorted(RULES)}[/red]", soft_wrap=True
@@ -268,24 +268,24 @@ def _parse_day(value: str) -> date:
         raise _fail(f"{value!r} is not a YYYY-MM-DD date") from exc
 
 
-def _mechanical(candidate: Candidate) -> MechanicalCandidate:
-    if not isinstance(candidate, MechanicalCandidate):
-        raise _fail(f"candidate {candidate.name!r} is {candidate.kind}, not mechanical")
+def _rule_candidate(candidate: Candidate) -> RuleCandidate:
+    if not isinstance(candidate, RuleCandidate):
+        raise _fail(f"candidate {candidate.name!r} is {candidate.kind}, not a rule candidate")
     return candidate
 
 
-def _resolve(name_or_path: str) -> MechanicalCandidate:
+def _resolve(name_or_path: str) -> RuleCandidate:
     """A registered candidate by name, or a candidate file (possibly a draft) by path."""
     try:
         path = Path(name_or_path)
         if path.is_file():
-            return _mechanical(load_candidate_file(path))
+            return _rule_candidate(load_candidate_file(path))
         registry = load_candidates(candidates_dir())
     except ValueError as exc:
         raise _fail(str(exc)) from exc
     for candidate in registry:
         if candidate.name == name_or_path:
-            return _mechanical(candidate)
+            return _rule_candidate(candidate)
     raise _fail(f"no registered candidate {name_or_path!r} and no such file")
 
 
@@ -460,7 +460,7 @@ def _print_backtest(result: BacktestResult) -> None:
 
 
 async def _family_size(
-    session: AsyncSession, candidate: MechanicalCandidate, registry: list[Candidate], now: datetime
+    session: AsyncSession, candidate: RuleCandidate, registry: list[Candidate], now: datetime
 ) -> int:
     starts = family_starts(
         candidate,
@@ -492,7 +492,7 @@ def backtest(
         typer.Option("--store", help="Store the run in the database, replacing an earlier one"),
     ] = False,
 ) -> None:
-    """Replay a mechanical candidate over completed events and score it like the report.
+    """Replay a rule candidate over completed events and score it like the report.
 
     Development data can kill an idea, never promote one. With --store, writes the run and its
     bets to the database, which the odds-web candidate page shows.
@@ -865,7 +865,7 @@ def parity(
     Exits 1 when a replay differs from the bets placed. Decisions whose replay from the
     database as it is now differs are listed as data differences and never affect the exit code.
     """
-    resolved = _mechanical(
+    resolved = _rule_candidate(
         next((c for c in _load_registry() if c.name == name), None) or _missing(name)
     )
 
@@ -926,7 +926,7 @@ def backfill_estimates(
 ) -> None:
     """Fill each live candidate trade's estimated EV from a replay of its decision.
 
-    Replays every decision of each version of a registered mechanical candidate from its
+    Replays every decision of each version of a registered rule candidate from its
     recorded inputs under the registry's rule, params and book set, as `odds candidates parity`
     does, and takes the estimate of the replayed bet on the trade's selection, line, bookmaker
     and price. Only a trade without a stored estimate is written. A trade with no such bet, or
@@ -968,7 +968,7 @@ def backfill_estimates(
             )
     for (name, version), count in plan.skipped.items():
         console.print(
-            f"{name} v{version}: {count} trades skipped, no registered mechanical rule to replay",
+            f"{name} v{version}: {count} trades skipped, not a registered rule candidate",
             soft_wrap=True,
         )
     if apply:

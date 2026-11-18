@@ -20,13 +20,13 @@ What a [candidate](../foundations/glossary.md#candidate) is and when it is promo
    - State the rule, the reason it might earn EV and the pre-registered grid: the parameter values, the data range and how a cell is selected. Fix these before any backtest runs, as [#626](https://github.com/Acusick1/odds/issues/626) does.
    - A rule that is not in `odds_lambda.candidate_rules.registry.RULES` needs a module of its own first, with its function, params model and spec, and a registry entry ([rule interface](candidate-rules.md#rule-interface)). Its spec declares the sharp inputs, extra markets and [fixture context](candidate-rules.md#fixture-context) it reads and the basis of its [estimates](candidate-rules.md#estimates); the [round-1 football rules](candidate-rules.md#the-football-rules-of-round-1) are examples. A [model rule](candidate-rules.md#model-rules) can only be backtested, because the live runner does not run one.
 2. **Backtest a draft on development data.**
-   - Write a draft file outside `candidates/` with every required field of `odds_core.candidates.MechanicalCandidate` except its hash ([file format](candidate-registry.md#file-format)): its `books` ([book set](candidate-rules.md#book-set)), its `sports` (several pool their bets into one verdict), a market that has a close in `odds_core.close.CLOSES` for each league if it is to get an EV verdict, and params with `minutes_before_kickoff` and `max_input_age_minutes` (10 for a version to register; a draft may widen it to reach older snapshots, [rule interface](candidate-rules.md#rule-interface)).
+   - Write a draft file outside `candidates/` with every required field of `odds_core.candidates.RuleCandidate` except its hash ([file format](candidate-registry.md#file-format)): its `books` ([book set](candidate-rules.md#book-set)), its `sports` (several pool their bets into one verdict), a market that has a close in `odds_core.close.CLOSES` for each league if it is to get an EV verdict, and params with `minutes_before_kickoff` and `max_input_age_minutes` (10 for a version to register; a draft may widen it to reach older snapshots, [rule interface](candidate-rules.md#rule-interface)).
    - For example:
 
      ```yaml
      name: back-longest
      description: Back the longest retail price when it beats the exchange fair price by 2%.
-     kind: mechanical
+     kind: rule
      market: 1x2
      books: uk_retail
      sports: [soccer_epl, soccer_italy_serie_a]
@@ -53,7 +53,7 @@ What a [candidate](../foundations/glossary.md#candidate) is and when it is promo
    - The [gate](candidate-backtest.md#sealed-holdout) passes at mean EV above 0 and not killed; under 30 bets, not killed alone passes, and the result is flagged on the idea issue. A second run of the idea and version is refused, and a failure after the reservation, a crash or power loss included, spends the run.
    - An idea that fails the gate is not registered. An idea with no sealed-holdout data (EPL-only: EPL has no sealed window, [ADR-0024](../../docs/adr/0024-epl-2022-24-is-development-data.md)) goes straight to the forward test; a file that lists EPL with other leagues runs on the others and its result row records EPL as without a window.
 4. **Register it** with a pull request that adds `candidates/<name>.yaml`.
-   - Take the hash from `uv run odds candidates rule-hash <rule>`, list the leagues it runs in (each needs a close for its market in `odds_core.close.CLOSES`), and set `version: 1`, the issue, a `start_date` and `status: active` ([file format](candidate-registry.md#file-format)).
+   - Take the hash from `uv run odds candidates rule-hash <rule>`, list the leagues it runs in (each needs a close for its market in `odds_core.close.CLOSES`), and set `kind: rule`, `version: 1`, the issue, a `start_date` and `status: active` ([file format](candidate-registry.md#file-format)).
    - `uv run odds candidates list` validates the file, and the `candidate-versions` hook checks that a later change carries a new version once the start date has arrived, and that a name's rule and market never change (another rule or market is a new name) ([version check](candidate-registry.md#version-check)). Any code edit in a module the rule imports shows up in the file as a new hash, so it needs a new version, unless the edit leaves every bet the same (step 8); so does adding or dropping a league.
 5. **Deploy.** The [run-candidates job](run-candidates-job.md) places the candidate's bets from its start date and records every decision, and the [fetch-oddsportal job](../collection/fetch-oddsportal-job.md#runs-before-candidate-decisions) scrapes each of its leagues before every decision time and lookback point. Nothing else is needed.
 6. **Read the report on the production host.** `odds copy from-prod` copies no bets or decisions, so a local database cannot show them ([report](candidate-registry.md#odds-candidates-report)).

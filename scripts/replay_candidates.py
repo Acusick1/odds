@@ -10,15 +10,22 @@ import argparse
 import asyncio
 import dataclasses
 import json
+import typing
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
 import yaml
 from odds_analytics.candidate_backtest import _Counts, _decide, final_events, replay
-from odds_core.candidates import MechanicalCandidate
 from odds_core.database import async_session_maker
 from sqlalchemy import text
+
+try:
+    from odds_core.candidates import RuleCandidate
+except ImportError:
+    from odds_core.candidates import (
+        MechanicalCandidate as RuleCandidate,  # type: ignore[attr-defined,no-redef]
+    )
 
 # Fixed so the summary's pending counts do not depend on when it runs.
 NOW = datetime(2000, 1, 1, tzinfo=UTC)
@@ -55,7 +62,7 @@ def current_rule_sha256(rule: str) -> str:
     return rule_sha256(rule)
 
 
-def resolve(candidate: MechanicalCandidate) -> tuple[Any, Any]:
+def resolve(candidate: RuleCandidate) -> tuple[Any, Any]:
     """The candidate's rule and params, wherever this revision defines ``resolve_rule``."""
     try:
         from odds_lambda.candidate_rules.registry import resolve_rule
@@ -64,29 +71,30 @@ def resolve(candidate: MechanicalCandidate) -> tuple[Any, Any]:
     return resolve_rule(candidate)
 
 
-def load(path: Path) -> MechanicalCandidate:
+def load(path: Path) -> RuleCandidate:
     """The candidate file parsed by this checkout's model: a revision before pooled leagues
-    names its one league ``sport``, a later one lists ``sports``, and a revision before book
-    sets has no ``books``."""
+    names its one league ``sport``, a later one lists ``sports``, a revision before book
+    sets has no ``books``, and a revision before rule candidates calls the kind ``mechanical``."""
     raw = yaml.safe_load(path.read_text())
-    if "books" not in MechanicalCandidate.model_fields:
+    if "books" not in RuleCandidate.model_fields:
         raw.pop("books", None)
-    if "sports" in MechanicalCandidate.model_fields:
+    if "sports" in RuleCandidate.model_fields:
         if "sport" in raw:
             raw["sports"] = [raw.pop("sport")]
     elif "sports" in raw:
         (raw["sport"],) = raw.pop("sports")
-    return MechanicalCandidate.model_validate(raw)
+    (raw["kind"],) = typing.get_args(RuleCandidate.model_fields["kind"].annotation)
+    return RuleCandidate.model_validate(raw)
 
 
-def leagues(candidate: MechanicalCandidate) -> list[str]:
+def leagues(candidate: RuleCandidate) -> list[str]:
     raw: Any = candidate
     return list(raw.sports) if hasattr(raw, "sports") else [raw.sport]
 
 
-def in_league(candidate: MechanicalCandidate, league: str) -> MechanicalCandidate:
+def in_league(candidate: RuleCandidate, league: str) -> RuleCandidate:
     """``candidate`` restricted to ``league``, whose development days differ from another's."""
-    if "sports" in MechanicalCandidate.model_fields:
+    if "sports" in RuleCandidate.model_fields:
         return candidate.model_copy(update={"sports": (league,)})
     return candidate
 

@@ -1,4 +1,4 @@
-"""Replay a mechanical candidate over completed events and score it like the forward test.
+"""Replay a rule candidate over completed events and score it like the forward test.
 
 Each event is decided at each of its rule's decision times, from the snapshots stamped at or
 before it, betting each selection at most once per event, and the bets are scored by
@@ -16,7 +16,7 @@ from enum import StrEnum
 from functools import reduce
 
 from odds_core.bookmakers import BOOK_SETS, BookSet
-from odds_core.candidates import MechanicalCandidate
+from odds_core.candidates import RuleCandidate
 from odds_core.close import backtest_close, backtest_close_quotes
 from odds_core.models import Event, EventStatus
 from odds_core.vocabulary import Source
@@ -126,7 +126,7 @@ class BacktestResult:
         return tuple(event_id for refit in self.refits for event_id in refit.event_ids)
 
 
-def hash_status(candidate: MechanicalCandidate) -> HashStatus:
+def hash_status(candidate: RuleCandidate) -> HashStatus:
     if candidate.rule_sha256 is None:
         return HashStatus.ABSENT
     try:
@@ -195,7 +195,7 @@ class _Counts:
 
 async def _decide(
     session: AsyncSession,
-    candidate: MechanicalCandidate,
+    candidate: RuleCandidate,
     spec: RuleSpec,
     params: RuleParams,
     events: Sequence[Event],
@@ -282,7 +282,7 @@ def _placement_order(bet: ScoredBet) -> tuple[datetime, datetime, int]:
 
 async def _decide_leagues(
     session: AsyncSession,
-    candidate: MechanicalCandidate,
+    candidate: RuleCandidate,
     spec: RuleSpec,
     params: RuleParams,
     events: Sequence[Event],
@@ -306,7 +306,7 @@ async def _decide_leagues(
 
 async def collect(
     session: AsyncSession,
-    candidate: MechanicalCandidate,
+    candidate: RuleCandidate,
     ranges: Mapping[str, Sequence[DayRange]],
     only_events: Collection[int] | None = None,
     access: Collection[HoldoutAccess] = (),
@@ -414,7 +414,7 @@ def coverage_of(replayed: Replayed, books: Collection[str]) -> Coverage:
 
 async def replay(
     session: AsyncSession,
-    candidate: MechanicalCandidate,
+    candidate: RuleCandidate,
     start: date,
     end: date,
     family_versions: int,
@@ -462,7 +462,7 @@ async def replay(
 
 
 def score(
-    candidate: MechanicalCandidate,
+    candidate: RuleCandidate,
     start: date,
     end: date,
     replayed: Replayed,

@@ -17,7 +17,7 @@ Interval table:
   no fixture in 28d → 6h check-in, no scrape
   DB unreachable    → 1h (fallback)
 
-A run is also added ``SCRAPE_LEAD`` before each active mechanical candidate's
+A run is also added ``SCRAPE_LEAD`` before each active rule candidate's
 decision time and lookback point, so each reads a snapshot taken just before it.
 """
 
@@ -380,7 +380,7 @@ async def ingest_league(
 
 
 def candidate_scrape_leads(sport_key: str) -> list[Lead]:
-    """A run ``SCRAPE_LEAD`` before each active mechanical candidate's decision time and
+    """A run ``SCRAPE_LEAD`` before each active rule candidate's decision time and
     lookback point, which still runs late until that time.
 
     An unreadable registry gives none, so collection keeps its cadence.
