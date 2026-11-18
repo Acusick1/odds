@@ -9,7 +9,7 @@ issue: 771
 start_date: 2026-11-13
 status: active
 rule: exchange_steam
-rule_sha256: e89d9d8302aa83e7787190d6d482ca93644bc344741fd9a27ecab9445f29821b
+rule_sha256: ef1b92129ba0f57839e86642b99c10a5c10f5872ad3f7b8a717b5f183f102d15
 params:
   min_rise: 0.025
   lookbacks:

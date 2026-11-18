@@ -28,7 +28,7 @@ A [fetch tier](../foundations/glossary.md#fetch-tier) is never stored: `odds_lam
 |---|---|---|---|
 | opening | 72+ | 48 | initial line release |
 | early | 24-72 | 24 | line establishment |
-| day_before | 12-24 | 12 | professional betting |
+| day_before | 12-24 | 12 | day before kick-off |
 | pregame | 3-12 | 3 | active betting |
 | closing | 0-3 | 0.5 | critical line movement |
 | in_play | after kick-off | 0.5 | incidental collection |

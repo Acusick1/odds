@@ -9,7 +9,7 @@ issue: 835
 start_date: 2026-11-13
 status: active
 rule: favourite_price
-rule_sha256: 19b1aabb7d981ad1debde63c3c3d1f3489833a451e14d5d225ea98487bc3cb22
+rule_sha256: c707fab2ff2d35114038dd98dfe2ec78070d9b855a008f9cc39190ae43defccf
 params:
   min_probability: 0.6
   threshold: 0.005
