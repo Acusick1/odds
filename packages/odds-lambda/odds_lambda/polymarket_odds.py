@@ -36,7 +36,7 @@ _CADENCE = job_cadence("fetch-polymarket-odds")
 TIER_STEPS: dict[FetchTier, timedelta] = {
     FetchTier.CLOSING: timedelta(hours=_CADENCE.closing),
     FetchTier.PREGAME: timedelta(hours=_CADENCE.pregame),
-    FetchTier.SHARP: timedelta(hours=_CADENCE.sharp),
+    FetchTier.DAY_BEFORE: timedelta(hours=_CADENCE.day_before),
     FetchTier.EARLY: timedelta(hours=_CADENCE.early),
     FetchTier.OPENING: timedelta(hours=_CADENCE.opening),
 }

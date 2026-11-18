@@ -401,7 +401,7 @@ class TestTierSamplerDerivedTiers:
             bookmakers=("pinnacle",),
         )
 
-        result = TierSampler("sharp", required_bookmakers=["pinnacle"]).sample(
+        result = TierSampler("day_before", required_bookmakers=["pinnacle"]).sample(
             self._bundle([opening])
         )
 

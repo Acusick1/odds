@@ -9,7 +9,7 @@ issue: 842
 start_date: 2026-11-13
 status: active
 rule: exchange_gap
-rule_sha256: 872857f18d4cb2dd11a338d34e2d0f5346af4caa25c7547857ba4018aa6c848e
+rule_sha256: 91af9e7a2c619f94c107070b2d348a59ee32eef146fbe6ce10cf6e68dc327b65
 params:
   threshold: 0.03
   minutes_before_kickoff: [360]

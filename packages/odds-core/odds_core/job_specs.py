@@ -11,7 +11,7 @@ from odds_core.sports import SportKey
 class Cadence:
     closing: float
     pregame: float
-    sharp: float
+    day_before: float
     early: float
     opening: float
     no_game: float
@@ -60,7 +60,7 @@ JOB_SPECS: Mapping[str, JobSpec] = MappingProxyType(
                 Heartbeat("fetch-odds-nba", 35, "basketball_nba"),
             ),
             cadence=Cadence(
-                closing=2.0, pregame=3.0, sharp=12.0, early=24.0, opening=48.0, no_game=24.0
+                closing=2.0, pregame=3.0, day_before=12.0, early=24.0, opening=48.0, no_game=24.0
             ),
             sport_cadences=(
                 (
@@ -68,7 +68,7 @@ JOB_SPECS: Mapping[str, JobSpec] = MappingProxyType(
                     Cadence(
                         closing=12.0,
                         pregame=12.0,
-                        sharp=12.0,
+                        day_before=12.0,
                         early=24.0,
                         opening=24.0,
                         no_game=24.0,
@@ -103,7 +103,7 @@ JOB_SPECS: Mapping[str, JobSpec] = MappingProxyType(
             cadence=Cadence(
                 closing=0.5,
                 pregame=1.0,
-                sharp=2.0,
+                day_before=2.0,
                 early=2.0,
                 opening=2.0,
                 no_game=6.0,
@@ -141,7 +141,7 @@ JOB_SPECS: Mapping[str, JobSpec] = MappingProxyType(
             bootstrap_function="schedule_next",
             agent_trades=True,
             cadence=Cadence(
-                closing=1.0, pregame=4.0, sharp=4.0, early=12.0, opening=24.0, no_game=12.0
+                closing=1.0, pregame=4.0, day_before=4.0, early=12.0, opening=24.0, no_game=12.0
             ),
         ),
         "fetch-espn-fixtures": JobSpec(
@@ -184,7 +184,7 @@ JOB_SPECS: Mapping[str, JobSpec] = MappingProxyType(
             cadence=Cadence(
                 closing=0.25,
                 pregame=0.5,
-                sharp=2.0,
+                day_before=2.0,
                 early=2.0,
                 opening=2.0,
                 no_game=6.0,
@@ -200,7 +200,7 @@ JOB_SPECS: Mapping[str, JobSpec] = MappingProxyType(
                 Heartbeat("fetch-polymarket-odds-nba", 11, "basketball_nba"),
             ),
             cadence=Cadence(
-                closing=1 / 12, pregame=0.25, sharp=0.25, early=0.5, opening=1, no_game=6
+                closing=1 / 12, pregame=0.25, day_before=0.25, early=0.5, opening=1, no_game=6
             ),
         ),
         "fetch-mlb-probables": JobSpec(
@@ -218,7 +218,7 @@ JOB_SPECS: Mapping[str, JobSpec] = MappingProxyType(
             cadence=Cadence(
                 closing=6.0,
                 pregame=6.0,
-                sharp=6.0,
+                day_before=6.0,
                 early=6.0,
                 opening=6.0,
                 no_game=6.0,

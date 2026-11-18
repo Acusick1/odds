@@ -22,9 +22,9 @@ Every scheduled job runs on one host: the production host, under the [local sche
 
 Job records and operator overrides decide what the production scheduler runs:
 
-- `odds_core.config.SchedulerConfig.bootstrap_jobs` names the jobs `odds scheduler start` bootstraps. `agent-run` has `bootstrap=False` in `odds_core.job_specs.JOB_SPECS`, so it runs only when added to `SCHEDULER_BOOTSTRAP_JOBS`.
-- `odds_core.job_specs.JOB_SPECS` gives the jobs installed as a fixed cron: `fetch-espn-fixtures`, `fetch-mlb-probables` and `backup-database`. Every other bootstrapped job self-schedules ([Self-scheduling](self-scheduling.md)); a restart keeps its pending run, and only a job without one runs its bootstrap function ([bootstrap](local-scheduler.md#bootstrap-jobs-and-cron-table)).
-- `odds_core.job_specs.JOB_SPECS` limits a per-league job, cron or self-scheduling, to the configured leagues in its allowlist (`fetch-espn-fixtures` lists EPL, NBA, the Championship, La Liga, Serie A, the Bundesliga and Ligue 1, one cron run per league; `fetch-oddsportal-results` the six football leagues). A per-league job with no league allowlist runs for every league in `data_collection.sports` (`odds_lambda.scheduling.jobs.resolve_target_sports`).
+- `odds_core.config.SchedulerConfig.bootstrap_jobs` names the jobs `odds scheduler start` bootstraps. `agent-run` has `bootstrap=False` in its `odds_core.job_specs.JOB_SPECS` record, so it runs only when added to `SCHEDULER_BOOTSTRAP_JOBS`.
+- The `cron` field of `odds_core.job_specs.JOB_SPECS` marks the jobs installed as a fixed cron: `fetch-espn-fixtures`, `fetch-mlb-probables` and `backup-database`. Every other bootstrapped job self-schedules ([Self-scheduling](self-scheduling.md)); a restart keeps its pending run, and only a job without one runs its bootstrap function ([bootstrap](local-scheduler.md#bootstrap-jobs-and-cron-table)).
+- The `sports` allowlist in `odds_core.job_specs.JOB_SPECS` limits a per-league job, cron or self-scheduling, to the configured leagues in its allowlist (`fetch-espn-fixtures` lists EPL, NBA, the Championship, La Liga, Serie A, the Bundesliga and Ligue 1, one cron run per league; `fetch-oddsportal-results` the six football leagues). A per-league job with no league allowlist runs for every league in `data_collection.sports` (`odds_lambda.scheduling.jobs.resolve_target_sports`).
 
 | Job | Bootstrapped by default | Leagues | Schedule |
 |---|---|---|---|

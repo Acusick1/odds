@@ -58,7 +58,7 @@ def create_tier_coverage_table(
     all_tiers = [
         FetchTier.OPENING,
         FetchTier.EARLY,
-        FetchTier.SHARP,
+        FetchTier.DAY_BEFORE,
         FetchTier.PREGAME,
         FetchTier.CLOSING,
     ]

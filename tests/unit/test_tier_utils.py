@@ -41,17 +41,17 @@ class TestCalculateTier:
         """Test PREGAME tier in middle of range."""
         assert calculate_tier(6.0) == FetchTier.PREGAME
 
-    def test_sharp_tier_lower_bound(self):
-        """Test SHARP tier at lower boundary (just over 12 hours)."""
-        assert calculate_tier(12.1) == FetchTier.SHARP
+    def test_day_before_tier_lower_bound(self):
+        """Test DAY_BEFORE tier at lower boundary (just over 12 hours)."""
+        assert calculate_tier(12.1) == FetchTier.DAY_BEFORE
 
-    def test_sharp_tier_upper_bound(self):
-        """Test SHARP tier at upper boundary (24 hours)."""
-        assert calculate_tier(24.0) == FetchTier.SHARP
+    def test_day_before_tier_upper_bound(self):
+        """Test DAY_BEFORE tier at upper boundary (24 hours)."""
+        assert calculate_tier(24.0) == FetchTier.DAY_BEFORE
 
-    def test_sharp_tier_middle(self):
-        """Test SHARP tier in middle of range."""
-        assert calculate_tier(18.0) == FetchTier.SHARP
+    def test_day_before_tier_middle(self):
+        """Test DAY_BEFORE tier in middle of range."""
+        assert calculate_tier(18.0) == FetchTier.DAY_BEFORE
 
     def test_early_tier_lower_bound(self):
         """Test EARLY tier at lower boundary (just over 24 hours)."""
@@ -101,10 +101,10 @@ class TestCalculateTier:
         assert calculate_tier(12.0) == FetchTier.PREGAME
         assert FetchTier.PREGAME.interval_hours == 3.0
 
-        # SHARP: 12-24 hours (interval 12.0)
-        assert calculate_tier(12.1) == FetchTier.SHARP
-        assert calculate_tier(24.0) == FetchTier.SHARP
-        assert FetchTier.SHARP.interval_hours == 12.0
+        # DAY_BEFORE: 12-24 hours (interval 12.0)
+        assert calculate_tier(12.1) == FetchTier.DAY_BEFORE
+        assert calculate_tier(24.0) == FetchTier.DAY_BEFORE
+        assert FetchTier.DAY_BEFORE.interval_hours == 12.0
 
         # EARLY: 24-72 hours (interval 24.0)
         assert calculate_tier(24.1) == FetchTier.EARLY
@@ -135,13 +135,13 @@ class TestSnapshotTierObserved:
         tier = snapshot_tier(now, game_time, TimeBasis.OBSERVED)
         assert tier == FetchTier.PREGAME
 
-    def test_sharp_tier_from_timestamps(self):
-        """Test SHARP tier calculated from timestamps."""
+    def test_day_before_tier_from_timestamps(self):
+        """Test DAY_BEFORE tier calculated from timestamps."""
         now = datetime.now(UTC)
         game_time = now + timedelta(hours=18)
 
         tier = snapshot_tier(now, game_time, TimeBasis.OBSERVED)
-        assert tier == FetchTier.SHARP
+        assert tier == FetchTier.DAY_BEFORE
 
     def test_early_tier_from_timestamps(self):
         """Test EARLY tier calculated from timestamps."""
@@ -176,7 +176,7 @@ class TestSnapshotTierObserved:
         assert tier == FetchTier.CLOSING
 
     def test_exact_boundary_12_hours(self):
-        """Test exact 12-hour boundary between PREGAME and SHARP."""
+        """Test exact 12-hour boundary between PREGAME and DAY_BEFORE."""
         now = datetime.now(UTC)
         game_time = now + timedelta(hours=12)
 
@@ -184,12 +184,12 @@ class TestSnapshotTierObserved:
         assert tier == FetchTier.PREGAME
 
     def test_exact_boundary_24_hours(self):
-        """Test exact 24-hour boundary between SHARP and EARLY."""
+        """Test exact 24-hour boundary between DAY_BEFORE and EARLY."""
         now = datetime.now(UTC)
         game_time = now + timedelta(hours=24)
 
         tier = snapshot_tier(now, game_time, TimeBasis.OBSERVED)
-        assert tier == FetchTier.SHARP
+        assert tier == FetchTier.DAY_BEFORE
 
     def test_exact_boundary_72_hours(self):
         """Test exact 72-hour boundary between EARLY and OPENING."""
@@ -239,8 +239,8 @@ class TestSnapshotTier:
         ("hours", "observed", "upper_bound"),
         [
             (3.0, FetchTier.CLOSING, FetchTier.PREGAME),
-            (12.0, FetchTier.PREGAME, FetchTier.SHARP),
-            (24.0, FetchTier.SHARP, FetchTier.EARLY),
+            (12.0, FetchTier.PREGAME, FetchTier.DAY_BEFORE),
+            (24.0, FetchTier.DAY_BEFORE, FetchTier.EARLY),
             (72.0, FetchTier.EARLY, FetchTier.OPENING),
             (2.0, FetchTier.CLOSING, FetchTier.CLOSING),
         ],

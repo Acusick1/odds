@@ -1,7 +1,7 @@
 """Utilities for calculating fetch tiers based on game timing.
 
 This module provides reusable functions for determining fetch tiers (opening, early,
-sharp, pregame, closing) based on how much time remains until a game starts. These
+day_before, pregame, closing) based on how much time remains until a game starts. These
 functions are used by both the live data collection pipeline and historical backfill
 operations to ensure consistent tier classification across all data.
 """
@@ -17,7 +17,7 @@ from odds_lambda.fetch_tier import FetchTier
 _NEARER_TO_FARTHER = (
     FetchTier.CLOSING,
     FetchTier.PREGAME,
-    FetchTier.SHARP,
+    FetchTier.DAY_BEFORE,
     FetchTier.EARLY,
     FetchTier.OPENING,
 )

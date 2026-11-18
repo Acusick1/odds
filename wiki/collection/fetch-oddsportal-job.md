@@ -45,7 +45,7 @@ A [rule candidate](../evaluation/candidate-rules.md#market-state) decides from a
 
 ## Heartbeats
 
-Heartbeats are keyed `heartbeat:fetch-oddsportal-<suffix>`, one per league in the job's `heartbeats` in `odds_core.job_specs.JOB_SPECS`: 11 h for each football league and NBA and 12 h for MLB, covering the overnight window. They share the map in `odds_core.config.AlertConfig.heartbeat_expectations` with every other job's ([alerting-and-heartbeats](../operations/alerting-and-heartbeats.md#heartbeats)).
+Heartbeats are keyed `heartbeat:fetch-oddsportal-<suffix>`, one per league in the `heartbeats` of the job's `odds_core.job_specs.JOB_SPECS` record: 11 h for each football league and NBA and 12 h for MLB, covering the overnight window. They share the map in `odds_core.config.AlertConfig.heartbeat_expectations` with every other job's ([alerting-and-heartbeats](../operations/alerting-and-heartbeats.md#heartbeats)).
 
 ## Related
 

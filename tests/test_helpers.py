@@ -32,7 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 TIER_HOURS_BEFORE: dict[FetchTier, float] = {
     FetchTier.OPENING: 100,
     FetchTier.EARLY: 72,
-    FetchTier.SHARP: 24,
+    FetchTier.DAY_BEFORE: 24,
     FetchTier.PREGAME: 12,
     FetchTier.CLOSING: 0.5,
     FetchTier.IN_PLAY: -1,

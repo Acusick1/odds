@@ -29,7 +29,7 @@ status: stable
 - `agent_trades`, `candidate_trades` and `paid_api` drive the separate smoke opt-ins `--include-agent`, `--include-candidates` and `--include-paid-api` ([CLI](local-scheduler.md#cli)).
 - `cron` gives the fixed local schedule. A self-scheduling job leaves it unset; bootstrap otherwise replaces its pending run with that cron.
 - `per_sport` controls compound naming. `sports` optionally restricts configured leagues through an explicit tuple or a lazy `odds_core.job_specs.SportMap` reference to the adapter's authoritative map; `odds_lambda.scheduling.jobs.resolve_target_sports` intersects the allowlist with the operator's configured leagues. An unrestricted job runs for every configured league.
-- `cadence` holds the default forward polling intervals; `sport_cadences` supplies league overrides. `odds_core.job_specs.job_cadence` selects them without runtime imports. Runtime `odds_lambda.scheduling.decision.CadenceConfig` adds tier lookup to the core value record.
+- `cadence` holds the default forward polling intervals in hours, one per `odds_core.job_specs.Cadence` field (`closing`, `pregame`, `day_before`, `early`, `opening` and `no_game`); `sport_cadences` supplies league overrides. `odds_core.job_specs.job_cadence` selects them without runtime imports. Runtime `odds_lambda.scheduling.decision.CadenceConfig` adds `odds_lambda.scheduling.decision.CadenceConfig.interval_for`, the lookup from an `odds_lambda.fetch_tier.FetchTier`, to the core value record.
 - `heartbeats` carries exact persisted identifiers, allowed hours and leagues. `odds_core.job_specs.default_heartbeat_expectations` supplies defaults to `odds_core.config.AlertConfig.heartbeat_expectations`; that setting remains an independent operator override.
 
 ## Compound job names

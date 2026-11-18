@@ -142,7 +142,7 @@ The result counts calls made, skipped and would-be-made, the provider gaps, the 
 - `basketball_nba` is still literal in `odds backfill scores` (`odds_cli.commands.backfill`, which reads game logs and spends no units). `odds discover games` requires `--sport`. `odds backfill plan` and `odds backfill execute` take the manifest's league, and `odds backfill plan --cost` and `odds backfill execute` print the acquisition key's balance (the newest quota recorded by live collection for that key index, reported as unknown when none is recent or the key is not set).
 - Historical responses for soccer carry the three-way market as `1x2`, relabelled, and book keys renamed to pipeline keys, by `odds_lambda.data_fetcher.TheOddsAPIClient.get_historical_odds` ([sport-and-market-keys](sport-and-market-keys.md#market-key-dialects)).
 - Final scores are not available from the Odds API for games older than 3 days (`odds_cli.commands.discover` docstring), hence `backfill scores`.
-- `odds validate` reports which fetch tiers a game's snapshots cover (`odds_lambda.storage.tier_validator.TierCoverageValidator`, whose discovery check asks `/scores` for the league's games on a day of the league's calendar; [fetch-tier](../storage/fetch-tier.md#the-tier-a-snapshot-covers)).
+- `odds validate` reports which fetch tiers a game's snapshots cover, by `odds_lambda.fetch_tier.FetchTier` value (`day_before`, in capitals on the console) (`odds_lambda.storage.tier_validator.TierCoverageValidator`, whose discovery check asks `/scores` for the league's games on a day of the league's calendar; [fetch-tier](../storage/fetch-tier.md#the-tier-a-snapshot-covers)).
 
 ## Tests
 

@@ -827,7 +827,7 @@ class TestQualityMetricsTierCoverage:
                 event_id=1,
                 snapshot_time=datetime(2024, 10, 15, 15, 0, tzinfo=UTC),
             ),
-            # Event 2: Has only sharp tier snapshots
+            # Event 2: Has only day_before tier snapshots
             OddsSnapshot(
                 event_id=2,
                 snapshot_time=datetime(2024, 10, 20, 7, 0, tzinfo=UTC),
@@ -882,15 +882,15 @@ class TestQualityMetricsTierCoverage:
         assert pregame.coverage_pct == pytest.approx(33.33, abs=0.01)
         assert pregame.avg_snapshots_per_game == 1.0
 
-        # Check sharp tier (event2 has 1 snapshot)
-        sharp = tier_map["sharp"]
-        assert sharp.tier == "sharp"
-        assert sharp.hours_range == "12-24 hours before"
-        assert sharp.expected_interval_hours == 12.0
-        assert sharp.games_in_tier_range == 3
-        assert sharp.games_with_tier_snapshots == 1
-        assert sharp.total_snapshots_in_tier == 1
-        assert sharp.coverage_pct == pytest.approx(33.33, abs=0.01)
+        # Check day_before tier (event2 has 1 snapshot)
+        day_before = tier_map["day_before"]
+        assert day_before.tier == "day_before"
+        assert day_before.hours_range == "12-24 hours before"
+        assert day_before.expected_interval_hours == 12.0
+        assert day_before.games_in_tier_range == 3
+        assert day_before.games_with_tier_snapshots == 1
+        assert day_before.total_snapshots_in_tier == 1
+        assert day_before.coverage_pct == pytest.approx(33.33, abs=0.01)
 
         # Check early tier (event3 has 1 snapshot)
         early = tier_map["early"]

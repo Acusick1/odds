@@ -411,7 +411,7 @@ class TestTierSampler:
                 2, event.id, commence - timedelta(hours=18), bookmakers=["bet365", "betway"]
             ),
         ]
-        sampler = TierSampler("sharp", required_bookmakers=["pinnacle"])
+        sampler = TierSampler("day_before", required_bookmakers=["pinnacle"])
         result = sampler.sample(self._make_bundle(event, snaps))
 
         assert len(result) == 1
@@ -425,7 +425,7 @@ class TestTierSampler:
                 1, event.id, commence - timedelta(hours=18), bookmakers=["bet365", "betway"]
             ),
         ]
-        sampler = TierSampler("sharp", required_bookmakers=["pinnacle"])
+        sampler = TierSampler("day_before", required_bookmakers=["pinnacle"])
         result = sampler.sample(self._make_bundle(event, snaps))
 
         assert result == []
@@ -439,7 +439,7 @@ class TestTierSampler:
             ),
             _make_snapshot(2, event.id, commence - timedelta(hours=18), bookmakers=["bet365"]),
         ]
-        sampler = TierSampler("sharp")
+        sampler = TierSampler("day_before")
         result = sampler.sample(self._make_bundle(event, snaps))
 
         assert len(result) == 1
@@ -456,7 +456,7 @@ class TestTierSampler:
                 bookmakers=["betfair_exchange", "bet365"],
             ),
         ]
-        sampler = TierSampler("sharp", required_bookmakers=["pinnacle", "betfair_exchange"])
+        sampler = TierSampler("day_before", required_bookmakers=["pinnacle", "betfair_exchange"])
         result = sampler.sample(self._make_bundle(event, snaps))
 
         assert len(result) == 1
@@ -470,7 +470,7 @@ class TestTierSampler:
                 1, event.id, commence - timedelta(hours=18), bookmakers=["bet365", "betway"]
             ),
         ]
-        sampler = TierSampler("sharp", required_bookmakers=["pinnacle", "betfair_exchange"])
+        sampler = TierSampler("day_before", required_bookmakers=["pinnacle", "betfair_exchange"])
         result = sampler.sample(self._make_bundle(event, snaps))
 
         assert result == []
@@ -490,7 +490,7 @@ class TestTierSampler:
             ),
             _make_snapshot(3, event.id, commence - timedelta(hours=3), bookmakers=["bet365"]),
         ]
-        sampler = TierSampler("sharp", required_bookmakers=["pinnacle", "betfair_exchange"])
+        sampler = TierSampler("day_before", required_bookmakers=["pinnacle", "betfair_exchange"])
         result = sampler.sample(self._make_bundle(event, snaps))
 
         assert len(result) == 1
