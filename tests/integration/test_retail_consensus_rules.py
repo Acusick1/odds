@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 from odds_analytics.candidate_parity import ParityStatus, check_parity
-from odds_core.candidates import MechanicalCandidate
+from odds_core.candidates import RuleCandidate
 from odds_lambda.candidate_rules.pinning import rule_sha256
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,7 +48,7 @@ def groups_at(*p: float) -> list[dict[str, Any]]:
     return [three_way_bookmaker(book, _priced(*p)) for book in GROUPED]
 
 
-def rule_candidate(rule: str, params: dict[str, Any]) -> MechanicalCandidate:
+def rule_candidate(rule: str, params: dict[str, Any]) -> RuleCandidate:
     return candidate(rule=rule, rule_sha256=rule_sha256(rule), params=params)
 
 

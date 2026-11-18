@@ -13,7 +13,7 @@ from odds_analytics.candidate_report import (
     summarize_candidates,
 )
 from odds_core.bookmakers import BookSet
-from odds_core.candidates import AgentCandidate, CandidateStatus, MechanicalCandidate
+from odds_core.candidates import AgentCandidate, CandidateStatus, RuleCandidate
 from odds_core.vocabulary import Source
 from odds_web.backtests import BacktestOverview, RunFigures
 
@@ -52,10 +52,10 @@ def bet(
     )
 
 
-def mechanical(
+def rule_candidate(
     name: str = "gap", sport: str = "soccer_epl", market: str = "1x2"
-) -> MechanicalCandidate:
-    return MechanicalCandidate(
+) -> RuleCandidate:
+    return RuleCandidate(
         name=name,
         description="d",
         sports=(sport,),
@@ -63,7 +63,7 @@ def mechanical(
         issue=1,
         start_date="2026-01-01",
         status=CandidateStatus.ACTIVE,
-        kind="mechanical",
+        kind="rule",
         books=BookSet.UK_RETAIL,
         market=market,
         rule="exchange_gap",

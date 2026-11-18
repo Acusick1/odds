@@ -25,7 +25,7 @@ from odds_web.candidate_page import ESTIMATE_OMITTED
 from odds_web.db import build_web_database
 from odds_web.ledger import LedgerPage
 
-from tests.odds_web_helpers import bet, mechanical, report
+from tests.odds_web_helpers import bet, report, rule_candidate
 from tests.odds_web_helpers import stub_stored_backtests as stub
 
 STORED = datetime(2026, 11, 13, 12, tzinfo=UTC)
@@ -224,7 +224,7 @@ class TestFigures:
 
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
-    registry = [mechanical()]
+    registry = [rule_candidate()]
 
     async def read(*_: object, **__: object) -> CandidateReport:
         return report([bet(i, 0.3) for i in range(100)], registry)

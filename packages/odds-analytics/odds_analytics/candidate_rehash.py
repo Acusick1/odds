@@ -16,7 +16,7 @@ from datetime import date
 from pathlib import Path
 
 import yaml
-from odds_core.candidates import MechanicalCandidate, load_candidate_file, load_candidates
+from odds_core.candidates import RuleCandidate, load_candidate_file, load_candidates
 from odds_core.rehash_ledger import Rehash, RehashCandidate, append_rehash
 from odds_lambda.candidate_rules.pinning import rule_sha256
 from sqlalchemy import text
@@ -83,7 +83,7 @@ class Replay:
 
 def _leagues(path: Path) -> tuple[str, ...]:
     candidate = load_candidate_file(path)
-    assert isinstance(candidate, MechanicalCandidate)  # noqa: S101
+    assert isinstance(candidate, RuleCandidate)  # noqa: S101
     return candidate.sports
 
 
@@ -171,9 +171,7 @@ def replay_under(
         return Replay(out.read_bytes(), hash_out.read_text().strip())
 
 
-async def parity_counts(
-    connection: AsyncConnection, candidate: MechanicalCandidate
-) -> tuple[int, int]:
+async def parity_counts(connection: AsyncConnection, candidate: RuleCandidate) -> tuple[int, int]:
     """The candidate's recorded decisions whose replay matched, and all of them."""
     session = AsyncSession(bind=connection)
     report = await check_parity(session, candidate)
@@ -218,7 +216,7 @@ def staged_file(path: Path, new: str) -> str:
     )
     if count != 1:
         raise Refused(f"{path.name}: no single rule_sha256 line to update")
-    parsed = MechanicalCandidate.model_validate(yaml.safe_load(content))
+    parsed = RuleCandidate.model_validate(yaml.safe_load(content))
     if parsed.rule_sha256 != new:
         raise Refused(f"{path.name}: the updated file records {parsed.rule_sha256}, not {new}")
     return content
@@ -234,7 +232,7 @@ async def _evidence(
     root: Path,
     rule: str,
     new: str,
-    candidates: list[MechanicalCandidate],
+    candidates: list[RuleCandidate],
     database_url: str,
     start: date,
     end: date,
@@ -329,7 +327,7 @@ async def rehash(
             candidates = [
                 c
                 for c in load_candidates(directory)
-                if isinstance(c, MechanicalCandidate) and c.rule == rule
+                if isinstance(c, RuleCandidate) and c.rule == rule
             ]
             if not candidates:
                 raise Refused(f"no registered candidate runs rule {rule!r}")
@@ -348,7 +346,7 @@ async def rehash(
                 _write_atomically(path, content)
             for path in updated:
                 written = load_candidate_file(path)
-                if not isinstance(written, MechanicalCandidate) or written.rule_sha256 != new:
+                if not isinstance(written, RuleCandidate) or written.rule_sha256 != new:
                     raise Refused(f"{path.name} does not record {new} after writing")
             append_rehash(directory, entry)
             return RehashResult(rule, new, entry)

@@ -11,7 +11,7 @@ import pytest
 import yaml
 from odds_analytics.candidate_backtest import BacktestResult, replay
 from odds_analytics.candidate_parity import ParityStatus, check_parity
-from odds_core.candidates import MechanicalCandidate
+from odds_core.candidates import RuleCandidate
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from odds_lambda.candidate_rules.pinning import rule_sha256
 from sqlalchemy import select
@@ -39,7 +39,7 @@ SIX_DAYS_BEFORE = KICKOFF - timedelta(days=6)
 DEV_KICKOFF = datetime(2025, 4, 12, 15, 0, tzinfo=UTC)
 
 
-def crowded(sports: list[str], at_least: int) -> MechanicalCandidate:
+def crowded(sports: list[str], at_least: int) -> RuleCandidate:
     params = {"min_concurrent_kickoffs": at_least, "threshold": 0.0, **BASE}
     return candidate(
         rule="crowded_gap",
@@ -49,7 +49,7 @@ def crowded(sports: list[str], at_least: int) -> MechanicalCandidate:
     )
 
 
-def last_result(min_margin: int = 2) -> MechanicalCandidate:
+def last_result(min_margin: int = 2) -> RuleCandidate:
     return candidate(
         rule="last_result_overreaction",
         rule_sha256=rule_sha256("last_result_overreaction"),
@@ -57,7 +57,7 @@ def last_result(min_margin: int = 2) -> MechanicalCandidate:
     )
 
 
-def favourite(min_probability: float = 0.55) -> MechanicalCandidate:
+def favourite(min_probability: float = 0.55) -> RuleCandidate:
     return candidate(
         rule="favourite_price",
         rule_sha256=rule_sha256("favourite_price"),
@@ -67,7 +67,7 @@ def favourite(min_probability: float = 0.55) -> MechanicalCandidate:
 
 async def replay_event_one(
     session: AsyncSession,
-    cand: MechanicalCandidate,
+    cand: RuleCandidate,
     kickoff: datetime = KICKOFF,
     **event: Any,
 ) -> BacktestResult:
@@ -97,7 +97,7 @@ def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
-def register(registry: Path, cand: MechanicalCandidate) -> None:
+def register(registry: Path, cand: RuleCandidate) -> None:
     (registry / f"{cand.name}.yaml").write_text(yaml.safe_dump(cand.model_dump(mode="json")))
 
 

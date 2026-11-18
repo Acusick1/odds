@@ -15,7 +15,7 @@ import structlog
 import yaml
 from odds_analytics.candidate_parity import ParityStatus, check_parity
 from odds_core.bookmakers import BOOK_SETS, BookSet
-from odds_core.candidates import MechanicalCandidate
+from odds_core.candidates import RuleCandidate
 from odds_core.models import Event, EventStatus
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from odds_lambda.candidate_rules import EstimateBasis, RuleSpec, SharpInput
@@ -87,7 +87,7 @@ def write_candidate(directory: Path, name: str = "cand", **fields: Any) -> None:
     data = {
         "name": name,
         "description": "d",
-        "kind": "mechanical",
+        "kind": "rule",
         "books": "uk_retail",
         "market": "1x2",
         "sports": [EPL],
@@ -195,11 +195,11 @@ class TestDecisions:
         assert decision.input_snapshot_ids == [retail.id, polymarket.id]
         [trade] = await all_of(pglite_async_session, PaperTrade)
         assert (trade.selection, trade.bookmaker) == ("home", "bet365")
-        cand = MechanicalCandidate.model_validate(
+        cand = RuleCandidate.model_validate(
             {
                 "name": "cand",
                 "description": "d",
-                "kind": "mechanical",
+                "kind": "rule",
                 "books": "uk_retail",
                 "market": "1x2",
                 "sports": [EPL],
@@ -514,12 +514,12 @@ class TestTotals:
         await session.commit()
 
     @staticmethod
-    def candidate() -> MechanicalCandidate:
-        return MechanicalCandidate.model_validate(
+    def candidate() -> RuleCandidate:
+        return RuleCandidate.model_validate(
             {
                 "name": "cand",
                 "description": "d",
-                "kind": "mechanical",
+                "kind": "rule",
                 "books": "uk_retail",
                 "market": "totals",
                 "sports": [EPL],

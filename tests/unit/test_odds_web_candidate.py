@@ -38,8 +38,8 @@ from tests.odds_web_helpers import (
     NOW,
     agent,
     bet,
-    mechanical,
     report,
+    rule_candidate,
     stub_stored_backtests,
 )
 
@@ -129,7 +129,7 @@ def scored(
     starts: dict[tuple[str, int], DecisionStart] | None = None,
 ) -> tuple[CandidateSummary, RunningScore]:
     """The report's summary and running score of the version ``gap`` v1."""
-    found = report(bets, registry or [mechanical()], starts)
+    found = report(bets, registry or [rule_candidate()], starts)
     [summary] = [s for s in found.summaries if (s.name, s.version) == ("gap", 1)]
     return summary, found.running[("gap", 1)]
 
@@ -143,7 +143,7 @@ class TestCandidatePage:
     def test_shows_the_numbers_of_the_report(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
-        summary = seed(data, [bet(i, 0.5) for i in range(100)], mechanical())
+        summary = seed(data, [bet(i, 0.5) for i in range(100)], rule_candidate())
         assert summary.current is not None
 
         body = client.get("/c/gap/1").text
@@ -158,7 +158,7 @@ class TestCandidatePage:
     def test_no_promote_or_kill_below_100_bets_with_a_close(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
-        seed(data, [bet(i, 0.9) for i in range(99)], mechanical())
+        seed(data, [bet(i, 0.9) for i in range(99)], rule_candidate())
 
         body = client.get("/c/gap/1").text
 
@@ -169,7 +169,7 @@ class TestCandidatePage:
     def test_the_ledger_is_listed_with_void_trades_labelled(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
-        seed(data, [bet(i, 0.5) for i in range(3)], mechanical())
+        seed(data, [bet(i, 0.5) for i in range(3)], rule_candidate())
         data["ledger"] = LedgerPage(
             [
                 ledger_row(1),
@@ -191,10 +191,10 @@ class TestCandidatePage:
         ]
         assert "3 trades" in body
 
-    def test_a_mechanical_candidate_shows_its_decision_timeline_and_missed_share(
+    def test_a_rule_candidate_shows_its_decision_timeline_and_missed_share(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
-        seed(data, [bet(i, 0.5) for i in range(3)], mechanical())
+        seed(data, [bet(i, 0.5) for i in range(3)], rule_candidate())
         data["decisions"] = history(
             DecisionKind.BET, DecisionKind.NO_BET, DecisionKind.MISSED, total=148, missed=9
         )
@@ -219,7 +219,7 @@ class TestCandidatePage:
     def test_a_killed_candidate_shows_its_status_and_no_next_checkpoint(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
-        killed = mechanical().model_copy(update={"status": CandidateStatus.KILLED})
+        killed = rule_candidate().model_copy(update={"status": CandidateStatus.KILLED})
         seed(data, [], killed)
 
         body = client.get("/c/gap/1").text
@@ -231,7 +231,7 @@ class TestCandidatePage:
     def test_a_promoted_candidate_shows_no_next_checkpoint(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
-        promoted = mechanical().model_copy(update={"status": CandidateStatus.PROMOTED})
+        promoted = rule_candidate().model_copy(update={"status": CandidateStatus.PROMOTED})
         seed(data, [], promoted)
 
         body = client.get("/c/gap/1").text
@@ -242,7 +242,7 @@ class TestCandidatePage:
     def test_a_historical_version_takes_not_the_current_versions_scope_or_progress(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
-        v2 = mechanical(sport="basketball_nba", market="h2h").model_copy(update={"version": 2})
+        v2 = rule_candidate(sport="basketball_nba", market="h2h").model_copy(update={"version": 2})
         seed(data, [bet(i, 0.5) for i in range(3)], v2)
 
         body = client.get("/c/gap/1").text
@@ -253,7 +253,7 @@ class TestCandidatePage:
     def test_a_historical_version_shows_its_timeline_only_if_it_recorded_decisions(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
-        v2 = mechanical().model_copy(update={"version": 2})
+        v2 = rule_candidate().model_copy(update={"version": 2})
         seed(data, [bet(i, 0.5) for i in range(3)], v2)
         data["decisions"] = history(DecisionKind.BET, DecisionKind.MISSED, missed=1)
 
@@ -267,7 +267,7 @@ class TestCandidatePage:
     def test_a_historical_version_with_decisions_only_is_shown_with_its_timeline(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
-        v2 = mechanical().model_copy(update={"version": 2})
+        v2 = rule_candidate().model_copy(update={"version": 2})
         seed(data, [bet(i, 0.5) for i in range(3)], v2)
         data["trades"] = []
         data["decisions"] = history(DecisionKind.NO_BET, DecisionKind.MISSED, missed=1)
@@ -282,7 +282,7 @@ class TestCandidatePage:
     def test_a_version_with_no_trades_and_no_decisions_is_not_found(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
-        v2 = mechanical().model_copy(update={"version": 2})
+        v2 = rule_candidate().model_copy(update={"version": 2})
         seed(data, [], v2)
         data["decisions"] = history(total=0)
 
@@ -302,10 +302,10 @@ class TestCandidatePage:
         assert 'id="ledger"' in body and "Arsenal v Spurs" in body
         assert "data-chart" not in body
 
-    def test_a_mechanical_candidate_whose_market_has_no_close_is_not_scoreable_before_any_bet(
+    def test_a_rule_candidate_whose_market_has_no_close_is_not_scoreable_before_any_bet(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
-        mlb = mechanical("mlb-gap", sport="baseball_mlb", market="h2h")
+        mlb = rule_candidate("mlb-gap", sport="baseball_mlb", market="h2h")
         data["registry"] = [mlb]
 
         body = client.get("/c/mlb-gap/1").text
@@ -315,7 +315,7 @@ class TestCandidatePage:
     def test_the_ledger_shows_the_stake_of_each_trade(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
-        seed(data, [bet(0, 0.5)], mechanical())
+        seed(data, [bet(0, 0.5)], rule_candidate())
         data["ledger"] = LedgerPage([ledger_row(stake=2.5)], 1, 1, 1)
 
         body = client.get("/c/gap/1").text
@@ -325,7 +325,7 @@ class TestCandidatePage:
     def test_an_unknown_candidate_is_not_found(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
-        seed(data, [bet(0, 0.5)], mechanical())
+        seed(data, [bet(0, 0.5)], rule_candidate())
 
         assert client.get("/c/gap/9").status_code == 404
         assert client.get("/c/nope/1").status_code == 404
@@ -333,7 +333,7 @@ class TestCandidatePage:
     def test_loads_the_status_strip_and_dates_its_data(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
-        seed(data, [bet(0, 0.5)], mechanical())
+        seed(data, [bet(0, 0.5)], rule_candidate())
 
         page = client.get("/c/gap/1").text
         fragment = client.get("/fragments/c/gap/1").text
@@ -355,7 +355,7 @@ class TestCandidatePage:
     def test_a_ledger_that_times_out_renders_unavailable(
         self, client: TestClient, data: dict[str, object], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        seed(data, [bet(i, 0.5) for i in range(3)], mechanical())
+        seed(data, [bet(i, 0.5) for i in range(3)], rule_candidate())
 
         async def timed_out(*_: object, **__: object) -> LedgerPage:
             raise DBAPIError("select", {}, TimeoutError("canceling statement"))
@@ -370,7 +370,7 @@ class TestCandidatePage:
     def test_the_ledger_page_is_requested_and_linked_by_path(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
-        seed(data, [bet(i, 0.5) for i in range(3)], mechanical())
+        seed(data, [bet(i, 0.5) for i in range(3)], rule_candidate())
         data["ledger"] = LedgerPage([ledger_row()], 2, 3, 60)
 
         body = client.get("/c/gap/1?page=2").text
@@ -384,14 +384,14 @@ class TestCandidatePage:
     def test_the_portfolio_links_to_the_page(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
-        seed(data, [bet(0, 0.5)], mechanical())
+        seed(data, [bet(0, 0.5)], rule_candidate())
 
         assert 'href="/c/gap/1"' in client.get("/").text
 
     def test_the_report_is_read_once_for_the_portfolio_and_the_page(
         self, client: TestClient, data: dict[str, object], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        seed(data, [bet(0, 0.5)], mechanical())
+        seed(data, [bet(0, 0.5)], rule_candidate())
         calls: list[int] = []
         original = report(data["trades"], data["registry"])  # type: ignore[arg-type]
 
@@ -476,7 +476,7 @@ class TestOneSnapshot:
     def test_the_charts_describe_the_cohort_of_the_cached_report(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
-        seed(data, [bet(i, 0.5) for i in range(99)], mechanical())
+        seed(data, [bet(i, 0.5) for i in range(99)], rule_candidate())
         client.get("/")  # the report is cached at 99 bets with a close
         data["trades"] = [bet(i, 0.5) for i in range(100)]
 
@@ -491,7 +491,7 @@ class TestOneSnapshot:
 
 class TestCurrentBesideACheckpoint:
     def test_a_current_estimate_at_a_checkpoints_n_with_a_larger_family_is_kept(self) -> None:
-        registry = [mechanical("gap"), mechanical("sibling")]
+        registry = [rule_candidate("gap"), rule_candidate("sibling")]
         # The 100th bet is placed 99 minutes after LONG_AGO; the sibling starts a day later.
         epl = frozenset({"soccer_epl"})
         starts = {
@@ -544,7 +544,7 @@ class TestBookReplays:
     def test_the_page_shows_each_book_set_marking_the_registered_one(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
-        seed(data, [bet(i, 0.5) for i in range(3)], mechanical())
+        seed(data, [bet(i, 0.5) for i in range(3)], rule_candidate())
         data["replays"] = {("gap", 1): book_replay()}
 
         body = client.get("/c/gap/1").text
@@ -557,7 +557,7 @@ class TestBookReplays:
     def test_the_per_book_table_gives_placed_and_without_figures(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
-        seed(data, [bet(i, 0.5) for i in range(3)], mechanical())
+        seed(data, [bet(i, 0.5) for i in range(3)], rule_candidate())
         data["replays"] = {("gap", 1): book_replay()}
 
         body = client.get("/c/gap/1").text
@@ -574,7 +574,7 @@ class TestBookReplays:
     def test_the_chart_carries_each_sets_running_mean_ev_in_percent(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
-        seed(data, [bet(i, 0.5) for i in range(3)], mechanical())
+        seed(data, [bet(i, 0.5) for i in range(3)], rule_candidate())
         data["replays"] = {("gap", 1): book_replay()}
 
         body = client.get("/c/gap/1").text
@@ -591,7 +591,7 @@ class TestBookReplays:
     def test_no_section_without_replays_or_decisions(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
-        seed(data, [bet(i, 0.5) for i in range(3)], mechanical())
+        seed(data, [bet(i, 0.5) for i in range(3)], rule_candidate())
         assert 'id="book-sets"' not in client.get("/c/gap/1").text
 
         data["replays"] = {("gap", 1): book_replay(decisions=0)}
@@ -600,7 +600,7 @@ class TestBookReplays:
     def test_replays_do_not_change_the_summary_figures(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
-        seed(data, [bet(i, 0.5) for i in range(3)], mechanical())
+        seed(data, [bet(i, 0.5) for i in range(3)], rule_candidate())
         before = client.get("/fragments/portfolio").text
         data["replays"] = {("gap", 1): book_replay()}
 
@@ -652,7 +652,7 @@ class TestEstimateLine:
     def test_the_page_draws_it_and_shows_the_gap(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
-        summary = seed(data, [bet(i, 0.1, estimated_ev=0.15) for i in range(10)], mechanical())
+        summary = seed(data, [bet(i, 0.1, estimated_ev=0.15) for i in range(10)], rule_candidate())
         assert summary.estimates is not None
         gap = summary.estimates.gap
 
@@ -666,7 +666,7 @@ class TestEstimateLine:
     def test_an_earlier_version_takes_its_names_basis(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
-        current = mechanical().model_copy(update={"version": 2})
+        current = rule_candidate().model_copy(update={"version": 2})
         seed(data, [bet(i, 0.1, estimated_ev=0.15) for i in range(3)], current)
 
         body = client.get("/c/gap/1").text
@@ -676,7 +676,9 @@ class TestEstimateLine:
     def test_a_name_the_registry_no_longer_holds_draws_a_generic_estimate(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
-        seed(data, [bet(i, 0.1, estimated_ev=0.15, name="gone") for i in range(3)], mechanical())
+        seed(
+            data, [bet(i, 0.1, estimated_ev=0.15, name="gone") for i in range(3)], rule_candidate()
+        )
 
         body = client.get("/c/gone/1").text
 
@@ -686,7 +688,7 @@ class TestEstimateLine:
     def test_the_page_says_why_there_is_none(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
-        seed(data, [bet(i, 0.1) for i in range(3)], mechanical())
+        seed(data, [bet(i, 0.1) for i in range(3)], rule_candidate())
 
         body = client.get("/c/gap/1").text
 
@@ -746,7 +748,7 @@ class TestLastGoodData:
     def test_a_stale_report_dates_the_page_by_the_report_not_the_listings(
         self, data: dict[str, object], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        seed(data, [bet(i, 0.5) for i in range(3)], mechanical())
+        seed(data, [bet(i, 0.5) for i in range(3)], rule_candidate())
         loads = iter(datetime(2026, 6, 1, 12, minute, tzinfo=UTC) for minute in range(0, 60, 5))
 
         class Clock:

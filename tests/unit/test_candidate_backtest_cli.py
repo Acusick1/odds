@@ -24,11 +24,11 @@ from odds_analytics.candidate_model import Refit, Tuning
 from odds_analytics.candidate_parity import DecisionParity, ParityReport, ParityStatus
 from odds_analytics.candidate_report import DecisionStart, ScoredBet, Verdict
 from odds_cli.main import app
-from odds_core.candidates import MechanicalCandidate
+from odds_core.candidates import RuleCandidate
 from odds_core.vocabulary import Source
 from typer.testing import CliRunner
 
-from tests.unit.test_candidates import MECHANICAL, write
+from tests.unit.test_candidates import RULE_CANDIDATE, write
 
 N_BOOT = 100
 NOW = datetime(2026, 9, 1, tzinfo=UTC)
@@ -38,7 +38,7 @@ RUNNER = CliRunner(env={"COLUMNS": "250"})
 @pytest.fixture
 def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     directory = tmp_path / "candidates"
-    write(directory, MECHANICAL)
+    write(directory, RULE_CANDIDATE)
     monkeypatch.setattr("odds_cli.commands.candidates.candidates_dir", lambda: directory)
 
     @asynccontextmanager
@@ -53,19 +53,19 @@ def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return directory
 
 
-def no_bets(candidate: MechanicalCandidate, counts: _Counts, events: int) -> Replayed:
+def no_bets(candidate: RuleCandidate, counts: _Counts, events: int) -> Replayed:
     """A replay of ``candidate``'s one league that decided ``events`` and placed no bet."""
     (league,) = candidate.sports
     return Replayed([], {league: counts}, {league: events}, 0, None, (), False)
 
 
-def fake_replay(monkeypatch: pytest.MonkeyPatch) -> list[MechanicalCandidate]:
-    seen: list[MechanicalCandidate] = []
+def fake_replay(monkeypatch: pytest.MonkeyPatch) -> list[RuleCandidate]:
+    seen: list[RuleCandidate] = []
     only: list[object] = []
 
     async def replay(
         _session: Any,
-        candidate: MechanicalCandidate,
+        candidate: RuleCandidate,
         start: date,
         end: date,
         k: int,
@@ -146,7 +146,7 @@ class TestBacktestCommand:
         self, registry: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         fake_replay(monkeypatch)
-        write(registry, {**MECHANICAL, "name": "other"})
+        write(registry, {**RULE_CANDIDATE, "name": "other"})
         stored: list[Any] = []
 
         async def store(_session: Any, records: list[Any]) -> None:
@@ -222,7 +222,7 @@ class TestBacktestCommand:
         self, registry: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         seen = fake_replay(monkeypatch)
-        write(registry, {**MECHANICAL, "name": "other"})
+        write(registry, {**RULE_CANDIDATE, "name": "other"})
         out = tmp_path / "result.json"
 
         result = RUNNER.invoke(
@@ -248,7 +248,7 @@ class TestBacktestCommand:
         draft.write_text(
             yaml.safe_dump(
                 {
-                    **{k: v for k, v in MECHANICAL.items() if k != "rule_sha256"},
+                    **{k: v for k, v in RULE_CANDIDATE.items() if k != "rule_sha256"},
                     "name": "model",
                     "rule": "retail_ev_model",
                     "params": {
@@ -316,7 +316,7 @@ class TestBacktestCommand:
         self, registry: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         fake_replay(monkeypatch)
-        write(registry, {**MECHANICAL, "name": "sibling"})
+        write(registry, {**RULE_CANDIDATE, "name": "sibling"})
         self.decisions(monkeypatch, ("sibling", 1))
         out = tmp_path / "result.json"
 
@@ -334,7 +334,7 @@ class TestBacktestCommand:
         self, registry: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         fake_replay(monkeypatch)
-        write(registry, {**MECHANICAL, "name": "sibling"})
+        write(registry, {**RULE_CANDIDATE, "name": "sibling"})
         assert "k=1" in self.backtest().stdout
 
     def test_registered_candidate_with_decisions_is_not_counted_twice(
@@ -348,9 +348,9 @@ class TestBacktestCommand:
         self, registry: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         fake_replay(monkeypatch)
-        write(registry, {**MECHANICAL, "name": "stale", "rule_sha256": "0" * 64})
+        write(registry, {**RULE_CANDIDATE, "name": "stale", "rule_sha256": "0" * 64})
         draft = tmp_path / "draft.yaml"
-        draft.write_text(yaml.safe_dump({**MECHANICAL, "name": "draft"}))
+        draft.write_text(yaml.safe_dump({**RULE_CANDIDATE, "name": "draft"}))
 
         result = RUNNER.invoke(
             app,
@@ -366,7 +366,7 @@ class TestBacktestCommand:
         seen = fake_replay(monkeypatch)
         draft = tmp_path / "draft.yaml"
         draft.write_text(
-            yaml.safe_dump({k: v for k, v in MECHANICAL.items() if k != "rule_sha256"})
+            yaml.safe_dump({k: v for k, v in RULE_CANDIDATE.items() if k != "rule_sha256"})
         )
 
         result = RUNNER.invoke(
@@ -403,7 +403,7 @@ def parity_report(*statuses: ParityStatus, db_replayed: tuple = (("home", "bet36
 
 class TestParityCommand:
     def invoke(self, monkeypatch: pytest.MonkeyPatch, report: ParityReport):
-        async def check(_session: Any, candidate: MechanicalCandidate, version: int | None):
+        async def check(_session: Any, candidate: RuleCandidate, version: int | None):
             return report
 
         monkeypatch.setattr("odds_cli.commands.candidates.check_parity", check)
@@ -452,7 +452,7 @@ class TestBacktestVerdictWording:
         from odds_cli.commands.candidates import _backtest_tables
         from rich.console import Console
 
-        candidate = MechanicalCandidate.model_validate(MECHANICAL)
+        candidate = RuleCandidate.model_validate(RULE_CANDIDATE)
         counts = _Counts(decisions=1, with_input=1, with_exchange=1, with_retail=1)
         result = score(
             candidate,
@@ -509,7 +509,7 @@ class TestPerLeagueTable:
 
 class TestCloseSources:
     def result(self) -> BacktestResult:
-        candidate = MechanicalCandidate.model_validate(MECHANICAL)
+        candidate = RuleCandidate.model_validate(RULE_CANDIDATE)
         (league,) = candidate.sports
 
         def bet(event_id: int, source: Source | None) -> ScoredBet:

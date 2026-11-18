@@ -1,4 +1,4 @@
-"""Run the active mechanical candidates that bet in one sport at their decision times, on that
+"""Run the active rule candidates that bet in one sport at their decision times, on that
 sport's events.
 
 Each run takes every decision that is due, then settles paper trades, and books the next
@@ -20,7 +20,7 @@ from odds_core.bookmakers import BOOK_SETS
 from odds_core.candidates import (
     Candidate,
     CandidateStatus,
-    MechanicalCandidate,
+    RuleCandidate,
     candidates_dir,
     load_candidates,
 )
@@ -63,7 +63,7 @@ RETRY_DELAY = timedelta(minutes=2)
 
 @dataclass(frozen=True)
 class RunnableCandidate:
-    candidate: MechanicalCandidate
+    candidate: RuleCandidate
     spec: RuleSpec
     params: RuleParams
 
@@ -94,7 +94,7 @@ async def _alert_invalid(name: str, error: ValueError) -> None:
 
 
 async def runnable_candidates(sport: SportKey, today: datetime) -> list[RunnableCandidate]:
-    """Active mechanical candidates that bet in ``sport``, have started and validate.
+    """Active rule candidates that bet in ``sport``, have started and validate.
 
     An invalid candidate, or one whose rule needs a fitted model (which only a replay fits), is
     skipped with one alert per ``stale_reminder_interval``; an unreadable registry skips them
@@ -110,7 +110,7 @@ async def runnable_candidates(sport: SportKey, today: datetime) -> list[Runnable
     runnable: list[RunnableCandidate] = []
     for candidate in loaded:
         if (
-            not isinstance(candidate, MechanicalCandidate)
+            not isinstance(candidate, RuleCandidate)
             or sport not in candidate.sports
             or candidate.status != CandidateStatus.ACTIVE
             or candidate.start_date > today.date()
@@ -208,7 +208,7 @@ async def _alert_no_fixture_context(decision: CandidateDecision) -> None:
 
 
 async def _bet_selections(
-    session: AsyncSession, candidate: MechanicalCandidate, event_id: int
+    session: AsyncSession, candidate: RuleCandidate, event_id: int
 ) -> frozenset[Selection]:
     """Selections the candidate version has already bet on the event at a decision."""
     rows = await session.execute(

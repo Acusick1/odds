@@ -1,4 +1,4 @@
-"""Unit tests for the mechanical rule interface and the rules."""
+"""Unit tests for the rule interface and the rules."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS
-from odds_core.candidates import MechanicalCandidate, candidates_dir, load_candidates
+from odds_core.candidates import RuleCandidate, candidates_dir, load_candidates
 from odds_core.exchange_price import ExchangePrice
 from odds_core.market_prices import Outcome
 from odds_core.quotes import Quote
@@ -838,11 +838,11 @@ class TestDecisionTimes:
         assert max_input_age(PARAMS) == timedelta(minutes=10)
 
 
-def _candidate(**overrides: Any) -> MechanicalCandidate:
+def _candidate(**overrides: Any) -> RuleCandidate:
     fields: dict[str, Any] = {
         "name": "gap",
         "description": "d",
-        "kind": "mechanical",
+        "kind": "rule",
         "books": "uk_retail",
         "market": "1x2",
         "sports": ["soccer_epl"],
@@ -855,7 +855,7 @@ def _candidate(**overrides: Any) -> MechanicalCandidate:
         "params": {"threshold": 0.02, "minutes_before_kickoff": [60], "max_input_age_minutes": 10},
         **overrides,
     }
-    return MechanicalCandidate.model_validate(fields)
+    return RuleCandidate.model_validate(fields)
 
 
 class TestValidateCandidateRules:
@@ -874,7 +874,7 @@ class TestValidateCandidateRules:
         fields = _candidate().model_dump(mode="json")
         del fields["market"]
         with pytest.raises(ValidationError, match="market"):
-            MechanicalCandidate.model_validate(fields)
+            RuleCandidate.model_validate(fields)
 
     @pytest.mark.parametrize(
         ("sport", "market"),
@@ -974,7 +974,7 @@ class TestValidateCandidateRules:
 
 
 class TestInputLeads:
-    def test_active_mechanical_candidates_of_the_sport(self) -> None:
+    def test_active_rule_candidates_of_the_sport(self) -> None:
         candidates = [
             _candidate(),
             _candidate(
@@ -1016,7 +1016,7 @@ class TestInputLeads:
         ]
 
 
-MECHANICAL_RULES = [name for name, spec in RULES.items() if isinstance(spec, RuleSpec)]
+RULE_NAMES = [name for name, spec in RULES.items() if isinstance(spec, RuleSpec)]
 
 
 def _replace(old: str, new: str) -> Callable[[str], str]:
@@ -1053,7 +1053,7 @@ class TestRuleSha256:
         ],
         ids=["docstring", "comment", "formatting"],
     )
-    @pytest.mark.parametrize("rule", MECHANICAL_RULES)
+    @pytest.mark.parametrize("rule", RULE_NAMES)
     def test_a_docstring_comment_or_format_edit_leaves_it_unchanged(
         self, edit_source: SourceEdit, module: str, transform: Callable[[str], str], rule: str
     ) -> None:
@@ -1064,7 +1064,7 @@ class TestRuleSha256:
     @pytest.mark.parametrize(
         ("module", "transform"),
         [
-            # The close the report scores against is outside a mechanical rule's imports.
+            # The close the report scores against is outside a rule's imports.
             (
                 "odds_core.close",
                 _replace("return CloseStatus(CloseKind.UNSUPPORTED)", "return None"),
@@ -1075,8 +1075,8 @@ class TestRuleSha256:
             ),
         ],
     )
-    @pytest.mark.parametrize("rule", MECHANICAL_RULES)
-    def test_a_module_outside_a_mechanical_rules_imports_leaves_it_unchanged(
+    @pytest.mark.parametrize("rule", RULE_NAMES)
+    def test_a_module_outside_a_rules_imports_leaves_it_unchanged(
         self, edit_source: SourceEdit, module: str, transform: Callable[[str], str], rule: str
     ) -> None:
         before = rule_sha256(rule)
@@ -1116,7 +1116,7 @@ class TestRuleSha256:
             ("odds_lambda", _append("VERSION = 1\n")),
         ],
     )
-    @pytest.mark.parametrize("rule", MECHANICAL_RULES)
+    @pytest.mark.parametrize("rule", RULE_NAMES)
     def test_a_code_edit_in_a_closure_module_changes_it(
         self, edit_source: SourceEdit, module: str, transform: Callable[[str], str], rule: str
     ) -> None:
@@ -1173,7 +1173,7 @@ NEW_RULE = RuleSpec(
 
 
 class TestRuleIndependence:
-    @pytest.mark.parametrize("rule", MECHANICAL_RULES)
+    @pytest.mark.parametrize("rule", RULE_NAMES)
     def test_no_rule_closure_holds_the_registry_or_another_rule(self, rule: str) -> None:
         spec = RULES[rule]
         found = set(closure([spec.function, spec.params_model, *RULE_ROOTS]))
@@ -1187,7 +1187,7 @@ class TestRuleIndependence:
         edit_source: SourceEdit,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        before = {rule: rule_sha256(rule) for rule in MECHANICAL_RULES}
+        before = {rule: rule_sha256(rule) for rule in RULE_NAMES}
         fixture_package({"new_rule": NEW_RULE})
         module = importlib.import_module(f"{FIXTURE_PACKAGE}.new_rule")
         edit_source(
@@ -1201,5 +1201,5 @@ class TestRuleIndependence:
         )
         monkeypatch.setitem(RULES, "new_rule", module.NEW_RULE)
 
-        assert {rule: rule_sha256(rule) for rule in MECHANICAL_RULES} == before
+        assert {rule: rule_sha256(rule) for rule in RULE_NAMES} == before
         assert rule_sha256("new_rule") not in before.values()

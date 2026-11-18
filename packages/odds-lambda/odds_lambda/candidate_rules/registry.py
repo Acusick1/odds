@@ -8,7 +8,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import timedelta
 
-from odds_core.candidates import Candidate, CandidateStatus, MechanicalCandidate
+from odds_core.candidates import Candidate, CandidateStatus, RuleCandidate
 from odds_core.sports import SportKey
 from odds_core.vocabulary import Market
 from pydantic import ValidationError
@@ -59,7 +59,7 @@ def estimate_basis(rule: str) -> EstimateBasis | None:
     return None if spec is None else spec.estimate_basis
 
 
-def resolve_rule(candidate: MechanicalCandidate) -> tuple[RuleSpec | ModelRuleSpec, RuleParams]:
+def resolve_rule(candidate: RuleCandidate) -> tuple[RuleSpec | ModelRuleSpec, RuleParams]:
     """The candidate's rule and validated params; ``ValueError`` names what is invalid.
 
     Does not check ``rule_sha256``, which a draft may lack.
@@ -102,7 +102,7 @@ def resolve_rule(candidate: MechanicalCandidate) -> tuple[RuleSpec | ModelRuleSp
 
 
 def input_leads(candidates: Sequence[Candidate], sport: str) -> list[timedelta]:
-    """How long before kick-off the active mechanical candidates that bet in ``sport`` read
+    """How long before kick-off the active rule candidates that bet in ``sport`` read
     the market: one lead per decision time, and one per lookback point of each decision time.
 
     A candidate whose rule or params do not resolve is left out; the run-candidates job
@@ -111,7 +111,7 @@ def input_leads(candidates: Sequence[Candidate], sport: str) -> list[timedelta]:
     leads: list[timedelta] = []
     for candidate in candidates:
         if (
-            not isinstance(candidate, MechanicalCandidate)
+            not isinstance(candidate, RuleCandidate)
             or sport not in candidate.sports
             or candidate.status != CandidateStatus.ACTIVE
         ):

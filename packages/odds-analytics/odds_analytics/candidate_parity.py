@@ -1,4 +1,4 @@
-"""Check that replaying a mechanical candidate reproduces the bets it placed live.
+"""Check that replaying a rule candidate reproduces the bets it placed live.
 
 Two comparisons per recorded decision. The parity comparison rebuilds the market state from
 exactly the snapshots the decision recorded (``input_snapshot_ids``), with its decision time
@@ -23,7 +23,7 @@ from enum import StrEnum
 from typing import Any
 
 from odds_core.bookmakers import BOOK_SETS
-from odds_core.candidates import MechanicalCandidate
+from odds_core.candidates import RuleCandidate
 from odds_core.market_prices import Outcome
 from odds_core.models import Event, OddsSnapshot
 from odds_core.paper_trade_models import CandidateDecision, PaperTrade
@@ -177,7 +177,7 @@ def recorded_intents(
 
 async def _recorded_inputs(
     session: AsyncSession,
-    candidate: MechanicalCandidate,
+    candidate: RuleCandidate,
     spec: RuleSpec,
     params: RuleParams,
     event: Event,
@@ -213,7 +213,7 @@ async def _recorded_inputs(
 
 async def _db_replayed(
     session: AsyncSession,
-    candidate: MechanicalCandidate,
+    candidate: RuleCandidate,
     spec: RuleSpec,
     params: RuleParams,
     event: Event,
@@ -281,7 +281,7 @@ async def load_recorded_fixture(
 
 
 async def check_parity(
-    session: AsyncSession, candidate: MechanicalCandidate, version: int | None = None
+    session: AsyncSession, candidate: RuleCandidate, version: int | None = None
 ) -> ParityReport:
     """Replay every non-missed decision of ``candidate``'s ``version`` (default its own), in
     the order the live runs took them.

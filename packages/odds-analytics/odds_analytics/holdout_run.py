@@ -11,7 +11,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from odds_core.bookmakers import BOOK_SETS
-from odds_core.candidates import CandidateStatus, MechanicalCandidate
+from odds_core.candidates import CandidateStatus, RuleCandidate
 from odds_core.models import OddsSnapshot
 from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.candidate_rules.pinning import rule_sha256
@@ -62,14 +62,14 @@ def pooled_draft(
     today: date,
     purpose: str,
     leagues: Sequence[str] | None = None,
-) -> MechanicalCandidate:
+) -> RuleCandidate:
     """The pre-registered strategy as one draft over ``leagues`` (by default all its leagues),
     with ``cell`` as params."""
-    return MechanicalCandidate.model_validate(
+    return RuleCandidate.model_validate(
         {
             "name": prereg.name,
             "description": f"{purpose} of #{prereg.issue}",
-            "kind": "mechanical",
+            "kind": "rule",
             "market": prereg.market,
             "books": prereg.books,
             "sports": list(leagues) if leagues is not None else prereg.leagues,
@@ -134,7 +134,7 @@ async def run_holdout(
 
 async def _replay_windows(
     session: AsyncSession,
-    draft: MechanicalCandidate,
+    draft: RuleCandidate,
     windows: Sequence[Window],
     access: Collection[HoldoutAccess],
     now: datetime,
@@ -166,7 +166,7 @@ class SpentReplay:
     which reproduces ``row``'s gate."""
 
     row: HoldoutResult
-    draft: MechanicalCandidate
+    draft: RuleCandidate
     windows: list[Window]
     result: BacktestResult
 

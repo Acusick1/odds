@@ -49,7 +49,7 @@ class SharpReading:
 
 
 class CandidateDecision(SQLModel, table=True):
-    """One run of a mechanical candidate's rule on one event at one of its decision times,
+    """One run of a rule candidate's rule on one event at one of its decision times,
     with the inputs it used.
 
     Written even when the rule places no bet, so a decision is never taken twice and a replay

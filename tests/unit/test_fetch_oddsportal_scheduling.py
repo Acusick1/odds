@@ -47,7 +47,7 @@ class TestCandidateScrapeLeads:
         fields = {
             "name": "gap",
             "description": "d",
-            "kind": "mechanical",
+            "kind": "rule",
             "books": "uk_retail",
             "market": "1x2",
             "sports": ["soccer_epl"],
@@ -74,7 +74,7 @@ class TestCandidateScrapeLeads:
         fields = {
             "name": "news",
             "description": "d",
-            "kind": "mechanical",
+            "kind": "rule",
             "books": "uk_retail",
             "market": "1x2",
             "sports": ["soccer_italy_serie_a"],

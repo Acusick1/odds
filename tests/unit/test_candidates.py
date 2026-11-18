@@ -8,7 +8,7 @@ from odds_cli.main import app
 from odds_core.bookmakers import BookSet
 from odds_core.candidates import (
     AgentCandidate,
-    MechanicalCandidate,
+    RuleCandidate,
     candidates_dir,
     load_candidate_file,
     load_candidates,
@@ -17,10 +17,10 @@ from odds_lambda.candidate_rules.pinning import rule_sha256
 from odds_lambda.candidate_rules.registry import resolve_rule
 from typer.testing import CliRunner
 
-MECHANICAL: dict[str, object] = {
+RULE_CANDIDATE: dict[str, object] = {
     "name": "back-longest",
     "description": "Back the longest retail price.",
-    "kind": "mechanical",
+    "kind": "rule",
     "books": "uk_retail",
     "market": "1x2",
     "sports": ["soccer_epl"],
@@ -52,13 +52,13 @@ def write(directory: Path, data: dict[str, object], stem: str | None = None) -> 
 
 class TestLoadCandidates:
     def test_loads_both_kinds_sorted_by_name(self, tmp_path: Path) -> None:
-        write(tmp_path, MECHANICAL)
+        write(tmp_path, RULE_CANDIDATE)
         write(tmp_path, AGENT)
 
         loaded = load_candidates(tmp_path)
 
         assert [c.name for c in loaded] == ["back-longest", "epl-agent"]
-        assert isinstance(loaded[0], MechanicalCandidate)
+        assert isinstance(loaded[0], RuleCandidate)
         assert loaded[0].params == {
             "threshold": 0.02,
             "minutes_before_kickoff": [60],
@@ -67,12 +67,12 @@ class TestLoadCandidates:
         assert isinstance(loaded[1], AgentCandidate)
 
     def test_a_draft_file_may_lack_the_hash_but_the_registry_may_not(self, tmp_path: Path) -> None:
-        draft = {k: v for k, v in MECHANICAL.items() if k != "rule_sha256"}
+        draft = {k: v for k, v in RULE_CANDIDATE.items() if k != "rule_sha256"}
         write(tmp_path, draft)
 
         loaded = load_candidate_file(tmp_path / "back-longest.yaml")
 
-        assert isinstance(loaded, MechanicalCandidate) and loaded.rule_sha256 is None
+        assert isinstance(loaded, RuleCandidate) and loaded.rule_sha256 is None
         with pytest.raises(ValueError, match="must record rule_sha256"):
             load_candidates(tmp_path)
 
@@ -80,7 +80,7 @@ class TestLoadCandidates:
         assert load_candidates(tmp_path / "absent") == []
 
     def test_unknown_field_rejected(self, tmp_path: Path) -> None:
-        write(tmp_path, {**MECHANICAL, "surprise": 1})
+        write(tmp_path, {**RULE_CANDIDATE, "surprise": 1})
         with pytest.raises(ValueError, match="back-longest.yaml"):
             load_candidates(tmp_path)
 
@@ -90,12 +90,12 @@ class TestLoadCandidates:
             load_candidates(tmp_path)
 
     def test_bad_name_rejected(self, tmp_path: Path) -> None:
-        write(tmp_path, {**MECHANICAL, "name": "Bad_Name"})
+        write(tmp_path, {**RULE_CANDIDATE, "name": "Bad_Name"})
         with pytest.raises(ValueError):
             load_candidates(tmp_path)
 
     def test_name_must_match_file_stem(self, tmp_path: Path) -> None:
-        write(tmp_path, MECHANICAL, stem="other-name")
+        write(tmp_path, RULE_CANDIDATE, stem="other-name")
         with pytest.raises(ValueError, match="other-name.yaml"):
             load_candidates(tmp_path)
 
@@ -112,7 +112,7 @@ class TestLoadCandidates:
 
     @pytest.mark.parametrize("version", ["3", 0, 1.5, True])
     def test_version_must_be_positive_integer(self, tmp_path: Path, version: object) -> None:
-        write(tmp_path, {**MECHANICAL, "version": version})
+        write(tmp_path, {**RULE_CANDIDATE, "version": version})
         with pytest.raises(ValueError):
             load_candidates(tmp_path)
 
@@ -121,20 +121,20 @@ class TestLoadCandidates:
         write(tmp_path, {**AGENT, "name": "mlb-agent", "sports": ["baseball_mlb"]})
         assert len(load_candidates(tmp_path)) == 2
 
-    def test_a_mechanical_file_must_declare_its_book_set(self, tmp_path: Path) -> None:
-        write(tmp_path, {k: v for k, v in MECHANICAL.items() if k != "books"})
+    def test_a_rule_candidate_file_must_declare_its_book_set(self, tmp_path: Path) -> None:
+        write(tmp_path, {k: v for k, v in RULE_CANDIDATE.items() if k != "books"})
         with pytest.raises(ValueError, match="books"):
             load_candidates(tmp_path)
 
     def test_the_book_set_is_one_of_the_named_sets(self, tmp_path: Path) -> None:
-        write(tmp_path, {**MECHANICAL, "books": "everything"})
+        write(tmp_path, {**RULE_CANDIDATE, "books": "everything"})
         with pytest.raises(ValueError, match="books"):
             load_candidates(tmp_path)
 
     def test_the_book_set_is_read_by_name(self, tmp_path: Path) -> None:
-        write(tmp_path, {**MECHANICAL, "books": "odds_api_uk"})
+        write(tmp_path, {**RULE_CANDIDATE, "books": "odds_api_uk"})
         [loaded] = load_candidates(tmp_path)
-        assert isinstance(loaded, MechanicalCandidate) and loaded.books is BookSet.ODDS_API_UK
+        assert isinstance(loaded, RuleCandidate) and loaded.books is BookSet.ODDS_API_UK
 
     def test_repo_registry_is_valid(self) -> None:
         load_candidates(candidates_dir())
@@ -152,7 +152,7 @@ class TestListCommand:
         assert "No candidates registered" in result.stdout
 
     def test_lists_and_filters_by_status(self, registry: Path) -> None:
-        write(registry, MECHANICAL)
+        write(registry, RULE_CANDIDATE)
         write(registry, AGENT)
         runner = CliRunner(env={"COLUMNS": "200"})
 
@@ -164,19 +164,19 @@ class TestListCommand:
         assert "epl-agent" in promoted.stdout and "back-longest" not in promoted.stdout
 
     def test_invalid_file_exits_1(self, registry: Path) -> None:
-        write(registry, {**MECHANICAL, "surprise": 1})
+        write(registry, {**RULE_CANDIDATE, "surprise": 1})
         result = CliRunner(env={"COLUMNS": "200"}).invoke(app, ["candidates", "list"])
         assert result.exit_code == 1
         assert "back-longest.yaml" in result.stdout
 
     def test_unknown_rule_exits_1(self, registry: Path) -> None:
-        write(registry, {**MECHANICAL, "rule": "no_such_rule"})
+        write(registry, {**RULE_CANDIDATE, "rule": "no_such_rule"})
         result = CliRunner(env={"COLUMNS": "200"}).invoke(app, ["candidates", "list"])
         assert result.exit_code == 1
         assert "back-longest" in result.stdout and "no_such_rule" in result.stdout
 
     def test_changed_rule_hash_exits_1(self, registry: Path) -> None:
-        write(registry, {**MECHANICAL, "rule_sha256": "0" * 64})
+        write(registry, {**RULE_CANDIDATE, "rule_sha256": "0" * 64})
         result = CliRunner(env={"COLUMNS": "200"}).invoke(app, ["candidates", "list"])
         assert result.exit_code == 1
         assert "code of rule 'exchange_gap' changed" in result.stdout
@@ -204,5 +204,5 @@ class TestDraftExample:
 
         loaded = load_candidate_file(draft)
 
-        assert isinstance(loaded, MechanicalCandidate) and loaded.rule_sha256 is None
+        assert isinstance(loaded, RuleCandidate) and loaded.rule_sha256 is None
         resolve_rule(loaded)

@@ -7,7 +7,7 @@ from datetime import timedelta
 
 import pytest
 from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS
-from odds_core.candidates import MechanicalCandidate
+from odds_core.candidates import RuleCandidate
 from odds_core.market_prices import Outcome
 from odds_core.quotes import Quote
 from odds_core.vocabulary import Market
@@ -184,12 +184,12 @@ class TestSameSourceRun:
 
 
 class TestDeclaration:
-    def _candidate(self, market: str, rule: str = "exchange_gap") -> MechanicalCandidate:
-        return MechanicalCandidate.model_validate(
+    def _candidate(self, market: str, rule: str = "exchange_gap") -> RuleCandidate:
+        return RuleCandidate.model_validate(
             {
                 "name": "c",
                 "description": "d",
-                "kind": "mechanical",
+                "kind": "rule",
                 "books": "uk_retail",
                 "market": market,
                 "sports": ["soccer_epl"],

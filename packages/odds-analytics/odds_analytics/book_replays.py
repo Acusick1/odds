@@ -18,7 +18,7 @@ from datetime import datetime
 
 import structlog
 from odds_core.bookmakers import BOOK_SETS, BookSet
-from odds_core.candidates import Candidate, MechanicalCandidate
+from odds_core.candidates import Candidate, RuleCandidate
 from odds_core.close import close_quotes
 from odds_core.models import Event
 from odds_core.paper_trade_models import CandidateDecision
@@ -118,9 +118,7 @@ class ReplayedBets:
     without: dict[str, list[ScoredBet]]
 
 
-async def replay_variants(
-    session: AsyncSession, candidate: MechanicalCandidate
-) -> ReplayedBets | None:
+async def replay_variants(session: AsyncSession, candidate: RuleCandidate) -> ReplayedBets | None:
     """The version's decisions replayed under every variant; None for a model rule, which has
     none. Each decision's recorded quotes are read once and every variant's state is built from
     them in memory."""
@@ -194,7 +192,7 @@ async def replay_variants(
 
 
 def build_replay(
-    candidate: MechanicalCandidate,
+    candidate: RuleCandidate,
     replayed: ReplayedBets,
     trades: Sequence[ScoredBet],
     now: datetime,
@@ -231,7 +229,7 @@ async def book_replays(
     trades: Sequence[ScoredBet],
     now: datetime,
 ) -> dict[tuple[str, int], BookReplay]:
-    """The replay of each mechanical entry of ``registry`` (the registered versions the report
+    """The replay of each rule-candidate entry of ``registry`` (the registered versions the report
     holds) by name and version, from ``trades`` in placement order. A version whose replay
     fails is logged and left out: nothing else reads these."""
     by_version: dict[tuple[str, int], list[ScoredBet]] = defaultdict(list)
@@ -239,7 +237,7 @@ async def book_replays(
         by_version[(trade.candidate_name, trade.candidate_version)].append(trade)
     found: dict[tuple[str, int], BookReplay] = {}
     for entry in registry:
-        if not isinstance(entry, MechanicalCandidate):
+        if not isinstance(entry, RuleCandidate):
             continue
         key = (entry.name, entry.version)
         try:

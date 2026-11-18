@@ -1,4 +1,4 @@
-"""The framework every mechanical rule shares: its params, its bets, its spec, the helpers rules
+"""The framework every rule shares: its params, its bets, its spec, the helpers rules
 bet through, and the one path by which a rule decides.
 
 Rule modules import this; the registry (``odds_lambda.candidate_rules.registry``) imports the rule
@@ -15,7 +15,7 @@ from enum import StrEnum
 from functools import partial
 from typing import Any
 
-from odds_core.candidates import MechanicalCandidate
+from odds_core.candidates import RuleCandidate
 from odds_core.market_prices import Outcome, market_outcomes
 from odds_core.models import Event
 from odds_core.vocabulary import Market
@@ -268,7 +268,7 @@ async def run_rule(
     return apply_rule(spec, params, state, kickoff, bet_selections)
 
 
-def candidate_leagues(candidate: MechanicalCandidate) -> tuple[str, ...]:
+def candidate_leagues(candidate: RuleCandidate) -> tuple[str, ...]:
     """The leagues whose kick-offs a candidate's rule counts as concurrent: every league it bets
     in."""
     return tuple(candidate.sports)

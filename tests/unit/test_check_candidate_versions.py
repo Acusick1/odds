@@ -167,10 +167,10 @@ class TestLeagueField:
 
 
 class TestBooksField:
-    """A mechanical file without `books` reads as `books: uk_retail`: adding that line is no
+    """A rule-candidate file without `books` reads as `books: uk_retail`: adding that line is no
     change, and changing the set is."""
 
-    YAML = BASE_YAML + "kind: mechanical\nrule: exchange_gap\nmarket: 1x2\nsports: [soccer_epl]\n"
+    YAML = BASE_YAML + "kind: rule\nrule: exchange_gap\nmarket: 1x2\nsports: [soccer_epl]\n"
 
     @pytest.fixture
     def repo(self, candidates_repo: Path) -> Path:
@@ -188,6 +188,13 @@ class TestBooksField:
             text=True,
         )
         return result.stderr.splitlines()
+
+    def test_the_former_mechanical_kind_reads_as_rule(self, repo: Path) -> None:
+        old = self.YAML.replace("kind: rule", "kind: mechanical") + "books: uk_retail\n"
+        (repo / "candidates" / "back-longest.yaml").write_text(old)
+        git(repo, "add", "candidates")
+        git(repo, "commit", "-q", "-m", "legacy kind")
+        assert self.errors(repo, self.YAML + "books: uk_retail\n") == []
 
     def test_adding_the_full_roster_set_at_the_same_version_passes(self, repo: Path) -> None:
         assert self.errors(repo, self.YAML + "books: uk_retail\n") == []

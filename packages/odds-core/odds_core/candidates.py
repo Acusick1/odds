@@ -52,8 +52,8 @@ class _CandidateBase(BaseModel):
         return sports
 
 
-class MechanicalCandidate(_CandidateBase):
-    kind: Literal["mechanical"]
+class RuleCandidate(_CandidateBase):
+    kind: Literal["rule"]
     market: Market
     # The roster books its rule takes retail prices from (ADR-0025).
     books: BookSet
@@ -67,7 +67,7 @@ class AgentCandidate(_CandidateBase):
     kind: Literal["agent"]
 
 
-Candidate = Annotated[MechanicalCandidate | AgentCandidate, Field(discriminator="kind")]
+Candidate = Annotated[RuleCandidate | AgentCandidate, Field(discriminator="kind")]
 
 _candidate_adapter: TypeAdapter[Candidate] = TypeAdapter(Candidate)
 
@@ -93,8 +93,8 @@ def load_candidates(directory: Path) -> list[Candidate]:
         candidate = load_candidate_file(path)
         if candidate.name != path.stem:
             raise ValueError(f"{path}: name {candidate.name!r} must match the file name")
-        if isinstance(candidate, MechanicalCandidate) and candidate.rule_sha256 is None:
-            raise ValueError(f"{path}: a registered mechanical candidate must record rule_sha256")
+        if isinstance(candidate, RuleCandidate) and candidate.rule_sha256 is None:
+            raise ValueError(f"{path}: a registered rule candidate must record rule_sha256")
         candidates.append(candidate)
 
     live_agents_per_sport = Counter(

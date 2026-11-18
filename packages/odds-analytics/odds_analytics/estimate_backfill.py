@@ -1,6 +1,6 @@
 """Backfill the estimated EV of candidate trades placed before trades recorded it.
 
-Each decision of a version of a registered mechanical candidate is replayed from its recorded
+Each decision of a version of a registered rule candidate is replayed from its recorded
 inputs under the registry's rule, params and book set, as the parity check replays it (``odds_analytics.candidate_parity.recorded_intents``), in the order
 the live runs took it, dropping the selections the match's earlier decisions placed trades on.
 A trade takes the estimate of the replayed bet on its selection, line, bookmaker and price; a
@@ -16,7 +16,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from odds_core.bookmakers import BOOK_SETS
-from odds_core.candidates import Candidate, MechanicalCandidate
+from odds_core.candidates import Candidate, RuleCandidate
 from odds_core.market_prices import Outcome
 from odds_core.models import Event
 from odds_core.paper_trade_models import PaperTrade
@@ -96,7 +96,7 @@ class VersionBackfill:
 
 @dataclass(frozen=True)
 class EstimateBackfill:
-    """The backfill of each version of a registered mechanical candidate with decision trades,
+    """The backfill of each version of a registered rule candidate with decision trades,
     and the trades of versions it cannot replay, by (name, version): a name the registry does
     not hold, or a model rule, which places no live trades."""
 
@@ -105,7 +105,7 @@ class EstimateBackfill:
 
 
 async def _version_backfill(
-    session: AsyncSession, candidate: MechanicalCandidate, version: int
+    session: AsyncSession, candidate: RuleCandidate, version: int
 ) -> VersionBackfill:
     spec, params = resolve_rule(candidate)
     assert not isinstance(spec, ModelRuleSpec)  # noqa: S101
@@ -165,12 +165,12 @@ async def _version_backfill(
 
 
 async def plan_backfill(session: AsyncSession, registry: Sequence[Candidate]) -> EstimateBackfill:
-    """The estimate of every decision trade of each version of a registered mechanical
+    """The estimate of every decision trade of each version of a registered rule
     candidate, and the count of decision trades of the versions it cannot replay."""
     replayable = {
         c.name: c
         for c in registry
-        if isinstance(c, MechanicalCandidate) and not isinstance(resolve_rule(c)[0], ModelRuleSpec)
+        if isinstance(c, RuleCandidate) and not isinstance(resolve_rule(c)[0], ModelRuleSpec)
     }
     name, version = col(PaperTrade.candidate_name), col(PaperTrade.candidate_version)
     rows = await session.execute(

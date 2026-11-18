@@ -1,4 +1,4 @@
-"""The candidate page's decision timeline: what a mechanical candidate's rule did at each
+"""The candidate page's decision timeline: what a rule candidate's rule did at each
 decision time."""
 
 from __future__ import annotations
