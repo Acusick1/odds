@@ -4,9 +4,9 @@ Each decision of a version of a registered rule candidate is replayed from its r
 inputs under the registry's rule, params and book set, as the parity check replays it (``odds_analytics.candidate_parity.recorded_intents``), in the order
 the live runs took it, dropping the selections the match's earlier decisions placed bets on.
 A bet takes the estimate of the replayed bet on its selection, line, bookmaker and price; a
-bet with no such bet keeps none. The registry holds only a name's current version, and a
+recorded bet with no such replayed bet keeps none. The registry holds only a name's current version, and a
 name's rule never changes across versions, so an earlier version is replayed with the current
-entry: a bet whose bet that does not reproduce stays unmatched.
+entry: a recorded bet whose replayed bet does not reproduce stays unmatched.
 """
 
 from __future__ import annotations

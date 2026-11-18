@@ -18,7 +18,7 @@ status: stable
 
 # Parity check
 
-`odds candidates parity <name> [--version N]` checks that the replay of each recorded decision reproduces the [bets](../foundations/glossary.md#bet) the [run-candidates job](run-candidates-job.md#the-decision-record) placed, so the [replay backtest](candidate-backtest.md) and the [forward test](../foundations/glossary.md#forward-test) are known to run one rule on one market state. The task is on [From idea to verdict](howto-take-an-idea-to-a-verdict.md).
+`odds candidates parity <name> [--version N]` checks that the replay of each recorded decision reproduces the [bets](../foundations/glossary.md#bet) the [run-candidates job](run-candidates-job.md#the-decision-record) recorded for it, so the [replay backtest](candidate-backtest.md) and the [forward test](../foundations/glossary.md#forward-test) are known to run one rule on one market state. The task is on [From idea to verdict](howto-take-an-idea-to-a-verdict.md).
 
 ## Command
 

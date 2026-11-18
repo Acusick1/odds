@@ -2,7 +2,7 @@
 
 Two comparisons per recorded decision. The parity comparison rebuilds the market state from
 exactly the snapshots the decision recorded (``input_snapshot_ids``), with its decision time
-and kick-off, runs the rule and compares the bets with the decision's bets; any difference
+and kick-off, runs the rule and compares the replayed bets with the decision's recorded bets; any difference
 is a mismatch. Decisions are replayed in the order the live runs took them, and each outcome
 of a match is bet once: the parity comparison drops the outcomes the match's earlier
 decisions placed bets on, as the live run did. A rule that reads fixture inputs gets them
