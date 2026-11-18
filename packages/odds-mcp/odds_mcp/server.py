@@ -1,6 +1,6 @@
 """FastMCP server exposing betting pipeline tools for AI agents.
 
-Thin wrappers over existing DB queries, jobs, and paper trading logic.
+Thin wrappers over existing DB queries, jobs, and betting logic.
 All tools are stateless and use async_session_maker() for DB access.
 """
 
@@ -15,23 +15,18 @@ from fastmcp import FastMCP
 from odds_analytics.candidate_report import CandidateSummary, candidate_report
 from odds_analytics.utils import per_book_market_holds
 from odds_core.agent_wakeup_models import AgentWakeup
+from odds_core.bet_models import Bet
 from odds_core.bookmakers import NON_BETTABLE_BOOKMAKERS, SHARP_BOOKMAKERS
 from odds_core.candidates import candidates_dir, load_candidates
 from odds_core.database import async_session_maker
 from odds_core.match_brief_models import BriefDecision, MatchBrief, SharpPriceMap
 from odds_core.models import Event, EventStatus
-from odds_core.paper_trade_models import PaperTrade
 from odds_core.quotes import Quote
 from odds_core.sports import SportKey
 from odds_core.vocabulary import Market
+from odds_lambda import betting
 from odds_lambda.jobs.fetch_oddsportal import LEAGUE_SPEC_BY_NAME
 from odds_lambda.oddsportal_client import FEED_MARKETS
-from odds_lambda.paper_trading import (
-    get_open_trades,
-    get_portfolio_summary,
-    place_trade,
-    settle_trades,
-)
 from odds_lambda.storage.readers import OddsReader
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -56,7 +51,7 @@ mcp = FastMCP(
     "odds-mcp",
     instructions=(
         "Betting odds pipeline tools. Use these to inspect fixtures, odds, "
-        "and manage paper trades across sports (EPL football, MLB baseball). "
+        "and manage bets across sports (EPL football, MLB baseball). "
         "All times are UTC."
     ),
 )
@@ -64,7 +59,7 @@ mcp = FastMCP(
 # Re-export canonical lookup built where LEAGUE_SPECS is defined
 _LEAGUE_SPEC_BY_NAME = LEAGUE_SPEC_BY_NAME
 
-# How far before placement paper_bet looks for the sharp price it records.
+# How far before placement place_bet looks for the sharp price it records.
 PLACEMENT_SHARP_LOOKBACK_HOURS = 24.0
 
 
@@ -127,34 +122,34 @@ def _hours_until_commence(event: Event, at: datetime) -> float:
     return (event.commence_time - at).total_seconds() / 3600
 
 
-def _trade_to_dict(trade: PaperTrade) -> dict[str, Any]:
-    """Serialize a PaperTrade to a JSON-safe dict."""
+def _bet_to_dict(bet: Bet) -> dict[str, Any]:
+    """Serialize a Bet to a JSON-safe dict."""
     return {
-        "id": trade.id,
-        "event_id": trade.event_id,
-        "market": trade.market,
-        "selection": trade.selection,
-        "line": trade.line,
-        "bookmaker": trade.bookmaker,
-        "price_decimal": trade.price_decimal,
-        "stake": trade.stake,
-        "reasoning": trade.reasoning,
-        "confidence": trade.confidence,
-        "bankroll_before": trade.bankroll_before,
-        "bankroll_after": trade.bankroll_after,
-        "placed_at": trade.placed_at.isoformat() if trade.placed_at else None,
-        "settled_at": trade.settled_at.isoformat() if trade.settled_at else None,
-        "result": trade.result.value if trade.result else None,
-        "pnl": trade.pnl,
-        "candidate_name": trade.candidate_name,
-        "candidate_version": trade.candidate_version,
-        "git_sha": trade.git_sha,
-        "sharp_probability": trade.sharp_probability,
-        "sharp_bookmaker": trade.sharp_bookmaker,
+        "id": bet.id,
+        "event_id": bet.event_id,
+        "market": bet.market,
+        "selection": bet.selection,
+        "line": bet.line,
+        "bookmaker": bet.bookmaker,
+        "price_decimal": bet.price_decimal,
+        "stake": bet.stake,
+        "reasoning": bet.reasoning,
+        "confidence": bet.confidence,
+        "bankroll_before": bet.bankroll_before,
+        "bankroll_after": bet.bankroll_after,
+        "placed_at": bet.placed_at.isoformat() if bet.placed_at else None,
+        "settled_at": bet.settled_at.isoformat() if bet.settled_at else None,
+        "result": bet.result.value if bet.result else None,
+        "pnl": bet.pnl,
+        "candidate_name": bet.candidate_name,
+        "candidate_version": bet.candidate_version,
+        "git_sha": bet.git_sha,
+        "sharp_probability": bet.sharp_probability,
+        "sharp_bookmaker": bet.sharp_bookmaker,
         "sharp_snapshot_time": (
-            trade.sharp_snapshot_time.isoformat() if trade.sharp_snapshot_time else None
+            bet.sharp_snapshot_time.isoformat() if bet.sharp_snapshot_time else None
         ),
-        "sharp_spread": trade.sharp_spread,
+        "sharp_spread": bet.sharp_spread,
     }
 
 
@@ -515,7 +510,7 @@ async def get_scrape_status(
 
 
 @mcp.tool()
-async def paper_bet(
+async def place_bet(
     event_id: int,
     market: str,
     selection: str,
@@ -528,7 +523,7 @@ async def paper_bet(
     candidate_name: str | None = None,
     candidate_version: int | None = None,
 ) -> dict[str, Any]:
-    """Place a paper (simulated) bet on an event.
+    """Place a bet on an event.
 
     Args:
         event_id: Event identifier.
@@ -544,7 +539,7 @@ async def paper_bet(
         candidate_version: The candidate's current version.
 
     Returns:
-        Dict with the placed trade details.
+        Dict with the placed bet details.
     """
     async with async_session_maker() as session:
         event_result = await session.execute(select(Event).where(Event.id == event_id))
@@ -556,7 +551,7 @@ async def paper_bet(
             return {"error": f"Event is '{event.status.value}', not 'scheduled'. Cannot place bet."}
 
         if bankroll is None:
-            portfolio = await get_portfolio_summary(session)
+            portfolio = await betting.get_portfolio_summary(session)
             bankroll = portfolio.current_bankroll
 
         sharp = await selection_sharp_reading(
@@ -571,7 +566,7 @@ async def paper_bet(
         )
 
         try:
-            trade = await place_trade(
+            bet = await betting.place_bet(
                 session,
                 event_id=event_id,
                 market=market,
@@ -590,12 +585,12 @@ async def paper_bet(
         except ValueError as e:
             return {"error": str(e), "error_type": "ValueError"}
         except Exception as e:
-            logger.error("paper_bet_failed", event_id=event_id, error=str(e), exc_info=True)
+            logger.error("place_bet_failed", event_id=event_id, error=str(e), exc_info=True)
             return {"error": str(e), "error_type": type(e).__name__}
 
     return {
         "status": "placed",
-        "trade": _trade_to_dict(trade),
+        "bet": _bet_to_dict(bet),
     }
 
 
@@ -628,17 +623,17 @@ def _candidate_summary_to_dict(summary: CandidateSummary) -> dict[str, Any]:
 
 @mcp.tool()
 async def get_portfolio(initial_bankroll: float = 1000.0) -> dict[str, Any]:
-    """Get paper trading portfolio summary: open bets, P&L, bankroll.
+    """Get betting portfolio summary: open bets, P&L, bankroll.
 
     Args:
         initial_bankroll: Starting bankroll for ROI calculation.
 
     Returns:
-        Dict with portfolio metrics, list of open trades and per-candidate results.
+        Dict with portfolio metrics, list of open bets and per-candidate results.
     """
     async with async_session_maker() as session:
-        portfolio = await get_portfolio_summary(session, initial_bankroll=initial_bankroll)
-        open_trades = await get_open_trades(session, include_flat_stake=False)
+        portfolio = await betting.get_portfolio_summary(session, initial_bankroll=initial_bankroll)
+        open_bets = await betting.get_open_bets(session, include_flat_stake=False)
         candidates: list[dict[str, Any]] | dict[str, str]
         try:
             candidates = [
@@ -652,9 +647,9 @@ async def get_portfolio(initial_bankroll: float = 1000.0) -> dict[str, Any]:
 
     return {
         "current_bankroll": portfolio.current_bankroll,
-        "total_trades": portfolio.total_trades,
-        "settled_trades": portfolio.settled_trades,
-        "open_trades": portfolio.open_trades,
+        "total_bets": portfolio.total_bets,
+        "settled_bets": portfolio.settled_bets,
+        "open_bets": portfolio.open_bets,
         "total_pnl": portfolio.total_pnl,
         "total_staked": portfolio.total_staked,
         "roi": round(portfolio.roi, 2),
@@ -663,32 +658,32 @@ async def get_portfolio(initial_bankroll: float = 1000.0) -> dict[str, Any]:
             "losses": portfolio.loss_count,
             "pushes": portfolio.push_count,
         },
-        "open_trade_details": [_trade_to_dict(t) for t in open_trades],
+        "open_bet_details": [_bet_to_dict(t) for t in open_bets],
         "candidates": candidates,
     }
 
 
 @mcp.tool()
 async def settle_bets() -> dict[str, Any]:
-    """Settle all paper trades whose events have final scores.
+    """Settle all bets whose events have final scores.
 
-    Idempotent: only settles trades that haven't been settled yet.
+    Idempotent: only settles bets that haven't been settled yet.
     Determines win/loss by comparing selection against actual match result.
 
     Returns:
-        Dict with count of settled trades and their details.
+        Dict with count of settled bets and their details.
     """
     async with async_session_maker() as session:
-        settled = await settle_trades(session)
+        settled = await betting.settle_bets(session)
         await session.commit()
 
         total_pnl = sum(t.pnl for t in settled if t.pnl is not None)
-        serialized = [_trade_to_dict(t) for t in settled]
+        serialized = [_bet_to_dict(t) for t in settled]
 
     return {
         "settled_count": len(settled),
         "total_pnl": total_pnl,
-        "settled_trades": serialized,
+        "settled_bets": serialized,
     }
 
 

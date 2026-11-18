@@ -171,7 +171,7 @@ def report() -> None:
     registry = _load_registry()
     summaries = asyncio.run(_report(registry))
     if not summaries:
-        console.print("[yellow]No candidates registered and no candidate trades[/yellow]")
+        console.print("[yellow]No candidates registered and no candidate bets[/yellow]")
         return
     console.print(_report_table(summaries))
     for s in summaries:
@@ -861,7 +861,7 @@ def parity(
 ) -> None:
     """Replay each recorded decision from its recorded input snapshots and compare the bets.
 
-    Run on the production host: decisions and trades are not copied by `odds copy from-prod`.
+    Run on the production host: decisions and bets are not copied by `odds copy from-prod`.
     Exits 1 when a replay differs from the bets placed. Decisions whose replay from the
     database as it is now differs are listed as data differences and never affect the exit code.
     """
@@ -924,12 +924,12 @@ def parity(
 def backfill_estimates(
     apply: bool = typer.Option(False, "--apply", help="Write; without it only the plan is shown"),
 ) -> None:
-    """Fill each live candidate trade's estimated EV from a replay of its decision.
+    """Fill each live candidate bet's estimated EV from a replay of its decision.
 
     Replays every decision of each version of a registered rule candidate from its
     recorded inputs under the registry's rule, params and book set, as `odds candidates parity`
-    does, and takes the estimate of the replayed bet on the trade's selection, line, bookmaker
-    and price. Only a trade without a stored estimate is written. A trade with no such bet, or
+    does, and takes the estimate of the replayed bet on the bet's selection, line, bookmaker
+    and price. Only a bet without a stored estimate is written. A bet with no such replayed bet, or
     whose stored estimate differs from the replay's, is listed and left as it is. Safe to
     re-run.
 
@@ -946,33 +946,33 @@ def backfill_estimates(
 
     plan, written = asyncio.run(run())
     for v in plan.versions:
-        with_estimate = [t for t in v.trades if t.estimated_ev is not None]
+        with_estimate = [t for t in v.bets if t.estimated_ev is not None]
         console.print(
-            f"{v.name} v{v.version}: {len(v.trades)} trades, "
-            f"{len(v.trades) - len(v.unmatched)} matched ({len(with_estimate)} with an estimate), "
+            f"{v.name} v{v.version}: {len(v.bets)} bets, "
+            f"{len(v.bets) - len(v.unmatched)} matched ({len(with_estimate)} with an estimate), "
             f"{len(v.unmatched)} unmatched, {len(v.mismatched)} with a different stored "
             f"estimate, {len(v.to_write)} to write",
             soft_wrap=True,
         )
         for t in v.unmatched:
             console.print(
-                f"  [yellow]unmatched trade {t.trade_id} (decision {t.decision_id}, "
+                f"  [yellow]unmatched bet {t.bet_id} (decision {t.decision_id}, "
                 f"event {t.event_id}): {t.key}[/yellow]",
                 soft_wrap=True,
             )
         for t in v.mismatched:
             console.print(
-                f"  [yellow]trade {t.trade_id} (decision {t.decision_id}): stored estimate "
+                f"  [yellow]bet {t.bet_id} (decision {t.decision_id}): stored estimate "
                 f"{t.stored}, replay {t.estimated_ev}; left as stored[/yellow]",
                 soft_wrap=True,
             )
     for (name, version), count in plan.skipped.items():
         console.print(
-            f"{name} v{version}: {count} trades skipped, not a registered rule candidate",
+            f"{name} v{version}: {count} bets skipped, not a registered rule candidate",
             soft_wrap=True,
         )
     if apply:
-        console.print(f"Wrote the estimate of {written} trades.")
+        console.print(f"Wrote the estimate of {written} bets.")
     else:
         console.print("Dry run: nothing written. Re-run with --apply.")
 

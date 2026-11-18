@@ -7,11 +7,11 @@ sources:
   - odds_core.database
   - odds_core.odds_math
   - odds_core.quotes.quotes
-  - odds_core.paper_trade_models.PaperTrade
+  - odds_core.bet_models.Bet
   - packages/odds-core/pyproject.toml
   - odds_lambda
   - odds_core.job_specs.JOB_SPECS
-  - odds_lambda.paper_trading.place_trade
+  - odds_lambda.betting.place_bet
   - odds_lambda.copy_from_production.copy_from_prod
   - packages/odds-lambda/pyproject.toml
   - odds_analytics
@@ -82,7 +82,7 @@ Python 3.12+ (`pyproject.toml`), a uv workspace linted by one root ruff configur
 | Module | Holds |
 |---|---|
 | `odds_core.models` | `odds_core.models.Event`, `odds_core.models.EventExternalId`, `odds_core.models.HealthCheckAcknowledgement`, `odds_core.models.OddsSnapshot`, `odds_core.models.SnapshotPayload`, `odds_core.models.Price`, `odds_core.models.FetchLog`, `odds_core.models.DataQualityLog`, `odds_core.models.AlertHistory` and `odds_core.models.utc_now` (`odds_core.models.EventPostponement` records the kick-off an event was postponed from; tables: [events](../storage/events.md), [snapshots](../storage/odds-tables.md#odds_snapshots), [prices](../storage/price-tables.md)); the closed sets their text columns take (source, market, time basis, market status, outcome, side, health check) are in `odds_core.vocabulary` |
-| `odds_core.match_brief_models`, `odds_core.paper_trade_models`, `odds_core.agent_wakeup_models` | Agent tables ([briefs](../agent/match-briefs.md), [bets](../agent/paper-trading.md)), the sharp-price types the MCP tools return, the bets (`odds_core.paper_trade_models.PaperTrade`) and the candidate decision table ([decision record](../evaluation/run-candidates-job.md#the-decision-record)) |
+| `odds_core.match_brief_models`, `odds_core.bet_models`, `odds_core.agent_wakeup_models` | Agent tables ([briefs](../agent/match-briefs.md), [bets](../agent/bets.md)), the sharp-price types the MCP tools return, the bets (`odds_core.bet_models.Bet`) and the candidate decision table ([decision record](../evaluation/run-candidates-job.md#the-decision-record)) |
 | `odds_core.backfill_models` | `odds_core.backfill_models.OddsApiSnapshotGap`, a planned historical Odds API snapshot the provider lacks ([provider gaps](../collection/odds-api-backfill.md#provider-gaps)) |
 | `odds_core.epl_data_models`, `odds_core.mlb_data_models`, `odds_core.injury_models`, `odds_core.game_log_models`, `odds_core.player_stats_models` | Sport-context tables (the MLB schedule table also feeds the MLB event calendar) |
 | `config.py` | Pydantic Settings, see [Configuration](configuration.md) |
@@ -116,9 +116,9 @@ Importing `odds_core.alerts` builds `odds_core.config.get_settings()` ([Read at 
 | Scheduling | `scheduling/` (`odds_lambda.scheduling.jobs`, `odds_lambda.scheduling.decision`, `odds_lambda.scheduling.helpers`, `odds_lambda.scheduling.backends`, `odds_lambda.scheduling.bootstrap`, `odds_lambda.scheduling.runner`), `odds_lambda.lambda_handler`, `odds_lambda.fetch_tier`, `odds_lambda.tier_utils` | [Job registry](../scheduling/job-registry.md), [Self-scheduling](../scheduling/self-scheduling.md), [Decision engine](../scheduling/decision-engine.md), [Fetch tier](../storage/fetch-tier.md) |
 | Jobs | `jobs/*.py`, one `main(ctx)` per file; `odds_lambda.results_run` holds what the two results jobs share | `odds_core.job_specs.JOB_SPECS` lists all 15; [results jobs](../collection/results-jobs.md#run-alerts-and-booking) |
 | Candidate rules | `odds_lambda.candidate_rules`: the market state and its query, the fixture context, the rule framework (`odds_lambda.candidate_rules.rules`), one module per rule a rule candidate runs, the rule registry (`odds_lambda.candidate_rules.registry`) and rule pinning (`odds_lambda.candidate_rules.pinning`, over `odds_lambda.candidate_rules.code_hash`) | [Candidate rules](../evaluation/candidate-rules.md) |
-| Services (including the check-health monitor) | `odds_lambda.paper_trading` (bet placement through `odds_lambda.paper_trading.place_trade`, settlement and voiding), `odds_lambda.health_readers`, `odds_lambda.health_monitor`, `odds_lambda.collection_calendar` (collection horizons, calendars, dormancy and the empty-collection guard), `odds_lambda.copy_from_production` | [Bets](../agent/paper-trading.md), [health monitor](../operations/health-monitor.md), [empty collection](../operations/alerting-and-heartbeats.md#empty-collection), [copy production data](howto-copy-production-data.md) |
+| Services (including the check-health monitor) | `odds_lambda.betting` (bet placement through `odds_lambda.betting.place_bet`, settlement and voiding), `odds_lambda.health_readers`, `odds_lambda.health_monitor`, `odds_lambda.collection_calendar` (collection horizons, calendars, dormancy and the empty-collection guard), `odds_lambda.copy_from_production` | [Bets](../agent/bets.md), [health monitor](../operations/health-monitor.md), [empty collection](../operations/alerting-and-heartbeats.md#empty-collection), [copy production data](howto-copy-production-data.md) |
 
-`odds_lambda` re-exports `odds_lambda.data_fetcher.TheOddsAPIClient` ([key handling](../collection/odds-api-client.md#retry-and-keys)), `odds_lambda.ingestion.OddsIngestionService`, `odds_lambda.fetch_tier.FetchTier` and `odds_lambda.tier_utils.calculate_tier`. Job modules are imported lazily by name from `odds_core.job_specs.JOB_SPECS`, so a scraper-only Lambda never imports the analytics stack. `odds_lambda.paper_trading` and `odds_lambda.copy_from_production` (`odds_lambda.copy_from_production.copy_from_prod`, run only through `odds copy from-prod`) are service code for the CLI and MCP server rather than Lambda code.
+`odds_lambda` re-exports `odds_lambda.data_fetcher.TheOddsAPIClient` ([key handling](../collection/odds-api-client.md#retry-and-keys)), `odds_lambda.ingestion.OddsIngestionService`, `odds_lambda.fetch_tier.FetchTier` and `odds_lambda.tier_utils.calculate_tier`. Job modules are imported lazily by name from `odds_core.job_specs.JOB_SPECS`, so a scraper-only Lambda never imports the analytics stack. `odds_lambda.betting` and `odds_lambda.copy_from_production` (`odds_lambda.copy_from_production.copy_from_prod`, run only through `odds copy from-prod`) are service code for the CLI and MCP server rather than Lambda code.
 
 ## odds-analytics
 

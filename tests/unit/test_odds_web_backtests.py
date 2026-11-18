@@ -232,12 +232,12 @@ def client(monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     async def no_decisions(*_: object, **__: object) -> None:
         return None
 
-    async def no_trades(*_: object, **__: object) -> LedgerPage:
+    async def no_bets(*_: object, **__: object) -> LedgerPage:
         return LedgerPage([], 1, 1, 0)
 
     monkeypatch.setattr("odds_web.app.candidate_report", read)
     monkeypatch.setattr("odds_web.app.load_decision_history", no_decisions)
-    monkeypatch.setattr("odds_web.app.load_ledger_page", no_trades)
+    monkeypatch.setattr("odds_web.app.load_ledger_page", no_bets)
     monkeypatch.setattr("odds_web.app.load_candidates", lambda _directory: registry)
     database = build_web_database("postgresql+asyncpg://odds_web:pw@localhost:1/odds")
     overview = bt.BacktestOverview(

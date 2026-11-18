@@ -82,7 +82,7 @@ class TestPortfolioPage:
         assert "99 / 100" in body
         assert re.findall(r'<span class="verdict">(.*?)</span>', body) == ["not yet", "not yet"]
 
-    def test_an_agent_without_a_close_is_listed_with_trades_only(
+    def test_an_agent_without_a_close_is_listed_with_bets_only(
         self, client: TestClient, report: dict[str, object], registry: list
     ) -> None:
         registry.append(agent())

@@ -5,8 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from odds_core.bet_models import Bet, BetResult, CandidateDecision
 from odds_core.models import Event, EventStatus
-from odds_core.paper_trade_models import CandidateDecision, PaperTrade, TradeResult
 from odds_web.decisions import DecisionKind, load_decision_history
 from odds_web.ledger import load_ledger_page
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +23,7 @@ KICKOFF = datetime(2026, 4, 15, 15, 0, tzinfo=UTC)
 NOW = KICKOFF + timedelta(days=1)
 
 
-def paper_trade(event_id: int, minutes: int, **fields: object) -> PaperTrade:
+def bet(event_id: int, minutes: int, **fields: object) -> Bet:
     defaults: dict[str, object] = {
         "event_id": event_id,
         "market": "1x2",
@@ -35,10 +35,10 @@ def paper_trade(event_id: int, minutes: int, **fields: object) -> PaperTrade:
         "candidate_version": 1,
         "placed_at": KICKOFF - timedelta(days=1) + timedelta(minutes=minutes),
         "settled_at": KICKOFF + timedelta(hours=3),
-        "result": TradeResult.WIN,
+        "result": BetResult.WIN,
         "pnl": 1.2,
     }
-    return PaperTrade(**{**defaults, **fields})  # type: ignore[arg-type]
+    return Bet(**{**defaults, **fields})  # type: ignore[arg-type]
 
 
 async def add_event_with_close(session: AsyncSession, event_id: int = 1) -> Event:
@@ -58,13 +58,13 @@ async def add_event_with_close(session: AsyncSession, event_id: int = 1) -> Even
 
 
 class TestLedger:
-    async def test_void_trades_are_listed_and_labelled(self, test_session: AsyncSession) -> None:
+    async def test_void_bets_are_listed_and_labelled(self, test_session: AsyncSession) -> None:
         await add_event_with_close(test_session)
         test_session.add_all(
             [
-                paper_trade(1, 1),
-                paper_trade(1, 2, selection="draw", result=TradeResult.VOID, pnl=0.0),
-                paper_trade(1, 3, selection="away", result=None, pnl=None, settled_at=None),
+                bet(1, 1),
+                bet(1, 2, selection="draw", result=BetResult.VOID, pnl=0.0),
+                bet(1, 3, selection="away", result=None, pnl=None, settled_at=None),
             ]
         )
         await test_session.flush()
@@ -73,7 +73,7 @@ class TestLedger:
 
         assert ledger.total == 3
         by_selection = {row.selection: row for row in ledger.rows}
-        assert by_selection["draw"].is_void and by_selection["draw"].result is TradeResult.VOID
+        assert by_selection["draw"].is_void and by_selection["draw"].result is BetResult.VOID
         assert not by_selection["home"].is_void
         assert by_selection["away"].result is None
 
@@ -81,19 +81,19 @@ class TestLedger:
         self, test_session: AsyncSession
     ) -> None:
         await add_event_with_close(test_session)
-        test_session.add(paper_trade(1, 1))
+        test_session.add(bet(1, 1))
         await test_session.flush()
 
         [row] = (await load_ledger_page(test_session, "gap", 1)).rows
 
-        assert row.trade_id is not None
+        assert row.bet_id is not None
         assert row.event == "Arsenal v Chelsea"
         assert (row.selection, row.line, row.bookmaker) == ("home", None, "bet365")
         assert (row.price, row.stake, row.pnl) == (2.2, 1.0, 1.2)
         assert row.p_close == pytest.approx(0.5)
         assert row.ev == pytest.approx(0.5 * 2.2 - 1)
 
-    async def test_totals_trades_take_the_close_of_their_own_line(
+    async def test_totals_bets_take_the_close_of_their_own_line(
         self, test_session: AsyncSession
     ) -> None:
         event = await add_event_with_close(test_session)
@@ -108,8 +108,8 @@ class TestLedger:
         )
         test_session.add_all(
             [
-                paper_trade(1, 1, market="totals", selection="over", line=2.5, price_decimal=2.3),
-                paper_trade(1, 2, market="totals", selection="under", line=3.5, price_decimal=1.6),
+                bet(1, 1, market="totals", selection="over", line=2.5, price_decimal=2.3),
+                bet(1, 2, market="totals", selection="under", line=3.5, price_decimal=1.6),
             ]
         )
         await test_session.flush()
@@ -120,18 +120,16 @@ class TestLedger:
         assert by_line[2.5].p_close == pytest.approx((1 / 2.1) / (1 / 2.1 + 1 / 1.9))
         assert by_line[3.5].p_close is None and by_line[3.5].ev is None
 
-    async def test_other_versions_and_non_candidate_trades_are_not_listed(
+    async def test_other_versions_and_non_candidate_bets_are_not_listed(
         self, test_session: AsyncSession
     ) -> None:
         await add_event_with_close(test_session)
         test_session.add_all(
             [
-                paper_trade(1, 1),
-                paper_trade(1, 2, candidate_version=2),
-                paper_trade(1, 3, candidate_name="other"),
-                paper_trade(
-                    1, 4, candidate_name=None, candidate_version=None, bankroll_before=100.0
-                ),
+                bet(1, 1),
+                bet(1, 2, candidate_version=2),
+                bet(1, 3, candidate_name="other"),
+                bet(1, 4, candidate_name=None, candidate_version=None, bankroll_before=100.0),
             ]
         )
         await test_session.flush()
@@ -140,9 +138,7 @@ class TestLedger:
 
     async def test_pages_run_newest_first_and_clamp(self, test_session: AsyncSession) -> None:
         await add_event_with_close(test_session)
-        test_session.add_all(
-            [paper_trade(1, minutes, bookmaker=f"b{minutes}") for minutes in range(5)]
-        )
+        test_session.add_all([bet(1, minutes, bookmaker=f"b{minutes}") for minutes in range(5)])
         await test_session.flush()
 
         first = await load_ledger_page(test_session, "gap", 1, page=1, page_size=2)
@@ -153,7 +149,7 @@ class TestLedger:
         assert [r.bookmaker for r in last.rows] == ["b0"]
         assert (first.total, first.pages, last.page, beyond.page) == (5, 3, 3, 3)
 
-    async def test_a_version_without_trades_has_one_empty_page(
+    async def test_a_version_without_bets_has_one_empty_page(
         self, test_session: AsyncSession
     ) -> None:
         ledger = await load_ledger_page(test_session, "gap", 1)

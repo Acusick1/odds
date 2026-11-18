@@ -20,7 +20,7 @@ fi
 dump="$1"
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-tables=(events odds_snapshots prices candidate_decisions paper_trades)
+tables=(events odds_snapshots prices candidate_decisions bets)
 query=""
 for table in "${tables[@]}"; do
     query+="${query:+ union all }select '$table', count(*) from $table"

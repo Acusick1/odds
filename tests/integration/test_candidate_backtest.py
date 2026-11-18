@@ -14,10 +14,10 @@ from odds_analytics.candidate_report import (
     family_starts,
     load_decision_starts,
 )
+from odds_core.bet_models import Bet, BetResult, CandidateDecision
 from odds_core.bookmakers import BOOK_SETS, BookSet
 from odds_core.candidates import RuleCandidate
 from odds_core.models import Event, EventStatus
-from odds_core.paper_trade_models import CandidateDecision, PaperTrade, TradeResult
 from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.candidate_rules.pinning import rule_sha256
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_shaped_snapshot
@@ -492,7 +492,7 @@ class TestSubstituteClose:
         await add_event(session, 1, close=None)
         await add_oddsapi(session, 1, 4)
         session.add(
-            PaperTrade(
+            Bet(
                 event_id=1,
                 market="1x2",
                 selection="home",
@@ -503,7 +503,7 @@ class TestSubstituteClose:
                 candidate_version=1,
                 placed_at=T,
                 settled_at=KICKOFF,
-                result=TradeResult.WIN,
+                result=BetResult.WIN,
                 pnl=1.2,
             )
         )
@@ -533,13 +533,13 @@ class TestSharedScoring:
         self, pglite_async_session
     ) -> None:
         session = pglite_async_session
-        trades = []
+        bets = []
         for i in range(100):
             kickoff = KICKOFF + timedelta(hours=3 * i)  # beyond the twin window
             close = (2.0, 4.0, 4.0) if i % 2 else (2.4, 3.6, 3.6)
             await add_event(session, i + 1, kickoff, close=close)
-            trades.append(
-                PaperTrade(
+            bets.append(
+                Bet(
                     event_id=i + 1,
                     market="1x2",
                     selection="home",
@@ -550,11 +550,11 @@ class TestSharedScoring:
                     candidate_version=1,
                     placed_at=kickoff - timedelta(minutes=60),
                     settled_at=kickoff,
-                    result=TradeResult.WIN,
+                    result=BetResult.WIN,
                     pnl=1.2,
                 )
             )
-        session.add_all(trades)
+        session.add_all(bets)
         await session.commit()
 
         result = await run(session)

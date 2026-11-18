@@ -1,7 +1,7 @@
 """Run the active rule candidates that bet in one sport at their decision times, on that
 sport's events.
 
-Each run takes every decision that is due, then settles paper trades, and books the next
+Each run takes every decision that is due, then settles bets, and books the next
 run at the earliest future decision time (at most ``MAX_WAIT`` away, to pick up new
 fixtures and registrations). A candidate version bets each selection of a match at most once,
 at the first of its decision times that qualifies.
@@ -16,6 +16,7 @@ from enum import StrEnum
 
 import structlog
 from odds_core.alerts import job_alert_context, send_recorded_alert, stale_reminder_interval
+from odds_core.bet_models import Bet, CandidateDecision
 from odds_core.bookmakers import BOOK_SETS
 from odds_core.candidates import (
     Candidate,
@@ -28,12 +29,12 @@ from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_core.market_prices import Outcome
 from odds_core.models import Event, EventStatus
-from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from odds_core.sports import SportKey
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from odds_lambda.betting import place_bet, settle_bets
 from odds_lambda.candidate_rules import (
     ModelRuleSpec,
     RuleParams,
@@ -45,7 +46,6 @@ from odds_lambda.candidate_rules import (
 )
 from odds_lambda.candidate_rules.pinning import validate_candidate_rules
 from odds_lambda.candidate_rules.registry import RULES
-from odds_lambda.paper_trading import place_trade, settle_trades
 from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
 
@@ -212,11 +212,11 @@ async def _bet_selections(
 ) -> frozenset[Selection]:
     """Selections the candidate version has already bet on the event at a decision."""
     rows = await session.execute(
-        select(PaperTrade.selection, PaperTrade.line).where(
-            PaperTrade.candidate_name == candidate.name,
-            PaperTrade.candidate_version == candidate.version,
-            PaperTrade.event_id == event_id,
-            PaperTrade.decision_id.is_not(None),  # type: ignore[union-attr]
+        select(Bet.selection, Bet.line).where(
+            Bet.candidate_name == candidate.name,
+            Bet.candidate_version == candidate.version,
+            Bet.event_id == event_id,
+            Bet.decision_id.is_not(None),  # type: ignore[union-attr]
         )
     )
     return frozenset((Outcome(selection), line) for selection, line in rows.tuples())
@@ -266,7 +266,7 @@ async def _decide(
         _log_missed(decision, MissReason.NO_INPUT, now)
         return decision, MissReason.NO_INPUT
     for intent in intents:
-        await place_trade(
+        await place_bet(
             session,
             event_id=event.id,
             market=state.market,
@@ -302,7 +302,7 @@ def _log_missed(decision: CandidateDecision, reason: MissReason, now: datetime) 
 
 async def _is_decided(session: AsyncSession, item: RunnableCandidate, key: DecisionKey) -> bool:
     """Whether another run committed the decision, which is what a unique violation on the
-    decision row means; one from a trade of this decision is a failure."""
+    decision row means; one from a bet of this decision is a failure."""
     event_id, minutes = key
     found = await session.execute(
         select(CandidateDecision.id).where(
@@ -404,10 +404,10 @@ async def run_decisions(
 
 
 async def _settle(sport: SportKey) -> int:
-    """Settle paper trades in a session of its own; a failure is logged and alerted, never raised."""
+    """Settle bets in a session of its own; a failure is logged and alerted, never raised."""
     try:
         async with async_session_maker() as session:
-            settled = await settle_trades(session)
+            settled = await settle_bets(session)
             await session.commit()
         return len(settled)
     except Exception as exc:
@@ -415,7 +415,7 @@ async def _settle(sport: SportKey) -> int:
         await send_recorded_alert(
             f"candidate_settlement_failed:{sport}",
             "critical",
-            f"Paper trade settlement failed in run-candidates for {sport}: {exc}",
+            f"Bet settlement failed in run-candidates for {sport}: {exc}",
             every=stale_reminder_interval(),
         )
         return 0

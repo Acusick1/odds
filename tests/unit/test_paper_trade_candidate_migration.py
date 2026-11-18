@@ -41,9 +41,9 @@ def _run(connection: Any, migration: ModuleType, step: str) -> None:
 
 class TestUpgradeAndDowngrade:
     @pytest.fixture
-    async def legacy_session(self, pglite_async_session: AsyncSession, migration: ModuleType):
+    async def legacy_session(self, paper_trades_session: AsyncSession, migration: ModuleType):
         """The session's database with ``paper_trades`` in its pre-migration shape."""
-        session = pglite_async_session
+        session = paper_trades_session
         session.add(
             Event(
                 id=1,

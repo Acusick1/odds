@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 from odds_analytics.candidate_parity import ParityStatus, check_parity
-from odds_core.paper_trade_models import CandidateDecision, PaperTrade
+from odds_core.bet_models import Bet, CandidateDecision
 
 from tests.integration.test_candidate_backtest import (
     EXCHANGE,
@@ -87,7 +87,7 @@ async def add_polymarket_snapshot(session: Any) -> int:
 async def add_decision(
     session: Any,
     input_ids: list[int],
-    trades: list[tuple[str, str, float]] | None = None,
+    bets: list[tuple[str, str, float]] | None = None,
     missed: bool = False,
     version: int = 1,
     decision_time: datetime = T,
@@ -96,9 +96,9 @@ async def add_decision(
     event_ids: list[int] | None = None,
     fixture: dict[str, Any] | None = None,
 ) -> None:
-    """A decision of ``gap`` on ``e1`` with the given (selection, book, price) unit-stake trades
+    """A decision of ``gap`` on ``e1`` with the given (selection, book, price) unit-stake bets
     and recorded fixture event ids."""
-    trades = trades or []
+    bets = bets or []
     decision = CandidateDecision(
         candidate_name="gap",
         candidate_version=version,
@@ -111,14 +111,14 @@ async def add_decision(
         input_snapshot_ids=input_ids,
         input_event_ids=event_ids or [],
         input_fixture=fixture,
-        bets_placed=len(trades),
+        bets_placed=len(bets),
         missed=missed,
     )
     session.add(decision)
     await session.flush()
-    for selection, book, price in trades:
+    for selection, book, price in bets:
         session.add(
-            PaperTrade(
+            Bet(
                 event_id=1,
                 market="1x2",
                 selection=selection,

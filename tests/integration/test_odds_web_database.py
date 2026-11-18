@@ -14,8 +14,8 @@ from odds_core import (  # noqa: F401  (tables the role must not read)
     agent_wakeup_models,
     match_brief_models,
 )
+from odds_core.bet_models import Bet, BetResult
 from odds_core.models import EventStatus
-from odds_core.paper_trade_models import PaperTrade, TradeResult
 from odds_web.app import create_app
 from odds_web.db import WebDatabase, restrict_transactions
 from odds_web.decisions import load_decision_history
@@ -65,12 +65,12 @@ class TestRoleCheck:
     async def test_fails_when_the_role_can_write(self, odds_web_session: AsyncSession) -> None:
         engine = odds_web_session.bind
         assert isinstance(engine, AsyncEngine)
-        await odds_web_session.execute(text("GRANT INSERT ON paper_trades TO odds_web"))
+        await odds_web_session.execute(text("GRANT INSERT ON bets TO odds_web"))
         await odds_web_session.commit()
 
         with as_odds_web_login(engine):
             async with engine.connect() as conn:
-                with pytest.raises(RoleCheckFailed, match="write privileges on: paper_trades"):
+                with pytest.raises(RoleCheckFailed, match="write privileges on: bets"):
                     await check_role(conn)
 
     @pytest.mark.parametrize("table", READ_TABLES)
@@ -95,7 +95,7 @@ class TestGrants:
         engine = odds_web_session.bind
         assert isinstance(engine, AsyncEngine)
         with as_odds_web(engine):
-            for listed in ("paper_trades", "schedules", "odds_snapshots"):
+            for listed in ("bets", "schedules", "odds_snapshots"):
                 async with engine.connect() as conn:
                     await conn.execute(text(f"SELECT count(*) FROM {listed}"))
             for unlisted in ("agent_wakeups", "match_briefs", "snapshot_payloads"):
@@ -106,10 +106,10 @@ class TestGrants:
     @pytest.mark.parametrize(
         "write",
         [
-            "INSERT INTO paper_trades (event_id) VALUES (1)",
+            "INSERT INTO bets (event_id) VALUES (1)",
             "UPDATE events SET home_team = 'x'",
             "DELETE FROM candidate_decisions",
-            "TRUNCATE paper_trades",
+            "TRUNCATE bets",
         ],
     )
     async def test_the_role_cannot_write(self, odds_web_session: AsyncSession, write: str) -> None:
@@ -162,7 +162,7 @@ async def seed_one_bet(session: AsyncSession) -> None:
         ),
     )
     session.add(
-        PaperTrade(
+        Bet(
             event_id=1,
             market="1x2",
             selection="home",
@@ -173,7 +173,7 @@ async def seed_one_bet(session: AsyncSession) -> None:
             candidate_version=1,
             placed_at=KICKOFF - timedelta(days=1),
             settled_at=KICKOFF + timedelta(hours=3),
-            result=TradeResult.WIN,
+            result=BetResult.WIN,
             pnl=1.2,
         )
     )
@@ -199,7 +199,7 @@ class TestPortfolioUnderTheRole:
 
 
 class TestCandidatePageUnderTheRole:
-    async def test_renders_the_ledger_and_trade_from_the_real_tables(
+    async def test_renders_the_ledger_and_bet_from_the_real_tables(
         self, odds_web_session: AsyncSession, tmp_path: Path
     ) -> None:
         await seed_one_bet(odds_web_session)

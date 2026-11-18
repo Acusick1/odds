@@ -3,7 +3,7 @@ type: explanation
 title: Goal and strategy
 description: What the project is for, how a candidate is scored, promoted or killed, and which parts of the workflow exist today.
 sources:
-  - odds_core.paper_trade_models.PaperTrade
+  - odds_core.bet_models.Bet
   - odds_analytics.retail_ev
   - odds_core.close.event_close
 status: stable
@@ -60,7 +60,7 @@ The repo also holds:
 The workflow for a rule candidate exists end to end, from idea to verdict ([From idea to verdict](../evaluation/howto-take-an-idea-to-a-verdict.md), #608):
 
 - The [candidate registry](../evaluation/candidate-registry.md), holding the registered candidates above.
-- The candidate, its version and the git commit on each bet (`odds_core.paper_trade_models.PaperTrade`, [bets](../agent/paper-trading.md#candidate-fields)).
+- The candidate, its version and the git commit on each bet (`odds_core.bet_models.Bet`, [bets](../agent/bets.md#candidate-fields)).
 - The close, computed from stored price rows when a report runs, so a bet stores none.
 - `odds candidates report`, which gives the checkpoint verdict ([Candidate registry](../evaluation/candidate-registry.md#odds-candidates-report)).
 - The [rule interface](../evaluation/candidate-rules.md) and its rules, with the hash each rule candidate records.
@@ -76,4 +76,4 @@ Missing:
 
 - [Take an idea to a verdict](../evaluation/howto-take-an-idea-to-a-verdict.md)
 - [About the system and its pivots](project-overview.md)
-- [Bets](../agent/paper-trading.md)
+- [Bets](../agent/bets.md)

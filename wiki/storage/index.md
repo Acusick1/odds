@@ -24,7 +24,7 @@ Every table is a SQLModel class in `packages/odds-core/odds_core/`; migrations a
 | `odds_api_snapshot_gaps` | `odds_core.backfill_models.OddsApiSnapshotGap` | [Odds API historical backfill](../collection/odds-api-backfill.md#provider-gaps) |
 | `alert_history` | `odds_core.models.AlertHistory` | [Alerts and health](../operations/alerts.md) |
 | `match_briefs` | `odds_core.match_brief_models.MatchBrief` | [Briefs](../agent/match-briefs.md) |
-| `paper_trades` | `odds_core.paper_trade_models.PaperTrade` | [Bets](../agent/paper-trading.md) |
+| `bets` | `odds_core.bet_models.Bet` | [Bets](../agent/bets.md) |
 | `candidate_backtests` | `odds_core.candidate_backtest_models.CandidateBacktest` | [Replay backtest](../evaluation/candidate-backtest.md#stored-runs) |
 | `candidate_backtest_bets` | `odds_core.candidate_backtest_models.CandidateBacktestBet` | [Replay backtest](../evaluation/candidate-backtest.md#stored-runs) |
 | `agent_wakeups` | `odds_core.agent_wakeup_models.AgentWakeup` | [Agent runtime and the agent-run job](../agent/agent-run-job.md) |

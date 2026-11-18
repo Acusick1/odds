@@ -4,9 +4,9 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from odds_core.bet_models import Bet, BetResult
 from odds_core.models import Event, EventStatus
 from odds_core.odds_math import american_to_decimal
-from odds_core.paper_trade_models import PaperTrade, TradeResult
 from odds_core.vocabulary import Market
 from odds_mcp.prices import BookPrice
 
@@ -189,31 +189,31 @@ class TestOddsToDict:
         assert result["last_update"] == datetime(2026, 4, 12, 10, 0, tzinfo=UTC).isoformat()
 
 
-class TestTradeToDict:
+class TestBetToDict:
     def test_serialization(self) -> None:
-        from odds_mcp.server import _trade_to_dict
+        from odds_mcp.server import _bet_to_dict
 
-        trade = MagicMock(spec=PaperTrade)
-        trade.id = 1
-        trade.event_id = 1
-        trade.market = "h2h"
-        trade.selection = "home"
-        trade.bookmaker = "bet365"
-        trade.price_decimal = 1.91
-        trade.stake = 10.0
-        trade.reasoning = "good value"
-        trade.confidence = 0.8
-        trade.bankroll_before = 1000.0
-        trade.bankroll_after = None
-        trade.placed_at = datetime(2026, 4, 12, 10, 0, tzinfo=UTC)
-        trade.settled_at = None
-        trade.result = None
-        trade.pnl = None
-        trade.candidate_name = "cand"
-        trade.candidate_version = 2
-        trade.git_sha = "abc123"
+        bet = MagicMock(spec=Bet)
+        bet.id = 1
+        bet.event_id = 1
+        bet.market = "h2h"
+        bet.selection = "home"
+        bet.bookmaker = "bet365"
+        bet.price_decimal = 1.91
+        bet.stake = 10.0
+        bet.reasoning = "good value"
+        bet.confidence = 0.8
+        bet.bankroll_before = 1000.0
+        bet.bankroll_after = None
+        bet.placed_at = datetime(2026, 4, 12, 10, 0, tzinfo=UTC)
+        bet.settled_at = None
+        bet.result = None
+        bet.pnl = None
+        bet.candidate_name = "cand"
+        bet.candidate_version = 2
+        bet.git_sha = "abc123"
 
-        result = _trade_to_dict(trade)
+        result = _bet_to_dict(bet)
         assert result["id"] == 1
         assert result["price_decimal"] == 1.91
         assert result["candidate_name"] == "cand"
@@ -222,30 +222,30 @@ class TestTradeToDict:
         assert result["result"] is None
         assert result["settled_at"] is None
 
-    def test_settled_trade(self) -> None:
-        from odds_mcp.server import _trade_to_dict
+    def test_settled_bet(self) -> None:
+        from odds_mcp.server import _bet_to_dict
 
-        trade = MagicMock(spec=PaperTrade)
-        trade.id = 2
-        trade.event_id = 1
-        trade.market = "h2h"
-        trade.selection = "home"
-        trade.bookmaker = "bet365"
-        trade.price_decimal = 1.91
-        trade.stake = 10.0
-        trade.reasoning = None
-        trade.confidence = None
-        trade.bankroll_before = 1000.0
-        trade.bankroll_after = 1009.09
-        trade.placed_at = datetime(2026, 4, 12, 10, 0, tzinfo=UTC)
-        trade.settled_at = datetime(2026, 4, 12, 17, 0, tzinfo=UTC)
-        trade.result = TradeResult.WIN
-        trade.pnl = 9.09
-        trade.candidate_name = None
-        trade.candidate_version = None
-        trade.git_sha = None
+        bet = MagicMock(spec=Bet)
+        bet.id = 2
+        bet.event_id = 1
+        bet.market = "h2h"
+        bet.selection = "home"
+        bet.bookmaker = "bet365"
+        bet.price_decimal = 1.91
+        bet.stake = 10.0
+        bet.reasoning = None
+        bet.confidence = None
+        bet.bankroll_before = 1000.0
+        bet.bankroll_after = 1009.09
+        bet.placed_at = datetime(2026, 4, 12, 10, 0, tzinfo=UTC)
+        bet.settled_at = datetime(2026, 4, 12, 17, 0, tzinfo=UTC)
+        bet.result = BetResult.WIN
+        bet.pnl = 9.09
+        bet.candidate_name = None
+        bet.candidate_version = None
+        bet.git_sha = None
 
-        result = _trade_to_dict(trade)
+        result = _bet_to_dict(bet)
         assert result["result"] == "win"
         assert result["pnl"] == 9.09
 
@@ -446,10 +446,10 @@ class TestGetCurrentOddsMissingEvent:
             assert "999" in result["error"]
 
 
-class TestPaperBetValidation:
+class TestPlaceBetValidation:
     @pytest.mark.asyncio
     async def test_rejects_non_scheduled_event(self) -> None:
-        from odds_mcp.server import paper_bet
+        from odds_mcp.server import place_bet
 
         mock_event = MagicMock(spec=Event)
         mock_event.id = 1
@@ -465,7 +465,7 @@ class TestPaperBetValidation:
             mock_session_maker.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_session_maker.return_value.__aexit__ = AsyncMock()
 
-            result = await paper_bet(
+            result = await place_bet(
                 event_id=1,
                 market="h2h",
                 selection="home",
@@ -477,7 +477,7 @@ class TestPaperBetValidation:
 
     @pytest.mark.asyncio
     async def test_missing_event(self) -> None:
-        from odds_mcp.server import paper_bet
+        from odds_mcp.server import place_bet
 
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
@@ -489,7 +489,7 @@ class TestPaperBetValidation:
             mock_session_maker.return_value.__aenter__ = AsyncMock(return_value=mock_session)
             mock_session_maker.return_value.__aexit__ = AsyncMock()
 
-            result = await paper_bet(
+            result = await place_bet(
                 event_id=999,
                 market="h2h",
                 selection="home",
@@ -500,7 +500,7 @@ class TestPaperBetValidation:
             assert "999" in result["error"]
 
 
-class TestPaperBetCandidate:
+class TestPlaceBetCandidate:
     @staticmethod
     def _session_with_scheduled_event() -> AsyncMock:
         event = MagicMock(spec=Event)
@@ -512,11 +512,11 @@ class TestPaperBetCandidate:
         return session
 
     @pytest.mark.asyncio
-    async def test_candidate_and_price_reach_place_trade(self) -> None:
-        from odds_mcp.server import paper_bet
+    async def test_candidate_and_price_reach_place_bet(self) -> None:
+        from odds_mcp.server import place_bet
 
         session = self._session_with_scheduled_event()
-        placed = MagicMock(spec=PaperTrade)
+        placed = MagicMock(spec=Bet)
         placed.id = 1
         placed.placed_at = datetime(2026, 4, 12, 10, 0, tzinfo=UTC)
         placed.settled_at = None
@@ -524,11 +524,11 @@ class TestPaperBetCandidate:
 
         with (
             patch("odds_mcp.server.async_session_maker") as maker,
-            patch("odds_mcp.server.place_trade", AsyncMock(return_value=placed)) as place,
+            patch("odds_mcp.server.betting.place_bet", AsyncMock(return_value=placed)) as place,
         ):
             maker.return_value.__aenter__ = AsyncMock(return_value=session)
             maker.return_value.__aexit__ = AsyncMock()
-            result = await paper_bet(
+            result = await place_bet(
                 event_id=1,
                 market="1x2",
                 selection="home",
@@ -547,19 +547,19 @@ class TestPaperBetCandidate:
 
     @pytest.mark.asyncio
     async def test_registry_rejection_comes_back_as_error(self) -> None:
-        from odds_mcp.server import paper_bet
+        from odds_mcp.server import place_bet
 
         session = self._session_with_scheduled_event()
         with (
             patch("odds_mcp.server.async_session_maker") as maker,
             patch(
-                "odds_mcp.server.place_trade",
+                "odds_mcp.server.betting.place_bet",
                 AsyncMock(side_effect=ValueError("Candidate 'x' is not in the registry")),
             ),
         ):
             maker.return_value.__aenter__ = AsyncMock(return_value=session)
             maker.return_value.__aexit__ = AsyncMock()
-            result = await paper_bet(
+            result = await place_bet(
                 event_id=1,
                 market="1x2",
                 selection="home",
@@ -578,7 +578,7 @@ class TestGetPortfolioCandidates:
     async def test_includes_candidate_summaries(self) -> None:
         from odds_analytics.candidate_report import report_candidates
         from odds_core.candidates import AgentCandidate
-        from odds_lambda.paper_trading import PortfolioSummary
+        from odds_lambda.betting import PortfolioSummary
         from odds_mcp.server import get_portfolio
 
         entry = AgentCandidate(
@@ -595,8 +595,10 @@ class TestGetPortfolioCandidates:
 
         with (
             patch("odds_mcp.server.async_session_maker") as maker,
-            patch("odds_mcp.server.get_portfolio_summary", AsyncMock(return_value=portfolio)),
-            patch("odds_mcp.server.get_open_trades", AsyncMock(return_value=[])),
+            patch(
+                "odds_mcp.server.betting.get_portfolio_summary", AsyncMock(return_value=portfolio)
+            ),
+            patch("odds_mcp.server.betting.get_open_bets", AsyncMock(return_value=[])),
             patch("odds_mcp.server.load_candidates", return_value=[entry]),
             patch(
                 "odds_mcp.server.candidate_report",
@@ -631,15 +633,17 @@ class TestGetPortfolioCandidates:
 class TestGetPortfolioInvalidRegistry:
     @pytest.mark.asyncio
     async def test_registry_error_leaves_the_rest_of_the_portfolio(self) -> None:
-        from odds_lambda.paper_trading import PortfolioSummary
+        from odds_lambda.betting import PortfolioSummary
         from odds_mcp.server import get_portfolio
 
         portfolio = PortfolioSummary(1000.0, 3, 1, 2, 5.0, 10.0, 50.0, 1, 0, 0)
 
         with (
             patch("odds_mcp.server.async_session_maker") as maker,
-            patch("odds_mcp.server.get_portfolio_summary", AsyncMock(return_value=portfolio)),
-            patch("odds_mcp.server.get_open_trades", AsyncMock(return_value=[])),
+            patch(
+                "odds_mcp.server.betting.get_portfolio_summary", AsyncMock(return_value=portfolio)
+            ),
+            patch("odds_mcp.server.betting.get_open_bets", AsyncMock(return_value=[])),
             patch(
                 "odds_mcp.server.load_candidates",
                 side_effect=ValueError("candidates/x.yaml: bad"),
@@ -650,7 +654,7 @@ class TestGetPortfolioInvalidRegistry:
             result = await get_portfolio()
 
         assert result["candidates"] == {"error": "candidates/x.yaml: bad"}
-        assert result["total_trades"] == 3
+        assert result["total_bets"] == 3
         assert result["total_pnl"] == 5.0
 
 

@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
+from odds_core.bet_models import SharpReading
 from odds_core.market_prices import TWO_WAY_MARKET, market_outcomes
 from odds_core.match_brief_models import SharpPriceMap, SharpPriceMeta
 from odds_core.models import Event, OddsSnapshot, Price
@@ -15,7 +16,6 @@ from odds_core.odds_math import (
     decimal_to_implied_probability,
     devig_probabilities,
 )
-from odds_core.paper_trade_models import SharpReading
 from odds_core.quotes import Quote, quotes
 from odds_core.utils import is_three_way_sport
 from odds_core.vocabulary import Market, PriceOutcome, Side, Source
@@ -280,7 +280,7 @@ async def selection_sharp_reading(
 
     The selection's sharp price is devigged against the sharp prices of the market's other
     outcomes on the same line, each as ``resolve_sharp_prices`` picked it, so they may come from
-    different books. None when the market or selection is not one a trade takes, or any outcome
+    different books. None when the market or selection is not one a bet takes, or any outcome
     has no sharp price in the window.
     """
     try:

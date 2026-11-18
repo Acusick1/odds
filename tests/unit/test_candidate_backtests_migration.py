@@ -83,9 +83,9 @@ def backtest(**changes: Any) -> CandidateBacktest:
 
 class TestCandidateBacktestsMigration:
     async def test_the_migrated_tables_store_the_models(
-        self, pglite_async_session: AsyncSession, migration: ModuleType
+        self, paper_trades_session: AsyncSession, migration: ModuleType
     ) -> None:
-        session = pglite_async_session
+        session = paper_trades_session
         await _migrated(session, migration)
         run = backtest()
         session.add(run)
@@ -118,9 +118,9 @@ class TestCandidateBacktestsMigration:
         assert (bet.close_source, bet.pnl, bet.line) == (Source.ODDS_API, None, None)
 
     async def test_deleting_a_run_deletes_its_bets(
-        self, pglite_async_session: AsyncSession, migration: ModuleType
+        self, paper_trades_session: AsyncSession, migration: ModuleType
     ) -> None:
-        session = pglite_async_session
+        session = paper_trades_session
         await _migrated(session, migration)
         run = backtest()
         session.add(run)
@@ -148,33 +148,33 @@ class TestCandidateBacktestsMigration:
     )
     async def test_an_inconsistent_run_is_refused(
         self,
-        pglite_async_session: AsyncSession,
+        paper_trades_session: AsyncSession,
         migration: ModuleType,
         changes: dict[str, Any],
         constraint: str,
     ) -> None:
-        await _migrated(pglite_async_session, migration)
-        pglite_async_session.add(backtest(**changes))
+        await _migrated(paper_trades_session, migration)
+        paper_trades_session.add(backtest(**changes))
 
         with pytest.raises(IntegrityError, match=constraint):
-            await pglite_async_session.flush()
+            await paper_trades_session.flush()
 
     async def test_a_run_of_the_same_identity_is_refused_even_without_a_grid_cell(
-        self, pglite_async_session: AsyncSession, migration: ModuleType
+        self, paper_trades_session: AsyncSession, migration: ModuleType
     ) -> None:
-        await _migrated(pglite_async_session, migration)
-        pglite_async_session.add_all([backtest(), backtest()])
+        await _migrated(paper_trades_session, migration)
+        paper_trades_session.add_all([backtest(), backtest()])
 
         with pytest.raises(IntegrityError, match="uq_candidate_backtests_run"):
-            await pglite_async_session.flush()
+            await paper_trades_session.flush()
 
     async def test_the_database_refuses_a_window_kind_the_model_does_not_name(
-        self, pglite_async_session: AsyncSession, migration: ModuleType
+        self, paper_trades_session: AsyncSession, migration: ModuleType
     ) -> None:
-        await _migrated(pglite_async_session, migration)
+        await _migrated(paper_trades_session, migration)
 
         with pytest.raises(IntegrityError, match="ck_candidate_backtests_window_kind"):
-            await pglite_async_session.execute(
+            await paper_trades_session.execute(
                 text(
                     "INSERT INTO candidate_backtests (candidate_name, candidate_version, issue,"
                     " market, rule, params, window_kind, start_date, end_date, leagues, git_sha,"

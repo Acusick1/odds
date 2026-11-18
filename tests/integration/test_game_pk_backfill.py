@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 import typer
 from odds_cli.commands import events as events_cli
+from odds_core.bet_models import Bet, CandidateDecision
 from odds_core.config import get_settings
 from odds_core.match_brief_models import BriefDecision, MatchBrief
 from odds_core.models import (
@@ -17,7 +18,6 @@ from odds_core.models import (
     HealthCheckAcknowledgement,
     OddsSnapshot,
 )
-from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from odds_core.vocabulary import Market, Source, TimeBasis
 from odds_lambda.health_monitor import HealthMonitor
 from odds_lambda.mlb_game_resolver import UnresolvedReason
@@ -371,15 +371,13 @@ class TestAssignGamePks:
             (2, BackfillSkip.HELD_GAME_MISMATCH)
         ]
 
-    async def test_merge_repoints_paper_trades_and_briefs(
-        self, pglite_async_session: AsyncSession
-    ) -> None:
+    async def test_merge_repoints_bets_and_briefs(self, pglite_async_session: AsyncSession) -> None:
         session = pglite_async_session
         session.add_all([_event(1, AFTERNOON), _event(2, AFTERNOON + timedelta(minutes=20))])
         await session.flush()
         session.add_all(
             [
-                PaperTrade(
+                Bet(
                     event_id=2,
                     market="h2h",
                     selection="home",
@@ -403,8 +401,8 @@ class TestAssignGamePks:
         plan, [outcome] = await _plan_and_apply(session, fetcher)
 
         assert (outcome.kept_id, outcome.merged_ids) == (1, (2,))
-        assert outcome.read_only_rows == {"match_briefs": 1, "paper_trades": 1}
-        assert await _count(session, PaperTrade, 1) == 1
+        assert outcome.read_only_rows == {"match_briefs": 1, "bets": 1}
+        assert await _count(session, Bet, 1) == 1
         assert await _count(session, MatchBrief, 1) == 1
 
 
@@ -432,7 +430,7 @@ class TestMergeRefusesClashingDecisions:
         session.add_all(decisions)
         await session.flush()
         session.add(
-            PaperTrade(
+            Bet(
                 event_id=2,
                 market="h2h",
                 selection="home",
@@ -452,13 +450,13 @@ class TestMergeRefusesClashingDecisions:
 
         assert (outcome.status, outcome.detail) == (
             OutcomeStatus.REFUSED,
-            RefusalReason.PAPER_TRADE_CLASH,
+            RefusalReason.BET_CLASH,
         )
-        assert outcome.rows_deleted == {"candidate_decisions": 1, "paper_trades": 1}
+        assert outcome.rows_deleted == {"candidate_decisions": 1, "bets": 1}
         assert await session.get(Event, 2) is not None
         assert await _game_pk(session, 1) is None
         assert await _count(session, CandidateDecision, 2) == 1
-        assert await _count(session, PaperTrade, 2) == 1
+        assert await _count(session, Bet, 2) == 1
 
 
 class TestTbdReplay:

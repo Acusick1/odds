@@ -42,10 +42,10 @@ from typing import Any
 from urllib.request import urlopen
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from odds_core.bet_models import CandidateDecision
 from odds_core.database import async_session_maker
 from odds_core.models import Event, EventStatus, OddsSnapshot, Price, SnapshotPayload
 from odds_core.odds_math import PRICE_DECIMAL_KEY
-from odds_core.paper_trade_models import CandidateDecision
 from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.oddsportal_common import IngestionStats
 from odds_lambda.price_rows import PriceSpec, expand_envelope

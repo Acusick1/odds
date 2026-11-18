@@ -82,7 +82,7 @@
 <div class="legend">{% for s in r.sets %}<span><svg width="26" height="10"><line class="{{ 'bookset-registered' if s.registered else 'bookset-other' }}" x1="2" y1="5" x2="24" y2="5"/></svg>{{ s.books.value }}{% if s.registered %} (registered){% endif %}</span>{% endfor %}<span>Running mean EV over the bets with a close</span></div>
 
 <h3>Per book</h3>
-<div class="sub">Books with a trade placed at them, or whose removal changes the replay. Without: the version's own book set less that book.</div>
+<div class="sub">Books with a bet placed at them, or whose removal changes the replay. Without: the version's own book set less that book.</div>
 <table id="books">
 <thead><tr><th rowspan="2">Book</th><th class="r" colspan="3">Placed there</th><th class="r" colspan="4">Without this book</th></tr>
 <tr><th class="r">Bets</th><th class="r">Mean EV</th><th class="r">P&amp;L</th><th class="r">Bets</th><th class="r">With a close</th><th class="r">Mean EV</th><th class="r">P&amp;L</th></tr></thead>
@@ -112,7 +112,7 @@
 </div></div>
 {% endif %}
 
-<h3>Bet ledger <span class="sub">{{ c.ledger.total }} trades</span></h3>
+<h3>Bet ledger <span class="sub">{{ c.ledger.total }} bets</span></h3>
 <div class="scroll">
 <table id="ledger">
 <thead><tr><th>Placed</th><th>Event</th><th>Sel.</th><th>Book</th><th class="r">Stake</th><th class="r">Price</th><th class="r">p_close</th><th class="r">EV</th><th>Result</th><th class="r">P&amp;L</th></tr></thead>
@@ -131,7 +131,7 @@
 <td class="r">{{ (r.pnl | signed(2)) if r.pnl is not none else '—' }}</td>
 </tr>
 {% else %}
-<tr><td colspan="10" class="sub">No trades.</td></tr>
+<tr><td colspan="10" class="sub">No bets.</td></tr>
 {% endfor %}
 </tbody>
 </table>

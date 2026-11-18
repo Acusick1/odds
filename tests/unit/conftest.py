@@ -7,6 +7,7 @@ import base64
 import gzip
 import hashlib
 import importlib
+import importlib.util
 import json
 import os
 import subprocess
@@ -29,9 +30,15 @@ from py_pglite.config import PGliteConfig
 from py_pglite.manager import PGliteManager
 from sqlalchemy import text
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 
 OP_FIXTURES = Path(__file__).parent.parent / "fixtures" / "oddsportal"
+BET_RENAME_MIGRATION = (
+    Path(__file__).resolve().parents[2]
+    / "migrations"
+    / "versions"
+    / "d5a3f7c19e24_rename_paper_trades_to_bets.py"
+)
 
 
 SourceEdit = Callable[[str, Callable[[str], str]], None]
@@ -484,3 +491,29 @@ def holdout_repo(candidates_repo: Path) -> Path:
     (directory / "selections" / f"{STEM}.yaml").write_text(yaml.safe_dump(selection(grid)))
     git_commit(candidates_repo)
     return directory
+
+
+def run_bet_rename(connection: Connection, step: str) -> None:
+    """Run the ``step`` ("upgrade" or "downgrade") of the paper_trades-to-bets rename migration."""
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    spec = importlib.util.spec_from_file_location("bet_rename_migration", BET_RENAME_MIGRATION)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    with Operations.context(MigrationContext.configure(connection)):
+        getattr(module, step)()
+
+
+@pytest.fixture
+async def paper_trades_session(pglite_async_session: AsyncSession) -> AsyncSession:
+    """The session's database with the ``bets`` table renamed back to ``paper_trades``, the
+    shape the migrations before the rename act on."""
+    connection = await pglite_async_session.connection()
+    # The models leave the decision foreign key unnamed; the migrations named it.
+    await connection.execute(
+        text("ALTER TABLE bets RENAME CONSTRAINT bets_decision_id_fkey TO fk_bets_decision_id")
+    )
+    await connection.run_sync(lambda c: run_bet_rename(c, "downgrade"))
+    return pglite_async_session

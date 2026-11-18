@@ -8,10 +8,10 @@ from typing import Any
 import pytest
 from odds_analytics.book_replays import book_replays, replay_variants
 from odds_analytics.candidate_parity import check_parity
-from odds_analytics.candidate_report import candidate_report, load_scored_trades
+from odds_analytics.candidate_report import candidate_report, load_scored_bets
+from odds_core.bet_models import Bet, BetResult
 from odds_core.bookmakers import BOOK_SETS, BookSet
 from odds_core.models import Event, EventStatus
-from odds_core.paper_trade_models import PaperTrade, TradeResult
 from sqlalchemy import select
 
 from tests.integration.test_candidate_backtest import (
@@ -152,19 +152,19 @@ class TestReplayVariants:
 
 
 class TestBookReplays:
-    async def trades(self, session: Any) -> list[Any]:
-        for trade in (await session.scalars(select(PaperTrade))).all():
-            trade.result, trade.pnl = TradeResult.WIN, 1.6
+    async def bets(self, session: Any) -> list[Any]:
+        for bet in (await session.scalars(select(Bet))).all():
+            bet.result, bet.pnl = BetResult.WIN, 1.6
         await session.commit()
-        return await load_scored_trades(session)
+        return await load_scored_bets(session)
 
     async def test_scores_each_set_and_the_books_that_matter(
         self, pglite_async_session: Any, midnite_event: list[int]
     ) -> None:
         await add_decision(pglite_async_session, midnite_event, [("home", "midnite", 2.6)])
-        trades = await self.trades(pglite_async_session)
+        bets = await self.bets(pglite_async_session)
 
-        replays = await book_replays(pglite_async_session, [candidate()], trades, NOW)
+        replays = await book_replays(pglite_async_session, [candidate()], bets, NOW)
 
         replay = replays[("gap", 1)]
         own, api = replay.sets
@@ -184,7 +184,7 @@ class TestBookReplays:
         self, pglite_async_session: Any, midnite_event: list[int]
     ) -> None:
         await add_decision(pglite_async_session, midnite_event, [("home", "midnite", 2.6)])
-        await self.trades(pglite_async_session)
+        await self.bets(pglite_async_session)
 
         report = await candidate_report(
             pglite_async_session, [candidate()], N_BOOT, now=NOW, replays=True
@@ -207,7 +207,7 @@ class TestBookReplays:
         self, pglite_async_session: Any, midnite_event: list[int]
     ) -> None:
         await add_decision(pglite_async_session, midnite_event, [("home", "midnite", 2.6)])
-        await self.trades(pglite_async_session)
+        await self.bets(pglite_async_session)
         other = candidate(version=2)
 
         report = await candidate_report(
@@ -220,7 +220,7 @@ class TestBookReplays:
         self, pglite_async_session: Any, midnite_event: list[int]
     ) -> None:
         await add_decision(pglite_async_session, midnite_event, [("home", "midnite", 2.6)])
-        await self.trades(pglite_async_session)
+        await self.bets(pglite_async_session)
 
         plain = await candidate_report(pglite_async_session, [candidate()], N_BOOT, now=NOW)
         replayed = await candidate_report(

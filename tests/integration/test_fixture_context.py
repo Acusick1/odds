@@ -14,11 +14,11 @@ import pytest
 import yaml
 from odds_analytics.candidate_backtest import BacktestResult, replay
 from odds_analytics.candidate_parity import ParityStatus, check_parity
+from odds_core.bet_models import CandidateDecision
 from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS
 from odds_core.candidates import load_candidate_file
 from odds_core.market_prices import Outcome
 from odds_core.models import Event, EventStatus
-from odds_core.paper_trade_models import CandidateDecision
 from odds_lambda.candidate_rules import (
     FixtureContext,
     FixtureInput,
@@ -417,7 +417,7 @@ def declares_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, declares_fixture: None) -> Path:
     monkeypatch.setattr("odds_lambda.jobs.run_candidates.candidates_dir", lambda: tmp_path)
-    monkeypatch.setattr("odds_lambda.paper_trading.candidates_dir", lambda: tmp_path)
+    monkeypatch.setattr("odds_lambda.betting.candidates_dir", lambda: tmp_path)
     (tmp_path / "gap.yaml").write_text(yaml.safe_dump(candidate().model_dump(mode="json")))
     assert load_candidate_file(tmp_path / "gap.yaml").name == "gap"
     return tmp_path

@@ -1709,8 +1709,8 @@ class TestMarketWindow:
         )
 
 
-class TestPaperBetSharpReading:
-    """paper_bet records the sharp market's devigged reading of the selection at placement."""
+class TestPlaceBetSharpReading:
+    """place_bet records the sharp market's devigged reading of the selection at placement."""
 
     @staticmethod
     async def _event_with_books(session: AsyncSession, bookmakers: list[dict[str, Any]]) -> Event:
@@ -1728,9 +1728,9 @@ class TestPaperBetSharpReading:
 
     @staticmethod
     async def _bet(event: Event) -> dict[str, Any]:
-        from odds_mcp.server import paper_bet
+        from odds_mcp.server import place_bet
 
-        result = await paper_bet(
+        result = await place_bet(
             event_id=event.id,
             market="1x2",
             selection="home",
@@ -1739,7 +1739,7 @@ class TestPaperBetSharpReading:
             bankroll=1000.0,
         )
         assert result["status"] == "placed"
-        return result["trade"]
+        return result["bet"]
 
     @staticmethod
     def _fair_home(prices: tuple[float, float, float]) -> float:
@@ -1759,12 +1759,12 @@ class TestPaperBetSharpReading:
             ],
         )
 
-        trade = await self._bet(event)
+        bet = await self._bet(event)
 
-        assert trade["sharp_bookmaker"] == "pinnacle"
-        assert trade["sharp_probability"] == pytest.approx(self._fair_home(pinnacle))
-        assert trade["sharp_spread"] == pytest.approx(1 / 2.1 - self._fair_home(pinnacle))
-        assert trade["sharp_snapshot_time"] is not None
+        assert bet["sharp_bookmaker"] == "pinnacle"
+        assert bet["sharp_probability"] == pytest.approx(self._fair_home(pinnacle))
+        assert bet["sharp_spread"] == pytest.approx(1 / 2.1 - self._fair_home(pinnacle))
+        assert bet["sharp_snapshot_time"] is not None
 
     @pytest.mark.asyncio
     async def test_fallback_book_only(
@@ -1779,10 +1779,10 @@ class TestPaperBetSharpReading:
             ],
         )
 
-        trade = await self._bet(event)
+        bet = await self._bet(event)
 
-        assert trade["sharp_bookmaker"] == "betfair_exchange"
-        assert trade["sharp_probability"] == pytest.approx(self._fair_home(betfair))
+        assert bet["sharp_bookmaker"] == "betfair_exchange"
+        assert bet["sharp_probability"] == pytest.approx(self._fair_home(betfair))
 
     @pytest.mark.asyncio
     async def test_no_sharp_book(
@@ -1792,12 +1792,12 @@ class TestPaperBetSharpReading:
             pglite_async_session, [three_way_bookmaker("bet365", (2.1, 3.4, 3.6))]
         )
 
-        trade = await self._bet(event)
+        bet = await self._bet(event)
 
-        assert trade["sharp_probability"] is None
-        assert trade["sharp_bookmaker"] is None
-        assert trade["sharp_snapshot_time"] is None
-        assert trade["sharp_spread"] is None
+        assert bet["sharp_probability"] is None
+        assert bet["sharp_bookmaker"] is None
+        assert bet["sharp_snapshot_time"] is None
+        assert bet["sharp_spread"] is None
 
     @pytest.mark.asyncio
     async def test_market_missing_an_outcome(
@@ -1807,7 +1807,7 @@ class TestPaperBetSharpReading:
         pinnacle["markets"][0]["outcomes"].pop()  # no away price, so nothing to devig against
         event = await self._event_with_books(pglite_async_session, [pinnacle])
 
-        trade = await self._bet(event)
+        bet = await self._bet(event)
 
-        assert trade["sharp_probability"] is None
-        assert trade["sharp_bookmaker"] is None
+        assert bet["sharp_probability"] is None
+        assert bet["sharp_bookmaker"] is None

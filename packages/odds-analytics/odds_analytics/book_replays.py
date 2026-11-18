@@ -17,14 +17,14 @@ from dataclasses import dataclass
 from datetime import datetime
 
 import structlog
+from odds_core.bet_models import CandidateDecision
 from odds_core.bookmakers import BOOK_SETS, BookSet
 from odds_core.candidates import Candidate, RuleCandidate
 from odds_core.close import close_quotes
 from odds_core.models import Event
-from odds_core.paper_trade_models import CandidateDecision
+from odds_lambda.betting import VOIDING_STATUSES
 from odds_lambda.candidate_rules import BetIntent, ModelRuleSpec, Selection
 from odds_lambda.candidate_rules.registry import resolve_rule
-from odds_lambda.paper_trading import VOIDING_STATUSES
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
@@ -73,7 +73,7 @@ class BookSetReplay:
 
 @dataclass(frozen=True)
 class BookRow:
-    """One book of the version's set: the paper trades placed at it, and the version's decisions
+    """One book of the version's set: the bets placed at it, and the version's decisions
     replayed without it."""
 
     book: str
@@ -84,7 +84,7 @@ class BookRow:
 @dataclass(frozen=True)
 class BookReplay:
     """The counterfactual replays of one candidate version over its ``decisions``. ``books``
-    lists the books of the declared set that a trade was placed at or whose removal changes the
+    lists the books of the declared set that a bet was placed at or whose removal changes the
     replay's bets or EV, in key order."""
 
     name: str
@@ -194,10 +194,10 @@ async def replay_variants(session: AsyncSession, candidate: RuleCandidate) -> Re
 def build_replay(
     candidate: RuleCandidate,
     replayed: ReplayedBets,
-    trades: Sequence[ScoredBet],
+    live_bets: Sequence[ScoredBet],
     now: datetime,
 ) -> BookReplay:
-    """The replay of ``candidate`` from its variants' bets and its paper ``trades``, both in
+    """The replay of ``candidate`` from its variants' bets and its ``live_bets``, both in
     placement order."""
     prefixes = {s: scoreable_prefix(bets, now)[0] for s, bets in replayed.by_set.items()}
     sets = tuple(
@@ -210,11 +210,11 @@ def build_replay(
         for s in BookSet
     )
     baseline = next(s.score for s in sets if s.registered)
-    live_with_close = scoreable_prefix(trades, now)[0]
+    live_with_close = scoreable_prefix(live_bets, now)[0]
     rows: list[BookRow] = []
     for book, bets in replayed.without.items():
         placed = score_bets(
-            [t for t in trades if t.bookmaker == book],
+            [t for t in live_bets if t.bookmaker == book],
             [t for t in live_with_close if t.bookmaker == book],
         )
         without = score_bets(bets, scoreable_prefix(bets, now)[0])
@@ -226,15 +226,15 @@ def build_replay(
 async def book_replays(
     session: AsyncSession,
     registry: Sequence[Candidate | None],
-    trades: Sequence[ScoredBet],
+    bets: Sequence[ScoredBet],
     now: datetime,
 ) -> dict[tuple[str, int], BookReplay]:
     """The replay of each rule-candidate entry of ``registry`` (the registered versions the report
-    holds) by name and version, from ``trades`` in placement order. A version whose replay
+    holds) by name and version, from ``bets`` in placement order. A version whose replay
     fails is logged and left out: nothing else reads these."""
     by_version: dict[tuple[str, int], list[ScoredBet]] = defaultdict(list)
-    for trade in trades:
-        by_version[(trade.candidate_name, trade.candidate_version)].append(trade)
+    for bet in bets:
+        by_version[(bet.candidate_name, bet.candidate_version)].append(bet)
     found: dict[tuple[str, int], BookReplay] = {}
     for entry in registry:
         if not isinstance(entry, RuleCandidate):

@@ -5,11 +5,11 @@ from __future__ import annotations
 import pytest
 from odds_core import (  # noqa: F401  (every table of the allowlist, and some outside it, must exist)
     agent_wakeup_models,
+    bet_models,
     candidate_backtest_models,
     match_brief_models,
     mlb_data_models,
     models,
-    paper_trade_models,
 )
 from odds_web import grants
 from odds_web.grants import GrantsFailed, apply_grants
@@ -67,7 +67,7 @@ class TestApplyGrants:
         assert extras
         for table in extras:
             await odds_web_session.execute(text(f"GRANT SELECT, INSERT ON {table} TO odds_web"))
-        await odds_web_session.execute(text("GRANT INSERT, UPDATE ON paper_trades TO odds_web"))
+        await odds_web_session.execute(text("GRANT INSERT, UPDATE ON bets TO odds_web"))
         await odds_web_session.commit()
 
         await apply_grants(await odds_web_session.connection())
@@ -75,7 +75,7 @@ class TestApplyGrants:
 
         assert await readable_tables(odds_web_session) == set(READ_TABLES)
         assert not await odds_web_session.scalar(
-            text("SELECT has_table_privilege('odds_web', 'paper_trades', 'INSERT, UPDATE')")
+            text("SELECT has_table_privilege('odds_web', 'bets', 'INSERT, UPDATE')")
         )
 
     async def test_a_table_dropped_from_the_allowlist_loses_its_grant(

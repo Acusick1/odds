@@ -6,8 +6,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 import structlog
+from odds_core.bet_models import Bet, CandidateDecision
 from odds_core.models import Event, EventExternalId, HealthCheckAcknowledgement
-from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from odds_core.time import ensure_utc, season_start_year
 from odds_core.vocabulary import HealthCheck, Source
 from sqlalchemy import and_, delete, func, select, text
@@ -240,7 +240,7 @@ class EventMerger:
 
     async def merge_drops(self, keep: Event, duplicates: Sequence[Event]) -> dict[str, int]:
         """The rows ``merge(keep, duplicates)`` would delete, per table, leaving out tables with
-        none: the duplicates' clashing candidate decisions and their paper trades, external ids
+        none: the duplicates' clashing candidate decisions and their bets, external ids
         and acknowledgements (``_drop_clashing_decisions``, ``_drop_clashing_identity_rows``),
         counted as each duplicate's rows join the kept event. Read-only."""
         versions = await self._decision_versions(keep)
@@ -267,10 +267,10 @@ class EventMerger:
             ]
             add("candidate_decisions", len(clashing))
             if clashing:
-                trades = await self.session.execute(
-                    select(func.count()).where(PaperTrade.decision_id.in_(clashing))  # type: ignore[union-attr]
+                bets = await self.session.execute(
+                    select(func.count()).where(Bet.decision_id.in_(clashing))  # type: ignore[union-attr]
                 )
-                add("paper_trades", trades.scalar_one())
+                add("bets", bets.scalar_one())
             versions |= {(d.candidate_name, d.candidate_version) for d in decisions}
             duplicate_sources = await self._id_sources(duplicate)
             add("event_external_ids", len(duplicate_sources & sources))
@@ -318,13 +318,13 @@ class EventMerger:
         return int(result.rowcount)  # type: ignore[attr-defined]
 
     async def _drop_clashing_decisions(self, duplicate: Event, keep: Event) -> dict[str, int]:
-        """Delete the duplicate's decisions, and their trades, that the kept event has too.
+        """Delete the duplicate's decisions, and their bets, that the kept event has too.
 
         A candidate version decides a match once per decision time and bets each outcome once
-        (``uq_candidate_decisions_candidate_event_lead``, ``uq_paper_trades_candidate_bet``),
+        (``uq_candidate_decisions_candidate_event_lead``, ``uq_bets_candidate_bet``),
         so when the kept event holds any decision of a candidate version, that version's
-        decisions on the duplicate are dropped. The other decisions and trades move with the
-        foreign keys: a trade only clashes with the kept event's trades through a decision of
+        decisions on the duplicate are dropped. The other decisions and bets move with the
+        foreign keys: a bet only clashes with the kept event's bets through a decision of
         the same candidate version, and those are the ones deleted here.
         """
         kept = {
@@ -348,8 +348,8 @@ class EventMerger:
         ]
         if not clashing:
             return {}
-        trades = await self.session.execute(
-            delete(PaperTrade).where(PaperTrade.decision_id.in_(clashing))  # type: ignore[union-attr]
+        bets = await self.session.execute(
+            delete(Bet).where(Bet.decision_id.in_(clashing))  # type: ignore[union-attr]
         )
         await self.session.execute(
             delete(CandidateDecision).where(CandidateDecision.id.in_(clashing))  # type: ignore[union-attr]
@@ -359,9 +359,9 @@ class EventMerger:
             kept_id=keep.id,
             duplicate_id=duplicate.id,
             decisions=len(clashing),
-            trades=trades.rowcount,
+            bets=bets.rowcount,
         )
-        deleted = {"candidate_decisions": len(clashing), "paper_trades": trades.rowcount}
+        deleted = {"candidate_decisions": len(clashing), "bets": bets.rowcount}
         return {table: count for table, count in deleted.items() if count}
 
     async def _drop_clashing_identity_rows(self, duplicate: Event, keep: Event) -> dict[str, int]:

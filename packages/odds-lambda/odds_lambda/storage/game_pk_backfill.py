@@ -46,7 +46,7 @@ from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
 
-READ_ONLY_TABLES = frozenset({"paper_trades", "match_briefs", "candidate_decisions"})
+READ_ONLY_TABLES = frozenset({"bets", "match_briefs", "candidate_decisions"})
 
 _PairDate = tuple[tuple[str, str], date]
 
@@ -66,7 +66,7 @@ class OutcomeStatus(StrEnum):
 
 
 class RefusalReason(StrEnum):
-    PAPER_TRADE_CLASH = "paper_trade_clash"
+    BET_CLASH = "bet_clash"
 
 
 class ScoreCarry(StrEnum):
@@ -89,7 +89,7 @@ class Settlement(StrEnum):
 
 
 class MergeClash(Exception):
-    """The merge would delete candidate decisions or paper trades."""
+    """The merge would delete candidate decisions or bets."""
 
     def __init__(self, rows_deleted: dict[str, int]) -> None:
         super().__init__(f"merge would delete {rows_deleted}")
@@ -159,7 +159,7 @@ class AssignmentOutcome:
 
     @property
     def read_only_rows(self) -> dict[str, int]:
-        """Paper-trade, brief and candidate-decision rows the merge moved or deleted."""
+        """Bet, brief and candidate-decision rows the merge moved or deleted."""
         touched: dict[str, int] = {}
         for rows in (self.rows_moved, self.rows_deleted):
             for table, count in rows.items():
@@ -344,8 +344,8 @@ async def apply_assignment(
 ) -> AssignmentOutcome:
     """Merge the assignment's events into ``kept``, give it the ``gamePk``, move it to the
     scheduled start re-timing its snapshots, and settle it from MLB's Final score when it has
-    none. Raises ``MergeClash`` when the merge would delete candidate decisions or paper
-    trades. Runs in the caller's transaction."""
+    none. Raises ``MergeClash`` when the merge would delete candidate decisions or
+    bets. Runs in the caller's transaction."""
     kept = assignment.kept
     kept_id = kept.id
     moved_from = ensure_utc(kept.commence_time)
@@ -402,7 +402,7 @@ async def run_assignments(
 ) -> list[AssignmentOutcome]:
     """Apply each assignment in its own savepoint, committing after each when ``commit``.
 
-    An assignment whose merge would delete candidate decisions or paper trades is rolled back
+    An assignment whose merge would delete candidate decisions or bets is rolled back
     and reported ``REFUSED``; one that raises anything else (a ``gamePk`` taken meanwhile, say)
     is rolled back, logged and reported ``FAILED``. The others go ahead either way.
     """
@@ -427,7 +427,7 @@ async def run_assignments(
                 merged_ids,
                 assignment.rule,
                 status=OutcomeStatus.REFUSED,
-                detail=RefusalReason.PAPER_TRADE_CLASH,
+                detail=RefusalReason.BET_CLASH,
                 rows_deleted=e.rows_deleted,
             )
         except Exception as e:

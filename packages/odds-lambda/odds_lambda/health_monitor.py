@@ -19,6 +19,7 @@ from typing import NamedTuple, Protocol
 
 import structlog
 from odds_core.alerts import job_outage_alerted_at, send_recorded_alert
+from odds_core.bet_models import Bet
 from odds_core.close import (
     CLOSES,
     LIVE_CLOSE_WINDOW,
@@ -37,7 +38,6 @@ from odds_core.models import (
     HealthCheckAcknowledgement,
     OddsSnapshot,
 )
-from odds_core.paper_trade_models import PaperTrade
 from odds_core.vocabulary import HealthCheck, Market, Source
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -126,7 +126,7 @@ class StaleSource:
 @dataclass(frozen=True, slots=True)
 class MissingBetfairClose:
     """A played football event with no live Betfair close in the window before kick-off: on
-    the three-way market, or on the line of a totals paper trade."""
+    the three-way market, or on the line of a totals bet."""
 
     event_id: int
     sport_key: str
@@ -341,20 +341,20 @@ class HealthMonitor:
             .all()
         )
         already_alerted = await self._event_ids_alerted(BETFAIR_CLOSE_ALERT_TYPE, moment - lookback)
-        traded_lines = (
+        bet_lines = (
             await self.session.execute(
-                select(PaperTrade.event_id, PaperTrade.line)
+                select(Bet.event_id, Bet.line)
                 .where(
-                    PaperTrade.event_id.in_([e.id for e in events]),  # type: ignore[attr-defined]
-                    PaperTrade.market == TOTALS_MARKET,
-                    PaperTrade.line.is_not(None),  # type: ignore[union-attr]
+                    Bet.event_id.in_([e.id for e in events]),  # type: ignore[attr-defined]
+                    Bet.market == TOTALS_MARKET,
+                    Bet.line.is_not(None),  # type: ignore[union-attr]
                 )
                 .distinct()
-                .order_by(PaperTrade.event_id, PaperTrade.line)
+                .order_by(Bet.event_id, Bet.line)
             )
         ).all()
         totals_lines: dict[str, list[float]] = {}
-        for event_id, line in traded_lines:
+        for event_id, line in bet_lines:
             totals_lines.setdefault(event_id, []).append(line)
         missing: list[MissingBetfairClose] = []
         for event in events:

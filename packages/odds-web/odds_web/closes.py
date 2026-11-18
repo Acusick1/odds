@@ -7,9 +7,9 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import NamedTuple
 
+from odds_core.bet_models import Bet
 from odds_core.close import CloseKind, CloseStatus, close_quotes, close_status
 from odds_core.models import Event
-from odds_core.paper_trade_models import PaperTrade
 from odds_core.vocabulary import Source
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -79,15 +79,15 @@ class CloseWeeks:
 
 
 async def close_coverage(session: AsyncSession, now: datetime) -> list[CloseWeeks]:
-    """The close of every (event, market, line) a paper trade is on, for events kicking off in
+    """The close of every (event, market, line) a bet is on, for events kicking off in
     the ``WEEKS`` weeks to ``now``'s, by kick-off week (``odds_core.close.close_status``)."""
     weeks = [week_of(now) - timedelta(weeks=n) for n in reversed(range(WEEKS))]
     start = datetime.combine(weeks[0], datetime.min.time(), tzinfo=now.tzinfo)
     end = start + timedelta(weeks=WEEKS)
     keys = (
         await session.execute(
-            select(col(PaperTrade.event_id), col(PaperTrade.market), col(PaperTrade.line))
-            .join(Event, col(Event.id) == col(PaperTrade.event_id))
+            select(col(Bet.event_id), col(Bet.market), col(Bet.line))
+            .join(Event, col(Event.id) == col(Bet.event_id))
             .where(col(Event.commence_time) >= start, col(Event.commence_time) < end)
             .distinct()
         )

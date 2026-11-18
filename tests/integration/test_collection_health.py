@@ -9,10 +9,10 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from odds_core.bet_models import Bet
 from odds_core.config import get_settings
 from odds_core.mlb_data_models import MlbProbablePitchers
 from odds_core.models import AlertHistory, Event, EventStatus, OddsSnapshot
-from odds_core.paper_trade_models import PaperTrade
 from odds_core.vocabulary import Market, Source, TimeBasis
 from odds_lambda import collection_calendar, results_run
 from odds_lambda.betfair.client import BetfairBook, BetfairRunner
@@ -822,8 +822,8 @@ class TestCheckMissingBetfairCloses:
         assert len(missing) == 1
 
     @staticmethod
-    def _totals_trade(event_id: int, line: float) -> PaperTrade:
-        return PaperTrade(
+    def _totals_bet(event_id: int, line: float) -> Bet:
+        return Bet(
             event_id=event_id,
             market="totals",
             selection="over",
@@ -844,7 +844,7 @@ class TestCheckMissingBetfairCloses:
             },
         )
 
-    async def test_totals_trade_without_a_close_on_its_line_is_missing(
+    async def test_totals_bet_without_a_close_on_its_line_is_missing(
         self, pglite_async_session: Any, seed_event: Callable[..., Any]
     ) -> None:
         close = self.KICKOFF - timedelta(minutes=10)
@@ -856,8 +856,8 @@ class TestCheckMissingBetfairCloses:
                 self._live_totals(close, {2.5: (2.0, 2.0)}),
             ),
         )
-        pglite_async_session.add(self._totals_trade(event_id, 2.5))
-        pglite_async_session.add(self._totals_trade(event_id, 3.5))
+        pglite_async_session.add(self._totals_bet(event_id, 2.5))
+        pglite_async_session.add(self._totals_bet(event_id, 3.5))
         await pglite_async_session.commit()
 
         [missing] = await self._monitor(pglite_async_session).check_missing_betfair_closes(NOW)
@@ -869,7 +869,7 @@ class TestCheckMissingBetfairCloses:
         )
         assert "totals 3.5" in missing.describe()
 
-    async def test_totals_trade_with_a_close_on_its_line_is_not_missing(
+    async def test_totals_bet_with_a_close_on_its_line_is_not_missing(
         self, pglite_async_session: Any, seed_event: Callable[..., Any]
     ) -> None:
         close = self.KICKOFF - timedelta(minutes=10)
@@ -881,12 +881,12 @@ class TestCheckMissingBetfairCloses:
                 self._live_totals(close, {2.5: (2.0, 2.0)}),
             ),
         )
-        pglite_async_session.add(self._totals_trade(event_id, 2.5))
+        pglite_async_session.add(self._totals_bet(event_id, 2.5))
         await pglite_async_session.commit()
 
         assert await self._monitor(pglite_async_session).check_missing_betfair_closes(NOW) == []
 
-    async def test_event_without_a_totals_trade_needs_no_totals_close(
+    async def test_event_without_a_totals_bet_needs_no_totals_close(
         self, pglite_async_session: Any, seed_event: Callable[..., Any]
     ) -> None:
         await seed_event(

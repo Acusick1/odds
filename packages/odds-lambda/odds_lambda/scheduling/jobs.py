@@ -181,14 +181,14 @@ def spends_api_quota(job_name: str) -> bool:
     return spec.paid_api if spec else False
 
 
-def places_candidate_trades(job_name: str) -> bool:
-    """Whether a run of the job places the registry candidates' paper trades.
+def places_candidate_bets(job_name: str) -> bool:
+    """Whether a run of the job places the registry candidates' bets.
 
     Accepts a compound (sport-suffixed) or base job name.
     """
     base_name, _ = resolve_job_name(job_name)
     spec = JOB_SPECS.get(base_name)
-    return spec.candidate_trades if spec else False
+    return spec.candidate_bets if spec else False
 
 
 def is_smoke_unsafe(job_name: str) -> bool:
@@ -198,7 +198,7 @@ def is_smoke_unsafe(job_name: str) -> bool:
     """
     base_name, _ = resolve_job_name(job_name)
     spec = JOB_SPECS.get(base_name)
-    return spec.agent_trades if spec else False
+    return spec.agent_bets if spec else False
 
 
 def resolve_target_sports(job_name: str, configured_sports: Sequence[SportKey]) -> list[SportKey]:

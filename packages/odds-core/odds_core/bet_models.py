@@ -1,4 +1,4 @@
-"""Paper trade model for forward-looking bet tracking and settlement."""
+"""Bet model for forward-looking bet tracking and settlement."""
 
 from __future__ import annotations
 
@@ -28,8 +28,8 @@ from sqlmodel import Field, SQLModel
 from odds_core.models import utc_now
 
 
-class TradeResult(str, Enum):
-    """Outcome of a settled paper trade."""
+class BetResult(str, Enum):
+    """Outcome of a settled bet."""
 
     WIN = "win"
     LOSS = "loss"
@@ -132,10 +132,10 @@ class CandidateDecision(SQLModel, table=True):
     )
 
 
-class PaperTrade(SQLModel, table=True):
-    """Persistent record of a paper bet, placed before an event and settled against results."""
+class Bet(SQLModel, table=True):
+    """Persistent record of a bet, placed before an event and settled against results."""
 
-    __tablename__ = "paper_trades"
+    __tablename__ = "bets"
 
     id: int | None = Field(default=None, primary_key=True)
     event_id: int = Field(sa_type=BigInteger, foreign_key="events.id", index=True)
@@ -195,11 +195,11 @@ class PaperTrade(SQLModel, table=True):
     confidence: float | None = Field(default=None, description="Agent confidence score (0-1)")
 
     # Bankroll tracking
-    # Bankroll snapshots are per-trade only (bankroll_before at placement, bankroll_after at
-    # settlement as bankroll_before + pnl). They do not reflect other trades placed in between.
-    # Flat-stake candidate trades record neither.
+    # Bankroll snapshots are per-bet only (bankroll_before at placement, bankroll_after at
+    # settlement as bankroll_before + pnl). They do not reflect other bets placed in between.
+    # Flat-stake candidate bets record neither.
     bankroll_before: float | None = Field(
-        default=None, description="Bankroll before this bet; null for a flat-stake trade"
+        default=None, description="Bankroll before this bet; null for a flat-stake bet"
     )
     bankroll_after: float | None = Field(default=None, description="Bankroll after settlement")
 
@@ -216,16 +216,14 @@ class PaperTrade(SQLModel, table=True):
     )
 
     # Settlement
-    result: TradeResult | None = Field(default=None, description="Settlement outcome")
+    result: BetResult | None = Field(default=None, description="Settlement outcome")
     pnl: float | None = Field(default=None, description="Profit/loss from this bet")
 
     __table_args__ = (
+        Index("ix_bets_unsettled", "settled_at", postgresql_where=text("settled_at IS NULL")),
+        Index("ix_bets_event_selection", "event_id", "selection"),
         Index(
-            "ix_paper_trades_unsettled", "settled_at", postgresql_where=text("settled_at IS NULL")
-        ),
-        Index("ix_paper_trades_event_selection", "event_id", "selection"),
-        Index(
-            "uq_paper_trades_candidate_bet",
+            "uq_bets_candidate_bet",
             "candidate_name",
             "candidate_version",
             "event_id",
@@ -235,13 +233,13 @@ class PaperTrade(SQLModel, table=True):
             postgresql_where=text("decision_id IS NOT NULL"),
             postgresql_nulls_not_distinct=True,
         ),
-        CheckConstraint("price_decimal > 1.0", name="ck_paper_trades_price_decimal_gt_one"),
+        CheckConstraint("price_decimal > 1.0", name="ck_bets_price_decimal_gt_one"),
         CheckConstraint(
             "(candidate_name IS NULL) = (candidate_version IS NULL)",
-            name="ck_paper_trades_candidate_pair",
+            name="ck_bets_candidate_pair",
         ),
         CheckConstraint(
             "bankroll_before IS NOT NULL OR candidate_name IS NOT NULL",
-            name="ck_paper_trades_bankroll_or_candidate",
+            name="ck_bets_bankroll_or_candidate",
         ),
     )

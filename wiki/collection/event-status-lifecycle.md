@@ -15,7 +15,7 @@ sources:
   - odds_lambda.odds_api_events.resolve_odds_api_events
   - odds_core.models.EventStatus.can_become
   - odds_lambda.scheduling.helpers.get_next_kickoff
-  - odds_lambda.paper_trading.settle_trades
+  - odds_lambda.betting.settle_bets
   - scripts.ingest_football_data_uk._ingest_one_match
 status: stable
 ---
@@ -66,8 +66,8 @@ Two kinds of orphan have no source signal and stay SCHEDULED or LIVE: an event w
 
 ## What each status gates
 
-- Schedule-driven readers filter on SCHEDULED: `odds_lambda.scheduling.helpers.get_next_kickoff`, and three of the MCP tools: `odds_mcp.server.get_upcoming_fixtures` and `odds_mcp.server.get_slate_briefs` list SCHEDULED events only, and `odds_mcp.server.paper_bet` rejects an event that is not SCHEDULED, before any sharp reading or candidate check (the run-candidates job filters the same way). The other MCP tools look an event up by its integer id with no status filter. The three depend on update-status running on the production host ([mcp-market-tools](../agent/mcp-market-tools.md)).
-- Training, standings and bet settlement read only FINAL events (`odds_lambda.paper_trading.settle_trades`). Bets settle on FINAL, with both scores present (on every [run-candidates](../evaluation/run-candidates-job.md#one-run) run among others), (graded by the market's outcomes, `h2h` or `1x2`, or by the total score against a totals bet's half line, with profit from the bet's decimal price) and are voided on CANCELLED (a POSTPONED event's bets stay open), so stalled results jobs leave bets unsettled ([bets](../agent/paper-trading.md#settlement)).
+- Schedule-driven readers filter on SCHEDULED: `odds_lambda.scheduling.helpers.get_next_kickoff`, and three of the MCP tools: `odds_mcp.server.get_upcoming_fixtures` and `odds_mcp.server.get_slate_briefs` list SCHEDULED events only, and `odds_mcp.server.place_bet` rejects an event that is not SCHEDULED, before any sharp reading or candidate check (the run-candidates job filters the same way). The other MCP tools look an event up by its integer id with no status filter. The three depend on update-status running on the production host ([mcp-market-tools](../agent/mcp-market-tools.md)).
+- Training, standings and bet settlement read only FINAL events (`odds_lambda.betting.settle_bets`). Bets settle on FINAL, with both scores present (on every [run-candidates](../evaluation/run-candidates-job.md#one-run) run among others), (graded by the market's outcomes, `h2h` or `1x2`, or by the total score against a totals bet's half line, with profit from the bet's decimal price) and are voided on CANCELLED (a POSTPONED event's bets stay open), so stalled results jobs leave bets unsettled ([bets](../agent/bets.md#settlement)).
 - Flipping to LIVE removes a started game from pre-game proximity decisions, because the fetch-odds gate keys off SCHEDULED events.
 - A status flip is not what stops pre-game fetching: the fetch job's gating is tier-based ([fetch-tier](../storage/fetch-tier.md)), and `odds_lambda.jobs.fetch_odds.main`, which runs for one league (EPL or NBA), has no status check at all (an event-sync failure is logged at error level and alerts once per outage, `event_sync_failed:<job>`; a gated run still writes its heartbeat; [flow](fetch-odds-job.md#flow)). `odds_lambda.jobs.update_status._update_event_statuses` only flips the status; nothing in it stops later odds fetches for a started game.
 

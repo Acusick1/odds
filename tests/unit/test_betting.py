@@ -1,17 +1,17 @@
-"""Tests for paper trade model and settlement logic."""
+"""Tests for bet model and settlement logic."""
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 import yaml
+from odds_core.bet_models import Bet, BetResult
 from odds_core.models import Event, EventStatus
-from odds_core.paper_trade_models import PaperTrade, TradeResult
-from odds_lambda.paper_trading import (
-    get_open_trades,
+from odds_lambda.betting import (
+    get_open_bets,
     get_portfolio_summary,
-    place_trade,
-    settle_trades,
+    place_bet,
+    settle_bets,
 )
 
 
@@ -30,7 +30,7 @@ def _write_candidate(directory: Path, **fields: object) -> None:
     (directory / f"{data['name']}.yaml").write_text(yaml.safe_dump(data))
 
 
-class TestPlaceTradeCandidate:
+class TestPlaceBetCandidate:
     @pytest.fixture
     async def event(self, test_session) -> Event:
         event = Event(
@@ -43,16 +43,17 @@ class TestPlaceTradeCandidate:
         )
         test_session.add(event)
         await test_session.flush()
+        await test_session.flush()
         return event
 
     @pytest.fixture
     def registry(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-        monkeypatch.setattr("odds_lambda.paper_trading.candidates_dir", lambda: tmp_path)
+        monkeypatch.setattr("odds_lambda.betting.candidates_dir", lambda: tmp_path)
         return tmp_path
 
     @staticmethod
-    async def _place(session, **candidate: object) -> PaperTrade:
-        return await place_trade(
+    async def _place(session, **candidate: object) -> Bet:
+        return await place_bet(
             session,
             event_id=1,
             market="1x2",
@@ -67,13 +68,13 @@ class TestPlaceTradeCandidate:
     @pytest.mark.asyncio
     async def test_valid_candidate_is_recorded(self, test_session, event, registry) -> None:
         _write_candidate(registry)
-        trade = await self._place(test_session, candidate_name="cand", candidate_version=2)
-        assert (trade.candidate_name, trade.candidate_version) == ("cand", 2)
+        bet = await self._place(test_session, candidate_name="cand", candidate_version=2)
+        assert (bet.candidate_name, bet.candidate_version) == ("cand", 2)
 
     @pytest.mark.asyncio
     async def test_no_candidate_is_allowed(self, test_session, event, registry) -> None:
-        trade = await self._place(test_session)
-        assert trade.candidate_name is None and trade.candidate_version is None
+        bet = await self._place(test_session)
+        assert bet.candidate_name is None and bet.candidate_version is None
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -113,7 +114,7 @@ class TestPlaceTradeCandidate:
     ) -> None:
         _write_candidate(registry)
         with pytest.raises(ValueError, match="use '1x2'"):
-            await place_trade(
+            await place_bet(
                 test_session,
                 event_id=1,
                 market="h2h",
@@ -135,7 +136,7 @@ class TestPlaceTradeCandidate:
             await self._place(test_session, candidate_name="cand", candidate_version=2)
 
     @pytest.mark.asyncio
-    async def test_candidate_trade_on_a_missing_event_is_rejected(
+    async def test_candidate_bet_on_a_missing_event_is_rejected(
         self, test_session, registry
     ) -> None:
         _write_candidate(registry)
@@ -144,14 +145,14 @@ class TestPlaceTradeCandidate:
 
     @pytest.mark.asyncio
     async def test_git_sha_is_recorded(self, test_session, event, registry, monkeypatch) -> None:
-        monkeypatch.setattr("odds_lambda.paper_trading.current_git_sha", lambda: "abc123")
-        trade = await self._place(test_session)
-        assert trade.git_sha == "abc123"
+        monkeypatch.setattr("odds_lambda.betting.current_git_sha", lambda: "abc123")
+        bet = await self._place(test_session)
+        assert bet.git_sha == "abc123"
 
     @pytest.mark.asyncio
     async def test_price_must_exceed_one(self, test_session, event, registry) -> None:
         with pytest.raises(ValueError, match="exceed 1.0"):
-            await place_trade(
+            await place_bet(
                 test_session,
                 event_id=1,
                 market="1x2",
@@ -163,9 +164,9 @@ class TestPlaceTradeCandidate:
             )
 
 
-class TestPlaceTrade:
+class TestPlaceBet:
     @pytest.mark.asyncio
-    async def test_place_valid_trade(self, test_session) -> None:
+    async def test_place_valid_bet(self, test_session) -> None:
         event = Event(
             id=2,
             sport_key="soccer_epl",
@@ -176,8 +177,9 @@ class TestPlaceTrade:
         )
         test_session.add(event)
         await test_session.flush()
+        await test_session.flush()
 
-        trade = await place_trade(
+        bet = await place_bet(
             test_session,
             event_id=2,
             market="h2h",
@@ -190,18 +192,18 @@ class TestPlaceTrade:
             confidence=0.72,
         )
 
-        assert trade.id is not None
-        assert trade.event_id == 2
-        assert trade.selection == "home"
-        assert trade.price_decimal == 1.6
-        assert trade.stake == 50.0
-        assert trade.bankroll_before == 1000.0
-        assert trade.settled_at is None
+        assert bet.id is not None
+        assert bet.event_id == 2
+        assert bet.selection == "home"
+        assert bet.price_decimal == 1.6
+        assert bet.stake == 50.0
+        assert bet.bankroll_before == 1000.0
+        assert bet.settled_at is None
 
     @pytest.mark.asyncio
     async def test_stake_exceeds_bankroll(self, test_session) -> None:
         with pytest.raises(ValueError, match="exceeds available bankroll"):
-            await place_trade(
+            await place_bet(
                 test_session,
                 event_id=2,
                 market="h2h",
@@ -215,7 +217,7 @@ class TestPlaceTrade:
     @pytest.mark.asyncio
     async def test_invalid_selection(self, test_session) -> None:
         with pytest.raises(ValueError, match="Invalid selection"):
-            await place_trade(
+            await place_bet(
                 test_session,
                 event_id=2,
                 market="h2h",
@@ -229,7 +231,7 @@ class TestPlaceTrade:
     @pytest.mark.asyncio
     async def test_zero_stake(self, test_session) -> None:
         with pytest.raises(ValueError, match="Stake must be positive"):
-            await place_trade(
+            await place_bet(
                 test_session,
                 event_id=2,
                 market="h2h",
@@ -241,7 +243,7 @@ class TestPlaceTrade:
             )
 
 
-class TestPlaceTradeMarkets:
+class TestPlaceBetMarkets:
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("sport_key", "accepted"), [("soccer_epl", True), ("baseball_mlb", False)]
@@ -261,7 +263,7 @@ class TestPlaceTradeMarkets:
         )
         await test_session.flush()
 
-        placing = place_trade(
+        placing = place_bet(
             test_session,
             event_id=3,
             market="h2h",
@@ -280,7 +282,7 @@ class TestPlaceTradeMarkets:
     @pytest.mark.asyncio
     async def test_unsupported_market_is_rejected(self, test_session) -> None:
         with pytest.raises(ValueError, match="Unsupported market"):
-            await place_trade(
+            await place_bet(
                 test_session,
                 event_id=2,
                 market="spreads",
@@ -292,11 +294,12 @@ class TestPlaceTradeMarkets:
             )
 
     @pytest.mark.asyncio
-    async def test_totals_trade_records_its_half_line(self, test_session) -> None:
+    async def test_totals_bet_records_its_half_line(self, test_session) -> None:
         test_session.add(_event(4, EventStatus.SCHEDULED))
         await test_session.flush()
+        await test_session.flush()
 
-        trade = await place_trade(
+        bet = await place_bet(
             test_session,
             event_id=4,
             market="totals",
@@ -308,7 +311,7 @@ class TestPlaceTradeMarkets:
             bankroll=1000.0,
         )
 
-        assert (trade.market, trade.selection, trade.line) == ("totals", "over", 2.5)
+        assert (bet.market, bet.selection, bet.line) == ("totals", "over", 2.5)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -326,7 +329,7 @@ class TestPlaceTradeMarkets:
         self, test_session, market: str, selection: str, line: float | None, message: str
     ) -> None:
         with pytest.raises(ValueError, match=message):
-            await place_trade(
+            await place_bet(
                 test_session,
                 event_id=2,
                 market=market,
@@ -353,8 +356,8 @@ def _event(event_id: int, status: EventStatus, scores: tuple[int, int] | None = 
     )
 
 
-def _trade(event_id: int, market: str, selection: str, line: float | None = None) -> PaperTrade:
-    return PaperTrade(
+def _bet(event_id: int, market: str, selection: str, line: float | None = None) -> Bet:
+    return Bet(
         event_id=event_id,
         market=market,
         selection=selection,
@@ -371,64 +374,68 @@ class TestSettleMarkets:
     @pytest.mark.parametrize(
         ("selection", "result", "pnl"),
         [
-            ("draw", TradeResult.WIN, 200.0),
-            ("home", TradeResult.LOSS, -100.0),
-            ("away", TradeResult.LOSS, -100.0),
+            ("draw", BetResult.WIN, 200.0),
+            ("home", BetResult.LOSS, -100.0),
+            ("away", BetResult.LOSS, -100.0),
         ],
     )
     async def test_three_way_market_grades_a_draw(
-        self, test_session, selection: str, result: TradeResult, pnl: float
+        self, test_session, selection: str, result: BetResult, pnl: float
     ) -> None:
         test_session.add(_event(5, EventStatus.FINAL, (1, 1)))
-        test_session.add(_trade(5, "1x2", selection))
+        await test_session.flush()
+        test_session.add(_bet(5, "1x2", selection))
         await test_session.flush()
 
-        [settled] = await settle_trades(test_session)
+        [settled] = await settle_bets(test_session)
 
         assert (settled.result, settled.pnl) == (result, pytest.approx(pnl))
 
     @pytest.mark.asyncio
-    async def test_trade_on_a_cancelled_event_is_voided(self, test_session) -> None:
+    async def test_bet_on_a_cancelled_event_is_voided(self, test_session) -> None:
         test_session.add(_event(6, EventStatus.CANCELLED))
-        test_session.add(_trade(6, "1x2", "home"))
+        await test_session.flush()
+        test_session.add(_bet(6, "1x2", "home"))
         await test_session.flush()
 
-        [settled] = await settle_trades(test_session)
+        [settled] = await settle_bets(test_session)
 
         assert (settled.result, settled.pnl, settled.bankroll_after) == (
-            TradeResult.VOID,
+            BetResult.VOID,
             0.0,
             1000.0,
         )
         assert settled.settled_at is not None
-        assert await settle_trades(test_session) == []
+        assert await settle_bets(test_session) == []
 
     @pytest.mark.asyncio
-    async def test_trade_on_a_postponed_event_stays_open(self, test_session) -> None:
+    async def test_bet_on_a_postponed_event_stays_open(self, test_session) -> None:
         test_session.add(_event(7, EventStatus.POSTPONED))
-        test_session.add(_trade(7, "1x2", "home"))
+        await test_session.flush()
+        test_session.add(_bet(7, "1x2", "home"))
         await test_session.flush()
 
-        assert await settle_trades(test_session) == []
-        assert len(await get_open_trades(test_session)) == 1
+        assert await settle_bets(test_session) == []
+        assert len(await get_open_bets(test_session)) == 1
 
     @pytest.mark.asyncio
     async def test_unsupported_market_on_a_final_event_stays_open(self, test_session) -> None:
         test_session.add(_event(8, EventStatus.FINAL, (2, 0)))
-        test_session.add(_trade(8, "spreads", "home"))
+        await test_session.flush()
+        test_session.add(_bet(8, "spreads", "home"))
         await test_session.flush()
 
-        assert await settle_trades(test_session) == []
-        assert len(await get_open_trades(test_session)) == 1
+        assert await settle_bets(test_session) == []
+        assert len(await get_open_bets(test_session)) == 1
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("scores", "selection", "result", "pnl"),
         [
-            ((2, 1), "over", TradeResult.WIN, 200.0),
-            ((2, 1), "under", TradeResult.LOSS, -100.0),
-            ((2, 0), "over", TradeResult.LOSS, -100.0),
-            ((2, 0), "under", TradeResult.WIN, 200.0),
+            ((2, 1), "over", BetResult.WIN, 200.0),
+            ((2, 1), "under", BetResult.LOSS, -100.0),
+            ((2, 0), "over", BetResult.LOSS, -100.0),
+            ((2, 0), "under", BetResult.WIN, 200.0),
         ],
     )
     async def test_totals_settle_on_the_total_score_against_the_line(
@@ -436,33 +443,35 @@ class TestSettleMarkets:
         test_session,
         scores: tuple[int, int],
         selection: str,
-        result: TradeResult,
+        result: BetResult,
         pnl: float,
     ) -> None:
         test_session.add(_event(4, EventStatus.FINAL, scores))
-        test_session.add(_trade(4, "totals", selection, line=2.5))
+        await test_session.flush()
+        test_session.add(_bet(4, "totals", selection, line=2.5))
         await test_session.flush()
 
-        [settled] = await settle_trades(test_session)
+        [settled] = await settle_bets(test_session)
 
         assert (settled.result, settled.pnl) == (result, pytest.approx(pnl))
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("line", [None, 3.0])
-    async def test_totals_trade_without_a_half_line_stays_open(
+    async def test_totals_bet_without_a_half_line_stays_open(
         self, test_session, line: float | None
     ) -> None:
         test_session.add(_event(4, EventStatus.FINAL, (2, 1)))
-        test_session.add(_trade(4, "totals", "over", line=line))
+        await test_session.flush()
+        test_session.add(_bet(4, "totals", "over", line=line))
         await test_session.flush()
 
-        assert await settle_trades(test_session) == []
-        assert len(await get_open_trades(test_session)) == 1
+        assert await settle_bets(test_session) == []
+        assert len(await get_open_bets(test_session)) == 1
 
 
-class TestSettleTrades:
+class TestSettleBets:
     @pytest.mark.asyncio
-    async def test_settle_winning_trade(self, test_session) -> None:
+    async def test_settle_winning_bet(self, test_session) -> None:
         event = Event(
             id=9,
             sport_key="soccer_epl",
@@ -475,8 +484,9 @@ class TestSettleTrades:
             away_score=0,
         )
         test_session.add(event)
+        await test_session.flush()
 
-        trade = PaperTrade(
+        bet = Bet(
             event_id=9,
             market="h2h",
             selection="home",
@@ -485,19 +495,19 @@ class TestSettleTrades:
             stake=100.0,
             bankroll_before=1000.0,
         )
-        test_session.add(trade)
+        test_session.add(bet)
         await test_session.flush()
 
-        settled = await settle_trades(test_session)
+        settled = await settle_bets(test_session)
 
         assert len(settled) == 1
-        assert settled[0].result == TradeResult.WIN
+        assert settled[0].result == BetResult.WIN
         assert settled[0].pnl == pytest.approx(150.0)
         assert settled[0].bankroll_after == pytest.approx(1150.0)
         assert settled[0].settled_at is not None
 
     @pytest.mark.asyncio
-    async def test_settle_losing_trade(self, test_session) -> None:
+    async def test_settle_losing_bet(self, test_session) -> None:
         event = Event(
             id=10,
             sport_key="soccer_epl",
@@ -510,8 +520,9 @@ class TestSettleTrades:
             away_score=1,
         )
         test_session.add(event)
+        await test_session.flush()
 
-        trade = PaperTrade(
+        bet = Bet(
             event_id=10,
             market="h2h",
             selection="home",
@@ -520,13 +531,13 @@ class TestSettleTrades:
             stake=100.0,
             bankroll_before=1000.0,
         )
-        test_session.add(trade)
+        test_session.add(bet)
         await test_session.flush()
 
-        settled = await settle_trades(test_session)
+        settled = await settle_bets(test_session)
 
         assert len(settled) == 1
-        assert settled[0].result == TradeResult.LOSS
+        assert settled[0].result == BetResult.LOSS
         assert settled[0].pnl == -100.0
 
     @pytest.mark.asyncio
@@ -543,8 +554,9 @@ class TestSettleTrades:
             away_score=1,
         )
         test_session.add(event)
+        await test_session.flush()
 
-        trade = PaperTrade(
+        bet = Bet(
             event_id=11,
             market="h2h",
             selection="home",
@@ -553,13 +565,13 @@ class TestSettleTrades:
             stake=100.0,
             bankroll_before=1000.0,
         )
-        test_session.add(trade)
+        test_session.add(bet)
         await test_session.flush()
 
-        settled = await settle_trades(test_session)
+        settled = await settle_bets(test_session)
 
         assert len(settled) == 1
-        assert settled[0].result == TradeResult.LOSS
+        assert settled[0].result == BetResult.LOSS
         assert settled[0].pnl == -100.0
 
     @pytest.mark.asyncio
@@ -576,8 +588,9 @@ class TestSettleTrades:
             away_score=1,
         )
         test_session.add(event)
+        await test_session.flush()
 
-        trade = PaperTrade(
+        bet = Bet(
             event_id=12,
             market="h2h",
             selection="draw",
@@ -586,13 +599,13 @@ class TestSettleTrades:
             stake=50.0,
             bankroll_before=1000.0,
         )
-        test_session.add(trade)
+        test_session.add(bet)
         await test_session.flush()
 
-        first = await settle_trades(test_session)
+        first = await settle_bets(test_session)
         assert len(first) == 1
 
-        second = await settle_trades(test_session)
+        second = await settle_bets(test_session)
         assert len(second) == 0
 
     @pytest.mark.asyncio
@@ -607,8 +620,9 @@ class TestSettleTrades:
             status=EventStatus.SCHEDULED,
         )
         test_session.add(event)
+        await test_session.flush()
 
-        trade = PaperTrade(
+        bet = Bet(
             event_id=13,
             market="h2h",
             selection="home",
@@ -617,10 +631,10 @@ class TestSettleTrades:
             stake=50.0,
             bankroll_before=1000.0,
         )
-        test_session.add(trade)
+        test_session.add(bet)
         await test_session.flush()
 
-        settled = await settle_trades(test_session)
+        settled = await settle_bets(test_session)
         assert len(settled) == 0
 
 
@@ -630,11 +644,11 @@ class TestPortfolioQueries:
         summary = await get_portfolio_summary(test_session, initial_bankroll=1000.0)
 
         assert summary.current_bankroll == 1000.0
-        assert summary.total_trades == 0
+        assert summary.total_bets == 0
         assert summary.total_pnl == 0.0
 
     @pytest.mark.asyncio
-    async def test_open_trades_query(self, test_session) -> None:
+    async def test_open_bets_query(self, test_session) -> None:
         event = Event(
             id=14,
             sport_key="soccer_epl",
@@ -644,8 +658,9 @@ class TestPortfolioQueries:
             away_team="Man City",
         )
         test_session.add(event)
+        await test_session.flush()
 
-        trade = PaperTrade(
+        bet = Bet(
             event_id=14,
             market="h2h",
             selection="away",
@@ -654,9 +669,9 @@ class TestPortfolioQueries:
             stake=25.0,
             bankroll_before=975.0,
         )
-        test_session.add(trade)
+        test_session.add(bet)
         await test_session.flush()
 
-        open_trades = await get_open_trades(test_session)
-        assert len(open_trades) == 1
-        assert open_trades[0].selection == "away"
+        open_bets = await get_open_bets(test_session)
+        assert len(open_bets) == 1
+        assert open_bets[0].selection == "away"

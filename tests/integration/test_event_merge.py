@@ -6,6 +6,7 @@ from datetime import timedelta
 
 import pytest
 from odds_cli.commands import events as events_cli
+from odds_core.bet_models import Bet, CandidateDecision
 from odds_core.match_brief_models import MatchBrief
 from odds_core.models import (
     DataQualityLog,
@@ -17,7 +18,6 @@ from odds_core.models import (
     SnapshotPayload,
     utc_now,
 )
-from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from odds_core.vocabulary import Market, Source, TimeBasis
 from odds_lambda.storage.event_merge import EventMerger
 from odds_lambda.storage.event_name_repair import _betfair_runner_names, repair_team_names
@@ -35,7 +35,7 @@ from tests.test_helpers import (
     with_game_pk,
 )
 
-CHILD_MODELS = (OddsSnapshot, PaperTrade, MatchBrief)
+CHILD_MODELS = (OddsSnapshot, Bet, MatchBrief)
 
 
 async def _event_ids(session, model) -> set[int]:
@@ -74,8 +74,8 @@ def _decision(event_id: int, candidate: str) -> CandidateDecision:
     )
 
 
-def _trade(event_id: int, candidate: str, decision_id: int | None) -> PaperTrade:
-    return PaperTrade(
+def _bet(event_id: int, candidate: str, decision_id: int | None) -> Bet:
+    return Bet(
         event_id=event_id,
         market="1x2",
         selection="home",
@@ -105,7 +105,7 @@ class TestMergeDecidedTwins:
         session.add_all(decisions.values())
         await session.flush()
         for (event_id, name), decision in decisions.items():
-            session.add(_trade(event_id, name, decision.id))
+            session.add(_bet(event_id, name, decision.id))
         await session.commit()
 
         await EventMerger(session).merge(keep, [twin])
@@ -117,12 +117,12 @@ class TestMergeDecidedTwins:
             (API_EVENT_ID, "shared"),
             (API_EVENT_ID, "only-twin"),
         }
-        trades = (await session.execute(select(PaperTrade))).scalars().all()
-        assert {(t.event_id, t.candidate_name) for t in trades} == {
+        bets = (await session.execute(select(Bet))).scalars().all()
+        assert {(t.event_id, t.candidate_name) for t in bets} == {
             (API_EVENT_ID, "shared"),
             (API_EVENT_ID, "only-twin"),
         }
-        assert len(trades) == 2
+        assert len(bets) == 2
         assert await session.get(Event, TWIN_EVENT_ID) is None
 
 

@@ -11,8 +11,8 @@ import pytest
 import yaml
 from odds_analytics.candidate_backtest import BacktestResult, replay
 from odds_analytics.candidate_parity import ParityStatus, check_parity
+from odds_core.bet_models import Bet, CandidateDecision
 from odds_core.candidates import RuleCandidate
-from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from odds_lambda.candidate_rules.pinning import rule_sha256
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -93,7 +93,7 @@ async def add_concurrent_matches(add_match: AddMatch, kickoff: datetime = KICKOF
 @pytest.fixture
 def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr("odds_lambda.jobs.run_candidates.candidates_dir", lambda: tmp_path)
-    monkeypatch.setattr("odds_lambda.paper_trading.candidates_dir", lambda: tmp_path)
+    monkeypatch.setattr("odds_lambda.betting.candidates_dir", lambda: tmp_path)
     return tmp_path
 
 
@@ -228,8 +228,8 @@ class TestLiveRunner:
 
         await decide(pglite_async_session)
 
-        trades = (await pglite_async_session.execute(select(PaperTrade))).scalars().all()
-        assert trades == []
+        bets = (await pglite_async_session.execute(select(Bet))).scalars().all()
+        assert bets == []
 
     async def test_a_last_result_bet_is_placed_and_matches_in_parity(
         self, pglite_async_session: AsyncSession, add_match: AddMatch, registry: Path
@@ -241,8 +241,8 @@ class TestLiveRunner:
 
         await decide(pglite_async_session)
 
-        [trade] = (await pglite_async_session.execute(select(PaperTrade))).scalars().all()
-        assert (trade.selection, trade.bookmaker) == ("home", "bet365")
+        [bet] = (await pglite_async_session.execute(select(Bet))).scalars().all()
+        assert (bet.selection, bet.bookmaker) == ("home", "bet365")
         report = await check_parity(pglite_async_session, last_result())
         assert [d.status for d in report.decisions] == [ParityStatus.MATCH]
 
@@ -284,8 +284,8 @@ class TestLiveRunner:
 
         await decide(pglite_async_session)
 
-        [trade] = (await pglite_async_session.execute(select(PaperTrade))).scalars().all()
-        assert (trade.selection, trade.bookmaker) == ("home", "bet365")
+        [bet] = (await pglite_async_session.execute(select(Bet))).scalars().all()
+        assert (bet.selection, bet.bookmaker) == ("home", "bet365")
         report = await check_parity(pglite_async_session, cand)
         assert [d.status for d in report.decisions] == [ParityStatus.MATCH]
 
