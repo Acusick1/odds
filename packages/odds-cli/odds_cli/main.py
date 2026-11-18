@@ -8,6 +8,7 @@ from rich.console import Console
 from odds_cli.commands import (
     agent,
     backfill,
+    bets,
     candidates,
     copy_from_prod,
     discover,
@@ -15,7 +16,6 @@ from odds_cli.commands import (
     fetch,
     injuries,
     nba_stats,
-    paper,
     pbpstats,
     polymarket,
     quality,
@@ -49,7 +49,7 @@ app.add_typer(injuries.app, name="injuries", help="NBA injury report operations"
 app.add_typer(nba_stats.app, name="nba-stats", help="NBA game log operations")
 app.add_typer(pbpstats.app, name="pbpstats", help="PBPStats player season statistics")
 app.add_typer(scrape.app, name="scrape", help="Scrape odds from OddsPortal")
-app.add_typer(paper.app, name="paper", help="Paper trade management")
+app.add_typer(bets.app, name="bets", help="Bet management")
 app.add_typer(candidates.app, name="candidates", help="Betting candidates in the registry")
 app.add_typer(agent.app, name="agent", help="Run the sport agent subprocess directly")
 app.add_typer(web.app, name="web", help="Read-only web UI")

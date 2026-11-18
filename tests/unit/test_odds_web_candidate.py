@@ -21,9 +21,9 @@ from odds_analytics.candidate_report import (
     RunningScore,
     ScoredBet,
 )
+from odds_core.bet_models import BetResult
 from odds_core.bookmakers import BookSet
 from odds_core.candidates import CandidateStatus
-from odds_core.paper_trade_models import TradeResult
 from odds_lambda.candidate_rules import EstimateBasis
 from odds_web.app import create_app
 from odds_web.cache import SingleFlightCache
@@ -44,9 +44,9 @@ from tests.odds_web_helpers import (
 )
 
 
-def ledger_row(trade_id: int = 1, **fields: object) -> LedgerRow:
+def ledger_row(bet_id: int = 1, **fields: object) -> LedgerRow:
     defaults: dict[str, object] = {
-        "trade_id": trade_id,
+        "bet_id": bet_id,
         "event": "Arsenal v Spurs",
         "commence_time": NOW,
         "selection": "home",
@@ -54,7 +54,7 @@ def ledger_row(trade_id: int = 1, **fields: object) -> LedgerRow:
         "bookmaker": "bet365",
         "price": 3.0,
         "stake": 1.0,
-        "result": TradeResult.WIN,
+        "result": BetResult.WIN,
         "pnl": 2.0,
         "placed_at": NOW,
         "p_close": 0.4,
@@ -75,10 +75,10 @@ def history(*kinds: DecisionKind, total: int | None = None, missed: int = 0) -> 
 
 @pytest.fixture
 def data(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
-    """What the app's readers return; the report is read from ``trades`` and ``registry`` when
+    """What the app's readers return; the report is read from ``bets`` and ``registry`` when
     the app asks for it, and ``error`` makes it raise."""
     state: dict[str, object] = {
-        "trades": [],
+        "bets": [],
         "decisions": None,
         "ledger": LedgerPage([ledger_row()], 1, 1, 1),
         "error": None,
@@ -91,7 +91,7 @@ def data(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
         if isinstance(state["error"], Exception):
             raise state["error"]
         return dataclasses.replace(
-            report(state["trades"], state["registry"]),  # type: ignore[arg-type]
+            report(state["bets"], state["registry"]),  # type: ignore[arg-type]
             book_replays=state["replays"],  # type: ignore[arg-type]
         )
 
@@ -119,7 +119,7 @@ def client(data: dict[str, object]) -> Iterator[TestClient]:
 
 def seed(data: dict[str, object], bets: list[ScoredBet], *registry: object) -> CandidateSummary:
     data["registry"] = list(registry)
-    data["trades"] = bets
+    data["bets"] = bets
     return report(bets, list(registry)).summaries[0]
 
 
@@ -166,14 +166,14 @@ class TestCandidatePage:
         assert re.findall(r'<span class="verdict">(.*?)</span>', body) == ["not yet"]
         assert "promote" not in body.replace("promote CI", "").replace('"promote"', "")
 
-    def test_the_ledger_is_listed_with_void_trades_labelled(
+    def test_the_ledger_is_listed_with_void_bets_labelled(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
         seed(data, [bet(i, 0.5) for i in range(3)], rule_candidate())
         data["ledger"] = LedgerPage(
             [
                 ledger_row(1),
-                ledger_row(2, result=TradeResult.VOID, pnl=0.0, selection="draw"),
+                ledger_row(2, result=BetResult.VOID, pnl=0.0, selection="draw"),
                 ledger_row(3, result=None, pnl=None, p_close=None),
             ],
             1,
@@ -189,7 +189,7 @@ class TestCandidatePage:
             "void",
             "pending",
         ]
-        assert "3 trades" in body
+        assert "3 bets" in body
 
     def test_a_rule_candidate_shows_its_decision_timeline_and_missed_share(
         self, client: TestClient, data: dict[str, object]
@@ -269,7 +269,7 @@ class TestCandidatePage:
     ) -> None:
         v2 = rule_candidate().model_copy(update={"version": 2})
         seed(data, [bet(i, 0.5) for i in range(3)], v2)
-        data["trades"] = []
+        data["bets"] = []
         data["decisions"] = history(DecisionKind.NO_BET, DecisionKind.MISSED, missed=1)
 
         response = client.get("/c/gap/1")
@@ -279,7 +279,7 @@ class TestCandidatePage:
         assert "mark-no-bet" in response.text and "1 of 2" in response.text
         assert "/ 100" not in response.text
 
-    def test_a_version_with_no_trades_and_no_decisions_is_not_found(
+    def test_a_version_with_no_bets_and_no_decisions_is_not_found(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
         v2 = rule_candidate().model_copy(update={"version": 2})
@@ -312,7 +312,7 @@ class TestCandidatePage:
 
         assert "EV not scoreable" in body
 
-    def test_the_ledger_shows_the_stake_of_each_trade(
+    def test_the_ledger_shows_the_stake_of_each_bet(
         self, client: TestClient, data: dict[str, object]
     ) -> None:
         seed(data, [bet(0, 0.5)], rule_candidate())
@@ -393,7 +393,7 @@ class TestCandidatePage:
     ) -> None:
         seed(data, [bet(0, 0.5)], rule_candidate())
         calls: list[int] = []
-        original = report(data["trades"], data["registry"])  # type: ignore[arg-type]
+        original = report(data["bets"], data["registry"])  # type: ignore[arg-type]
 
         async def counted(*_: object, **__: object) -> object:
             calls.append(1)
@@ -478,7 +478,7 @@ class TestOneSnapshot:
     ) -> None:
         seed(data, [bet(i, 0.5) for i in range(99)], rule_candidate())
         client.get("/")  # the report is cached at 99 bets with a close
-        data["trades"] = [bet(i, 0.5) for i in range(100)]
+        data["bets"] = [bet(i, 0.5) for i in range(100)]
 
         body = client.get("/c/gap/1").text
 

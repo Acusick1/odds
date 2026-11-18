@@ -39,8 +39,8 @@ class JobSpec:
     sports: tuple[SportKey, ...] | SportMap | None = None
     bootstrap: bool = True
     bootstrap_function: str | None = None
-    agent_trades: bool = False
-    candidate_trades: bool = False
+    agent_bets: bool = False
+    candidate_bets: bool = False
     paid_api: bool = False
     cron: str | None = None
     heartbeats: tuple[Heartbeat, ...] = ()
@@ -139,7 +139,7 @@ JOB_SPECS: Mapping[str, JobSpec] = MappingProxyType(
             per_sport=True,
             bootstrap=False,
             bootstrap_function="schedule_next",
-            agent_trades=True,
+            agent_bets=True,
             cadence=Cadence(
                 closing=1.0, pregame=4.0, day_before=4.0, early=12.0, opening=24.0, no_game=12.0
             ),
@@ -226,7 +226,7 @@ JOB_SPECS: Mapping[str, JobSpec] = MappingProxyType(
             ),
         ),
         "run-candidates": JobSpec(
-            module="odds_lambda.jobs.run_candidates", per_sport=True, candidate_trades=True
+            module="odds_lambda.jobs.run_candidates", per_sport=True, candidate_bets=True
         ),
         "backup-database": JobSpec(
             module="odds_lambda.jobs.backup_database",

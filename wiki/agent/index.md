@@ -13,7 +13,7 @@ An LLM agent per league (EPL, MLB) runs as a `claude` subprocess over the odds-m
 - [Agent prompts](agent-prompts.md) — The prompt files under packages/odds-mcp/agents/, the wake-up steps, edge types, conviction tiers and caps, and which of those rules code enforces.
 - [Agent run traces](agent-run-traces.md) — Where each agent wake-up's stream-json trace is written, how files are named, limited and pruned, which messages reach structlog, and what the summary viewer reads.
 - [Agent runtime and the agent-run job](agent-run-job.md) — The claude subprocess, the agent-run job flow and cadence, agent_wakeups, odds agent run and the database role.
-- [Bets](paper-trading.md) — The paper_trades table, the bet service, MCP and CLI entry points, portfolio maths and settlement.
+- [Bets](bets.md) — The bets table, the bet service, MCP and CLI entry points, portfolio maths and settlement.
 - [Briefs](match-briefs.md) — The match_briefs table, the sharp-price stamp, and the save, get and slate MCP tools.
 - [MCP odds and retail-edge tools](mcp-market-tools.md) — get_upcoming_fixtures, get_current_odds, get_odds_history and find_retail_edges, with inputs, anchor-relative price resolution, ranking and dispersion statistics, and the limits of their prices.
 - [MCP sport context tools](mcp-sport-context-tools.md) — EPL get_team_context (form, fixtures, standings from ESPN fixtures) and MLB get_probable_pitchers (live read-through with cached fallback), and their data dependencies.

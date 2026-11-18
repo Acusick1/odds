@@ -299,8 +299,8 @@ def assign_game_pks(
     """Give every MLB event without a gamePk its MLB Stats API gamePk, merging events of one game.
 
     Prints a summary, then one line per assignment (SINGLE, MERGE, MERGE_READ_ONLY for merges
-    that move paper trades, match briefs or candidate decisions; REFUSED for merges that would
-    delete a candidate decision or paper trade; FAILED), then UNRESOLVED, GHOST and UNASSIGNABLE
+    that move bets, match briefs or candidate decisions; REFUSED for merges that would
+    delete a candidate decision or bet; FAILED), then UNRESOLVED, GHOST and UNASSIGNABLE
     events. --apply commits each game in its own transaction. Safe to re-run.
 
     Examples:

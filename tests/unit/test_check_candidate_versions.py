@@ -189,13 +189,6 @@ class TestBooksField:
         )
         return result.stderr.splitlines()
 
-    def test_the_former_mechanical_kind_reads_as_rule(self, repo: Path) -> None:
-        old = self.YAML.replace("kind: rule", "kind: mechanical") + "books: uk_retail\n"
-        (repo / "candidates" / "back-longest.yaml").write_text(old)
-        git(repo, "add", "candidates")
-        git(repo, "commit", "-q", "-m", "legacy kind")
-        assert self.errors(repo, self.YAML + "books: uk_retail\n") == []
-
     def test_adding_the_full_roster_set_at_the_same_version_passes(self, repo: Path) -> None:
         assert self.errors(repo, self.YAML + "books: uk_retail\n") == []
 

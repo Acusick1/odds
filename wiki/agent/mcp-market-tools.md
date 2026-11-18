@@ -26,7 +26,7 @@ status: stable
 
 # MCP odds and retail-edge tools
 
-Four read-only market-data tools (none reads bets), part of the [odds-mcp server](mcp-server.md). Event ids are integers; an unknown one returns `{"error": "Event '<id>' not found"}`. The first three read stored data; `odds_mcp.server.find_retail_edges` is the [betting agent](betting-agent.md)'s flagship screener, about 290 lines, and its sharp lookup also backs the sharp reading of `odds_mcp.server.paper_bet`.
+Four read-only market-data tools (none reads bets), part of the [odds-mcp server](mcp-server.md). Event ids are integers; an unknown one returns `{"error": "Event '<id>' not found"}`. The first three read stored data; `odds_mcp.server.find_retail_edges` is the [betting agent](betting-agent.md)'s flagship screener, about 290 lines, and its sharp lookup also backs the sharp reading of `odds_mcp.server.place_bet`.
 
 The tools read prices from the `prices` table through `odds_core.quotes.quotes` ([reading prices](../storage/price-tables.md#reading-prices)), in `odds_mcp.prices`, and treat the event id as opaque: every source's snapshots hang on the one event ([event resolver](../storage/event-resolver.md)). A book's price is its `back` price, except Polymarket's, which is its `mid` (`odds_mcp.prices.BOOK_SIDES`, `odds_mcp.prices.book_quotes`); lay and traded prices are not surfaced. Outcomes are shown as the event's home and away team names, `Draw`, `Over` and `Under` (`odds_mcp.prices.outcome_label`), and `point` is the stored line. Book keys are the canonical keys the writers store ([books](../storage/price-tables.md#reading-an-envelope)), so the same book has one key across sources.
 
@@ -69,7 +69,7 @@ Output: `event`, `snapshot_time` (newest contributing retail snapshot), `sharp_b
 
 Divergence is vig-inclusive on both sides, so use `market_hold` to separate vig from it ([retail-sharp divergence](../modelling/sharp-benchmark.md#retail-sharp-divergence)); the feature and screener copies of the sharp-price logic differ ([code copies](../modelling/sharp-benchmark.md#code-copies)).
 
-Sharp prices are keyed by `(outcome, line)` as retail rows are bucketed by `(outcome, point)`, so on `totals` and `spreads` each retail row is compared with the sharp price at its own line, and a line with no sharp price has a null divergence. `odds_mcp.server.save_match_brief` stamps one sharp price per outcome, from the outcome's lowest line (`odds_mcp.prices.SharpLines.by_outcome`), and `odds_mcp.server.paper_bet` records the devigged sharp price of the selection on its line ([sharp fields](paper-trading.md#sharp-fields)).
+Sharp prices are keyed by `(outcome, line)` as retail rows are bucketed by `(outcome, point)`, so on `totals` and `spreads` each retail row is compared with the sharp price at its own line, and a line with no sharp price has a null divergence. `odds_mcp.server.save_match_brief` stamps one sharp price per outcome, from the outcome's lowest line (`odds_mcp.prices.SharpLines.by_outcome`), and `odds_mcp.server.place_bet` records the devigged sharp price of the selection on its line ([sharp fields](bets.md#sharp-fields)).
 
 Outcomes resolve their sharp price independently ([priority semantics](../modelling/sharp-benchmark.md#priority-semantics)), so read `sharp_snapshot_time` and `sharp_age_seconds` per row.
 
@@ -77,5 +77,5 @@ Outcomes resolve their sharp price independently ([priority semantics](../modell
 
 ## Related
 
-- [Sport context tools](mcp-sport-context-tools.md), [Briefs](match-briefs.md), [Bets](paper-trading.md)
+- [Sport context tools](mcp-sport-context-tools.md), [Briefs](match-briefs.md), [Bets](bets.md)
 - [Prices tables](../storage/price-tables.md)

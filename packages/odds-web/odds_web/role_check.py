@@ -22,7 +22,7 @@ WRITE_PRIVILEGES = ("INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRI
 # The one allowlist: the tables the readers use. ``odds_web.grants`` grants exactly these and the
 # check probes each; the first is the one the write probe targets.
 READ_TABLES = (
-    "paper_trades",
+    "bets",
     "candidate_decisions",
     "candidate_backtests",
     "candidate_backtest_bets",

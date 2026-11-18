@@ -1,7 +1,7 @@
-"""Per-candidate paper-trading results and the checkpoint verdict of the goal page.
+"""Per-candidate bet results and the checkpoint verdict of the goal page.
 
 A candidate is scored by EV at the price taken against the Betfair Exchange close
-(``p_close * price_decimal - 1``), on the bets with a close in the prefix of its trades
+(``p_close * price_decimal - 1``), on the bets with a close in the prefix of its bets
 that is settled and final, at checkpoints of 100, 200, ... bets. Realised P&L is
 reported beside it.
 """
@@ -20,13 +20,13 @@ from functools import partial
 from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
+from odds_core.bet_models import Bet, BetResult, CandidateDecision
 from odds_core.candidates import Candidate, CandidateStatus, RuleCandidate
 from odds_core.close import close_grace, close_quotes, event_close
 from odds_core.exchange_price import ExchangePrice
 from odds_core.market_prices import Outcome
 from odds_core.models import Event, EventStatus
 from odds_core.odds_math import calculate_profit_from_decimal, selection_won
-from odds_core.paper_trade_models import CandidateDecision, PaperTrade, TradeResult
 from odds_core.quotes import Quote
 from odds_core.vocabulary import Market, Source
 from odds_lambda.candidate_rules import BetIntent
@@ -65,7 +65,7 @@ def expected_value(p_close: float, price_decimal: float) -> float:
 
 @dataclass(frozen=True)
 class ScoredBet:
-    """A non-void candidate bet, a paper trade or a replayed one, with the devigged close
+    """A non-void candidate bet, a bet or a replayed one, with the devigged close
     probability of its selection: ``p_close`` devigged proportionally, the score, and
     ``p_close_power`` by the power method, for information (``CloseProbability``)."""
 
@@ -211,7 +211,7 @@ class Estimates:
 
 @dataclass(frozen=True)
 class CandidateReport:
-    """Every candidate version's summary and running score, from one read of the trades.
+    """Every candidate version's summary and running score, from one read of the bets.
     ``book_replays`` holds, for information only, the counterfactual book replays of each
     registered rule-candidate version that has them (``candidate_report`` with ``replays``); no
     summary, checkpoint or verdict reads them."""
@@ -363,7 +363,7 @@ def family_size_at(starts: Sequence[datetime], when: datetime) -> int:
 def checkpoint_at(
     scored: Sequence[ScoredBet], n: int, family_versions: int, n_boot: int, seed: int
 ) -> Checkpoint:
-    """Score the first ``n`` of ``scored``, which are trades with a close in placement order,
+    """Score the first ``n`` of ``scored``, which are bets with a close in placement order,
     with the promote interval at ``promote_level(family_versions)``."""
     head = scored[:n]
     level = promote_level(family_versions)
@@ -431,22 +431,22 @@ def current_estimate(
     return checkpoint_at(with_close, len(with_close), family_versions, n_boot, seed)
 
 
-def scoreable_prefix(trades: Sequence[ScoredBet], now: datetime) -> tuple[list[ScoredBet], int]:
-    """The bets with a close in the settled, final prefix of ``trades``, and its length.
+def scoreable_prefix(bets: Sequence[ScoredBet], now: datetime) -> tuple[list[ScoredBet], int]:
+    """The bets with a close in the settled, final prefix of ``bets``, and its length.
 
-    ``trades`` must be in placement order. The prefix stops at the first trade that is
+    ``bets`` must be in placement order. The prefix stops at the first bet that is
     unsettled, or has no close and kicked off less than its ``close_grace`` ago. Final
-    no-close trades inside it are skipped.
+    no-close bets inside it are skipped.
     """
     with_close: list[ScoredBet] = []
     length = 0
-    for trade in trades:
-        if not trade.settled:
+    for bet in bets:
+        if not bet.settled:
             break
-        if trade.p_close is None and now - trade.commence_time < trade.close_grace:
+        if bet.p_close is None and now - bet.commence_time < bet.close_grace:
             break
-        if trade.p_close is not None:
-            with_close.append(trade)
+        if bet.p_close is not None:
+            with_close.append(bet)
         length += 1
     return with_close, length
 
@@ -494,7 +494,7 @@ def scored_intent(
     p_close: CloseProbability | None,
 ) -> ScoredBet:
     """The bet a rule's ``intent`` placed at ``placed_at`` on ``event``, with the close
-    ``p_close``, settled on the event's final score as ``settle_trades`` settles a trade and
+    ``p_close``, settled on the event's final score as ``settle_bets`` settles a bet and
     unsettled until the event is final with both scores."""
     pnl = None
     if (
@@ -530,13 +530,13 @@ def scored_intent(
     )
 
 
-def league_breakdown(trades: Sequence[ScoredBet], now: datetime) -> tuple[LeagueBreakdown, ...]:
-    """``trades`` split by league, in league-key order; ``trades`` in placement order."""
-    with_close, _ = scoreable_prefix(trades, now)
+def league_breakdown(bets: Sequence[ScoredBet], now: datetime) -> tuple[LeagueBreakdown, ...]:
+    """``bets`` split by league, in league-key order; ``bets`` in placement order."""
+    with_close, _ = scoreable_prefix(bets, now)
     breakdown: list[LeagueBreakdown] = []
-    for league in sorted({t.sport_key for t in trades}):
+    for league in sorted({t.sport_key for t in bets}):
         scored = [t for t in with_close if t.sport_key == league]
-        settled = [t for t in trades if t.sport_key == league and t.pnl is not None]
+        settled = [t for t in bets if t.sport_key == league and t.pnl is not None]
         breakdown.append(
             LeagueBreakdown(
                 sport_key=league,
@@ -570,29 +570,29 @@ def summarize_candidate(
     name: str,
     version: int,
     registered: Candidate | None,
-    trades: Sequence[ScoredBet],
+    bets: Sequence[ScoredBet],
     now: datetime,
     family_size: Callable[[datetime], int],
     n_boot: int = DEFAULT_BOOTSTRAP_SAMPLES,
     seed: int = BOOTSTRAP_SEED,
 ) -> CandidateSummary:
-    """Summarise one candidate version's non-void trades, which must be in placement order.
+    """Summarise one candidate version's non-void bets, which must be in placement order.
 
     ``family_size`` gives the family's started versions at a time. The summary's family size is
     the verdict checkpoint's, or the size at ``now`` before any checkpoint.
     """
-    with_close, prefix_length = scoreable_prefix(trades, now)
+    with_close, prefix_length = scoreable_prefix(bets, now)
     verdict, checkpoints = judge(with_close, family_size, n_boot, seed)
     checkpoint = checkpoints[-1] if checkpoints else None
-    settled = [t for t in trades if t.pnl is not None]
+    settled = [t for t in bets if t.pnl is not None]
     return CandidateSummary(
         name=name,
         version=version,
         registered=registered,
         settled_bets=len(settled),
         bets_with_close=len(with_close),
-        bets_without_close=sum(t.p_close is None for t in trades[:prefix_length]),
-        pending_bets=len(trades) - prefix_length,
+        bets_without_close=sum(t.p_close is None for t in bets[:prefix_length]),
+        pending_bets=len(bets) - prefix_length,
         total_stake=sum(t.stake for t in settled),
         pnl=sum(t.pnl for t in settled if t.pnl is not None),
         checkpoint=checkpoint,
@@ -600,7 +600,7 @@ def summarize_candidate(
         current=current_estimate(with_close, family_size(now), checkpoints, n_boot, seed),
         verdict=verdict,
         family_versions=checkpoint.family_versions if checkpoint else family_size(now),
-        leagues=league_breakdown(trades, now),
+        leagues=league_breakdown(bets, now),
         estimates=estimates_of(with_close, n_boot, seed),
     )
 
@@ -608,34 +608,34 @@ def summarize_candidate(
 def unscored_version(
     name: str, version: int, now: datetime
 ) -> tuple[CandidateSummary, RunningScore]:
-    """The summary and running score of a version with no trades and no registry entry, one the
+    """The summary and running score of a version with no bets and no registry entry, one the
     report omits: its figures are all empty and its family one."""
     return summarize_candidate(name, version, None, [], now, lambda _: 1), running_score([])
 
 
 def _by_version(
-    trades: Sequence[ScoredBet], registry: Sequence[Candidate]
+    bets: Sequence[ScoredBet], registry: Sequence[Candidate]
 ) -> dict[tuple[str, int], list[ScoredBet]]:
-    """``trades`` per (name, version), with every registered version present."""
+    """``bets`` per (name, version), with every registered version present."""
     by_key: dict[tuple[str, int], list[ScoredBet]] = defaultdict(list)
-    for trade in trades:
-        by_key[(trade.candidate_name, trade.candidate_version)].append(trade)
+    for bet in bets:
+        by_key[(bet.candidate_name, bet.candidate_version)].append(bet)
     for c in registry:
         by_key.setdefault((c.name, c.version), [])
     return dict(sorted(by_key.items()))
 
 
 def summarize_candidates(
-    trades: Sequence[ScoredBet],
+    bets: Sequence[ScoredBet],
     registry: Sequence[Candidate],
     now: datetime,
     decision_starts: Mapping[tuple[str, int], DecisionStart] | None = None,
     n_boot: int = DEFAULT_BOOTSTRAP_SAMPLES,
     seed: int = BOOTSTRAP_SEED,
 ) -> list[CandidateSummary]:
-    """One summary per (candidate, version) with trades, plus each registered candidate's version.
+    """One summary per (candidate, version) with bets, plus each registered candidate's version.
 
-    ``trades`` must be in placement order. A version other than the registry's has no registry entry.
+    ``bets`` must be in placement order. A version other than the registry's has no registry entry.
     A version takes the family of the leagues it decided with (``decisions``), or of the
     registry's entry for its name when it has no decision; a name absent from the registry, and
     an agent, has a family of one. ``decisions`` is as in ``family_starts``.
@@ -665,87 +665,87 @@ def summarize_candidates(
             n_boot,
             seed,
         )
-        for (name, version), versioned in _by_version(trades, registry).items()
+        for (name, version), versioned in _by_version(bets, registry).items()
     ]
 
 
 def report_candidates(
-    trades: Sequence[ScoredBet],
+    bets: Sequence[ScoredBet],
     registry: Sequence[Candidate],
     now: datetime,
     decision_starts: Mapping[tuple[str, int], DecisionStart] | None = None,
     n_boot: int = DEFAULT_BOOTSTRAP_SAMPLES,
     seed: int = BOOTSTRAP_SEED,
 ) -> CandidateReport:
-    """``summarize_candidates`` of ``trades``, with each version's running score over the same
+    """``summarize_candidates`` of ``bets``, with each version's running score over the same
     scoreable prefix at ``now``."""
     return CandidateReport(
-        summaries=summarize_candidates(trades, registry, now, decision_starts, n_boot, seed),
+        summaries=summarize_candidates(bets, registry, now, decision_starts, n_boot, seed),
         running={
             key: running_score(scoreable_prefix(versioned, now)[0])
-            for key, versioned in _by_version(trades, registry).items()
+            for key, versioned in _by_version(bets, registry).items()
         },
     )
 
 
 async def close_probabilities(
-    session: AsyncSession, rows: Sequence[tuple[PaperTrade, Event]]
+    session: AsyncSession, rows: Sequence[tuple[Bet, Event]]
 ) -> list[CloseProbability | None]:
-    """The close probability of each trade's selection on its line, in ``rows`` order; None
+    """The close probability of each bet's selection on its line, in ``rows`` order; None
     where no close is defined or exists (``selection_close_probability``)."""
     events: dict[str, dict[int, Event]] = defaultdict(dict)
-    for trade, event in rows:
-        events[trade.market][event.id] = event
+    for bet, event in rows:
+        events[bet.market][event.id] = event
     closes = {
         market: await close_quotes(session, list(by_id.values()), market)
         for market, by_id in events.items()
     }
     return [
         selection_close_probability(
-            Market(trade.market),
-            trade.selection,
-            trade.line,
+            Market(bet.market),
+            bet.selection,
+            bet.line,
             event,
-            closes.get(trade.market, {}).get(event.id, []),
+            closes.get(bet.market, {}).get(event.id, []),
         )
-        for trade, event in rows
+        for bet, event in rows
     ]
 
 
-async def load_scored_trades(session: AsyncSession) -> list[ScoredBet]:
-    """Non-void candidate trades in placement order, each with its close probability."""
+async def load_scored_bets(session: AsyncSession) -> list[ScoredBet]:
+    """Non-void candidate bets in placement order, each with its close probability."""
     stmt = (
-        select(PaperTrade, Event)
-        .join(Event, PaperTrade.event_id == Event.id)
-        .where(PaperTrade.candidate_name.is_not(None))  # type: ignore[union-attr]
-        .where(or_(PaperTrade.result.is_(None), PaperTrade.result != TradeResult.VOID))  # type: ignore[union-attr]
-        .order_by(PaperTrade.placed_at, PaperTrade.id)  # type: ignore[arg-type]
+        select(Bet, Event)
+        .join(Event, Bet.event_id == Event.id)
+        .where(Bet.candidate_name.is_not(None))  # type: ignore[union-attr]
+        .where(or_(Bet.result.is_(None), Bet.result != BetResult.VOID))  # type: ignore[union-attr]
+        .order_by(Bet.placed_at, Bet.id)  # type: ignore[arg-type]
     )
-    rows = [(trade, event) for trade, event in (await session.execute(stmt)).all()]
+    rows = [(bet, event) for bet, event in (await session.execute(stmt)).all()]
     p_closes = await close_probabilities(session, rows)
 
     scored: list[ScoredBet] = []
-    for (trade, event), p_close in zip(rows, p_closes, strict=True):
-        assert trade.candidate_name is not None and trade.candidate_version is not None
+    for (bet, event), p_close in zip(rows, p_closes, strict=True):
+        assert bet.candidate_name is not None and bet.candidate_version is not None
         scored.append(
             ScoredBet(
-                candidate_name=trade.candidate_name,
-                candidate_version=trade.candidate_version,
-                event_id=trade.event_id,
+                candidate_name=bet.candidate_name,
+                candidate_version=bet.candidate_version,
+                event_id=bet.event_id,
                 commence_time=event.commence_time,
-                stake=trade.stake,
-                pnl=trade.pnl,
-                price_decimal=trade.price_decimal,
+                stake=bet.stake,
+                pnl=bet.pnl,
+                price_decimal=bet.price_decimal,
                 p_close=None if p_close is None else p_close.proportional,
-                placed_at=trade.placed_at,
-                close_grace=close_grace(event.sport_key, trade.market),
+                placed_at=bet.placed_at,
+                close_grace=close_grace(event.sport_key, bet.market),
                 sport_key=event.sport_key,
-                selection=trade.selection,
-                line=trade.line,
-                bookmaker=trade.bookmaker,
+                selection=bet.selection,
+                line=bet.line,
+                bookmaker=bet.bookmaker,
                 p_close_power=None if p_close is None else p_close.power,
                 close_source=None if p_close is None else p_close.source,
-                estimated_ev=trade.estimated_ev,
+                estimated_ev=bet.estimated_ev,
             )
         )
     return scored
@@ -785,7 +785,7 @@ async def candidate_report(
     executor: Executor | None = None,
     replays: bool = False,
 ) -> CandidateReport:
-    """Every candidate version's summary and running score, from one read of the trades and
+    """Every candidate version's summary and running score, from one read of the bets and
     decision starts.
 
     The bootstrap runs on ``executor`` (the loop's default one when None), so a server can hold
@@ -795,18 +795,18 @@ async def candidate_report(
     # book_replays scores with this module's functions, so it cannot be imported above.
     from odds_analytics.book_replays import book_replays
 
-    trades = await load_scored_trades(session)
+    bets = await load_scored_bets(session)
     decision_starts = await load_decision_starts(session)
     now = now or datetime.now(UTC)
     report = await asyncio.get_running_loop().run_in_executor(
         executor,
-        partial(report_candidates, trades, registry, now, decision_starts, n_boot, seed),
+        partial(report_candidates, bets, registry, now, decision_starts, n_boot, seed),
     )
     if not replays:
         return report
     return replace(
         report,
         book_replays=await book_replays(
-            session, [s.registered for s in report.summaries], trades, now
+            session, [s.registered for s in report.summaries], bets, now
         ),
     )

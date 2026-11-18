@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from enum import StrEnum
 
+from odds_core.bet_models import CandidateDecision
 from odds_core.models import Event
-from odds_core.paper_trade_models import CandidateDecision
 from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 

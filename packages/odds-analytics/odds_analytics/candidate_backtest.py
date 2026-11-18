@@ -2,9 +2,9 @@
 
 Each event is decided at each of its rule's decision times, from the snapshots stamped at or
 before it, betting each selection at most once per event, and the bets are scored by
-``odds_analytics.candidate_report``: the same EV, checkpoint and verdict code as the paper
-trades, against the backtest close (``odds_core.close.backtest_close``), which adds the
-substitute to the paper trades' close. Development data can kill an idea but never promote one.
+``odds_analytics.candidate_report``: the same EV, checkpoint and verdict code as the placed
+bets, against the backtest close (``odds_core.close.backtest_close``), which adds the
+substitute to the bets' close. Development data can kill an idea but never promote one.
 """
 
 from __future__ import annotations
@@ -432,7 +432,7 @@ async def replay(
     event's times are decided earliest first, and an outcome bet at one is not bet again.
     State is built with ``known_at=None`` because backfilled rows were created long after
     their snapshot time. Bets of every league are scored as one series in decision-time order,
-    as the live report orders trades by placement, all settled.
+    as the live report orders bets by placement, all settled.
 
     A model rule decides only the matches after its training prefix, on which its
     hyperparameters are tuned, each block with the model refitted before it

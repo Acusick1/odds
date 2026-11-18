@@ -1,16 +1,16 @@
-"""CLI commands for paper trade management."""
+"""CLI commands for bet management."""
 
 import asyncio
 
 import typer
+from odds_core.bet_models import Bet
 from odds_core.database import async_session_maker
-from odds_core.paper_trade_models import PaperTrade
-from odds_lambda.paper_trading import (
+from odds_lambda.betting import (
     get_exposure_by_event,
-    get_open_trades,
+    get_open_bets,
     get_portfolio_summary,
-    get_settled_trades,
-    settle_trades,
+    get_settled_bets,
+    settle_bets,
 )
 from rich.console import Console
 from rich.table import Table
@@ -19,32 +19,32 @@ app = typer.Typer()
 console = Console()
 
 
-def _selection(trade: PaperTrade) -> str:
-    return trade.selection if trade.line is None else f"{trade.selection} {trade.line:g}"
+def _selection(bet: Bet) -> str:
+    return bet.selection if bet.line is None else f"{bet.selection} {bet.line:g}"
 
 
 @app.command("list")
-def list_trades(
-    settled: bool = typer.Option(False, "--settled", "-s", help="Show settled trades"),
-    limit: int = typer.Option(50, "--limit", "-n", help="Maximum trades to show"),
+def list_bets(
+    settled: bool = typer.Option(False, "--settled", "-s", help="Show settled bets"),
+    limit: int = typer.Option(50, "--limit", "-n", help="Maximum bets to show"),
 ) -> None:
-    """List open or settled paper trades."""
-    asyncio.run(_list_trades(settled, limit))
+    """List open or settled bets."""
+    asyncio.run(_list_bets(settled, limit))
 
 
-async def _list_trades(settled: bool, limit: int) -> None:
+async def _list_bets(settled: bool, limit: int) -> None:
     header = "Settled" if settled else "Open"
-    console.print(f"\n[bold blue]{header} Paper Trades[/bold blue]\n")
+    console.print(f"\n[bold blue]{header} Bets[/bold blue]\n")
 
     try:
         async with async_session_maker() as session:
             if settled:
-                trades = await get_settled_trades(session, limit=limit)
+                bets = await get_settled_bets(session, limit=limit)
             else:
-                trades = await get_open_trades(session)
+                bets = await get_open_bets(session)
 
-            if not trades:
-                console.print(f"[yellow]No {header.lower()} trades found[/yellow]\n")
+            if not bets:
+                console.print(f"[yellow]No {header.lower()} bets found[/yellow]\n")
                 return
 
             table = Table()
@@ -58,14 +58,14 @@ async def _list_trades(settled: bool, limit: int) -> None:
                 table.add_column("Result")
                 table.add_column("P&L", justify="right")
 
-            for trade in trades:
+            for bet in bets:
                 row = [
-                    str(trade.id),
-                    str(trade.event_id),
-                    _selection(trade),
-                    trade.bookmaker,
-                    f"{trade.price_decimal:.2f}",
-                    f"{trade.stake:.2f}",
+                    str(bet.id),
+                    str(bet.event_id),
+                    _selection(bet),
+                    bet.bookmaker,
+                    f"{bet.price_decimal:.2f}",
+                    f"{bet.stake:.2f}",
                 ]
                 if settled:
                     result_color = {
@@ -73,15 +73,15 @@ async def _list_trades(settled: bool, limit: int) -> None:
                         "loss": "red",
                         "push": "yellow",
                         "void": "dim",
-                    }.get(trade.result.value if trade.result else "", "white")
-                    result_str = trade.result.value if trade.result else "-"
-                    pnl_str = f"{trade.pnl:+.2f}" if trade.pnl is not None else "-"
+                    }.get(bet.result.value if bet.result else "", "white")
+                    result_str = bet.result.value if bet.result else "-"
+                    pnl_str = f"{bet.pnl:+.2f}" if bet.pnl is not None else "-"
                     row.append(f"[{result_color}]{result_str}[/{result_color}]")
                     row.append(pnl_str)
                 table.add_row(*row)
 
             console.print(table)
-            console.print(f"\n{len(trades)} trade(s)\n")
+            console.print(f"\n{len(bets)} bet(s)\n")
 
     except Exception as e:
         console.print(f"\n[bold red]Failed: {e}[/bold red]")
@@ -90,20 +90,20 @@ async def _list_trades(settled: bool, limit: int) -> None:
 
 @app.command("settle")
 def settle() -> None:
-    """Settle unsettled trades against final event scores."""
+    """Settle unsettled bets against final event scores."""
     asyncio.run(_settle())
 
 
 async def _settle() -> None:
-    console.print("\n[bold blue]Settling Paper Trades[/bold blue]\n")
+    console.print("\n[bold blue]Settling Bets[/bold blue]\n")
 
     try:
         async with async_session_maker() as session:
-            settled = await settle_trades(session)
+            settled = await settle_bets(session)
             await session.commit()
 
             if not settled:
-                console.print("[yellow]No trades to settle[/yellow]\n")
+                console.print("[yellow]No bets to settle[/yellow]\n")
                 return
 
             table = Table()
@@ -113,26 +113,26 @@ async def _settle() -> None:
             table.add_column("Result")
             table.add_column("P&L", justify="right")
 
-            for trade in settled:
+            for bet in settled:
                 result_color = {
                     "win": "green",
                     "loss": "red",
                     "push": "yellow",
-                }.get(trade.result.value if trade.result else "", "white")
-                result_str = trade.result.value if trade.result else "-"
-                pnl_str = f"{trade.pnl:+.2f}" if trade.pnl is not None else "-"
+                }.get(bet.result.value if bet.result else "", "white")
+                result_str = bet.result.value if bet.result else "-"
+                pnl_str = f"{bet.pnl:+.2f}" if bet.pnl is not None else "-"
 
                 table.add_row(
-                    str(trade.id),
-                    str(trade.event_id),
-                    _selection(trade),
+                    str(bet.id),
+                    str(bet.event_id),
+                    _selection(bet),
                     f"[{result_color}]{result_str}[/{result_color}]",
                     pnl_str,
                 )
 
             console.print(table)
             total_pnl = sum(t.pnl for t in settled if t.pnl is not None)
-            console.print(f"\nSettled {len(settled)} trade(s), net P&L: {total_pnl:+.2f}\n")
+            console.print(f"\nSettled {len(settled)} bet(s), net P&L: {total_pnl:+.2f}\n")
 
     except Exception as e:
         console.print(f"\n[bold red]Failed: {e}[/bold red]")
@@ -148,7 +148,7 @@ def summary(
 
 
 async def _summary(initial_bankroll: float) -> None:
-    console.print("\n[bold blue]Paper Trading Portfolio[/bold blue]\n")
+    console.print("\n[bold blue]Betting Portfolio[/bold blue]\n")
 
     try:
         async with async_session_maker() as session:
@@ -171,9 +171,9 @@ async def _summary(initial_bankroll: float) -> None:
             )
             table.add_row("Total Staked", f"${portfolio.total_staked:,.2f}")
             table.add_row("", "")
-            table.add_row("Total Trades", str(portfolio.total_trades))
-            table.add_row("Settled", str(portfolio.settled_trades))
-            table.add_row("Open", str(portfolio.open_trades))
+            table.add_row("Total Bets", str(portfolio.total_bets))
+            table.add_row("Settled", str(portfolio.settled_bets))
+            table.add_row("Open", str(portfolio.open_bets))
             table.add_row(
                 "Record",
                 f"{portfolio.win_count}W / {portfolio.loss_count}L / {portfolio.push_count}P",

@@ -95,9 +95,9 @@ def fduk_session(
 
 @pytest.fixture
 async def live_twin_with_rows(pglite_async_session):
-    """An event owning a snapshot, paper trade and match brief."""
+    """An event owning a snapshot, bet and match brief."""
+    from odds_core.bet_models import Bet
     from odds_core.match_brief_models import BriefDecision, MatchBrief
-    from odds_core.paper_trade_models import PaperTrade
 
     session = pglite_async_session
     session.add(make_epl_event(TWIN_EVENT_ID))
@@ -115,7 +115,7 @@ async def live_twin_with_rows(pglite_async_session):
 
     session.add_all(
         [
-            PaperTrade(
+            Bet(
                 event_id=TWIN_EVENT_ID,
                 market="h2h",
                 selection="home",

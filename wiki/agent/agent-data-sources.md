@@ -19,7 +19,7 @@ Every odds feed, and what each supplies, is on [data sources](../collection/data
 
 ## On-demand research
 
-Not collected on a schedule; the agent searches and browses these each wake-up with web search and Playwright (the list is in `packages/odds-mcp/agents/epl/base.md`; MLB sources are in `packages/odds-mcp/agents/mlb/base.md`). Nothing in the repo fetches these sites: what the agent does with them is defined only by the prompt files ([prompts](betting-agent.md#prompts)). Odds for an event come through the MCP tools under its one integer event id, whichever source stored them ([market tools](mcp-market-tools.md)).
+Not collected on a schedule; the agent searches and browses these each wake-up with web search and Playwright (the list is in `packages/odds-mcp/agents/epl/base.md`; MLB sources are in `packages/odds-mcp/agents/mlb/base.md`). Nothing in the repo fetches these sites: only the prompt files define what the agent does with them ([prompts](betting-agent.md#prompts)). Odds for an event come through the MCP tools under its one integer event id, whichever source stored them ([market tools](mcp-market-tools.md)).
 
 | Source | Provides | Use |
 |---|---|---|

@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from odds_core.bet_models import CandidateDecision
 from odds_core.models import (
     DataQualityLog,
     Event,
@@ -15,7 +16,6 @@ from odds_core.models import (
     Price,
     SnapshotPayload,
 )
-from odds_core.paper_trade_models import CandidateDecision
 from odds_core.vocabulary import Market, PriceOutcome, Side, Source, TimeBasis
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.tier_utils import snapshot_tiers

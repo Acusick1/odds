@@ -1,4 +1,4 @@
-"""Paper trade settlement and portfolio query service."""
+"""Bet settlement and portfolio query service."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import structlog
+from odds_core.bet_models import Bet, BetResult, SharpReading
 from odds_core.candidates import CandidateStatus, candidates_dir, load_candidates
 from odds_core.git_info import current_git_sha
 from odds_core.market_prices import (
@@ -20,7 +21,6 @@ from odds_core.odds_math import (
     decimal_to_implied_probability,
     selection_won,
 )
-from odds_core.paper_trade_models import PaperTrade, SharpReading, TradeResult
 from odds_core.utils import is_three_way_sport
 from odds_core.vocabulary import Market
 from sqlalchemy import func, select
@@ -36,12 +36,12 @@ VOIDING_STATUSES = (EventStatus.CANCELLED,)
 
 @dataclass(frozen=True)
 class PortfolioSummary:
-    """Snapshot of paper trading portfolio state."""
+    """Snapshot of betting portfolio state."""
 
     current_bankroll: float
-    total_trades: int
-    settled_trades: int
-    open_trades: int
+    total_bets: int
+    settled_bets: int
+    open_bets: int
     total_pnl: float
     total_staked: float
     roi: float
@@ -50,8 +50,8 @@ class PortfolioSummary:
     push_count: int
 
 
-# Flat-stake candidate trades record no bankroll and stay out of the agent's bankroll maths.
-BANKROLL_SIZED = PaperTrade.bankroll_before.is_not(None)  # type: ignore[union-attr]
+# Flat-stake candidate bets record no bankroll and stay out of the agent's bankroll maths.
+BANKROLL_SIZED = Bet.bankroll_before.is_not(None)  # type: ignore[union-attr]
 
 
 def _check_candidate(name: str, version: int, event: Event, market: str) -> None:
@@ -72,10 +72,10 @@ def _check_candidate(name: str, version: int, event: Event, market: str) -> None
             f"({event.id})"
         )
     if market == TWO_WAY_MARKET and is_three_way_sport(event.sport_key):
-        raise ValueError(f"{event.sport_key} trades use '{THREE_WAY_MARKET}', not '{market}'")
+        raise ValueError(f"{event.sport_key} bets use '{THREE_WAY_MARKET}', not '{market}'")
 
 
-async def place_trade(
+async def place_bet(
     session: AsyncSession,
     *,
     event_id: int,
@@ -93,10 +93,10 @@ async def place_trade(
     decision_id: int | None = None,
     sharp: SharpReading | None = None,
     estimated_ev: float | None = None,
-) -> PaperTrade:
-    """Place a new paper trade. Validates stake against bankroll and the candidate.
+) -> Bet:
+    """Place a new bet. Validates stake against bankroll and the candidate.
 
-    ``bankroll=None`` places a flat-stake candidate trade, which records no bankroll. ``line``
+    ``bankroll=None`` places a flat-stake candidate bet, which records no bankroll. ``line``
     is the selection's line, a half line in a market with lines and None otherwise. ``sharp``
     is the sharp market's reading of the selection at placement, if one was taken and found.
     ``estimated_ev`` is the EV a candidate's rule estimated for the bet at decision time.
@@ -107,7 +107,7 @@ async def place_trade(
         raise ValueError("Stake must be positive")
     if bankroll is None:
         if candidate_name is None:
-            raise ValueError("A trade without a candidate needs a bankroll")
+            raise ValueError("A bet without a candidate needs a bankroll")
     elif stake > bankroll:
         raise ValueError(f"Stake {stake} exceeds available bankroll {bankroll}")
     if market not in SETTLEABLE_MARKETS:
@@ -143,7 +143,7 @@ async def place_trade(
             raise ValueError(f"Event '{event_id}' not found")
         _check_candidate(candidate_name, candidate_version, candidate_event, market)
 
-    trade = PaperTrade(
+    bet = Bet(
         event_id=event_id,
         market=market,
         selection=selection,
@@ -161,99 +161,97 @@ async def place_trade(
         estimated_ev=estimated_ev,
     )
     if sharp is not None:
-        trade.sharp_probability = sharp.probability
-        trade.sharp_bookmaker = sharp.bookmaker
-        trade.sharp_snapshot_time = sharp.snapshot_time
-        trade.sharp_spread = decimal_to_implied_probability(price_decimal) - sharp.probability
-    session.add(trade)
+        bet.sharp_probability = sharp.probability
+        bet.sharp_bookmaker = sharp.bookmaker
+        bet.sharp_snapshot_time = sharp.snapshot_time
+        bet.sharp_spread = decimal_to_implied_probability(price_decimal) - sharp.probability
+    session.add(bet)
     await session.flush()
-    return trade
+    return bet
 
 
-async def settle_trades(session: AsyncSession) -> list[PaperTrade]:
-    """Settle unsettled trades on FINAL events and void those on cancelled ones.
+async def settle_bets(session: AsyncSession) -> list[Bet]:
+    """Settle unsettled bets on FINAL events and void those on cancelled ones.
 
-    A FINAL event settles only with both scores, and a totals trade only on a half line.
+    A FINAL event settles only with both scores, and a totals bet only on a half line.
     Idempotent.
     """
     played = (Event.status == EventStatus.FINAL) & (
         Event.home_score.is_not(None) & Event.away_score.is_not(None)  # type: ignore[union-attr]
     )
     stmt = (
-        select(PaperTrade, Event)
-        .join(Event, PaperTrade.event_id == Event.id)
-        .where(PaperTrade.settled_at.is_(None))  # type: ignore[union-attr]
+        select(Bet, Event)
+        .join(Event, Bet.event_id == Event.id)
+        .where(Bet.settled_at.is_(None))  # type: ignore[union-attr]
         .where(played | Event.status.in_(VOIDING_STATUSES))  # type: ignore[attr-defined]
     )
     rows = (await session.execute(stmt)).all()
 
-    settled: list[PaperTrade] = []
+    settled: list[Bet] = []
     now = datetime.now(UTC)
 
-    for trade, event in rows:
+    for bet, event in rows:
         if event.status in VOIDING_STATUSES:
-            result = TradeResult.VOID
-        elif trade.market in SETTLEABLE_MARKETS:
+            result = BetResult.VOID
+        elif bet.market in SETTLEABLE_MARKETS:
             assert event.home_score is not None
             assert event.away_score is not None
             try:
-                won = selection_won(trade.selection, trade.line, event.home_score, event.away_score)
+                won = selection_won(bet.selection, bet.line, event.home_score, event.away_score)
             except ValueError:
                 logger.error(
-                    "paper_trade_unsettleable_line",
-                    trade_id=trade.id,
-                    market=trade.market,
-                    selection=trade.selection,
-                    line=trade.line,
+                    "bet_unsettleable_line",
+                    bet_id=bet.id,
+                    market=bet.market,
+                    selection=bet.selection,
+                    line=bet.line,
                 )
                 continue
-            result = TradeResult.WIN if won else TradeResult.LOSS
+            result = BetResult.WIN if won else BetResult.LOSS
         else:
-            logger.error("paper_trade_unsupported_market", trade_id=trade.id, market=trade.market)
+            logger.error("bet_unsupported_market", bet_id=bet.id, market=bet.market)
             continue
 
         pnl = (
             calculate_profit_from_decimal(
-                trade.stake, trade.price_decimal, won=(result == TradeResult.WIN)
+                bet.stake, bet.price_decimal, won=(result == BetResult.WIN)
             )
-            if result in (TradeResult.WIN, TradeResult.LOSS)
+            if result in (BetResult.WIN, BetResult.LOSS)
             else 0.0
         )
 
-        trade.result = result
-        trade.pnl = pnl
-        if trade.bankroll_before is not None:
-            trade.bankroll_after = trade.bankroll_before + pnl
-        trade.settled_at = now
+        bet.result = result
+        bet.pnl = pnl
+        if bet.bankroll_before is not None:
+            bet.bankroll_after = bet.bankroll_before + pnl
+        bet.settled_at = now
 
-        session.add(trade)
-        settled.append(trade)
+        session.add(bet)
+        settled.append(bet)
 
     await session.flush()
     return settled
 
 
-async def get_open_trades(
-    session: AsyncSession, *, include_flat_stake: bool = True
-) -> list[PaperTrade]:
-    """Return all unsettled paper trades, optionally only those sized from a bankroll."""
-    stmt = select(PaperTrade).where(PaperTrade.settled_at.is_(None))  # type: ignore[union-attr]
+async def get_open_bets(session: AsyncSession, *, include_flat_stake: bool = True) -> list[Bet]:
+    """Return all unsettled bets, optionally only those sized from a bankroll."""
+    stmt = select(Bet).where(Bet.settled_at.is_(None))  # type: ignore[union-attr]
     if not include_flat_stake:
         stmt = stmt.where(BANKROLL_SIZED)
-    result = await session.execute(stmt.order_by(PaperTrade.placed_at.desc()))  # type: ignore[union-attr]
+    result = await session.execute(stmt.order_by(Bet.placed_at.desc()))  # type: ignore[union-attr]
     return list(result.scalars().all())
 
 
-async def get_settled_trades(
+async def get_settled_bets(
     session: AsyncSession,
     *,
     limit: int = 50,
-) -> list[PaperTrade]:
-    """Return settled paper trades, most recent first."""
+) -> list[Bet]:
+    """Return settled bets, most recent first."""
     stmt = (
-        select(PaperTrade)
-        .where(PaperTrade.settled_at.is_not(None))  # type: ignore[union-attr]
-        .order_by(PaperTrade.settled_at.desc())  # type: ignore[union-attr]
+        select(Bet)
+        .where(Bet.settled_at.is_not(None))  # type: ignore[union-attr]
+        .order_by(Bet.settled_at.desc())  # type: ignore[union-attr]
         .limit(limit)
     )
     result = await session.execute(stmt)
@@ -265,26 +263,26 @@ async def get_portfolio_summary(
     *,
     initial_bankroll: float = 1000.0,
 ) -> PortfolioSummary:
-    """Compute aggregate portfolio metrics over the trades sized from a bankroll."""
+    """Compute aggregate portfolio metrics over the bets sized from a bankroll."""
     # Total counts
-    total_stmt = select(func.count()).select_from(PaperTrade).where(BANKROLL_SIZED)
-    total_trades = (await session.execute(total_stmt)).scalar_one()
+    total_stmt = select(func.count()).select_from(Bet).where(BANKROLL_SIZED)
+    total_bets = (await session.execute(total_stmt)).scalar_one()
 
     # Settled aggregates
     settled_stmt = select(
         func.count(),
-        func.coalesce(func.sum(PaperTrade.pnl), 0.0),
-        func.coalesce(func.sum(PaperTrade.stake), 0.0),
-    ).where(PaperTrade.settled_at.is_not(None), BANKROLL_SIZED)  # type: ignore[union-attr]
+        func.coalesce(func.sum(Bet.pnl), 0.0),
+        func.coalesce(func.sum(Bet.stake), 0.0),
+    ).where(Bet.settled_at.is_not(None), BANKROLL_SIZED)  # type: ignore[union-attr]
     settled_row = (await session.execute(settled_stmt)).one()
     settled_count: int = settled_row[0]
     total_pnl: float = float(settled_row[1])
     total_staked: float = float(settled_row[2])
 
-    # Open trade exposure
+    # Open bet exposure
     open_stmt = (
-        select(func.count(), func.coalesce(func.sum(PaperTrade.stake), 0.0)).where(
-            PaperTrade.settled_at.is_(None), BANKROLL_SIZED
+        select(func.count(), func.coalesce(func.sum(Bet.stake), 0.0)).where(
+            Bet.settled_at.is_(None), BANKROLL_SIZED
         )  # type: ignore[union-attr]
     )
     open_row = (await session.execute(open_stmt)).one()
@@ -293,19 +291,13 @@ async def get_portfolio_summary(
 
     # Win/loss/push counts
     win_stmt = (
-        select(func.count())
-        .select_from(PaperTrade)
-        .where(PaperTrade.result == TradeResult.WIN, BANKROLL_SIZED)
+        select(func.count()).select_from(Bet).where(Bet.result == BetResult.WIN, BANKROLL_SIZED)
     )
     loss_stmt = (
-        select(func.count())
-        .select_from(PaperTrade)
-        .where(PaperTrade.result == TradeResult.LOSS, BANKROLL_SIZED)
+        select(func.count()).select_from(Bet).where(Bet.result == BetResult.LOSS, BANKROLL_SIZED)
     )
     push_stmt = (
-        select(func.count())
-        .select_from(PaperTrade)
-        .where(PaperTrade.result == TradeResult.PUSH, BANKROLL_SIZED)
+        select(func.count()).select_from(Bet).where(Bet.result == BetResult.PUSH, BANKROLL_SIZED)
     )
 
     win_count = (await session.execute(win_stmt)).scalar_one()
@@ -317,9 +309,9 @@ async def get_portfolio_summary(
 
     return PortfolioSummary(
         current_bankroll=current_bankroll,
-        total_trades=total_trades,
-        settled_trades=settled_count,
-        open_trades=open_count,
+        total_bets=total_bets,
+        settled_bets=settled_count,
+        open_bets=open_count,
         total_pnl=total_pnl,
         total_staked=total_staked,
         roi=roi,
@@ -330,12 +322,12 @@ async def get_portfolio_summary(
 
 
 async def get_exposure_by_event(session: AsyncSession) -> list[tuple[str, float]]:
-    """Return total open stake per event over the trades sized from a bankroll."""
+    """Return total open stake per event over the bets sized from a bankroll."""
     stmt = (
-        select(PaperTrade.event_id, func.sum(PaperTrade.stake))
-        .where(PaperTrade.settled_at.is_(None), BANKROLL_SIZED)  # type: ignore[union-attr]
-        .group_by(PaperTrade.event_id)
-        .order_by(func.sum(PaperTrade.stake).desc())
+        select(Bet.event_id, func.sum(Bet.stake))
+        .where(Bet.settled_at.is_(None), BANKROLL_SIZED)  # type: ignore[union-attr]
+        .group_by(Bet.event_id)
+        .order_by(func.sum(Bet.stake).desc())
     )
     rows = (await session.execute(stmt)).all()
     return [(row[0], float(row[1])) for row in rows]

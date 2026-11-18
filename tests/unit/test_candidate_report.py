@@ -27,10 +27,10 @@ from odds_analytics.candidate_report import (
     summarize_candidates,
 )
 from odds_cli.main import app
+from odds_core.bet_models import Bet, BetResult
 from odds_core.candidates import AgentCandidate, CandidateStatus
 from odds_core.close import close_quotes, event_close
 from odds_core.models import Event, EventStatus
-from odds_core.paper_trade_models import PaperTrade, TradeResult
 from odds_core.quotes import Quote, quotes
 from odds_core.vocabulary import Market, PriceOutcome, Side, Source, TimeBasis
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,7 +56,7 @@ def one(_when: datetime) -> int:
     return 1
 
 
-def trade(
+def bet(
     index: int,
     ev: float | None = 0.5,
     *,
@@ -70,7 +70,7 @@ def trade(
     sport_key: str = "soccer_epl",
     estimated_ev: float | None = None,
 ) -> ScoredBet:
-    """A trade at price 3.0 whose EV is ``ev`` (p_close = (1 + ev) / 3), None for no close."""
+    """A bet at price 3.0 whose EV is ``ev`` (p_close = (1 + ev) / 3), None for no close."""
     return ScoredBet(
         candidate_name=name,
         candidate_version=version,
@@ -92,12 +92,12 @@ def trade(
     )
 
 
-def trades(n: int, ev: float = 0.5, start: int = 0) -> list[ScoredBet]:
-    return [trade(start + i, ev) for i in range(n)]
+def bets(n: int, ev: float = 0.5, start: int = 0) -> list[ScoredBet]:
+    return [bet(start + i, ev) for i in range(n)]
 
 
 def noise(n: int, start: int = 0) -> list[ScoredBet]:
-    return [trade(start + i, 1.0 if i % 2 else -1.0) for i in range(n)]
+    return [bet(start + i, 1.0 if i % 2 else -1.0) for i in range(n)]
 
 
 def summary_of(sequence: list[ScoredBet], now: datetime = NOW):
@@ -142,8 +142,8 @@ class TestEv:
         assert t.ev_power == pytest.approx(0.125)
 
     def test_no_close_has_no_ev(self) -> None:
-        assert trade(0, ev=None).ev is None
-        assert trade(0, ev=None).ev_power is None
+        assert bet(0, ev=None).ev is None
+        assert bet(0, ev=None).ev_power is None
 
 
 class TestPowerDevig:
@@ -225,35 +225,35 @@ def close_quotes_of(
 
 class TestCheckpoint:
     def test_under_one_checkpoint_is_not_yet(self) -> None:
-        summary = summary_of(trades(99))
+        summary = summary_of(bets(99))
         assert summary.checkpoint is None
         assert summary.verdict is Verdict.NOT_YET
 
     def test_exactly_100_scores_all(self) -> None:
-        checkpoint = checkpoint_at(trades(100), 100, 1, N_BOOT, 0)
+        checkpoint = checkpoint_at(bets(100), 100, 1, N_BOOT, 0)
         assert checkpoint.n == 100
         assert checkpoint.mean_ev == pytest.approx(0.5)
 
     def test_checkpoint_scores_only_the_earliest_n(self) -> None:
-        sequence = trades(200, 0.5) + trades(50, -0.5, start=200)
+        sequence = bets(200, 0.5) + bets(50, -0.5, start=200)
         assert checkpoint_at(sequence, 200, 1, N_BOOT, 0).mean_ev == pytest.approx(0.5)
 
     def test_mean_is_stake_weighted(self) -> None:
-        sequence = [trade(i, 1.0, stake=3.0) for i in range(50)] + [
-            trade(50 + i, -1.0, stake=1.0) for i in range(50)
+        sequence = [bet(i, 1.0, stake=3.0) for i in range(50)] + [
+            bet(50 + i, -1.0, stake=1.0) for i in range(50)
         ]
         assert checkpoint_at(sequence, 100, 1, N_BOOT, 0).mean_ev == pytest.approx(0.5)
 
     def test_events_are_resampled_as_clusters(self) -> None:
-        sequence = [trade(i, 1.0, event_id=1) for i in range(50)] + [
-            trade(50 + i, -1.0, event_id=2) for i in range(50)
+        sequence = [bet(i, 1.0, event_id=1) for i in range(50)] + [
+            bet(50 + i, -1.0, event_id=2) for i in range(50)
         ]
         checkpoint = checkpoint_at(sequence, 100, 1, N_BOOT, 0)
         assert checkpoint.mean_ev == pytest.approx(0.0)
         assert checkpoint.promote_ci == pytest.approx((-1.0, 1.0))
 
     def test_seed_is_deterministic(self) -> None:
-        sequence = [trade(i, 1.0 if i % 3 else -1.0) for i in range(100)]
+        sequence = [bet(i, 1.0 if i % 3 else -1.0) for i in range(100)]
         assert checkpoint_at(sequence, 100, 1, N_BOOT, 7) == checkpoint_at(
             sequence, 100, 1, N_BOOT, 7
         )
@@ -263,20 +263,20 @@ class TestCurrentEstimate:
     """The current estimate is separate from the verdict's checkpoints."""
 
     def test_below_a_checkpoint_there_is_an_estimate_and_no_checkpoint(self) -> None:
-        summary = summary_of(trades(64, 0.5))
+        summary = summary_of(bets(64, 0.5))
         assert summary.checkpoint is None and summary.checkpoints == ()
         assert summary.current is not None and summary.current.n == 64
         assert summary.verdict is Verdict.NOT_YET
 
     def test_one_event_has_no_estimate(self) -> None:
-        sequence = [trade(i, event_id=1) for i in range(5)]
+        sequence = [bet(i, event_id=1) for i in range(5)]
         assert summary_of(sequence).current is None
 
     def test_no_bets_with_a_close_have_no_estimate(self) -> None:
-        assert summary_of([trade(0, None)]).current is None
+        assert summary_of([bet(0, None)]).current is None
 
     def test_the_verdict_checkpoint_is_frozen_while_the_estimate_follows_the_bets(self) -> None:
-        summary = summary_of(trades(100, 0.5) + trades(100, -0.5, start=100))
+        summary = summary_of(bets(100, 0.5) + bets(100, -0.5, start=100))
         assert summary.verdict is Verdict.PROMOTE
         assert summary.checkpoint is not None and summary.checkpoint.n == 100
         assert [c.n for c in summary.checkpoints] == [100]
@@ -285,7 +285,7 @@ class TestCurrentEstimate:
         assert summary.checkpoint.mean_ev == pytest.approx(0.5)
 
     def test_the_estimate_is_the_checkpoint_when_both_score_the_same_bets(self) -> None:
-        summary = summary_of(trades(100, 0.5))
+        summary = summary_of(bets(100, 0.5))
         assert summary.current is summary.checkpoint
 
     def test_the_estimate_uses_the_family_size_now(self) -> None:
@@ -295,7 +295,7 @@ class TestCurrentEstimate:
             ("b", 1): DecisionStart(NOW - timedelta(days=1), frozenset({"soccer_epl"})),
         }
         summaries = summarize_candidates(
-            [trade(i, name="a") for i in range(150)], registry, NOW, decisions, N_BOOT
+            [bet(i, name="a") for i in range(150)], registry, NOW, decisions, N_BOOT
         )
         a = next(s for s in summaries if s.name == "a")
         assert a.checkpoint is not None and a.checkpoint.family_versions == 1
@@ -305,12 +305,12 @@ class TestCurrentEstimate:
 
 class TestVerdict:
     def test_promote_when_99_lower_bound_above_zero(self) -> None:
-        verdict, checkpoints = judge(trades(100, 0.5), one, N_BOOT, 0)
+        verdict, checkpoints = judge(bets(100, 0.5), one, N_BOOT, 0)
         assert verdict is Verdict.PROMOTE
         assert [c.n for c in checkpoints] == [100]
 
     def test_kill_when_95_upper_bound_at_or_below_zero(self) -> None:
-        assert judge(trades(100, -0.5), one, N_BOOT, 0)[0] is Verdict.KILL
+        assert judge(bets(100, -0.5), one, N_BOOT, 0)[0] is Verdict.KILL
 
     def test_continue_when_interval_straddles_zero(self) -> None:
         verdict, checkpoints = judge(noise(400), one, N_BOOT, 0)
@@ -323,33 +323,33 @@ class TestVerdict:
         assert checkpoints[-1].n == 500
 
     def test_promotion_at_500_beats_the_kill_limit(self) -> None:
-        assert judge(trades(500, 0.5), one, N_BOOT, 0)[0] is Verdict.PROMOTE
+        assert judge(bets(500, 0.5), one, N_BOOT, 0)[0] is Verdict.PROMOTE
 
     def test_no_checkpoint_is_not_yet(self) -> None:
-        assert judge(trades(99), one, N_BOOT, 0) == (Verdict.NOT_YET, [])
+        assert judge(bets(99), one, N_BOOT, 0) == (Verdict.NOT_YET, [])
 
     def test_first_verdict_stands_when_later_bets_reverse_the_estimate(self) -> None:
-        sequence = trades(100, 0.5) + trades(300, -0.5, start=100)
+        sequence = bets(100, 0.5) + bets(300, -0.5, start=100)
         verdict, checkpoints = judge(sequence, one, N_BOOT, 0)
         assert verdict is Verdict.PROMOTE
         assert [c.n for c in checkpoints] == [100]
         assert checkpoint_at(sequence, 400, 1, N_BOOT, 0).promote_ci[0] < 0
 
     def test_a_kill_stands_when_later_bets_recover(self) -> None:
-        sequence = trades(100, -0.5) + trades(300, 0.5, start=100)
+        sequence = bets(100, -0.5) + bets(300, 0.5, start=100)
         verdict, checkpoints = judge(sequence, one, N_BOOT, 0)
         assert verdict is Verdict.KILL
         assert [c.n for c in checkpoints] == [100]
 
     def test_summary_carries_the_checkpoint_of_the_verdict(self) -> None:
-        summary = summary_of(trades(100, 0.5) + trades(100, -0.5, start=100))
+        summary = summary_of(bets(100, 0.5) + bets(100, -0.5, start=100))
         assert summary.verdict is Verdict.PROMOTE
         assert summary.checkpoint is not None and summary.checkpoint.n == 100
 
 
 class TestPrefix:
     def test_no_close_is_skipped_once_final_and_not_counted_toward_n(self) -> None:
-        sequence = trades(60) + [trade(100 + i, None) for i in range(50)] + trades(60, start=200)
+        sequence = bets(60) + [bet(100 + i, None) for i in range(50)] + bets(60, start=200)
         summary = summary_of(sequence)
         assert summary.settled_bets == 170
         assert summary.bets_with_close == 120
@@ -357,8 +357,8 @@ class TestPrefix:
         assert summary.pending_bets == 0
         assert summary.checkpoint is not None and summary.checkpoint.n == 100
 
-    def test_unsettled_trade_ends_the_prefix(self) -> None:
-        sequence = trades(60) + [trade(60, pnl=None)] + trades(60, start=61)
+    def test_unsettled_bet_ends_the_prefix(self) -> None:
+        sequence = bets(60) + [bet(60, pnl=None)] + bets(60, start=61)
         summary = summary_of(sequence)
         assert summary.bets_with_close == 60
         assert summary.pending_bets == 61
@@ -367,7 +367,7 @@ class TestPrefix:
 
     def test_recent_no_close_ends_the_prefix_until_the_grace_passes(self) -> None:
         kickoff = NOW - timedelta(days=3)
-        sequence = trades(60) + [trade(60, None, commence_time=kickoff)] + trades(60, start=61)
+        sequence = bets(60) + [bet(60, None, commence_time=kickoff)] + bets(60, start=61)
         waiting = summary_of(sequence)
         assert (waiting.bets_with_close, waiting.bets_without_close) == (60, 0)
         assert waiting.pending_bets == 61
@@ -378,28 +378,28 @@ class TestPrefix:
 
     def test_a_recent_no_close_is_final_where_no_fallback_arrives_late(self) -> None:
         kickoff = NOW - timedelta(days=3)
-        no_wait = trade(60, None, commence_time=kickoff, close_grace=timedelta(0))
-        summary = summary_of(trades(60) + [no_wait] + trades(60, start=61))
+        no_wait = bet(60, None, commence_time=kickoff, close_grace=timedelta(0))
+        summary = summary_of(bets(60) + [no_wait] + bets(60, start=61))
         assert (summary.bets_with_close, summary.bets_without_close) == (120, 1)
         assert summary.pending_bets == 0
 
-    def test_trades_placed_earlier_count_first(self) -> None:
+    def test_bets_placed_earlier_count_first(self) -> None:
         """A later-placed bet that settles first never takes an earlier bet's place."""
-        sequence = [trade(0, pnl=None), *trades(100, start=1)]
+        sequence = [bet(0, pnl=None), *bets(100, start=1)]
         assert summary_of(sequence).checkpoint is None
 
     def test_prefix_is_fixed_once_final(self) -> None:
-        before = trades(100, 0.5) + [trade(100, None, commence_time=NOW - timedelta(days=1))]
-        after = before + trades(50, -0.5, start=101)
+        before = bets(100, 0.5) + [bet(100, None, commence_time=NOW - timedelta(days=1))]
+        after = before + bets(50, -0.5, start=101)
         assert summary_of(before).checkpoint == summary_of(after).checkpoint
 
 
 class TestSummaries:
-    def test_totals_and_roi_cover_settled_trades(self) -> None:
+    def test_totals_and_roi_cover_settled_bets(self) -> None:
         sequence = [
-            trade(0, 0.5, stake=10.0, pnl=20.0),
-            trade(1, None, stake=5.0, pnl=-5.0),
-            trade(2, 0.5, stake=7.0, pnl=None),
+            bet(0, 0.5, stake=10.0, pnl=20.0),
+            bet(1, None, stake=5.0, pnl=-5.0),
+            bet(2, 0.5, stake=7.0, pnl=None),
         ]
         summary = summary_of(sequence)
         assert summary.total_stake == 15.0
@@ -407,7 +407,7 @@ class TestSummaries:
         assert summary.roi == pytest.approx(1.0)
 
     def test_versions_are_separate_and_unregistered_has_no_status(self) -> None:
-        sequence = [trade(0, version=1), trade(1, version=2)]
+        sequence = [bet(0, version=1), bet(1, version=2)]
         by_version = {
             s.version: s
             for s in summarize_candidates(sequence, [registry_entry(version=2)], NOW, n_boot=N_BOOT)
@@ -417,7 +417,7 @@ class TestSummaries:
         assert by_version[1].settled_bets == by_version[2].settled_bets == 1
 
     def test_each_version_carries_its_own_registry_entry(self) -> None:
-        sequence = [trade(0, version=1), trade(1, version=2)]
+        sequence = [bet(0, version=1), bet(1, version=2)]
         v1, v2 = registry_entry(version=1), registry_entry(version=2)
         v2 = v2.model_copy(update={"sports": ("basketball_nba",), "status": CandidateStatus.KILLED})
 
@@ -431,14 +431,14 @@ class TestSummaries:
         assert both[1].registered == v1 and both[1].registered.sports == ("soccer_epl",)
         assert both[2].registered.sports == ("basketball_nba",)  # type: ignore[union-attr]
 
-    def test_registered_candidate_without_trades_is_listed(self) -> None:
+    def test_registered_candidate_without_bets_is_listed(self) -> None:
         summary = summarize_candidates([], [registry_entry("fresh", 4)], NOW, n_boot=N_BOOT)[0]
         assert (summary.name, summary.version, summary.settled_bets) == ("fresh", 4, 0)
         assert summary.roi == 0.0
         assert summary.verdict is Verdict.NOT_YET
 
-    def test_trades_of_a_candidate_missing_from_registry_are_listed(self) -> None:
-        summary = summarize_candidates([trade(0, name="ghost")], [], NOW, n_boot=N_BOOT)[0]
+    def test_bets_of_a_candidate_missing_from_registry_are_listed(self) -> None:
+        summary = summarize_candidates([bet(0, name="ghost")], [], NOW, n_boot=N_BOOT)[0]
         assert summary.name == "ghost" and summary.status is None
 
 
@@ -505,7 +505,7 @@ class TestPromoteLevel:
         assert promote_level(3) == pytest.approx(0.996667, abs=1e-6)
 
     def test_k_above_one_widens_the_promote_interval_only(self) -> None:
-        sequence = [trade(i, 1.0 if i % 4 else -1.0) for i in range(100)]
+        sequence = [bet(i, 1.0 if i % 4 else -1.0) for i in range(100)]
         base, wide = (checkpoint_at(sequence, 100, k, N_BOOT, 0) for k in (1, 8))
         assert (base.family_versions, wide.family_versions) == (1, 8)
         assert wide.promote_level > base.promote_level
@@ -514,7 +514,7 @@ class TestPromoteLevel:
 
     def test_a_higher_k_can_withhold_a_promotion(self) -> None:
         # 10 big winners in 100 events give a positive 99% lower bound but not a positive 99.999% one.
-        sequence = [trade(i, 5.0 if i < 10 else -0.2, event_id=i + 1) for i in range(100)]
+        sequence = [bet(i, 5.0 if i < 10 else -0.2, event_id=i + 1) for i in range(100)]
         assert judge(sequence, one, N_BOOT, 0)[0] is Verdict.PROMOTE
         assert judge(sequence, lambda _: 1000, N_BOOT, 0)[0] is not Verdict.PROMOTE
 
@@ -631,7 +631,7 @@ class TestPastVersionLeagues:
         from odds_analytics.candidate_report import summarize_candidates
 
         summaries = summarize_candidates(
-            [trade(0, name="gap", version=1)],
+            [bet(0, name="gap", version=1)],
             self.registry,
             at(30),
             self.decisions,
@@ -655,8 +655,8 @@ class TestFamilyUsesTheNamesRuleAndMarket:
 
 class TestLeagueBreakdown:
     def test_it_splits_the_series_by_league_and_leaves_the_verdict_pooled(self) -> None:
-        epl = [trade(i, 0.5, sport_key="soccer_epl") for i in range(0, 120, 2)]
-        serie_a = [trade(i, -0.1, sport_key="soccer_italy_serie_a") for i in range(1, 120, 2)]
+        epl = [bet(i, 0.5, sport_key="soccer_epl") for i in range(0, 120, 2)]
+        serie_a = [bet(i, -0.1, sport_key="soccer_italy_serie_a") for i in range(1, 120, 2)]
         sequence = sorted(epl + serie_a, key=lambda t: t.placed_at)
 
         summary = summary_of(sequence)
@@ -670,9 +670,9 @@ class TestLeagueBreakdown:
 
     def test_a_bet_beyond_the_scoreable_prefix_has_no_ev_in_its_league(self) -> None:
         sequence = [
-            trade(0, 0.5, sport_key="soccer_epl"),
-            trade(1, 0.5, pnl=None, sport_key="soccer_epl"),
-            trade(2, 0.5, sport_key="soccer_italy_serie_a"),
+            bet(0, 0.5, sport_key="soccer_epl"),
+            bet(1, 0.5, pnl=None, sport_key="soccer_epl"),
+            bet(2, 0.5, sport_key="soccer_italy_serie_a"),
         ]
         by_league = {b.sport_key: b for b in league_breakdown(sequence, NOW)}
         assert by_league["soccer_epl"].bets_with_close == 1
@@ -685,13 +685,13 @@ class TestKAtEachCheckpoint:
     registry = [rule_candidate("a"), rule_candidate("b")]
 
     def judged(self, decisions: dict):
-        sequence = [trade(i, 0.5, name="a") for i in range(100)]
+        sequence = [bet(i, 0.5, name="a") for i in range(100)]
         starts = {key: DecisionStart(t, frozenset({EPL})) for key, t in decisions.items()}
         summaries = summarize_candidates(sequence, self.registry, NOW, starts, N_BOOT)
         return {s.name: s for s in summaries}
 
     def test_a_variant_deciding_after_a_promote_leaves_it_standing(self) -> None:
-        # Trade i is placed i minutes after LONG_AGO; b first decides a day later.
+        # Bet i is placed i minutes after LONG_AGO; b first decides a day later.
         summaries = self.judged({("a", 1): LONG_AGO, ("b", 1): LONG_AGO + timedelta(days=1)})
         assert summaries["a"].verdict is Verdict.PROMOTE
         assert summaries["a"].family_versions == 1
@@ -716,7 +716,7 @@ class TestKAtEachCheckpoint:
 
     def test_every_version_of_a_name_takes_the_family_of_its_registry_entry(self) -> None:
         registry = [rule_candidate("a", version=2)]
-        sequence = [trade(i, name="a", version=1) for i in range(3)]
+        sequence = [bet(i, name="a", version=1) for i in range(3)]
         decisions = {
             ("a", 1): DecisionStart(LONG_AGO, frozenset({"soccer_epl"})),
             ("a", 2): decided(31),
@@ -729,7 +729,7 @@ class TestKAtEachCheckpoint:
 
     def test_unregistered_name_and_agent_have_k_1(self) -> None:
         summaries = summarize_candidates(
-            [trade(0, name="ghost"), trade(1, name="cand")],
+            [bet(0, name="ghost"), bet(1, name="cand")],
             [registry_entry("cand"), rule_candidate("a"), rule_candidate("b")],
             NOW,
             {("a", 1): decided(1), ("b", 1): decided(1)},
@@ -741,7 +741,7 @@ class TestKAtEachCheckpoint:
 
 class TestRunningScore:
     def test_it_is_the_stake_weighted_mean_ev_and_the_running_totals(self) -> None:
-        sequence = [trade(0, 0.3, stake=2.0, pnl=4.0), trade(1, -0.1, pnl=-1.0), trade(2, 0.5)]
+        sequence = [bet(0, 0.3, stake=2.0, pnl=4.0), bet(1, -0.1, pnl=-1.0), bet(2, 0.5)]
 
         running = report_candidates(sequence, [], NOW, n_boot=N_BOOT).running[("cand", 1)]
 
@@ -751,7 +751,7 @@ class TestRunningScore:
         assert running.mean_ev == pytest.approx((0.3, 0.5 / 3, 0.25))
 
     def test_it_covers_the_summarys_bets_with_a_close(self) -> None:
-        sequence = [trade(0), trade(1, None), trade(2), trade(3, pnl=None), trade(4)]
+        sequence = [bet(0), bet(1, None), bet(2), bet(3, pnl=None), bet(4)]
 
         found = report_candidates(sequence, [], NOW, n_boot=N_BOOT)
 
@@ -770,7 +770,7 @@ class TestRunningScore:
             assert mean_ev[point.n - 1] == pytest.approx(point.mean_ev)
 
     def test_every_summarised_version_has_one_and_the_summaries_are_unchanged(self) -> None:
-        sequence = [*trades(3), trade(3, name="ghost", version=2)]
+        sequence = [*bets(3), bet(3, name="ghost", version=2)]
         registry = [registry_entry("fresh", 4)]
 
         found = report_candidates(sequence, registry, NOW, n_boot=N_BOOT)
@@ -796,7 +796,7 @@ async def _store_close(session: AsyncSession, event: Event) -> None:
     )
 
 
-def _paper_trade(event_id: int, minutes: int, **fields) -> PaperTrade:
+def _bet(event_id: int, minutes: int, **fields) -> Bet:
     defaults = {
         "event_id": event_id,
         "market": "1x2",
@@ -809,18 +809,18 @@ def _paper_trade(event_id: int, minutes: int, **fields) -> PaperTrade:
         "candidate_version": 1,
         "placed_at": KICKOFF - timedelta(days=1) + timedelta(minutes=minutes),
         "settled_at": KICKOFF + timedelta(hours=3),
-        "result": TradeResult.WIN,
+        "result": BetResult.WIN,
         "pnl": 12.0,
     }
-    return PaperTrade(**{**defaults, **fields})
+    return Bet(**{**defaults, **fields})
 
 
 class TestEstimates:
     def test_the_running_estimate_is_stake_weighted_over_the_bets_with_a_close(self) -> None:
         sequence = [
-            trade(0, 0.3, stake=2.0, estimated_ev=0.5),
-            trade(1, None, estimated_ev=0.9),
-            trade(2, -0.1, estimated_ev=0.2),
+            bet(0, 0.3, stake=2.0, estimated_ev=0.5),
+            bet(1, None, estimated_ev=0.9),
+            bet(2, -0.1, estimated_ev=0.2),
         ]
 
         [summary] = report_candidates(sequence, [], NOW, n_boot=N_BOOT).summaries
@@ -831,9 +831,9 @@ class TestEstimates:
 
     def test_the_gap_is_the_stake_weighted_mean_of_estimate_minus_ev(self) -> None:
         sequence = [
-            trade(0, 0.3, stake=2.0, estimated_ev=0.5),
-            trade(1, -0.1, estimated_ev=0.2),
-            trade(2, 0.0, estimated_ev=0.1),
+            bet(0, 0.3, stake=2.0, estimated_ev=0.5),
+            bet(1, -0.1, estimated_ev=0.2),
+            bet(2, 0.0, estimated_ev=0.1),
         ]
 
         estimates = estimates_of(sequence, N_BOOT, 0)
@@ -845,7 +845,7 @@ class TestEstimates:
         assert gap.interval[0] <= gap.mean_gap <= gap.interval[1]
 
     def test_the_interval_takes_the_resamples_and_seed_it_is_given(self) -> None:
-        sequence = [trade(i, 0.1 * (i % 3), estimated_ev=0.05 * i) for i in range(30)]
+        sequence = [bet(i, 0.1 * (i % 3), estimated_ev=0.05 * i) for i in range(30)]
 
         first = estimates_of(sequence, N_BOOT, 0)
         again = estimates_of(sequence, N_BOOT, 0)
@@ -855,7 +855,7 @@ class TestEstimates:
         assert first.gap.interval == again.gap.interval != other.gap.interval
 
     def test_events_are_resampled_whole(self) -> None:
-        one_event = [trade(i, 0.1, estimated_ev=0.1 + i / 10, event_id=7) for i in range(3)]
+        one_event = [bet(i, 0.1, estimated_ev=0.1 + i / 10, event_id=7) for i in range(3)]
 
         estimates = estimates_of(one_event, N_BOOT, 0)
 
@@ -865,10 +865,10 @@ class TestEstimates:
 
     def test_none_without_a_bet_or_with_a_bet_lacking_an_estimate(self) -> None:
         assert estimates_of([], N_BOOT, 0) is None
-        assert estimates_of([trade(0, 0.1, estimated_ev=0.2), trade(1, 0.1)], N_BOOT, 0) is None
+        assert estimates_of([bet(0, 0.1, estimated_ev=0.2), bet(1, 0.1)], N_BOOT, 0) is None
 
     def test_the_summary_has_none_when_a_bet_lacks_one(self) -> None:
-        sequence = [trade(0, 0.3, estimated_ev=0.5), trade(1, 0.1)]
+        sequence = [bet(0, 0.3, estimated_ev=0.5), bet(1, 0.1)]
 
         [summary] = report_candidates(sequence, [], NOW, n_boot=N_BOOT).summaries
 
@@ -897,13 +897,13 @@ class TestLoadScoredBets:
         await _store_close(session, e1)
         session.add_all(
             [
-                _paper_trade(1, 2),
-                _paper_trade(1, 1, selection="away", result=TradeResult.LOSS, pnl=-10.0),
-                _paper_trade(1, 3, result=TradeResult.VOID, pnl=0.0),
-                _paper_trade(1, 4, settled_at=None, result=None, pnl=None),
-                _paper_trade(1, 5, candidate_name=None, candidate_version=None),
-                _paper_trade(2, 6),
-                _paper_trade(3, 7, market="h2h"),
+                _bet(1, 2),
+                _bet(1, 1, selection="away", result=BetResult.LOSS, pnl=-10.0),
+                _bet(1, 3, result=BetResult.VOID, pnl=0.0),
+                _bet(1, 4, settled_at=None, result=None, pnl=None),
+                _bet(1, 5, candidate_name=None, candidate_version=None),
+                _bet(2, 6),
+                _bet(3, 7, market="h2h"),
             ]
         )
         await session.flush()
@@ -918,7 +918,7 @@ class TestLoadScoredBets:
         summary = summaries[0]
         assert summary.settled_bets == 4
         assert summary.bets_with_close == 2
-        # The unsettled trade ends the prefix, so the two trades after it are pending.
+        # The unsettled bet ends the prefix, so the two bets after it are pending.
         assert summary.bets_without_close == 0
         assert summary.pending_bets == 3
         assert summary.pnl == pytest.approx(12.0 - 10.0 + 12.0 + 12.0)
@@ -926,18 +926,18 @@ class TestLoadScoredBets:
 
     @pytest.mark.asyncio
     async def test_ev_uses_devigged_close_of_selection(self, test_session: AsyncSession) -> None:
-        from odds_analytics.candidate_report import load_scored_trades
+        from odds_analytics.candidate_report import load_scored_bets
 
         session = test_session
         e1 = make_epl_event(1, KICKOFF, status=EventStatus.FINAL)
         session.add(e1)
         await session.flush()
         await _store_close(session, e1)
-        session.add(_paper_trade(1, 1))
-        session.add(_paper_trade(1, 2, selection="draw", price_decimal=4.5))
+        session.add(_bet(1, 1))
+        session.add(_bet(1, 2, selection="draw", price_decimal=4.5))
         await session.flush()
 
-        home, draw = await load_scored_trades(session)
+        home, draw = await load_scored_bets(session)
         assert home.commence_time == KICKOFF
 
         assert home.p_close == pytest.approx(0.5)
@@ -946,32 +946,32 @@ class TestLoadScoredBets:
         assert draw.ev == pytest.approx(0.25 * 4.5 - 1)
 
     @pytest.mark.asyncio
-    async def test_each_trade_carries_its_stored_estimate(self, test_session: AsyncSession) -> None:
-        from odds_analytics.candidate_report import load_scored_trades
+    async def test_each_bet_carries_its_stored_estimate(self, test_session: AsyncSession) -> None:
+        from odds_analytics.candidate_report import load_scored_bets
 
         session = test_session
         session.add(make_epl_event(1, KICKOFF, status=EventStatus.FINAL))
         await session.flush()
-        session.add(_paper_trade(1, 1, estimated_ev=0.07))
-        session.add(_paper_trade(1, 2, selection="draw"))
+        session.add(_bet(1, 1, estimated_ev=0.07))
+        session.add(_bet(1, 2, selection="draw"))
         await session.flush()
 
-        home, draw = await load_scored_trades(session)
+        home, draw = await load_scored_bets(session)
 
         assert (home.estimated_ev, draw.estimated_ev) == (0.07, None)
 
     @pytest.mark.asyncio
-    async def test_each_trade_is_scored_against_the_close_on_its_line(
+    async def test_each_bet_is_scored_against_the_close_on_its_line(
         self, test_session: AsyncSession
     ) -> None:
-        from odds_analytics.candidate_report import load_scored_trades
+        from odds_analytics.candidate_report import load_scored_bets
 
         session = test_session
         e1 = make_epl_event(1, KICKOFF, status=EventStatus.FINAL)
         session.add(e1)
         await session.flush()
         await _store_close(session, e1)
-        # The live totals close prices 2.5 only, so the trade on 3.5 has no close.
+        # The live totals close prices 2.5 only, so the bet on 3.5 has no close.
         await store_tagged(
             session,
             make_tagged_snapshot(
@@ -981,16 +981,12 @@ class TestLoadScoredBets:
                 "betfair_api",
             ),
         )
-        session.add(_paper_trade(1, 1))
-        session.add(
-            _paper_trade(1, 2, market="totals", selection="over", line=2.5, price_decimal=2.3)
-        )
-        session.add(
-            _paper_trade(1, 3, market="totals", selection="under", line=3.5, price_decimal=1.6)
-        )
+        session.add(_bet(1, 1))
+        session.add(_bet(1, 2, market="totals", selection="over", line=2.5, price_decimal=2.3))
+        session.add(_bet(1, 3, market="totals", selection="under", line=3.5, price_decimal=1.6))
         await session.flush()
 
-        home, over, under = await load_scored_trades(session)
+        home, over, under = await load_scored_bets(session)
 
         assert home.p_close == pytest.approx(0.5)
         over_close = (1 / 2.1) / (1 / 2.1 + 1 / 1.9)
@@ -999,10 +995,10 @@ class TestLoadScoredBets:
         assert under.p_close is None
 
     @pytest.mark.asyncio
-    async def test_nba_h2h_trades_are_scored_against_the_nba_close(
+    async def test_nba_h2h_bets_are_scored_against_the_nba_close(
         self, test_session: AsyncSession
     ) -> None:
-        from odds_analytics.candidate_report import load_scored_trades
+        from odds_analytics.candidate_report import load_scored_bets
 
         session = test_session
         with_betfair = make_nba_event(1, KICKOFF, status=EventStatus.FINAL)
@@ -1041,16 +1037,16 @@ class TestLoadScoredBets:
                 ),
             )
         for event_id, minutes in ((1, 1), (2, 2), (3, 3), (4, 4)):
-            session.add(_paper_trade(event_id, minutes, market="h2h", price_decimal=2.1))
+            session.add(_bet(event_id, minutes, market="h2h", price_decimal=2.1))
         await session.flush()
 
-        betfair, polymarket, neither, mlb_trade = await load_scored_trades(session)
+        betfair, polymarket, neither, mlb_bet = await load_scored_bets(session)
 
         assert betfair.p_close == pytest.approx(0.5)
         assert betfair.ev == pytest.approx(0.5 * 2.1 - 1)
         assert polymarket.p_close == pytest.approx(0.6 / 1.01)
         assert neither.p_close is None
-        assert mlb_trade.p_close is None
+        assert mlb_bet.p_close is None
 
     @pytest.mark.asyncio
     async def test_close_quotes_give_the_close_of_all_quotes(
@@ -1108,9 +1104,7 @@ class TestLoadScoredBets:
 # The first 100 bets reach the k=100 checkpoint at EV +0.5; the 20 after it pull the current
 # estimate down to +0.33, which the command never shows.
 COHORT = (
-    trades(100)
-    + trades(20, ev=-0.5, start=100)
-    + [trade(i, name="ghost", version=2) for i in range(3)]
+    bets(100) + bets(20, ev=-0.5, start=100) + [bet(i, name="ghost", version=2) for i in range(3)]
 )
 
 
@@ -1169,7 +1163,7 @@ def stored_cohort(monkeypatch: pytest.MonkeyPatch) -> None:
         async def __aexit__(self, *_: object) -> None:
             return None
 
-    monkeypatch.setattr("odds_analytics.candidate_report.load_scored_trades", scored)
+    monkeypatch.setattr("odds_analytics.candidate_report.load_scored_bets", scored)
     monkeypatch.setattr("odds_analytics.candidate_report.load_decision_starts", no_starts)
     monkeypatch.setattr("odds_cli.commands.candidates.async_session_maker", Session)
     monkeypatch.setattr("odds_mcp.server.async_session_maker", Session)
@@ -1195,14 +1189,14 @@ class TestReportOutputThroughCandidateReport:
     ) -> None:
         from unittest.mock import AsyncMock
 
-        from odds_lambda.paper_trading import PortfolioSummary
+        from odds_lambda.betting import PortfolioSummary
         from odds_mcp.server import get_portfolio
 
         portfolio = PortfolioSummary(1000.0, 0, 0, 0, 0.0, 0.0, 0.0, 0, 0, 0)
         monkeypatch.setattr(
-            "odds_mcp.server.get_portfolio_summary", AsyncMock(return_value=portfolio)
+            "odds_mcp.server.betting.get_portfolio_summary", AsyncMock(return_value=portfolio)
         )
-        monkeypatch.setattr("odds_mcp.server.get_open_trades", AsyncMock(return_value=[]))
+        monkeypatch.setattr("odds_mcp.server.betting.get_open_bets", AsyncMock(return_value=[]))
         monkeypatch.setattr("odds_mcp.server.load_candidates", lambda _directory: [])
 
         result = await get_portfolio()

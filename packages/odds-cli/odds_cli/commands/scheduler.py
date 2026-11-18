@@ -306,13 +306,13 @@ def smoke(
         False,
         "--include-agent",
         help="Also run smoke-unsafe jobs (agent-run). Off by default so a deploy "
-        "check never places paper bets.",
+        "check never places bets.",
     ),
     include_candidates: bool = typer.Option(
         False,
         "--include-candidates",
         help="Also run run-candidates. Off by default so a deploy check never places "
-        "candidate paper trades.",
+        "candidate bets.",
     ),
     include_paid_api: bool = typer.Option(
         False,
@@ -340,7 +340,7 @@ def smoke(
     per-job pass/fail table.
     Exits non-zero (exit code = number of failed jobs) if any job fails.
 
-    ``agent-run`` is skipped by default (never place paper bets during a deploy
+    ``agent-run`` is skipped by default (never place bets during a deploy
     check); pass ``--include-agent`` to run it. ``run-candidates`` is skipped
     likewise unless ``--include-candidates``. ``fetch-odds`` and ``fetch-scores``
     are skipped by default because they spend Odds API quota; pass
@@ -367,7 +367,7 @@ def smoke(
         expected_compound_job_names,
         get_job_function,
         is_smoke_unsafe,
-        places_candidate_trades,
+        places_candidate_bets,
         resolve_job_name,
         spends_api_quota,
     )
@@ -431,8 +431,8 @@ def smoke(
             skipped.append((name, "excluded (--exclude)"))
         elif is_smoke_unsafe(name) and not include_agent:
             skipped.append((name, "smoke-unsafe (pass --include-agent)"))
-        elif places_candidate_trades(name) and not include_candidates:
-            skipped.append((name, "places candidate trades (pass --include-candidates)"))
+        elif places_candidate_bets(name) and not include_candidates:
+            skipped.append((name, "places candidate bets (pass --include-candidates)"))
         elif spends_api_quota(name) and not include_paid_api:
             skipped.append((name, "spends Odds API quota (pass --include-paid-api)"))
         else:

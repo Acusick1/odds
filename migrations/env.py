@@ -6,6 +6,7 @@ from logging.config import fileConfig
 from alembic import context
 from odds_core.agent_wakeup_models import AgentWakeup  # noqa: F401
 from odds_core.backfill_models import OddsApiSnapshotGap  # noqa: F401
+from odds_core.bet_models import Bet  # noqa: F401
 from odds_core.candidate_backtest_models import (  # noqa: F401
     CandidateBacktest,
     CandidateBacktestBet,
@@ -29,7 +30,6 @@ from odds_core.models import (  # noqa: F401
     Price,
     SnapshotPayload,
 )
-from odds_core.paper_trade_models import PaperTrade  # noqa: F401
 from odds_core.player_stats_models import NbaPlayerSeasonStats  # noqa: F401
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection

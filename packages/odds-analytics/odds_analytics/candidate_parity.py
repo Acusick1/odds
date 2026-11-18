@@ -2,10 +2,10 @@
 
 Two comparisons per recorded decision. The parity comparison rebuilds the market state from
 exactly the snapshots the decision recorded (``input_snapshot_ids``), with its decision time
-and kick-off, runs the rule and compares the bets with the decision's trades; any difference
+and kick-off, runs the rule and compares the replayed bets with the decision's recorded bets; any difference
 is a mismatch. Decisions are replayed in the order the live runs took them, and each outcome
 of a match is bet once: the parity comparison drops the outcomes the match's earlier
-decisions placed trades on, as the live run did. A rule that reads fixture inputs gets them
+decisions placed bets on, as the live run did. A rule that reads fixture inputs gets them
 from the events the decision recorded (``input_event_ids``), as known at its ``known_at``. The
 data comparison replays from the database as it is now, with
 ``known_at`` the decision's, dropping the outcomes its own replays of the earlier decisions
@@ -22,11 +22,11 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
+from odds_core.bet_models import Bet, CandidateDecision
 from odds_core.bookmakers import BOOK_SETS
 from odds_core.candidates import RuleCandidate
 from odds_core.market_prices import Outcome
 from odds_core.models import Event, OddsSnapshot
-from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from odds_core.quotes import Quote
 from odds_core.vocabulary import Market
 from odds_lambda.candidate_rules import (
@@ -307,16 +307,16 @@ async def check_parity(
     recorded_fixture = (
         await load_recorded_fixture(session, decisions) if spec.fixture_inputs else {}
     )
-    trades: dict[int, list[PaperTrade]] = defaultdict(list)
+    bets: dict[int, list[Bet]] = defaultdict(list)
     if decisions:
         rows = await session.execute(
-            select(PaperTrade).where(
-                PaperTrade.decision_id.in_([d.id for d in decisions])  # type: ignore[union-attr]
+            select(Bet).where(
+                Bet.decision_id.in_([d.id for d in decisions])  # type: ignore[union-attr]
             )
         )
-        for trade in rows.scalars():
-            assert trade.decision_id is not None  # noqa: S101
-            trades[trade.decision_id].append(trade)
+        for bet in rows.scalars():
+            assert bet.decision_id is not None  # noqa: S101
+            bets[bet.decision_id].append(bet)
 
     # Selections bet so far per event, live and by the database replay; decisions come in
     # live order.
@@ -330,7 +330,7 @@ async def check_parity(
         live = tuple(
             sorted(
                 bet_key(t.selection, t.line, t.bookmaker, t.price_decimal, t.stake)
-                for t in trades[decision.id]
+                for t in bets[decision.id]
             )
         )
         replayed_bets, missing, missing_events = await _recorded_inputs(
@@ -355,7 +355,7 @@ async def check_parity(
             db_replayed_selections[decision.event_id],
         )
         live_selections[decision.event_id].update(
-            (Outcome(t.selection), t.line) for t in trades[decision.id]
+            (Outcome(t.selection), t.line) for t in bets[decision.id]
         )
         db_replayed_selections[decision.event_id].update(b.selection for b in db_replayed_bets)
         replayed, db_replayed = intent_keys(replayed_bets), intent_keys(db_replayed_bets)

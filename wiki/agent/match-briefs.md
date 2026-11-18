@@ -17,7 +17,7 @@ status: stable
 
 # Briefs
 
-The [betting agent](betting-agent.md) writes [briefs](../foundations/glossary.md#brief) through MCP tools ([odds-mcp server](mcp-server.md)). The restricted agent role needs `INSERT` on `match_briefs` and is read-only elsewhere except for the tables listed under [database role](agent-run-job.md#database-role). The agent's other record is its [bets](paper-trading.md).
+The [betting agent](betting-agent.md) writes [briefs](../foundations/glossary.md#brief) through MCP tools ([odds-mcp server](mcp-server.md)). The restricted agent role needs `INSERT` on `match_briefs` and is read-only elsewhere except for the tables listed under [database role](agent-run-job.md#database-role). The agent's other record is its [bets](bets.md).
 
 ## The match_briefs table
 
@@ -48,6 +48,6 @@ The stamp lets a later wake-up compare the price at brief time with the current 
 
 ## Related
 
-- [Bets](paper-trading.md)
+- [Bets](bets.md)
 - [Agent prompts](agent-prompts.md)
 - [odds-mcp server](mcp-server.md)

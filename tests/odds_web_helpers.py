@@ -30,7 +30,7 @@ def bet(
     p_close: bool = True,
     estimated_ev: float | None = None,
 ) -> ScoredBet:
-    """A settled trade at price 3.0 whose EV is ``ev``; without a close when ``p_close`` is False."""
+    """A settled bet at price 3.0 whose EV is ``ev``; without a close when ``p_close`` is False."""
     return ScoredBet(
         candidate_name=name,
         candidate_version=1,

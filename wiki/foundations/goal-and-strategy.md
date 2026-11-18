@@ -3,7 +3,7 @@ type: explanation
 title: Goal and strategy
 description: What the project is for, how a candidate is scored, promoted or killed, and which parts of the workflow exist today.
 sources:
-  - odds_core.paper_trade_models.PaperTrade
+  - odds_core.bet_models.Bet
   - odds_analytics.retail_ev
   - odds_core.close.event_close
 status: stable
@@ -24,7 +24,7 @@ The goal is profit from betting at UK retail books on EPL and MLB. No approach i
 Rule candidates are the current focus. Nine are registered, all on the `uk_retail` [book set](glossary.md#book-set) ([ADR-0025](../../docs/adr/0025-book-set-is-part-of-a-candidate.md)): three in EPL alone and six pooled across six football leagues. Each records a hash of its rule's code (`odds_lambda.candidate_rules.pinning.rule_sha256`), and a code change that leaves every bet the same is a rehash rather than a new version, so its forward test continues ([rule pinning](../evaluation/candidate-rules.md#rule-pinning), [rehash ledger](../evaluation/candidate-registry.md#rehash-ledger)). Each rule is described on [candidate rules](../evaluation/candidate-rules.md#rules); the registered parameters are in each `candidates/<name>.yaml`.
 
 - `exchange-gap-epl` (`candidates/exchange-gap-epl.yaml`, idea #626) runs the [exchange gap](../evaluation/candidate-rules.md#the-gap-rules) on `1x2` at 60 and 30 minutes before kick-off. It was registered at KO-60 by #626's pre-registered fallback, because its development backtest had too few bets to judge; its KO-30 time comes from development screens that suggested more bets at similar EV ([#692](https://github.com/Acusick1/odds/pull/692)).
-- `polymarket-gap-epl` (`candidates/polymarket-gap-epl.yaml`, idea #655) runs the [Polymarket gap](../evaluation/candidate-rules.md#the-gap-rules) at the same times with a 1% threshold.
+- `polymarket-gap-epl` (`candidates/polymarket-gap-epl.yaml`, idea #655) runs the [Polymarket gap](../evaluation/candidate-rules.md#the-gap-rules) on `1x2` at the same times with a 1% threshold.
 - `exchange-gap-epl-totals` (`candidates/exchange-gap-epl-totals.yaml`, [#708](https://github.com/Acusick1/odds/issues/708)) runs `exchange-gap-epl`'s rule and params on the totals market, from version 3's start on 14 November 2026. It is its own [family](glossary.md#family), and [development data](glossary.md#development-data) has no totals close to score it against.
 
 The other six are the survivors of ideation round 1 ([#817](https://github.com/Acusick1/odds/issues/817)), each pooled across the EPL, La Liga, Serie A, the Bundesliga, Ligue 1 and the Championship ([ADR-0022](../../docs/adr/0022-pooled-league-candidates.md)). Each runs the cell its development screen selected and passed the one-shot sealed-holdout gate ([ADR-0021](../../docs/adr/0021-sealed-holdout-and-one-shot-gate.md)); neither result promotes it ([From idea to verdict](../evaluation/howto-take-an-idea-to-a-verdict.md)):
@@ -60,7 +60,7 @@ The repo also holds:
 The workflow for a rule candidate exists end to end, from idea to verdict ([From idea to verdict](../evaluation/howto-take-an-idea-to-a-verdict.md), #608):
 
 - The [candidate registry](../evaluation/candidate-registry.md), holding the registered candidates above.
-- The candidate, its version and the git commit on each bet (`odds_core.paper_trade_models.PaperTrade`, [bets](../agent/paper-trading.md#candidate-fields)).
+- The candidate, its version and the git commit on each bet (`odds_core.bet_models.Bet`, [bets](../agent/bets.md#candidate-fields)).
 - The close, computed from stored price rows when a report runs, so a bet stores none.
 - `odds candidates report`, which gives the checkpoint verdict ([Candidate registry](../evaluation/candidate-registry.md#odds-candidates-report)).
 - The [rule interface](../evaluation/candidate-rules.md) and its rules, with the hash each rule candidate records.
@@ -76,4 +76,4 @@ Missing:
 
 - [Take an idea to a verdict](../evaluation/howto-take-an-idea-to-a-verdict.md)
 - [About the system and its pivots](project-overview.md)
-- [Bets](../agent/paper-trading.md)
+- [Bets](../agent/bets.md)

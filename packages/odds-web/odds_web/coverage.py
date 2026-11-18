@@ -7,10 +7,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
+from odds_core.bet_models import CandidateDecision
 from odds_core.bookmakers import BOOK_SETS
 from odds_core.candidates import Candidate, CandidateStatus, RuleCandidate
 from odds_core.models import Event, EventStatus
-from odds_core.paper_trade_models import CandidateDecision
 from odds_core.quotes import Quote
 from odds_core.vocabulary import Market
 from odds_lambda.candidate_rules import (

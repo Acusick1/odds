@@ -163,7 +163,7 @@ One rule candidate version's record at one event and decision time, with the inp
 
 ### Bet
 
-A bet placed by a candidate or a betting agent, recorded without real money ([bets](../agent/paper-trading.md)).
+A bet placed by a candidate or a betting agent, recorded without real money ([bets](../agent/bets.md)).
 _Avoid_: paper trade, paper bet, trade
 
 ### Cell

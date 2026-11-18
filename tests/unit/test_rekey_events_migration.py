@@ -69,10 +69,10 @@ def _event(event_id: int | None, home: str) -> Event:
 
 
 @pytest.fixture
-async def session(pglite_async_session: AsyncSession, migration: ModuleType) -> AsyncSession:
+async def session(paper_trades_session: AsyncSession, migration: ModuleType) -> AsyncSession:
     """Integer-keyed events 1 to 4 with rows referencing them; events 1 and 2 have the string
     ids an upgrade kept, 3 holds an Odds API id and 4 nothing."""
-    session = pglite_async_session
+    session = paper_trades_session
     # A later table that references events; the schema this migration re-keys has none.
     await session.execute(text("DROP TABLE IF EXISTS event_postponements"))
     session.add_all([_event(1, "Arsenal"), _event(2, "Brentford"), _event(3, "Burnley")])

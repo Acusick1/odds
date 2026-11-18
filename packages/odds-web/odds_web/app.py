@@ -195,7 +195,7 @@ def create_app(
         listings = Section.of(await cache.get(f"candidate:{name}:{version}:{page}", load_listings))
         summary, running = known, report.value.running.get((name, version))
         if summary is None or running is None:
-            # An earlier version the report holds no trades for exists only if it recorded decisions.
+            # An earlier version the report holds no bets for exists only if it recorded decisions.
             if listings.value is not None and not (listings.value[0] and listings.value[0].total):
                 raise HTTPException(status_code=404, detail=f"No candidate {name} v{version}")
             summary, running = unscored_version(name, version, datetime.now(UTC))

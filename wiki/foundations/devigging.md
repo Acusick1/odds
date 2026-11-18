@@ -27,7 +27,7 @@ There are three consumers. The first is the `retail_ev` target, and the [retail-
 
 The second is the retail consensus of the [retail-consensus rules](../evaluation/candidate-rules.md#the-retail-consensus-rules). `odds_lambda.candidate_rules.retail_consensus.group_probabilities` devigs each UK retail book in a book group that prices every outcome with `odds_core.odds_math.devig_probabilities`, and `odds_lambda.candidate_rules.retail_consensus.consensus` takes the median across groups and normalises it.
 
-The third is the sharp probability `odds_mcp.server.paper_bet` records on an agent's bet (`odds_mcp.prices.selection_sharp_reading`, [sharp fields](../agent/paper-trading.md#sharp-fields)). It devigs the sharp prices of every outcome of the market on the selection's line as `odds_mcp.prices.resolve_sharp_prices` picks them, one book per outcome, so when the outcomes resolve to different books it devigs across Pinnacle and Betfair Exchange prices.
+The third is the sharp probability `odds_mcp.server.place_bet` records on an agent's bet (`odds_mcp.prices.selection_sharp_reading`, [sharp fields](../agent/bets.md#sharp-fields)). It devigs the sharp prices of every outcome of the market on the selection's line as `odds_mcp.prices.resolve_sharp_prices` picks them, one book per outcome, so when the outcomes resolve to different books it devigs across Pinnacle and Betfair Exchange prices.
 
 ## Vig-inclusive consumers
 

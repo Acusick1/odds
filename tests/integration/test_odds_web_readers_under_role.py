@@ -11,6 +11,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from odds_core.bet_models import Bet, BetResult, CandidateDecision
 from odds_core.bookmakers import BookSet
 from odds_core.candidate_backtest_models import (
     CandidateBacktest,
@@ -21,7 +22,6 @@ from odds_core.candidates import AgentCandidate, CandidateStatus, RuleCandidate
 from odds_core.config import SchedulerConfig, Settings, get_settings
 from odds_core.mlb_data_models import MlbProbablePitchers
 from odds_core.models import AlertHistory, EventStatus, FetchLog
-from odds_core.paper_trade_models import CandidateDecision, PaperTrade, TradeResult
 from odds_lambda.candidate_rules.pinning import rule_sha256
 from odds_web.app import create_app
 from odds_web.db import WebDatabase
@@ -167,7 +167,7 @@ async def populated(odds_web_session: AsyncSession) -> AsyncSession:
     for candidate in CANDIDATES:
         event_id = PLAYED_EVENT[candidate.name]
         session.add(
-            PaperTrade(
+            Bet(
                 event_id=event_id,
                 market=MARKETS[candidate.name],
                 selection="home",
@@ -178,7 +178,7 @@ async def populated(odds_web_session: AsyncSession) -> AsyncSession:
                 candidate_version=candidate.version,
                 placed_at=PLAYED - timedelta(hours=2),
                 settled_at=PLAYED + timedelta(hours=3),
-                result=TradeResult.WIN,
+                result=BetResult.WIN,
                 pnl=1.2,
             )
         )

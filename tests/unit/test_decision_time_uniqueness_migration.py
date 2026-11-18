@@ -72,8 +72,8 @@ async def _bet(session: AsyncSession, decision_id: int, selection: str, bookmake
 
 class TestUpgradeAndDowngrade:
     @pytest.fixture
-    async def session(self, pglite_async_session: AsyncSession) -> AsyncSession:
-        pglite_async_session.add(
+    async def session(self, paper_trades_session: AsyncSession) -> AsyncSession:
+        paper_trades_session.add(
             Event(
                 id=1,
                 sport_key="soccer_epl",
@@ -84,8 +84,8 @@ class TestUpgradeAndDowngrade:
                 status=EventStatus.SCHEDULED,
             )
         )
-        await pglite_async_session.flush()
-        return pglite_async_session
+        await paper_trades_session.flush()
+        return paper_trades_session
 
     async def test_upgrade_backfills_the_lead_of_existing_decisions(
         self, migration: ModuleType, session: AsyncSession

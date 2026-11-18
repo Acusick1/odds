@@ -12,6 +12,7 @@ from odds_core.api_models import (
     parse_api_event,
     parse_scores_from_api_dict,
 )
+from odds_core.bet_models import Bet, BetResult
 from odds_core.config import Settings, get_settings
 from odds_core.database import async_session_maker, get_engine
 from odds_core.models import (
@@ -21,7 +22,6 @@ from odds_core.models import (
     FetchLog,
     OddsSnapshot,
 )
-from odds_core.paper_trade_models import PaperTrade, TradeResult
 from odds_core.team import normalize_team_name, team_abbrev
 
 __all__ = [
@@ -31,9 +31,9 @@ __all__ = [
     "OddsSnapshot",
     "DataQualityLog",
     "FetchLog",
-    # Paper Trading
-    "PaperTrade",
-    "TradeResult",
+    # Betting
+    "Bet",
+    "BetResult",
     # Database
     "get_engine",
     "async_session_maker",

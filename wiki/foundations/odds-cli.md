@@ -39,7 +39,7 @@ status: stable
 | `scheduler` | [Local scheduler](../scheduling/local-scheduler.md) |
 | `polymarket` | [Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md#backfill-command) (`odds_cli.commands.polymarket.backfill_odds` attaches listed events to stored events before storing history for EPL or NBA from a required `--since`, and reports the ones that failed) |
 | `injuries`, `nba-stats`, `pbpstats` | [NBA feeds](../collection/nba-injuries-and-stats.md) |
-| `paper` | [Bets](../agent/paper-trading.md) |
+| `bets` | [Bets](../agent/bets.md) |
 | `candidates` | [Candidate registry](../evaluation/candidate-registry.md#odds-candidates-list), [Replay backtest](../evaluation/candidate-backtest.md), [Parity check](../evaluation/candidate-parity.md) |
 | `agent` | [Agent runtime and the agent-run job](../agent/agent-run-job.md) |
 | `odds_cli.commands.web` (`odds web serve`) | [odds-web](../operations/odds-web.md#running-it) |

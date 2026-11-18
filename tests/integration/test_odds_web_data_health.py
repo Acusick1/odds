@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
+from odds_core.bet_models import Bet, CandidateDecision
 from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS, BookSet
 from odds_core.candidates import (
     CandidateStatus,
@@ -19,7 +20,6 @@ from odds_core.candidates import (
 from odds_core.close import CloseKind
 from odds_core.config import SchedulerConfig, Settings, get_settings
 from odds_core.models import AlertHistory, Event, FetchLog
-from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from odds_lambda.candidate_rules import load_market_state, max_input_age
 from odds_lambda.candidate_rules.pinning import rule_sha256
 from odds_lambda.candidate_rules.registry import resolve_rule
@@ -234,7 +234,7 @@ class TestCloseCoverage:
         await store_tagged(session, live)
         for event_id in (1, 1, 2, 3):
             session.add(
-                PaperTrade(
+                Bet(
                     event_id=event_id,
                     market="1x2",
                     selection="home",

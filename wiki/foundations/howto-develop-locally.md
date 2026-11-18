@@ -45,7 +45,7 @@ Every `odds` command builds settings on import, so a missing `ODDS_API_KEY` or `
 
 ```bash
 uv run pytest
-uv run pytest tests/unit/test_paper_trading.py -v
+uv run pytest tests/unit/test_betting.py -v
 ```
 
 A bare `uv run pytest` from the repo root runs the offline suite, which is what CI runs ([Test suite](test-suite.md#configuration)). Two suites run only when asked for ([AGENTS.md](../../AGENTS.md#tests)):

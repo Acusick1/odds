@@ -1,4 +1,4 @@
-"""The run-candidates job: decision times, lateness, idempotency and trade fields."""
+"""The run-candidates job: decision times, lateness, idempotency and bet fields."""
 
 from __future__ import annotations
 
@@ -14,10 +14,11 @@ import pytest
 import structlog
 import yaml
 from odds_analytics.candidate_parity import ParityStatus, check_parity
+from odds_core.bet_models import Bet, CandidateDecision
 from odds_core.bookmakers import BOOK_SETS, BookSet
 from odds_core.candidates import RuleCandidate
 from odds_core.models import Event, EventStatus
-from odds_core.paper_trade_models import CandidateDecision, PaperTrade
+from odds_lambda.betting import get_portfolio_summary, place_bet, settle_bets
 from odds_lambda.candidate_rules import EstimateBasis, RuleSpec, SharpInput
 from odds_lambda.candidate_rules import rules as rules_module
 from odds_lambda.candidate_rules.pinning import rule_sha256
@@ -31,7 +32,6 @@ from odds_lambda.jobs.run_candidates import (
     run_decisions,
     runnable_candidates,
 )
-from odds_lambda.paper_trading import get_portfolio_summary, place_trade, settle_trades
 from odds_lambda.scheduling.jobs import JobContext
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -78,7 +78,7 @@ def rules(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.fixture
 def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr("odds_lambda.jobs.run_candidates.candidates_dir", lambda: tmp_path)
-    monkeypatch.setattr("odds_lambda.paper_trading.candidates_dir", lambda: tmp_path)
+    monkeypatch.setattr("odds_lambda.betting.candidates_dir", lambda: tmp_path)
     return tmp_path
 
 
@@ -156,13 +156,13 @@ class TestDecisions:
         assert decision.known_at == NOW
         assert (decision.bets_placed, decision.missed) == (1, False)
         assert len(decision.input_snapshot_ids) == 1
-        [trade] = await all_of(pglite_async_session, PaperTrade)
-        assert (trade.candidate_name, trade.candidate_version) == ("cand", 1)
-        assert trade.decision_id == decision.id
-        assert trade.estimated_ev == ESTIMATED_EV
-        assert (trade.selection, trade.bookmaker, trade.price_decimal) == ("home", "bet365", 2.0)
-        assert trade.market == "1x2"
-        assert trade.bankroll_before is None and trade.stake == 1.0
+        [bet] = await all_of(pglite_async_session, Bet)
+        assert (bet.candidate_name, bet.candidate_version) == ("cand", 1)
+        assert bet.decision_id == decision.id
+        assert bet.estimated_ev == ESTIMATED_EV
+        assert (bet.selection, bet.bookmaker, bet.price_decimal) == ("home", "bet365", 2.0)
+        assert bet.market == "1x2"
+        assert bet.bankroll_before is None and bet.stake == 1.0
 
     async def test_polymarket_decision_records_both_inputs_and_replays_in_parity(
         self, pglite_async_session, registry
@@ -193,8 +193,8 @@ class TestDecisions:
         assert summary.placed == 1
         [decision] = await all_of(pglite_async_session, CandidateDecision)
         assert decision.input_snapshot_ids == [retail.id, polymarket.id]
-        [trade] = await all_of(pglite_async_session, PaperTrade)
-        assert (trade.selection, trade.bookmaker) == ("home", "bet365")
+        [bet] = await all_of(pglite_async_session, Bet)
+        assert (bet.selection, bet.bookmaker) == ("home", "bet365")
         cand = RuleCandidate.model_validate(
             {
                 "name": "cand",
@@ -229,7 +229,7 @@ class TestDecisions:
             summary = await run(pglite_async_session)
 
         assert summary.missed == 1
-        assert await all_of(pglite_async_session, PaperTrade) == []
+        assert await all_of(pglite_async_session, Bet) == []
         [decision] = await all_of(pglite_async_session, CandidateDecision)
         assert (decision.missed, decision.bets_placed) == (True, 0)
         assert decision.input_snapshot_ids == []
@@ -274,7 +274,7 @@ class TestDecisions:
         again = await run(pglite_async_session, NOW + timedelta(minutes=1))
 
         assert (again.placed, again.missed, again.already_decided) == (0, 0, 0)
-        assert len(await all_of(pglite_async_session, PaperTrade)) == 1
+        assert len(await all_of(pglite_async_session, Bet)) == 1
         assert len(await all_of(pglite_async_session, CandidateDecision)) == 2
 
     async def test_zero_bet_decision_is_recorded_once(self, pglite_async_session, registry) -> None:
@@ -287,7 +287,7 @@ class TestDecisions:
         assert (first.skipped_zero_bet, second.skipped_zero_bet) == (1, 0)
         [decision] = await all_of(pglite_async_session, CandidateDecision)
         assert (decision.bets_placed, decision.missed) == (0, False)
-        assert await all_of(pglite_async_session, PaperTrade) == []
+        assert await all_of(pglite_async_session, Bet) == []
 
     async def test_event_not_yet_due_is_left_alone(self, pglite_async_session, registry) -> None:
         write_candidate(registry)
@@ -309,7 +309,7 @@ class TestDecisions:
         assert (summary.missed, summary.placed) == (1, 0)
         [decision] = await all_of(pglite_async_session, CandidateDecision)
         assert (decision.event_id, decision.missed, decision.bets_placed) == (1, True, 0)
-        assert await all_of(pglite_async_session, PaperTrade) == []
+        assert await all_of(pglite_async_session, Bet) == []
 
     async def test_decision_time_before_the_start_date_is_not_decided(
         self, pglite_async_session, registry
@@ -408,8 +408,8 @@ class TestSeveralDecisionTimes:
         ]
         assert [(d.bets_placed, d.missed) for d in decisions] == [(1, False), (0, False)]
         assert len(decisions[1].input_snapshot_ids) == 1
-        [trade] = await all_of(pglite_async_session, PaperTrade)
-        assert (trade.selection, trade.decision_id) == ("home", decisions[0].id)
+        [bet] = await all_of(pglite_async_session, Bet)
+        assert (bet.selection, bet.decision_id) == ("home", decisions[0].id)
 
     async def test_a_later_time_may_bet_a_different_outcome(
         self, pglite_async_session, registry
@@ -430,8 +430,8 @@ class TestSeveralDecisionTimes:
         await run(pglite_async_session, self.EARLY_RUN)
         await run(pglite_async_session)
 
-        trades = await all_of(pglite_async_session, PaperTrade)
-        assert sorted(t.selection for t in trades) == ["away", "draw"]
+        bets = await all_of(pglite_async_session, Bet)
+        assert sorted(t.selection for t in bets) == ["away", "draw"]
 
     async def test_a_kickoff_moved_after_a_decision_does_not_reopen_it(
         self, pglite_async_session, registry
@@ -548,13 +548,13 @@ class TestTotals:
 
         assert (early.placed, late.placed) == (2, 1)
         decisions = sorted(await all_of(session, CandidateDecision), key=lambda d: d.decision_time)
-        trades = await all_of(session, PaperTrade)
-        assert sorted((t.selection, t.line, t.decision_id) for t in trades) == [
+        bets = await all_of(session, Bet)
+        assert sorted((t.selection, t.line, t.decision_id) for t in bets) == [
             ("over", 2.5, decisions[0].id),
             ("over", 3.5, decisions[1].id),
             ("under", 3.5, decisions[0].id),
         ]
-        assert {(t.market, t.bookmaker) for t in trades} == {("totals", "bet365")}
+        assert {(t.market, t.bookmaker) for t in bets} == {("totals", "bet365")}
 
         report = await check_parity(session, self.candidate())
         assert [d.status for d in report.decisions] == [ParityStatus.MATCH, ParityStatus.MATCH]
@@ -568,15 +568,15 @@ class TestTotals:
         session.add(make_epl_event(1, DUE))
         await self.add_snapshot(session, self.RETAIL, 60)
         await run(session, self.EARLY_RUN)
-        trade = next(t for t in await all_of(session, PaperTrade) if t.selection == "over")
-        trade.line = 4.5
+        bet = next(t for t in await all_of(session, Bet) if t.selection == "over")
+        bet.line = 4.5
         await session.commit()
 
         report = await check_parity(session, self.candidate())
 
         assert [d.status for d in report.decisions] == [ParityStatus.MISMATCH]
 
-    async def test_trades_settle_on_the_total_score(self, pglite_async_session, registry) -> None:
+    async def test_bets_settle_on_the_total_score(self, pglite_async_session, registry) -> None:
         session = pglite_async_session
         write_candidate(registry, market="totals", rule="exchange_gap", params=self.PARAMS)
         session.add(make_epl_event(1, DUE))
@@ -587,7 +587,7 @@ class TestTotals:
         event.status, event.home_score, event.away_score = EventStatus.FINAL, 4, 0
         await session.commit()
 
-        settled = await settle_trades(session)
+        settled = await settle_bets(session)
 
         # Four goals: over 2.5 wins, under 3.5 loses.
         assert sorted((t.selection, t.result.value, t.pnl) for t in settled) == [
@@ -752,7 +752,7 @@ class TestMain:
         monkeypatch.setattr(run_candidates, "runnable_candidates", AsyncMock(return_value=[]))
         monkeypatch.setattr(run_candidates, "candidate_events", AsyncMock(return_value=[]))
         monkeypatch.setattr(run_candidates, "self_schedule", schedule)
-        monkeypatch.setattr(run_candidates, "settle_trades", settle)
+        monkeypatch.setattr(run_candidates, "settle_bets", settle)
         monkeypatch.setattr(run_candidates, "run_decisions", decide)
         monkeypatch.setattr(run_candidates, "job_alert_context", alert_context)
 
@@ -779,7 +779,7 @@ class TestMain:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         schedule = self._patch(monkeypatch, run_candidates.RunSummary(placed=1))
-        monkeypatch.setattr(run_candidates, "settle_trades", AsyncMock(side_effect=ValueError("x")))
+        monkeypatch.setattr(run_candidates, "settle_bets", AsyncMock(side_effect=ValueError("x")))
         alert = AsyncMock()
         monkeypatch.setattr(run_candidates, "send_recorded_alert", alert)
 
@@ -803,20 +803,20 @@ class TestMain:
         monkeypatch.setattr(run_candidates, "runnable_candidates", AsyncMock(return_value=[]))
         monkeypatch.setattr(run_candidates, "candidate_events", AsyncMock(return_value=[]))
         monkeypatch.setattr(run_candidates, "self_schedule", schedule)
-        monkeypatch.setattr(run_candidates, "settle_trades", AsyncMock(return_value=[]))
+        monkeypatch.setattr(run_candidates, "settle_bets", AsyncMock(return_value=[]))
         monkeypatch.setattr(run_candidates, "run_decisions", AsyncMock(return_value=summary))
         monkeypatch.setattr(run_candidates, "job_alert_context", alert_context)
         return schedule
 
 
-class TestFlatStakeTrades:
-    async def test_portfolio_summary_excludes_flat_stake_trades(
+class TestFlatStakeBets:
+    async def test_portfolio_summary_excludes_flat_stake_bets(
         self, pglite_async_session, registry
     ) -> None:
         session = pglite_async_session
         write_candidate(registry)
         await add_event(session, 1, DUE)
-        await place_trade(
+        await place_bet(
             session,
             event_id=1,
             market="1x2",
@@ -831,7 +831,7 @@ class TestFlatStakeTrades:
 
         summary = await get_portfolio_summary(session)
 
-        assert (summary.total_trades, summary.open_trades) == (1, 1)
+        assert (summary.total_bets, summary.open_bets) == (1, 1)
         assert summary.current_bankroll == 990.0
 
     async def test_settlement_leaves_the_bankroll_empty(
@@ -847,16 +847,16 @@ class TestFlatStakeTrades:
         event.home_score, event.away_score = 2, 0
         await session.commit()
 
-        [settled] = await settle_trades(session)
+        [settled] = await settle_bets(session)
 
         assert settled.pnl == 1.0
         assert settled.bankroll_before is None and settled.bankroll_after is None
 
-    async def test_a_trade_without_a_candidate_needs_a_bankroll(self, pglite_async_session) -> None:
+    async def test_a_bet_without_a_candidate_needs_a_bankroll(self, pglite_async_session) -> None:
         await add_event(pglite_async_session, 1, DUE)
 
         with pytest.raises(ValueError, match="needs a bankroll"):
-            await place_trade(
+            await place_bet(
                 pglite_async_session,
                 event_id=1,
                 market="1x2",
@@ -885,8 +885,8 @@ class TestFlatStakeTrades:
         session.add(decision)
         await session.flush()
 
-        def trade(decision_id: int | None, bookmaker: str = "bet365") -> PaperTrade:
-            return PaperTrade(
+        def bet(decision_id: int | None, bookmaker: str = "bet365") -> Bet:
+            return Bet(
                 event_id=1,
                 market="1x2",
                 selection="home",
@@ -900,10 +900,10 @@ class TestFlatStakeTrades:
             )
 
         # The agent may take the same price at the same book twice.
-        session.add_all([trade(None), trade(None), trade(decision.id)])
+        session.add_all([bet(None), bet(None), bet(decision.id)])
         await session.commit()
 
-        session.add(trade(decision.id, bookmaker="betway"))
+        session.add(bet(decision.id, bookmaker="betway"))
         with pytest.raises(IntegrityError):
             await session.commit()
 
@@ -923,8 +923,8 @@ class TestFlatStakeTrades:
         session.add(decision)
         await session.flush()
 
-        def trade(line: float) -> PaperTrade:
-            return PaperTrade(
+        def bet(line: float) -> Bet:
+            return Bet(
                 event_id=1,
                 market="totals",
                 selection="over",
@@ -937,9 +937,9 @@ class TestFlatStakeTrades:
                 decision_id=decision.id,
             )
 
-        session.add_all([trade(2.5), trade(3.5)])
+        session.add_all([bet(2.5), bet(3.5)])
         await session.commit()
 
-        session.add(trade(2.5))
+        session.add(bet(2.5))
         with pytest.raises(IntegrityError):
             await session.commit()

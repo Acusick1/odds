@@ -4,12 +4,12 @@ title: Agent prompts
 description: The prompt files under packages/odds-mcp/agents/, the wake-up steps, edge types, conviction tiers and caps, and which of those rules code enforces.
 sources:
   - odds_lambda.jobs.agent_run.CADENCE
-  - odds_lambda.paper_trading.place_trade
-  - odds_core.paper_trade_models.PaperTrade
+  - odds_lambda.betting.place_bet
+  - odds_core.bet_models.Bet
   - odds_mcp.server.get_upcoming_fixtures
   - odds_mcp.server.get_slate_briefs
   - odds_mcp.server.save_match_brief
-  - odds_mcp.server.paper_bet
+  - odds_mcp.server.place_bet
   - odds_mcp.server.settle_bets
   - odds_mcp.server.schedule_next_wakeup
   - odds_mcp.server.find_retail_edges
@@ -25,12 +25,12 @@ Every [wake-up](../foundations/glossary.md#wake-up) of the [agent](betting-agent
 ## Steps
 
 1. **Orient.** Check the date, weekday and UTC time (`date -u`), then load upcoming events with `odds_mcp.server.get_upcoming_fixtures`. The integer event id it returns is the id every other tool takes; the base prompts tell the agent to treat it as opaque.
-2. **Settle.** Settle finished bets (`odds_mcp.server.settle_bets`, see [settlement](paper-trading.md#settlement)).
+2. **Settle.** Settle finished bets (`odds_mcp.server.settle_bets`, see [settlement](bets.md#settlement)).
 3. **Triage.** Read the latest [brief](../foundations/glossary.md#brief) per upcoming event (`odds_mcp.server.get_slate_briefs`) and choose what to research ([briefs](match-briefs.md)). Briefs are append-only and do not store the market.
 4. **Pre-market read**, for new events only.
 5. **Research.** Web search and Playwright; depth scales with kick-off proximity ([data sources](agent-data-sources.md)). Lineups come from BBC Sport at about KO-60, not an API ([ADR-0006](../../docs/adr/0006-lineups-from-web-research.md)).
 6. **Brief.** Append a brief per researched event with a decision of `bet`, `skip` or `watching` (`odds_mcp.server.save_match_brief`).
-7. **Decide.** Place bets when there is an edge (`odds_mcp.server.paper_bet`); bets can be placed at any time if the edge is clear. Stakes follow the conviction tiers below.
+7. **Decide.** Place bets when there is an edge (`odds_mcp.server.place_bet`); bets can be placed at any time if the edge is clear. Stakes follow the conviction tiers below.
 
 The agent may ask for its next wake-up with `odds_mcp.server.schedule_next_wakeup` ([scheduling tools](mcp-server.md#scrape-and-scheduling-tools)); otherwise the job's cadence applies. The cadence (`odds_lambda.jobs.agent_run.CADENCE`, selected from the `agent-run` `odds_core.job_specs.JobSpec` `cadence` field in `odds_core.job_specs.JOB_SPECS`, [cadence table](../scheduling/decision-engine.md#cadence)) is 1 h within 3 h of kick-off, 4 h from 3 to 24 h out, 12 h from 1 to 3 days out and 24 h beyond, and a requested wake-up overrides it, later or sooner ([wake-up requests](agent-run-job.md#wake-up-requests)).
 
@@ -58,7 +58,7 @@ The criteria per tier are in the prompt file. The prompt also caps exposure at 1
 
 ## What code enforces
 
-`odds_lambda.paper_trading.place_trade` checks only that the decimal price exceeds 1.0, the stake is positive, does not exceed the bankroll (an agent bet always carries one), that the market is `h2h`, `1x2` or `totals`, that the selection is one of the market's outcomes (`draw` on `h2h` only for a three-way sport such as EPL, not MLB) and that a totals bet has a half line, which `odds_mcp.server.paper_bet` does not pass, so the agent bets `h2h` or `1x2`. `odds_mcp.server.paper_bet` also records the sharp market's reading of the selection, which never blocks a bet ([sharp fields](paper-trading.md#sharp-fields)), and passes no estimated EV, which only a rule candidate records. A candidate bet is also checked against the registry, including that the event's sport is the candidate's and that a three-way sport uses `1x2`. Unlike a rule candidate's bets, an agent bet may repeat a bet on an outcome ([candidate fields](paper-trading.md#candidate-fields)). Tier sizes, the 3% single-bet cap, the 10% matchday cap, the four edge bases and the requirement to state a basis are prompt-level: `odds_core.paper_trade_models.PaperTrade.reasoning` and `confidence` are free-form optional fields, so the tool accepts a stake above 3% of bankroll, a matchday over the 10% cap, or a bet with no stated edge. The price is the decimal price as offered (`odds_core.paper_trade_models.PaperTrade.price_decimal`), and the optional candidate is checked against the registry ([bets](paper-trading.md#service-functions)). The `bankroll` that `odds_mcp.server.paper_bet` uses for sizing is computed from the portfolio summary unless the agent passes its own ([bets](paper-trading.md)).
+`odds_lambda.betting.place_bet` checks only that the decimal price exceeds 1.0, the stake is positive, does not exceed the bankroll (an agent bet always carries one), that the market is `h2h`, `1x2` or `totals`, that the selection is one of the market's outcomes (`draw` on `h2h` only for a three-way sport such as EPL, not MLB) and that a totals bet has a half line, which `odds_mcp.server.place_bet` does not pass, so the agent bets `h2h` or `1x2`. `odds_mcp.server.place_bet` also records the sharp market's reading of the selection, which never blocks a bet ([sharp fields](bets.md#sharp-fields)), and passes no estimated EV, which only a rule candidate records. A candidate bet is also checked against the registry, including that the event's sport is the candidate's and that a three-way sport uses `1x2`. Unlike a rule candidate's bets, an agent bet may repeat a bet on an outcome ([candidate fields](bets.md#candidate-fields)). Tier sizes, the 3% single-bet cap, the 10% matchday cap, the four edge bases and the requirement to state a basis are prompt-level: `odds_core.bet_models.Bet.reasoning` and `confidence` are free-form optional fields, so the tool accepts a stake above 3% of bankroll, a matchday over the 10% cap, or a bet with no stated edge. The price is the decimal price as offered (`odds_core.bet_models.Bet.price_decimal`), and the optional candidate is checked against the registry ([bets](bets.md#service-functions)). The `bankroll` that `odds_mcp.server.place_bet` uses for sizing is computed from the portfolio summary unless the agent passes its own ([bets](bets.md)).
 
 ## Related
 

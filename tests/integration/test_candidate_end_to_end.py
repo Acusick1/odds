@@ -9,9 +9,9 @@ from typing import Any
 import pytest
 import yaml
 from odds_analytics.candidate_parity import ParityStatus, check_parity
+from odds_core.bet_models import Bet, CandidateDecision
 from odds_core.candidates import load_candidate_file
 from odds_core.models import OddsSnapshot
-from odds_core.paper_trade_models import CandidateDecision, PaperTrade
 from odds_lambda.jobs.run_candidates import candidate_events, run_decisions, runnable_candidates
 from sqlalchemy import select
 
@@ -38,7 +38,7 @@ NOW = T + timedelta(minutes=1)
 @pytest.fixture
 def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr("odds_lambda.jobs.run_candidates.candidates_dir", lambda: tmp_path)
-    monkeypatch.setattr("odds_lambda.paper_trading.candidates_dir", lambda: tmp_path)
+    monkeypatch.setattr("odds_lambda.betting.candidates_dir", lambda: tmp_path)
     fields = candidate().model_dump(mode="json")
     (tmp_path / "gap.yaml").write_text(yaml.safe_dump(fields))
     assert load_candidate_file(tmp_path / "gap.yaml").name == "gap"
@@ -86,8 +86,8 @@ class TestRunnerThenParity:
         assert report.checked == 2
         assert [d.status for d in report.decisions] == [ParityStatus.MATCH] * 2
         assert report.data_differences == []
-        trades = (await pglite_async_session.execute(select(PaperTrade))).scalars().all()
-        assert len(trades) == 1
+        bets = (await pglite_async_session.execute(select(Bet))).scalars().all()
+        assert len(bets) == 1
 
     async def test_recorded_input_is_the_snapshot_decided_from(
         self, pglite_async_session, registry
