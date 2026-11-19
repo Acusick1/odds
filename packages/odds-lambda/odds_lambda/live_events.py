@@ -20,7 +20,7 @@ from odds_core.team import normalize_team_name
 from odds_core.vocabulary import Source
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_lambda.collection_calendar import EventKey, FixtureKey, MlbGameKey
+from odds_lambda.collection_calendar import EventKey, GameKey, MlbGameKey
 from odds_lambda.mlb_game_resolver import (
     MLB_SPORT_KEY,
     GameResolution,
@@ -55,7 +55,7 @@ LIVE_EVENT_STALE_THRESHOLD = timedelta(hours=1)
 
 
 def lock_order(sport_key: str, game: GameRow) -> int:
-    """Sort key that resolves a run's games in fixture-lock order within one transaction."""
+    """Sort key that resolves a run's games in game-lock order within one transaction."""
     return event_lock_key(
         sport_key, normalize_team_name(game.home_team), normalize_team_name(game.away_team)
     )
@@ -143,8 +143,8 @@ class LiveEventFinder:
     def schedule_unavailable(self) -> bool:
         return self.resolutions is None
 
-    async def fixture_key(self, session: AsyncSession, game: GameRow) -> FixtureKey | None:
-        """The calendar fixture a listed game identifies, never creating one; ``None`` if it matches nothing.
+    async def game_key(self, session: AsyncSession, game: GameRow) -> GameKey | None:
+        """The calendar game a listed game identifies, never creating one; ``None`` if it matches nothing.
 
         An MLB game is its resolved ``gamePk``, unless the resolver only inferred it from a started
         sibling: that row can be the started game's own, and naming the next game would excuse it.
@@ -283,7 +283,7 @@ class LiveEventFinder:
     ) -> ListingWrites:
         """Resolve each listing's game and store its snapshot, all in the caller's transaction.
 
-        Listings go in fixture-lock order (``lock_order``), so one transaction never asks for a
+        Listings go in game-lock order (``lock_order``), so one transaction never asks for a
         lock below one it holds. Each runs in its own savepoint: a failing listing is rolled
         back and recorded in ``errors``, and the run's other writes stand. Does not commit.
         """

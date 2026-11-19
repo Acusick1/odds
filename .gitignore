@@ -65,8 +65,8 @@ htmlcov/
 *.json
 !.mcp.json
 
-# ESPN fixture data (regenerated via scripts/ingest_espn_fixtures.py)
-data/espn_fixtures/
+# ESPN game data (regenerated via scripts/ingest_espn_games.py)
+data/espn_games/
 
 # ESPN lineup data (regenerated via scripts/ingest_espn_lineups.py)
 data/espn_lineups/

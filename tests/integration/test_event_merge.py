@@ -7,7 +7,7 @@ from datetime import timedelta
 import pytest
 from odds_cli.commands import events as events_cli
 from odds_core.bet_models import Bet, CandidateDecision
-from odds_core.match_brief_models import MatchBrief
+from odds_core.brief_models import Brief
 from odds_core.models import (
     DataQualityLog,
     Event,
@@ -35,7 +35,7 @@ from tests.test_helpers import (
     with_game_pk,
 )
 
-CHILD_MODELS = (OddsSnapshot, Bet, MatchBrief)
+CHILD_MODELS = (OddsSnapshot, Bet, Brief)
 
 
 async def _event_ids(session, model) -> set[int]:
@@ -127,7 +127,7 @@ class TestMergeDecidedTwins:
 
 
 class TestMergeRecordedEvents:
-    async def test_a_recorded_fixture_event_follows_the_merge(self, pglite_async_session) -> None:
+    async def test_a_recorded_game_event_follows_the_merge(self, pglite_async_session) -> None:
         session = pglite_async_session
         keep = make_epl_event(API_EVENT_ID)
         twin = make_epl_event(TWIN_EVENT_ID)
@@ -341,7 +341,7 @@ class TestIdentityChecks:
         assert await monitor.check_event_identity() == []
 
     @pytest.mark.asyncio
-    async def test_flags_a_rescheduled_fixture_stored_twice_in_a_season(
+    async def test_flags_a_rescheduled_game_stored_twice_in_a_season(
         self, pglite_async_session
     ) -> None:
         session = pglite_async_session
@@ -353,13 +353,13 @@ class TestIdentityChecks:
         )
         await session.flush()
 
-        repeated = await EventMerger(session).find_repeated_fixtures("soccer_epl")
+        repeated = await EventMerger(session).find_repeated_games("soccer_epl")
 
         assert [[e.id for e in g] for g in repeated] == [[TWIN_EVENT_ID, API_EVENT_ID]]
         assert await EventMerger(session).find_twin_groups() == []
 
     @pytest.mark.asyncio
-    async def test_same_fixture_in_two_seasons_is_not_repeated(self, pglite_async_session) -> None:
+    async def test_same_game_in_two_seasons_is_not_repeated(self, pglite_async_session) -> None:
         session = pglite_async_session
         session.add_all(
             [
@@ -369,7 +369,7 @@ class TestIdentityChecks:
         )
         await session.flush()
 
-        assert await EventMerger(session).find_repeated_fixtures("soccer_epl") == []
+        assert await EventMerger(session).find_repeated_games("soccer_epl") == []
 
 
 class TestMergeTwinsCommand:
@@ -639,7 +639,7 @@ class TestRepairGhostsFromRunnerNames:
     async def test_cut_off_name_merges_into_clean_event_and_moves_every_row(
         self, pglite_async_session
     ) -> None:
-        from odds_core.match_brief_models import BriefDecision, MatchBrief
+        from odds_core.brief_models import Brief, BriefDecision
 
         session = pglite_async_session
         ghost = _mlb_event(1, "St. Louis Cardin", "Arizona Diamondbacks")
@@ -687,9 +687,7 @@ class TestRepairGhostsFromRunnerNames:
         session.add(snapshot)
         await session.flush()
         session.add(
-            MatchBrief(
-                event_id=ghost.id, decision=BriefDecision.WATCHING, summary="s", brief_text="b"
-            )
+            Brief(event_id=ghost.id, decision=BriefDecision.WATCHING, summary="s", brief_text="b")
         )
         await session.commit()
 
@@ -698,7 +696,7 @@ class TestRepairGhostsFromRunnerNames:
 
         assert report.merged_count == 1
         assert await _stored_event_ids(session) == {2}
-        for model in (OddsSnapshot, MatchBrief):
+        for model in (OddsSnapshot, Brief):
             assert await _event_ids(session, model) == {2}
         assert report.describe_merges() == ["2 [scheduled] <- 1 [scheduled]"]
 

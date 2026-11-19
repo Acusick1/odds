@@ -1,5 +1,5 @@
 # Odds API historical backfill of the Championship 2026-27 to 1 December 2026 (#859 step 10).
-# Snapshot grid, billing, books and fixture horizon follow the probe (#729, #787).
+# Snapshot grid, billing, books and game horizon follow the probe (#729, #787).
 sport: soccer_efl_champ
 # The window ends at the latest start of the month's extra purchases (#859).
 seasons:
@@ -11,7 +11,7 @@ markets: [h2h]
 regions: [uk]
 # A decision at any whole minute in a band finds a snapshot at most its max age old.
 # The bands of the 2024-26 manifest, chosen in #740, the far band ending at 4 d since the API
-# lists Championship fixtures only 125-172 h ahead (#787).
+# lists Championship games only 125-172 h ahead (#787).
 coverage:
   - {min_lead_minutes: 1, max_lead_minutes: 120, max_input_age_minutes: 10}
   - {min_lead_minutes: 121, max_lead_minutes: 1440, max_input_age_minutes: 60}
@@ -22,8 +22,8 @@ snapshot_grid:
 probe:
   snapshots:
     - 2026-10-24T09:55:38Z
-  # Call sharing needs fixtures as far ahead as the earliest coverage, 4 d plus its 6 h max age.
-  min_fixture_lead_hours: 102
+  # Call sharing needs games as far ahead as the earliest coverage, 4 d plus its 6 h max age.
+  min_game_lead_hours: 102
   # Betfair Exchange is the scoring reference and close (ADR-0012); no current candidate or
   # model uses Pinnacle.
   required_bookmakers:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from odds_core.market_prices import Outcome
 from pydantic import PositiveFloat, PositiveInt
 
-from odds_lambda.candidate_rules.fixture_context import FixtureInput
+from odds_lambda.candidate_rules.game_context import GameInput
 from odds_lambda.candidate_rules.market_state import MarketState
 from odds_lambda.candidate_rules.rules import (
     BetIntent,
@@ -31,7 +31,7 @@ def last_result_overreaction(state: MarketState, params: LastResultParams) -> li
     retail = state.retail.get(None, {})
     scored: list[BetIntent] = []
     for side in (Outcome.HOME, Outcome.AWAY):
-        previous = state.fixture.previous.get(side)
+        previous = state.game.previous.get(side)
         longest = longest_retail(retail, side)
         if previous is None or longest is None or previous.goal_difference > -params.min_margin:
             continue
@@ -44,6 +44,6 @@ LAST_RESULT_OVERREACTION = RuleSpec(
     last_result_overreaction,
     LastResultParams,
     frozenset(),
-    fixture_inputs=frozenset({FixtureInput.PREVIOUS_RESULT}),
+    game_inputs=frozenset({GameInput.PREVIOUS_RESULT}),
     estimate_basis=None,
 )

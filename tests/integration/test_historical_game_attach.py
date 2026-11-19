@@ -1,4 +1,4 @@
-"""A historical Odds API listing attaches to the FINAL fixture football-data.co.uk loaded (#779)."""
+"""A historical Odds API listing attaches to the FINAL game football-data.co.uk loaded (#779)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 from odds_analytics import backfill_executor
 from odds_analytics.backfill_executor import BackfillExecutor, BackfillResult
-from odds_analytics.backfill_plan import Call, Fixture, Manifest, Target
+from odds_analytics.backfill_plan import Call, Game, Manifest, Target
 from odds_core.models import DataQualityLog, Event, EventExternalId, EventStatus, OddsSnapshot
 from odds_core.sports import SportKey
 from odds_core.time import utc_isoformat
@@ -26,15 +26,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.test_helpers import (
-    LEAGUE_FIXTURES,
-    LeagueFixture,
+    LEAGUE_GAMES,
+    LeagueGame,
     ReplayHttpSession,
     SessionFactory,
-    load_fduk_fixture,
+    load_fduk_game,
 )
 
 # Valencia v Real Madrid, postponed from 3 Nov 2024 by the Valencia floods and played 3 Jan 2025.
-VALENCIA_REAL = LeagueFixture(
+VALENCIA_REAL = LeagueGame(
     "soccer_spain_la_liga",
     "La Liga - Spain",
     "Valencia",
@@ -64,7 +64,7 @@ def manifest(sport: SportKey) -> Manifest:
             "snapshot_grid": [{"start": "2020-06-06T00:00:00Z", "step_minutes": 10}],
             "probe": {
                 "snapshots": ["2024-09-14T12:00:00Z"],
-                "min_fixture_lead_hours": 12,
+                "min_game_lead_hours": 12,
                 "required_bookmakers": {},
             },
         }
@@ -72,16 +72,16 @@ def manifest(sport: SportKey) -> Manifest:
 
 
 def listing(
-    api_id: str, fixture: LeagueFixture, start: datetime, snapshot_time: datetime
+    api_id: str, game: LeagueGame, start: datetime, snapshot_time: datetime
 ) -> dict[str, Any]:
     stamp = snapshot_time.isoformat().replace("+00:00", "Z")
     return {
         "id": api_id,
-        "sport_key": fixture.sport,
-        "sport_title": fixture.sport_title,
+        "sport_key": game.sport,
+        "sport_title": game.sport_title,
         "commence_time": start.isoformat().replace("+00:00", "Z"),
-        "home_team": fixture.api_home,
-        "away_team": fixture.api_away,
+        "home_team": game.api_home,
+        "away_team": game.api_away,
         "bookmakers": [
             {
                 "key": "pinnacle",
@@ -92,8 +92,8 @@ def listing(
                         "key": "h2h",
                         "last_update": stamp,
                         "outcomes": [
-                            {"name": fixture.api_home, "price": 2.1},
-                            {"name": fixture.api_away, "price": 3.6},
+                            {"name": game.api_home, "price": 2.1},
+                            {"name": game.api_away, "price": 3.6},
                             {"name": "Draw", "price": 3.4},
                         ],
                     }
@@ -139,7 +139,7 @@ async def run_calls(
         Call(
             t,
             tuple(
-                Target(Fixture(event.id, event.commence_time), band, t, t)
+                Target(Game(event.id, event.commence_time), band, t, t)
                 for event in serves
                 if event.id is not None
             ),
@@ -179,13 +179,13 @@ async def snapshot_times(session: AsyncSession, event: Event) -> set[datetime]:
 
 
 @pytest.mark.asyncio
-class TestHistoricalFixtureAttach:
-    @pytest.mark.parametrize("league", LEAGUE_FIXTURES, ids=lambda f: f.sport)
-    async def test_listing_attaches_to_the_loaded_final_fixture(
-        self, pglite_async_session: AsyncSession, league: LeagueFixture
+class TestHistoricalGameAttach:
+    @pytest.mark.parametrize("league", LEAGUE_GAMES, ids=lambda f: f.sport)
+    async def test_listing_attaches_to_the_loaded_final_game(
+        self, pglite_async_session: AsyncSession, league: LeagueGame
     ) -> None:
         session = pglite_async_session
-        loaded = await load_fduk_fixture(session, league)
+        loaded = await load_fduk_game(session, league)
         at = league.kickoff - timedelta(hours=1)
 
         result = await run_call(
@@ -196,32 +196,32 @@ class TestHistoricalFixtureAttach:
         assert await odds_api_ids(session, loaded) == ["api-1"]
         assert await snapshot_times(session, loaded) == {at}
         assert (loaded.status, loaded.commence_time) == (EventStatus.FINAL, league.kickoff)
-        assert (result.fixtures_stored, result.dropped_games) == (1, {})
+        assert (result.games_stored, result.dropped_games) == (1, {})
 
     async def test_listing_off_the_kickoff_by_up_to_two_hours_attaches(
         self, pglite_async_session: AsyncSession
     ) -> None:
         session = pglite_async_session
-        fixture = LEAGUE_FIXTURES[1]
-        loaded = await load_fduk_fixture(session, fixture)
-        at = fixture.kickoff - timedelta(days=1)
-        listed_start = fixture.kickoff + timedelta(hours=2)
+        game = LEAGUE_GAMES[1]
+        loaded = await load_fduk_game(session, game)
+        at = game.kickoff - timedelta(days=1)
+        listed_start = game.kickoff + timedelta(hours=2)
 
-        await run_call(session, fixture.sport, at, [listing("api-1", fixture, listed_start, at)])
+        await run_call(session, game.sport, at, [listing("api-1", game, listed_start, at)])
 
-        assert [e.id for e in await events_of(session, fixture.sport)] == [loaded.id]
+        assert [e.id for e in await events_of(session, game.sport)] == [loaded.id]
         assert await odds_api_ids(session, loaded) == ["api-1"]
-        assert loaded.commence_time == fixture.kickoff
+        assert loaded.commence_time == game.kickoff
 
-    async def test_listing_with_no_loaded_fixture_creates_no_event(
+    async def test_listing_with_no_loaded_game_creates_no_event(
         self, pglite_async_session: AsyncSession
     ) -> None:
         session = pglite_async_session
-        fixture = LEAGUE_FIXTURES[0]
-        loaded = await load_fduk_fixture(session, fixture)
-        playoff = LeagueFixture(
-            fixture.sport,
-            fixture.sport_title,
+        game = LEAGUE_GAMES[0]
+        loaded = await load_fduk_game(session, game)
+        playoff = LeagueGame(
+            game.sport,
+            game.sport_title,
             "Sunderland",
             "Coventry",
             "Sunderland",
@@ -231,42 +231,42 @@ class TestHistoricalFixtureAttach:
         at = playoff.kickoff - timedelta(hours=1)
 
         result = await run_call(
-            session, fixture.sport, at, [listing("api-9", playoff, playoff.kickoff, at)]
+            session, game.sport, at, [listing("api-9", playoff, playoff.kickoff, at)]
         )
 
-        assert [e.id for e in await events_of(session, fixture.sport)] == [loaded.id]
+        assert [e.id for e in await events_of(session, game.sport)] == [loaded.id]
         assert [(d.game.home_team, d.reason) for d in result.dropped_games] == [
             ("Sunderland", SkipReason.NO_EVENT)
         ]
-        assert result.fixtures_stored == 0
+        assert result.games_stored == 0
 
     async def test_postponed_match_attaches_only_at_the_kickoff_it_was_played(
         self, pglite_async_session: AsyncSession
     ) -> None:
         session = pglite_async_session
-        fixture = VALENCIA_REAL
-        loaded = await load_fduk_fixture(session, fixture)
+        game = VALENCIA_REAL
+        loaded = await load_fduk_game(session, game)
         before = VALENCIA_REAL_ORIGINAL - timedelta(days=4)
-        after = fixture.kickoff - timedelta(hours=1)
+        after = game.kickoff - timedelta(hours=1)
 
         first = await run_call(
-            session, fixture.sport, before, [listing("vr", fixture, VALENCIA_REAL_ORIGINAL, before)]
+            session, game.sport, before, [listing("vr", game, VALENCIA_REAL_ORIGINAL, before)]
         )
         await run_call(
             session,
-            fixture.sport,
+            game.sport,
             after,
-            [listing("vr", fixture, fixture.kickoff, after)],
+            [listing("vr", game, game.kickoff, after)],
             (loaded,),
         )
         rerun = await run_call(
-            session, fixture.sport, before, [listing("vr", fixture, VALENCIA_REAL_ORIGINAL, before)]
+            session, game.sport, before, [listing("vr", game, VALENCIA_REAL_ORIGINAL, before)]
         )
 
-        assert [e.id for e in await events_of(session, fixture.sport)] == [loaded.id]
+        assert [e.id for e in await events_of(session, game.sport)] == [loaded.id]
         assert await odds_api_ids(session, loaded) == ["vr"]
         assert await snapshot_times(session, loaded) == {after}
-        assert (loaded.status, loaded.commence_time) == (EventStatus.FINAL, fixture.kickoff)
+        assert (loaded.status, loaded.commence_time) == (EventStatus.FINAL, game.kickoff)
         for result in (first, rerun):
             assert [d.reason for d in result.dropped_games] == [SkipReason.NO_EVENT]
 
@@ -274,24 +274,24 @@ class TestHistoricalFixtureAttach:
         self, pglite_async_session: AsyncSession
     ) -> None:
         session = pglite_async_session
-        fixture = VALENCIA_REAL
+        game = VALENCIA_REAL
         duplicate = await resolve_event(
             session,
             ListedGame(
                 source=Source.ODDS_API,
-                sport_key=fixture.sport,
-                sport_title=fixture.sport_title,
-                home_team=fixture.api_home,
-                away_team=fixture.api_away,
+                sport_key=game.sport,
+                sport_title=game.sport_title,
+                home_team=game.api_home,
+                away_team=game.api_away,
                 commence_time=VALENCIA_REAL_ORIGINAL,
                 external_id="vr",
             ),
         )
-        loaded = await load_fduk_fixture(session, fixture)
-        at = fixture.kickoff - timedelta(hours=1)
+        loaded = await load_fduk_game(session, game)
+        at = game.kickoff - timedelta(hours=1)
 
         result = await run_call(
-            session, fixture.sport, at, [listing("vr", fixture, fixture.kickoff, at)], (loaded,)
+            session, game.sport, at, [listing("vr", game, game.kickoff, at)], (loaded,)
         )
 
         [dropped] = result.dropped_games
@@ -312,11 +312,11 @@ class TestHistoricalFixtureAttach:
         self, pglite_async_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         session = pglite_async_session
-        fixture = LEAGUE_FIXTURES[0]
-        await load_fduk_fixture(session, fixture)
-        playoff = LeagueFixture(
-            fixture.sport,
-            fixture.sport_title,
+        game = LEAGUE_GAMES[0]
+        await load_fduk_game(session, game)
+        playoff = LeagueGame(
+            game.sport,
+            game.sport_title,
             "Sunderland",
             "Coventry",
             "Sunderland",
@@ -334,7 +334,7 @@ class TestHistoricalFixtureAttach:
         monkeypatch.setattr(backfill_executor, "alert_dropped_games", alert)
 
         result = await run_calls(
-            session, fixture.sport, times, [listing("api-9", playoff, playoff.kickoff, start)]
+            session, game.sport, times, [listing("api-9", playoff, playoff.kickoff, start)]
         )
 
         assert result.calls_made == 3
@@ -343,21 +343,19 @@ class TestHistoricalFixtureAttach:
         ]
         assert [len(games) for games in alerted] == [1]
 
-    async def test_relisting_a_fixture_keeps_one_event_and_one_id(
+    async def test_relisting_a_game_keeps_one_event_and_one_id(
         self, pglite_async_session: AsyncSession
     ) -> None:
         session = pglite_async_session
-        fixture = LEAGUE_FIXTURES[2]
-        loaded = await load_fduk_fixture(session, fixture)
-        early = fixture.kickoff - timedelta(hours=2)
-        late = fixture.kickoff - timedelta(minutes=30)
+        game = LEAGUE_GAMES[2]
+        loaded = await load_fduk_game(session, game)
+        early = game.kickoff - timedelta(hours=2)
+        late = game.kickoff - timedelta(minutes=30)
 
         for at in (early, late, late):
-            await run_call(
-                session, fixture.sport, at, [listing("api-1", fixture, fixture.kickoff, at)]
-            )
+            await run_call(session, game.sport, at, [listing("api-1", game, game.kickoff, at)])
 
-        assert [e.id for e in await events_of(session, fixture.sport)] == [loaded.id]
+        assert [e.id for e in await events_of(session, game.sport)] == [loaded.id]
         assert await odds_api_ids(session, loaded) == ["api-1"]
         assert await snapshot_times(session, loaded) == {
             early,

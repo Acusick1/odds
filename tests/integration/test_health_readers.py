@@ -99,7 +99,7 @@ class TestSourceFreshness:
 
         assert oddsportal_epl(found)[Market.ONE_X_TWO][0] is Freshness.FRESH
 
-    async def test_without_a_fixture_in_the_horizon_a_source_is_idle_and_keeps_its_last_time(
+    async def test_without_a_game_in_the_horizon_a_source_is_idle_and_keeps_its_last_time(
         self, pglite_async_session: AsyncSession
     ) -> None:
         last = NOW - timedelta(days=10)
@@ -147,7 +147,7 @@ class TestHeartbeats:
         ("schedule_id", "heartbeat"),
         [
             ("fetch-oddsportal-epl", "fetch-oddsportal-epl"),
-            ("fetch-espn-fixtures-epl", "fetch-espn-fixtures"),
+            ("fetch-espn-games-epl", "fetch-espn-games"),
             ("fetch-mlb-probables-mlb", "fetch-mlb-probables"),
             ("check-health", "check-health"),
             ("run-candidates-epl", "run-candidates-epl"),

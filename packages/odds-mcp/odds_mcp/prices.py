@@ -8,8 +8,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from odds_core.bet_models import SharpReading
+from odds_core.brief_models import SharpPriceMap, SharpPriceMeta
 from odds_core.market_prices import TWO_WAY_MARKET, market_outcomes
-from odds_core.match_brief_models import SharpPriceMap, SharpPriceMeta
 from odds_core.models import Event, OddsSnapshot, Price
 from odds_core.odds_math import (
     decimal_to_american,

@@ -657,7 +657,7 @@ class TestRun:
         assert done.row == result
 
     def register_epl_and_la_liga(self, directory: Path) -> Path:
-        """Commit a grid file of EPL and La Liga, unlike the fixture's so that git does not read
+        """Commit a grid file of EPL and La Liga, unlike the game's so that git does not read
         it as a rename of it, and its selection."""
         cell = {"threshold": 0.03, "minutes_before_kickoff": [45], "max_input_age_minutes": 15}
         grid = directory / "preregistrations" / "611-1x2-v1.yaml"

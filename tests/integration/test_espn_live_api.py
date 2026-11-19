@@ -1,4 +1,4 @@
-"""Live-API integration tests for ``EspnFixtureFetcher``.
+"""Live-API integration tests for ``EspnGameFetcher``.
 
 These hit ESPN's real Site API (no mocking) and act as a smoke test against
 schema drift — specifically the ``status.type.state`` enum, which was the
@@ -15,8 +15,8 @@ from contextlib import contextmanager
 
 import httpx
 import pytest
-from odds_lambda.espn_fixture_fetcher import (
-    EspnFixtureFetcher,
+from odds_lambda.espn_game_fetcher import (
+    EspnGameFetcher,
     current_season,
 )
 
@@ -47,15 +47,15 @@ class TestEspnLiveApi:
         """``fetch_upcoming`` should produce at least one ``state == 'pre'`` row.
 
         Skips (rather than fails) during deep offseason when no scheduled
-        fixtures exist in the next 30 days across any configured competition.
+        games exist in the next 30 days across any configured competition.
         """
         with _skip_on_espn_failure():
-            async with EspnFixtureFetcher() as fetcher:
+            async with EspnGameFetcher() as fetcher:
                 records = (await fetcher.fetch_upcoming(days_ahead=30)).records
 
         if not records:
             pytest.skip(
-                "ESPN returned no upcoming fixtures in the next 30 days "
+                "ESPN returned no upcoming games in the next 30 days "
                 "across any configured competition (offseason?)."
             )
 
@@ -73,7 +73,7 @@ class TestEspnLiveApi:
         """
         season = current_season()
         with _skip_on_espn_failure():
-            async with EspnFixtureFetcher() as fetcher:
+            async with EspnGameFetcher() as fetcher:
                 records = await fetcher.fetch_season(season)
 
         if not records:
@@ -96,7 +96,7 @@ class TestEspnLiveApi:
         will silently drop those rows. Catching it here surfaces the drift.
         """
         with _skip_on_espn_failure():
-            async with EspnFixtureFetcher() as fetcher:
+            async with EspnGameFetcher() as fetcher:
                 upcoming = (await fetcher.fetch_upcoming(days_ahead=30)).records
                 season = await fetcher.fetch_season(current_season())
 

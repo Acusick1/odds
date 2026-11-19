@@ -206,7 +206,7 @@ The versions sharing a candidate's rule and market whose leagues overlap its own
 
 ### Brief
 
-The agent's note on one event at one wake-up, written once and never updated ([match briefs](../agent/match-briefs.md)).
+The agent's note on one event at one wake-up, written once and never updated ([briefs](../agent/briefs.md)).
 _Avoid_: match brief
 
 ### Wake-up

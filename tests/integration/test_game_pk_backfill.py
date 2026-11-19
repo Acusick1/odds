@@ -9,8 +9,8 @@ import pytest
 import typer
 from odds_cli.commands import events as events_cli
 from odds_core.bet_models import Bet, CandidateDecision
+from odds_core.brief_models import Brief, BriefDecision
 from odds_core.config import get_settings
-from odds_core.match_brief_models import BriefDecision, MatchBrief
 from odds_core.models import (
     Event,
     EventExternalId,
@@ -386,7 +386,7 @@ class TestAssignGamePks:
                     stake=10.0,
                     bankroll_before=100.0,
                 ),
-                MatchBrief(
+                Brief(
                     event_id=2,
                     decision=BriefDecision.WATCHING,
                     summary="s",
@@ -401,9 +401,9 @@ class TestAssignGamePks:
         plan, [outcome] = await _plan_and_apply(session, fetcher)
 
         assert (outcome.kept_id, outcome.merged_ids) == (1, (2,))
-        assert outcome.read_only_rows == {"match_briefs": 1, "bets": 1}
+        assert outcome.read_only_rows == {"briefs": 1, "bets": 1}
         assert await _count(session, Bet, 1) == 1
-        assert await _count(session, MatchBrief, 1) == 1
+        assert await _count(session, Brief, 1) == 1
 
 
 class TestMergeRefusesClashingDecisions:

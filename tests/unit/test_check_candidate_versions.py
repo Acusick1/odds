@@ -114,12 +114,12 @@ class TestCheckCandidateVersions:
 
 
 class TestLeagueField:
-    """A one-league `sport` or a `sports` list reads as `leagues`: the rename alone is no change."""
+    """Changing a candidate's leagues is a change, needing a version bump."""
 
     @pytest.fixture
     def repo(self, candidates_repo: Path) -> Path:
         (candidates_repo / "candidates" / "back-longest.yaml").write_text(
-            BASE_YAML + "sport: soccer_epl\n"
+            BASE_YAML + "leagues: [soccer_epl]\n"
         )
         git(candidates_repo, "add", "candidates")
         git(candidates_repo, "commit", "-q", "-m", "base")
@@ -140,18 +140,7 @@ class TestLeagueField:
         )
         return result.stderr.splitlines()
 
-    def test_renaming_sport_to_a_one_league_list_passes(self, repo: Path) -> None:
-        self.write(repo, "[soccer_epl]")
-        assert self.errors(repo) == []
-
-    def test_renaming_sports_to_leagues_passes(self, repo: Path) -> None:
-        (repo / "candidates" / "back-longest.yaml").write_text(BASE_YAML + "sports: [soccer_epl]\n")
-        git(repo, "add", "candidates")
-        git(repo, "commit", "-q", "-m", "sports base")
-        self.write(repo, "[soccer_epl]")
-        assert self.errors(repo) == []
-
-    def test_renaming_to_another_league_fails(self, repo: Path) -> None:
+    def test_changing_to_another_league_fails(self, repo: Path) -> None:
         self.write(repo, "[soccer_italy_serie_a]")
         (error,) = self.errors(repo)
         assert "leagues changed without a version bump" in error
@@ -177,7 +166,7 @@ class TestBooksField:
     """A rule-candidate file without `books` reads as `books: uk_retail`: adding that line is no
     change, and changing the set is."""
 
-    YAML = BASE_YAML + "kind: rule\nrule: exchange_gap\nmarket: 1x2\nsports: [soccer_epl]\n"
+    YAML = BASE_YAML + "kind: rule\nrule: exchange_gap\nmarket: 1x2\nleagues: [soccer_epl]\n"
 
     @pytest.fixture
     def repo(self, candidates_repo: Path) -> Path:
@@ -214,7 +203,7 @@ class TestBooksField:
         assert "books changed without a version bump" in error
 
     def test_an_agent_file_is_not_given_a_set(self, repo: Path) -> None:
-        agent = BASE_YAML + "kind: agent\nsports: [soccer_epl]\n"
+        agent = BASE_YAML + "kind: agent\nleagues: [soccer_epl]\n"
         (repo / "candidates" / "back-longest.yaml").write_text(agent)
         git(repo, "commit", "-qam", "agent")
         assert self.errors(repo, agent + "# unchanged\n") == []
@@ -223,7 +212,7 @@ class TestBooksField:
 class TestIdentityKeys:
     """A name's rule and market are fixed: another rule or market is another candidate."""
 
-    YAML = BASE_YAML + "rule: exchange_gap\nmarket: 1x2\nsports: [soccer_epl]\n"
+    YAML = BASE_YAML + "rule: exchange_gap\nmarket: 1x2\nleagues: [soccer_epl]\n"
 
     @pytest.fixture
     def repo(self, candidates_repo: Path) -> Path:

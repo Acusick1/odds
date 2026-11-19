@@ -5,14 +5,14 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from odds_core.database import async_session_maker
-from odds_core.epl_data_models import ESPN_STATUS_POSTPONED, EspnFixture
+from odds_core.epl_data_models import ESPN_STATUS_POSTPONED, EspnGame
 from odds_core.mlb_data_models import UNPLAYED_GAME_STATUSES, MlbProbablePitchers
 from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.vocabulary import Market, Source, TimeBasis
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_lambda.espn_fixture_fetcher import LEAGUE_SLUGS, PRIMARY_LEAGUE_SLUG
+from odds_lambda.espn_game_fetcher import LEAGUE_SLUGS, PRIMARY_LEAGUE_SLUG
 from odds_lambda.scheduling.decision import (
     DORMANCY_HORIZON_DAYS,
     OVERNIGHT_WINDOWS,
@@ -34,34 +34,34 @@ ERRORS_SHOWN = 3
 
 @dataclass(frozen=True, slots=True)
 class EventKey:
-    """A fixture of an event-backed sport, by its ``events`` row."""
+    """A game of an event-backed sport, by its ``events`` row."""
 
     event_id: int
 
 
 @dataclass(frozen=True, slots=True)
 class MlbGameKey:
-    """An MLB fixture, by the ``gamePk`` of the schedule that is its calendar."""
+    """An MLB game, by the ``gamePk`` of the schedule that is its calendar."""
 
     game_pk: int
 
 
-FixtureKey = EventKey | MlbGameKey
+GameKey = EventKey | MlbGameKey
 
 
 class EmptyCollectionError(RuntimeError):
-    """A collection job wrote no rows while fixtures it should price are scheduled."""
+    """A collection job wrote no rows while games it should price are scheduled."""
 
 
 @dataclass(frozen=True, slots=True)
 class SportCollection:
     """What a source collects for one sport.
 
-    ``fixture_horizon`` is how far ahead a scheduled fixture must be before the
+    ``game_horizon`` is how far ahead a scheduled game must be before the
     source is expected to price it, and ``markets`` the markets it writes.
     """
 
-    fixture_horizon: timedelta
+    game_horizon: timedelta
     markets: tuple[Market, ...]
 
     def __post_init__(self) -> None:
@@ -74,7 +74,7 @@ class CollectionSource:
     """A snapshot source and the schedule its job promises to keep.
 
     ``cadence`` is the job's own polling cadence, so the expected gap between
-    rows follows the tier of the next fixture. ``sports`` holds what the source
+    rows follows the tier of the next game. ``sports`` holds what the source
     collects for each sport it covers. ``source`` is the ``source`` of the
     snapshots its job writes, all of them ``observed``.
     """
@@ -91,26 +91,26 @@ class CollectionSource:
 
 
 @dataclass(frozen=True, slots=True)
-class FixtureCalendar:
-    """Scheduled fixtures of one sport after a reference time."""
+class GameCalendar:
+    """Scheduled games of one sport after a reference time."""
 
     next_kickoff: datetime | None
     kickoffs_in_horizon: int
 
 
-async def fixture_calendar(
+async def game_calendar(
     session: AsyncSession,
     sport_key: str,
     *,
     now: datetime,
     horizon: timedelta,
-    excluding: Collection[FixtureKey] = (),
-) -> FixtureCalendar:
-    """Upcoming fixtures of a sport, MLB from the MLB Stats API schedule.
+    excluding: Collection[GameKey] = (),
+) -> GameCalendar:
+    """Upcoming games of a sport, MLB from the MLB Stats API schedule.
 
     The MLB calendar comes from ``mlb_probable_pitchers`` so it does not depend
     on the collectors being monitored, which create the ``events`` rows.
-    ``excluding`` leaves out fixtures by key (see ``FixtureKey``).
+    ``excluding`` leaves out games by key (see ``GameKey``).
     """
     if sport_key == MLB_SPORT_KEY:
         return await _mlb_schedule_calendar(session, now=now, horizon=horizon, excluding=excluding)
@@ -123,8 +123,8 @@ async def event_calendar(
     *,
     now: datetime,
     horizon: timedelta,
-    excluding: Collection[FixtureKey] = (),
-) -> FixtureCalendar:
+    excluding: Collection[GameKey] = (),
+) -> GameCalendar:
     """Upcoming SCHEDULED ``events`` of a sport, whichever collector created them."""
     scheduled = (
         Event.sport_key == sport_key,
@@ -140,7 +140,7 @@ async def event_calendar(
             select(func.count(Event.id)).where(*scheduled, Event.commence_time <= now + horizon)
         )
     ).scalar_one()
-    return FixtureCalendar(next_kickoff=next_kickoff, kickoffs_in_horizon=in_horizon)
+    return GameCalendar(next_kickoff=next_kickoff, kickoffs_in_horizon=in_horizon)
 
 
 async def _mlb_schedule_calendar(
@@ -148,8 +148,8 @@ async def _mlb_schedule_calendar(
     *,
     now: datetime,
     horizon: timedelta,
-    excluding: Collection[FixtureKey] = (),
-) -> FixtureCalendar:
+    excluding: Collection[GameKey] = (),
+) -> GameCalendar:
     """Games of the latest schedule fetch, which is the job's only write path.
 
     Every row of a fetch shares one ``fetched_at``, so the latest fetch is the
@@ -157,7 +157,7 @@ async def _mlb_schedule_calendar(
     """
     latest = (await session.execute(select(func.max(MlbProbablePitchers.fetched_at)))).scalar_one()
     if latest is None or latest < now - MLB_SCHEDULE_MAX_AGE:
-        return FixtureCalendar(next_kickoff=None, kickoffs_in_horizon=0)
+        return GameCalendar(next_kickoff=None, kickoffs_in_horizon=0)
     scheduled = (
         MlbProbablePitchers.fetched_at == latest,
         MlbProbablePitchers.commence_time > now,
@@ -181,16 +181,16 @@ async def _mlb_schedule_calendar(
             )
         )
     ).scalar_one()
-    return FixtureCalendar(next_kickoff=next_kickoff, kickoffs_in_horizon=in_horizon)
+    return GameCalendar(next_kickoff=next_kickoff, kickoffs_in_horizon=in_horizon)
 
 
-async def _espn_next_fixture(session: AsyncSession, *, now: datetime) -> datetime | None:
+async def _espn_next_game(session: AsyncSession, *, now: datetime) -> datetime | None:
     return (
         await session.execute(
-            select(func.min(EspnFixture.date)).where(
-                EspnFixture.competition == LEAGUE_SLUGS[PRIMARY_LEAGUE_SLUG],
-                EspnFixture.status != ESPN_STATUS_POSTPONED,
-                EspnFixture.date > now,
+            select(func.min(EspnGame.date)).where(
+                EspnGame.competition == LEAGUE_SLUGS[PRIMARY_LEAGUE_SLUG],
+                EspnGame.status != ESPN_STATUS_POSTPONED,
+                EspnGame.date > now,
             )
         )
     ).scalar_one()
@@ -201,20 +201,20 @@ async def published_schedule_kickoff(
 ) -> datetime | None:
     """Next kickoff in the sport's published schedule, which no collection job writes.
 
-    EPL reads the ESPN fixtures of the daily ``fetch-espn-fixtures`` cron and
+    EPL reads the ESPN games of the daily ``fetch-espn-games`` cron and
     MLB the Stats API schedule of the daily ``fetch-mlb-probables`` cron. NBA has no
-    table of its own: its ``fetch-espn-fixtures`` run creates the events, which the
+    table of its own: its ``fetch-espn-games`` run creates the events, which the
     stored lookup reads. A sport without a published schedule here has none.
     """
     if sport_key == MLB_SPORT_KEY:
         calendar = await _mlb_schedule_calendar(session, now=now, horizon=timedelta(0))
         return calendar.next_kickoff
     if sport_key == EPL_SPORT_KEY:
-        return await _espn_next_fixture(session, now=now)
+        return await _espn_next_game(session, now=now)
     return None
 
 
-async def next_fixture_kickoff(
+async def next_game_kickoff(
     sport_key: str, *, now: datetime, stored_kickoff: KickoffLookup = get_next_kickoff
 ) -> datetime | None:
     """Earliest upcoming kickoff in the stored events (read by ``stored_kickoff``) or the
@@ -241,7 +241,7 @@ async def decide_collection_run(
     leads: Sequence[Lead] = (),
     run_started: datetime | None = None,
 ) -> ScheduleDecision:
-    """Next run of a collector, dormant while no fixture is within ``DORMANCY_HORIZON_DAYS``.
+    """Next run of a collector, dormant while no game is within ``DORMANCY_HORIZON_DAYS``.
 
     ``stored_only`` looks at stored events alone, for a job that only pairs
     with events other jobs create. ``stored_kickoff`` replaces the stored events'
@@ -249,12 +249,12 @@ async def decide_collection_run(
     ``leads`` adds a run before each kickoff that the run started at
     ``run_started`` did not serve.
     """
-    lookup: KickoffLookup | None = None if stored_only else next_fixture_kickoff
+    lookup: KickoffLookup | None = None if stored_only else next_game_kickoff
     if stored_kickoff is not None:
         stored = stored_kickoff
 
         async def with_stored(sport_key: str, *, now: datetime) -> datetime | None:
-            return await next_fixture_kickoff(sport_key, now=now, stored_kickoff=stored)
+            return await next_game_kickoff(sport_key, now=now, stored_kickoff=stored)
 
         lookup = stored if stored_only else with_stored
     return await decide_forward_resilient(
@@ -312,30 +312,30 @@ def active_hours_between(
     return total.total_seconds() / 3600
 
 
-async def require_rows_for_fixtures(
+async def require_rows_for_games(
     source: CollectionSource,
     rows_by_sport: Mapping[str, int],
     *,
     errors_by_sport: Mapping[str, Sequence[str]] | None = None,
-    accounted_by_sport: Mapping[str, Collection[FixtureKey]] | None = None,
+    accounted_by_sport: Mapping[str, Collection[GameKey]] | None = None,
     now: datetime | None = None,
 ) -> None:
-    """Raise when a sport got no rows although fixtures inside the source's horizon are scheduled.
+    """Raise when a sport got no rows although games inside the source's horizon are scheduled.
 
     Called inside the job's alert context so the failure skips the heartbeat and
-    raises a critical alert. An empty fixture calendar (international break,
+    raises a critical alert. An empty game calendar (international break,
     off-season) never raises. The run's own errors for the sport join the message.
-    ``accounted_by_sport`` holds the keys of fixtures the run identified but rightly
+    ``accounted_by_sport`` holds the keys of games the run identified but rightly
     did not price (a market already in play); the calendar leaves them out, so the
-    check raises only for fixtures beyond them.
+    check raises only for games beyond them.
     """
     moment = now or datetime.now(UTC)
     async with async_session_maker() as session:
         for sport_key, rows_written in rows_by_sport.items():
             if rows_written > 0 or sport_key not in source.sports:
                 continue
-            horizon = source.sports[sport_key].fixture_horizon
-            calendar = await fixture_calendar(
+            horizon = source.sports[sport_key].game_horizon
+            calendar = await game_calendar(
                 session,
                 sport_key,
                 now=moment,
@@ -347,6 +347,6 @@ async def require_rows_for_fixtures(
                 detail = f"; errors: {'; '.join(errors)}" if errors else ""
                 raise EmptyCollectionError(
                     f"{source.key} wrote 0 rows for {sport_key} with "
-                    f"{calendar.kickoffs_in_horizon} fixture(s) scheduled within "
+                    f"{calendar.kickoffs_in_horizon} game(s) scheduled within "
                     f"{horizon} (next kickoff {calendar.next_kickoff}){detail}"
                 )

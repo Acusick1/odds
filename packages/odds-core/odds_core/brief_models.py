@@ -1,4 +1,4 @@
-"""Match brief model for cross-session agent memory."""
+"""Brief model for cross-session agent memory."""
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -37,10 +37,10 @@ class SharpPriceMeta:
     age_seconds: float
 
 
-class MatchBrief(SQLModel, table=True):
+class Brief(SQLModel, table=True):
     """Agent-authored match analysis brief, one per wake-up per event (append-only)."""
 
-    __tablename__ = "match_briefs"
+    __tablename__ = "briefs"
 
     id: int | None = Field(default=None, primary_key=True)
     event_id: int = Field(sa_type=BigInteger, foreign_key="events.id", index=True)

@@ -90,7 +90,7 @@ async def _create_recent_snapshot(session, *, minutes_ago: int = 30) -> None:
 
 
 async def _create_stale_oddsportal_source(session, *, hours_ago: float = 40) -> None:
-    """An EPL fixture inside the horizon whose OddsPortal feed last wrote hours ago."""
+    """An EPL game inside the horizon whose OddsPortal feed last wrote hours ago."""
     now = datetime.now(UTC)
     event = Event(
         id=9001,

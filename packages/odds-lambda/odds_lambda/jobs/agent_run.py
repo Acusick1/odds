@@ -1,4 +1,4 @@
-"""Run the betting agent and self-schedule based on fixture proximity.
+"""Run the betting agent and self-schedule based on game proximity.
 
 Scheduling strategy: query DB for next kickoff, compute the wake interval via
 the unified decision engine (proximity → cadence on canonical FetchTier
@@ -11,7 +11,7 @@ Wake cadence (canonical FetchTier boundaries, see ``CADENCE`` below):
   24-72h        -> 12h  (research window opening)
   3-24h         ->  4h  (active research)
   < 3h          ->  1h  (lineups dropping, final decisions)
-  no fixtures   -> 12h  (off-season check-in)
+  no games   -> 12h  (off-season check-in)
 """
 
 from __future__ import annotations
@@ -53,8 +53,8 @@ AGENT_RUN_LOG_KEEP = 50
 # payload) routinely exceeds it and would raise ``LimitOverrunError``.
 AGENT_STREAM_LINE_LIMIT = 8 * 1024 * 1024
 
-# Horizon for "no fixtures" classification (matches decide_forward lookahead).
-FIXTURE_HORIZON_DAYS = 7
+# Horizon for "no games" classification (matches decide_forward lookahead).
+GAME_HORIZON_DAYS = 7
 
 
 class ScheduleResult(NamedTuple):
@@ -263,7 +263,7 @@ async def _check_agent_requested_wakeup(sport_key: SportKey) -> datetime | None:
 async def schedule_next(sport: SportKey) -> ScheduleResult:
     """Compute and schedule the next agent wake-up for a sport.
 
-    Uses the unified decision engine to map fixture proximity to a wake
+    Uses the unified decision engine to map game proximity to a wake
     interval (canonical FetchTier boundaries, agent ``CADENCE`` values) with
     the sport's overnight suppression applied. The agent always wakes — the
     decision's ``should_execute`` gate is ignored; only ``next_execution`` is
@@ -286,7 +286,7 @@ async def schedule_next(sport: SportKey) -> ScheduleResult:
         [sport],
         CADENCE,
         overnight=OVERNIGHT_WINDOWS[sport],
-        lookahead_days=FIXTURE_HORIZON_DAYS,
+        lookahead_days=GAME_HORIZON_DAYS,
     )
     assert decision.next_execution is not None  # noqa: S101
     logger.info("agent_proximity", sport=sport, reason=decision.reason)

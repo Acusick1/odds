@@ -58,7 +58,7 @@ Measured on historical `h2h` and `totals` responses.
 - **Football totals.** Historical football `totals` carry only Pinnacle and William Hill ([probe results](https://github.com/Acusick1/odds/issues/527#issuecomment-6798104166)).
 - **Exchange start on EPL.** `betfair_ex_uk` on EPL `h2h` is absent on 2023-03-25 and present from 2023-04-01 ([probe results](https://github.com/Acusick1/odds/issues/527#issuecomment-6798104166)).
 - **Legacy keys in early history.** Under `regions=uk`, early history names the exchange `betfair` and Ladbrokes `ladbrokes`; on EPL 2023-04-01 `betfair` sits beside `betfair_sb_uk`. By 2023-09-02 the keys are `betfair_ex_uk` and `ladbrokes_uk`. The legacy `betfair` is the exchange, not the sportsbook: its `h2h` prices equal a `bookmakers=betfair_ex_uk` request on the same snapshot for 18 of 26 events and differ by one tick on the rest, and its median vig is 2.1% against about 7% for `betfair_sb_uk` (measured 2026-11-11 on the paid historical endpoint). `odds_core.bookmakers.ODDS_API_BOOKMAKER_KEY_MAP` maps it to `betfair_exchange` for Odds API responses only; OddsPortal's `betfair` stays the sportsbook ([league and market keys](sport-and-market-keys.md)).
-- **Fixture horizon.** How far ahead a snapshot lists events ([probe results](https://github.com/Acusick1/odds/issues/527#issuecomment-6798104166)):
+- **Game horizon.** How far ahead a snapshot lists events ([probe results](https://github.com/Acusick1/odds/issues/527#issuecomment-6798104166)):
 
 | League | Farthest event listed |
 | --- | --- |

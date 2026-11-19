@@ -1,5 +1,5 @@
 # Odds API historical backfill of EPL from April 2023 to the end of 2025-26 (#527).
-# A top-up is a new manifest. Snapshot grid, billing, books and fixture horizon follow the
+# A top-up is a new manifest. Snapshot grid, billing, books and game horizon follow the
 # probe (#729, #787).
 sport: soccer_epl
 # 2022-23 starts 1 April 2023, the first date the API quotes the exchange on EPL h2h (#729).
@@ -26,8 +26,8 @@ probe:
   snapshots:
     - 2023-04-01T09:55:38Z
     - 2025-09-13T09:55:38Z
-  # Call sharing needs fixtures as far ahead as the earliest coverage, 7 d plus its 6 h max age.
-  min_fixture_lead_hours: 174
+  # Call sharing needs games as far ahead as the earliest coverage, 7 d plus its 6 h max age.
+  min_game_lead_hours: 174
   # Betfair Exchange is the scoring reference and close (ADR-0012); no current candidate or
   # model uses Pinnacle.
   required_bookmakers:

@@ -299,7 +299,7 @@ def assign_game_pks(
     """Give every MLB event without a gamePk its MLB Stats API gamePk, merging events of one game.
 
     Prints a summary, then one line per assignment (SINGLE, MERGE, MERGE_READ_ONLY for merges
-    that move bets, match briefs or candidate decisions; REFUSED for merges that would
+    that move bets, briefs or candidate decisions; REFUSED for merges that would
     delete a candidate decision or bet; FAILED), then UNRESOLVED, GHOST and UNASSIGNABLE
     events. --apply commits each game in its own transaction. Safe to re-run.
 
@@ -450,7 +450,7 @@ def sync_football_schedule(
 
     The dry run reads the database but writes nothing, and prints what would be created per
     league and any ESPN team name outside the league's clubs. The scheduled job
-    (`fetch-espn-fixtures`) does the same with `--apply`.
+    (`fetch-espn-games`) does the same with `--apply`.
 
     Example:
         odds events sync-football-schedule --sport soccer_spain_la_liga

@@ -34,7 +34,7 @@ def strip_ansi(text: str) -> str:
 
 
 # =============================================================================
-# Fixtures
+# Games
 # =============================================================================
 
 
@@ -214,7 +214,7 @@ def test_tune_command_override_n_trials(sample_config_with_tuning):
     original_trials = config.tuning.n_trials
 
     # Override should happen in the command
-    # Original config should have 5 trials (from fixture)
+    # Original config should have 5 trials (from game)
     assert original_trials == 5
 
 

@@ -1,5 +1,5 @@
 # Odds API historical backfill of La Liga 2026-27 to 1 December 2026 (#859 step 10).
-# Snapshot grid, billing, books and fixture horizon follow the probe (#729, #787).
+# Snapshot grid, billing, books and game horizon follow the probe (#729, #787).
 sport: soccer_spain_la_liga
 # The window ends at the latest start of the month's extra purchases (#859).
 seasons:
@@ -21,8 +21,8 @@ snapshot_grid:
 probe:
   snapshots:
     - 2026-10-24T09:55:38Z
-  # Call sharing needs fixtures as far ahead as the earliest coverage, 7 d plus its 6 h max age.
-  min_fixture_lead_hours: 174
+  # Call sharing needs games as far ahead as the earliest coverage, 7 d plus its 6 h max age.
+  min_game_lead_hours: 174
   # Betfair Exchange is the scoring reference and close (ADR-0012); no current candidate or
   # model uses Pinnacle.
   required_bookmakers:

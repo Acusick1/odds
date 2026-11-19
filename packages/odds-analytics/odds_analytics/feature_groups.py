@@ -60,7 +60,7 @@ __all__ = [
     "filter_completed_events",
     "raw_closes",
     "tiers_of",
-    "load_fixtures_df",
+    "load_games_df",
 ]
 
 
@@ -546,25 +546,25 @@ def _compute_target(
 # =============================================================================
 
 
-async def load_fixtures_df(
+async def load_games_df(
     session: AsyncSession, until: datetime | None = None
 ) -> pd.DataFrame | None:
-    """Load all ESPN fixtures, up to ``until`` when it is given, from DB into a DataFrame.
+    """Load all ESPN games, up to ``until`` when it is given, from DB into a DataFrame.
 
-    Returns None if no fixtures exist in the database.
+    Returns None if no games exist in the database.
     """
-    from odds_lambda.storage.espn_fixture_reader import EspnFixtureReader
+    from odds_lambda.storage.espn_game_reader import EspnGameReader
 
-    reader = EspnFixtureReader(session)
-    fixtures = await reader.get_all_fixtures(until)
-    if not fixtures:
-        logger.warning("espn_fixtures_not_found_in_db")
+    reader = EspnGameReader(session)
+    games = await reader.get_all_games(until)
+    if not games:
+        logger.warning("espn_games_not_found_in_db")
         return None
 
-    rows = [f.model_dump(exclude={"id", "created_at"}) for f in fixtures]
-    df = pd.DataFrame(rows).rename(columns={"match_round": "round"})
+    rows = [f.model_dump(exclude={"id", "created_at"}) for f in games]
+    df = pd.DataFrame(rows).rename(columns={"game_round": "round"})
     df["date"] = pd.to_datetime(df["date"], utc=True)
-    logger.info("espn_fixtures_loaded_from_db", rows=len(df))
+    logger.info("espn_games_loaded_from_db", rows=len(df))
     return df
 
 

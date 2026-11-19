@@ -1,5 +1,5 @@
 """The crowded-kick-off and last-result rules decided from stored events: the replay, the live
-runner and the parity check read the same fixture context, across a pooled candidate's leagues."""
+runner and the parity check read the same game context, across a pooled candidate's leagues."""
 
 from __future__ import annotations
 
@@ -215,7 +215,7 @@ class TestLiveRunner:
             .all()
         )
         assert not decision.missed and decision.bets_placed == 1
-        assert decision.input_fixture == {"concurrent_kickoffs": 3}
+        assert decision.input_game == {"concurrent_kickoffs": 3}
         assert decision.input_event_ids == [2, 3]
 
     async def test_an_epl_only_candidate_does_not_count_the_other_league(

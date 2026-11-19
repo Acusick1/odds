@@ -57,8 +57,8 @@ class SportBetfairConfig:
     # Optional: pin a competition_id (preferred). If None, client uses
     # competition_name_hints to discover via list_competitions.
     competition_id: str | None
-    # How far ahead a scheduled fixture must be before a run is expected to price it.
-    fixture_horizon: timedelta
+    # How far ahead a scheduled game must be before a run is expected to price it.
+    game_horizon: timedelta
     competition_name_hints: tuple[str, ...] = ()
     # Markets collected alongside the match odds, stored only for an event whose match odds are.
     other_markets: tuple[BetfairMarketSpec, ...] = ()
@@ -86,7 +86,7 @@ def _football_league(
         event_type_id=EVENT_TYPE_SOCCER,
         match_odds=BetfairMarketSpec("MATCH_ODDS", Market.ONE_X_TWO),
         competition_id=competition_id,
-        fixture_horizon=timedelta(hours=72),
+        game_horizon=timedelta(hours=72),
         competition_name_hints=(competition_name,),
         other_markets=(BetfairMarketSpec("OVER_UNDER_25", Market.TOTALS, Decimal("2.5")),),
     )
@@ -99,7 +99,7 @@ SPORT_CONFIG: dict[SportKey, SportBetfairConfig] = {
         event_type_id=EVENT_TYPE_SOCCER,
         match_odds=BetfairMarketSpec("MATCH_ODDS", Market.ONE_X_TWO),
         competition_id=EPL_COMPETITION_ID,
-        fixture_horizon=timedelta(hours=72),
+        game_horizon=timedelta(hours=72),
         competition_name_hints=EPL_COMPETITION_NAME_HINTS,
         other_markets=(BetfairMarketSpec("OVER_UNDER_25", Market.TOTALS, Decimal("2.5")),),
     ),
@@ -127,7 +127,7 @@ SPORT_CONFIG: dict[SportKey, SportBetfairConfig] = {
         event_type_id=EVENT_TYPE_BASEBALL,
         match_odds=BetfairMarketSpec("MATCH_ODDS", Market.H2H),
         competition_id=MLB_COMPETITION_ID,
-        fixture_horizon=timedelta(hours=6),
+        game_horizon=timedelta(hours=6),
         competition_name_hints=MLB_COMPETITION_NAME_HINTS,
         name_separator=" @ ",
         name_order="away_first",
@@ -138,7 +138,7 @@ SPORT_CONFIG: dict[SportKey, SportBetfairConfig] = {
         event_type_id=EVENT_TYPE_BASKETBALL,
         match_odds=BetfairMarketSpec("MATCH_ODDS", Market.H2H),
         competition_id=NBA_COMPETITION_ID,
-        fixture_horizon=timedelta(hours=6),
+        game_horizon=timedelta(hours=6),
         competition_name_hints=NBA_COMPETITION_NAME_HINTS,
         name_separator=" @ ",
         name_order="away_first",

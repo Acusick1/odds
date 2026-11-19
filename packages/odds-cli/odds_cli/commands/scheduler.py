@@ -356,7 +356,7 @@ def smoke(
 
     Usage:
         SCHEDULER_DRY_RUN=true odds scheduler smoke
-        odds scheduler smoke --only fetch-oddsportal --only fetch-espn-fixtures
+        odds scheduler smoke --only fetch-oddsportal --only fetch-espn-games
         odds scheduler smoke --include-agent
         odds scheduler smoke --include-candidates
     """

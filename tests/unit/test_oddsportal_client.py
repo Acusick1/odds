@@ -1,4 +1,4 @@
-"""Tests for the OddsPortal HTTP client, using captured fixtures and synthetic feeds."""
+"""Tests for the OddsPortal HTTP client, using captured games and synthetic feeds."""
 
 from __future__ import annotations
 
@@ -58,8 +58,8 @@ def _feed(market: dict[str, Any], key: str = KEY_1X2) -> dict[str, Any]:
     return {"s": 1, "d": {"oddsdata": {"back": {key: market}, "lay": {}}}}
 
 
-def _read(fixtures: Path, name: str) -> str:
-    return (fixtures / name).read_text()
+def _read(games: Path, name: str) -> str:
+    return (games / name).read_text()
 
 
 class TestDecryptPayload:
@@ -83,7 +83,7 @@ class TestDecryptPayload:
             decrypt_payload(base64.b64encode(b"not:valid").decode())
 
 
-class TestFixtures:
+class TestGames:
     def test_home_data(self, oddsportal_fixtures: Path) -> None:
         home = decrypt_payload(_read(oddsportal_fixtures, "home_data.enc"))
 
@@ -97,7 +97,7 @@ class TestFixtures:
         assert names["44"] == "Betfair Exchange"
 
     @pytest.mark.parametrize(
-        ("fixture", "market", "outcomes"),
+        ("game", "market", "outcomes"),
         [
             ("feed_epl_1x2.enc", "1x2", 3),
             ("feed_epl_over_under.enc", "over_under_2_5", 2),
@@ -105,10 +105,10 @@ class TestFixtures:
         ],
     )
     def test_feed_extraction(
-        self, oddsportal_fixtures: Path, fixture: str, market: str, outcomes: int
+        self, oddsportal_fixtures: Path, game: str, market: str, outcomes: int
     ) -> None:
         names = decrypt_payload(_read(oddsportal_fixtures, "providers.enc"))["d"]["providersNames"]
-        feed = decrypt_payload(_read(oddsportal_fixtures, fixture))
+        feed = decrypt_payload(_read(oddsportal_fixtures, game))
 
         bookmakers = extract_market(feed, FEED_MARKETS[market], names)
 
@@ -868,8 +868,8 @@ NBA_EVENT = ListingEvent(
 )
 
 
-def _nba_feed(fixtures: Path, market: str, scope: int) -> dict[str, Any]:
-    return json.loads((fixtures / f"feed_nba_{market}_scope{scope}.json").read_text())
+def _nba_feed(games: Path, market: str, scope: int) -> dict[str, Any]:
+    return json.loads((games / f"feed_nba_{market}_scope{scope}.json").read_text())
 
 
 def _prices_at(

@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from odds_lambda.collection_calendar import EmptyCollectionError, FixtureCalendar
+from odds_lambda.collection_calendar import EmptyCollectionError, GameCalendar
 from odds_lambda.jobs import fetch_mlb_probables
 
 
@@ -30,8 +30,8 @@ def empty_fetcher() -> Iterator[MagicMock]:
         yield fetcher
 
 
-def _scheduled(count: int) -> FixtureCalendar:
-    return FixtureCalendar(
+def _scheduled(count: int) -> GameCalendar:
+    return GameCalendar(
         next_kickoff=datetime.now(UTC) + timedelta(days=1) if count else None,
         kickoffs_in_horizon=count,
     )

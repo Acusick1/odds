@@ -23,7 +23,7 @@ from odds_core.sports import SportKey
 from odds_core.team import normalize_team_name
 from odds_core.vocabulary import Source
 
-from odds_lambda.espn_fixture_fetcher import EspnFixtureFetcher
+from odds_lambda.espn_game_fetcher import EspnGameFetcher
 from odds_lambda.live_events import DroppedGame, SkipReason
 from odds_lambda.mlb_game_resolver import GameRow
 from odds_lambda.storage.event_resolver import (
@@ -274,7 +274,7 @@ def parse_scoreboard(data: dict[str, Any], league: FootballLeague) -> ParsedScor
     whose start ESPN marks invalid (those only have their status applied). A match
     with a side whose normalised name is not in ``league.clubs`` is dropped, and reported in
     ``dropped``: stored under a spelling OddsPortal and Betfair do not use, it would split the
-    fixture into two events.
+    game into two events.
     """
     parsed = ParsedScoreboard()
     for event in data.get("events", []):
@@ -332,7 +332,7 @@ def _months(since: date, until: date) -> list[tuple[int, int]]:
 
 
 async def fetch_games(
-    league: FootballLeague, since: date, until: date, fetcher: EspnFixtureFetcher
+    league: FootballLeague, since: date, until: date, fetcher: EspnGameFetcher
 ) -> ParsedScoreboard:
     """The matches ESPN lists for ``league`` from ``since`` to ``until`` inclusive (UTC days), one
     request per calendar month. Raises ``httpx.HTTPError`` when a request fails."""
@@ -412,7 +412,7 @@ async def sync_schedule(
 
     Raises ``httpx.HTTPError`` when ESPN cannot be read.
     """
-    async with EspnFixtureFetcher() as fetcher:
+    async with EspnGameFetcher() as fetcher:
         parsed = await fetch_games(league, since, until, fetcher)
     report = SyncReport(dropped=parsed.dropped)
     await sync_games(league, parsed.games, report, apply=apply)

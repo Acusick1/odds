@@ -22,7 +22,7 @@ from odds_lambda.candidate_rules.rules import RuleParams
 
 ROOT = Path(__file__).resolve().parents[2]
 FILES = sorted((ROOT / "candidates" / "preregistrations").glob("*.yaml"))
-FIXTURES = ROOT / "tests" / "fixtures" / "preregistration_grids"
+GAMES = ROOT / "tests" / "fixtures" / "preregistration_grids"
 
 FOOTBALL = {
     "soccer_epl",
@@ -177,7 +177,7 @@ class TestPreregistrationFiles:
     @pytest.mark.parametrize("path", FILES, ids=lambda p: p.stem)
     def test_cells_match_the_issue_text(self, path: Path) -> None:
         prereg = load(path)
-        parsed, count = parse_cells(prereg.issue, (FIXTURES / f"{prereg.issue}.md").read_text())
+        parsed, count = parse_cells(prereg.issue, (GAMES / f"{prereg.issue}.md").read_text())
         assert len(parsed) == count
         assert by_content(prereg.candidate_cells()) == by_content(parsed)
 
@@ -198,8 +198,8 @@ class TestPreregistrationFiles:
         named = {load(p).rule for p in FILES}
         assert {rule for rule in named if rule not in RULES} == PENDING_RULES
 
-    def test_every_fixture_has_a_file(self) -> None:
-        issues = {int(p.stem) for p in FIXTURES.glob("*.md")}
+    def test_every_game_has_a_file(self) -> None:
+        issues = {int(p.stem) for p in GAMES.glob("*.md")}
         assert issues == {int(p.name.split("-")[0]) for p in FILES}
 
     def test_exchange_gap_early_has_one_grid_in_both_markets(self) -> None:

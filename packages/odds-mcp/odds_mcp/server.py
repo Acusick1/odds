@@ -17,9 +17,9 @@ from odds_analytics.utils import per_book_market_holds
 from odds_core.agent_wakeup_models import AgentWakeup
 from odds_core.bet_models import Bet
 from odds_core.bookmakers import NON_BETTABLE_BOOKMAKERS, SHARP_BOOKMAKERS
+from odds_core.brief_models import Brief, BriefDecision, SharpPriceMap
 from odds_core.candidates import candidates_dir, load_candidates
 from odds_core.database import async_session_maker
-from odds_core.match_brief_models import BriefDecision, MatchBrief, SharpPriceMap
 from odds_core.models import Event, EventStatus
 from odds_core.quotes import Quote
 from odds_core.sports import SportKey
@@ -50,7 +50,7 @@ MarketKey = Literal["h2h", "1x2", "totals", "spreads"]
 mcp = FastMCP(
     "odds-mcp",
     instructions=(
-        "Betting odds pipeline tools. Use these to inspect fixtures, odds, "
+        "Betting odds pipeline tools. Use these to inspect games, odds, "
         "and manage bets across sports (EPL football, MLB baseball). "
         "All times are UTC."
     ),
@@ -154,18 +154,18 @@ def _bet_to_dict(bet: Bet) -> dict[str, Any]:
 
 
 @mcp.tool()
-async def get_upcoming_fixtures(
+async def get_upcoming_games(
     league: SportKey = "soccer_epl",
     days_ahead: int = 7,
 ) -> list[dict[str, Any]]:
-    """Get upcoming scheduled fixtures for a league.
+    """Get upcoming scheduled games for a league.
 
     Args:
         league: Sport key (e.g. "soccer_epl").
         days_ahead: How many days ahead to look (1-30).
 
     Returns:
-        List of fixture dicts with id, teams, commence_time, status.
+        List of game dicts with id, teams, commence_time, status.
     """
     days_ahead = max(1, min(days_ahead, 30))
     now = datetime.now(UTC)
@@ -688,7 +688,7 @@ async def settle_bets() -> dict[str, Any]:
 
 
 @mcp.tool()
-async def save_match_brief(
+async def save_brief(
     event_id: int,
     market: MarketKey,
     decision: Literal["watching", "bet", "skip"],
@@ -734,7 +734,7 @@ async def save_match_brief(
         else:
             sharp_prices = None
 
-        brief = MatchBrief(
+        brief = Brief(
             event_id=event_id,
             decision=BriefDecision(decision),
             summary=summary,
@@ -757,11 +757,11 @@ async def save_match_brief(
 
 
 @mcp.tool()
-async def get_match_brief(
+async def get_brief(
     event_id: int,
     limit: int | None = None,
 ) -> dict[str, Any]:
-    """Retrieve saved match briefs for an event.
+    """Retrieve saved briefs for an event.
 
     Returns briefs for the event, newest first (append-only history).
     Returns empty gracefully when no brief exists.
@@ -779,11 +779,7 @@ async def get_match_brief(
         if event is None:
             return {"error": f"Event '{event_id}' not found"}
 
-        query = (
-            select(MatchBrief)
-            .where(MatchBrief.event_id == event_id)
-            .order_by(MatchBrief.created_at.desc())
-        )
+        query = select(Brief).where(Brief.event_id == event_id).order_by(Brief.created_at.desc())
         if limit is not None:
             query = query.limit(limit)
 
@@ -812,7 +808,7 @@ async def get_slate_briefs(
     league: SportKey = "soccer_epl",
     days_ahead: int = 7,
 ) -> dict[str, Any]:
-    """Get latest brief status for all upcoming fixtures in a league.
+    """Get latest brief status for all upcoming games in a league.
 
     Returns one entry per event with the most recent brief's decision,
     summary, and timestamp. Events with no brief are included with
@@ -843,10 +839,10 @@ async def get_slate_briefs(
         if events:
             event_ids = [e.id for e in events]
             result = await session.execute(
-                select(MatchBrief)
-                .where(MatchBrief.event_id.in_(event_ids))  # type: ignore[union-attr]
-                .distinct(MatchBrief.event_id)
-                .order_by(MatchBrief.event_id, MatchBrief.created_at.desc())
+                select(Brief)
+                .where(Brief.event_id.in_(event_ids))  # type: ignore[union-attr]
+                .distinct(Brief.event_id)
+                .order_by(Brief.event_id, Brief.created_at.desc())
             )
             latest_by_event = {
                 b.event_id: {
@@ -866,7 +862,7 @@ async def get_slate_briefs(
         ]
 
     return {
-        "fixture_count": len(entries),
+        "game_count": len(entries),
         "fixtures": entries,
     }
 

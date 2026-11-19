@@ -1,9 +1,9 @@
 ---
 type: reference
 title: MCP odds and retail-edge tools
-description: get_upcoming_fixtures, get_current_odds, get_odds_history and find_retail_edges, with inputs, anchor-relative price resolution, ranking and dispersion statistics, and the limits of their prices.
+description: get_upcoming_games, get_current_odds, get_odds_history and find_retail_edges, with inputs, anchor-relative price resolution, ranking and dispersion statistics, and the limits of their prices.
 sources:
-  - odds_mcp.server.get_upcoming_fixtures
+  - odds_mcp.server.get_upcoming_games
   - odds_mcp.server.get_current_odds
   - odds_mcp.server.get_odds_history
   - odds_mcp.server.find_retail_edges
@@ -30,7 +30,7 @@ Four read-only market-data tools (none reads bets), part of the [odds-mcp server
 
 The tools read prices from the `prices` table through `odds_core.quotes.quotes` ([reading prices](../storage/price-tables.md#reading-prices)), in `odds_mcp.prices`, and treat the event id as opaque: every source's snapshots hang on the one event ([event resolver](../storage/event-resolver.md)). A book's price is its `back` price, except Polymarket's, which is its `mid` (`odds_mcp.prices.BOOK_SIDES`, `odds_mcp.prices.book_quotes`); lay and traded prices are not surfaced. Outcomes are shown as the event's home and away team names, `Draw`, `Over` and `Under` (`odds_mcp.prices.outcome_label`), and `point` is the stored line. Book keys are the canonical keys the writers store ([books](../storage/price-tables.md#reading-an-envelope)), so the same book has one key across sources.
 
-## `get_upcoming_fixtures(league="soccer_epl", days_ahead=7)`
+## `get_upcoming_games(league="soccer_epl", days_ahead=7)`
 
 `SCHEDULED` events with `commence_time` between now and now plus `days_ahead` (clamped to 1-30), ordered by kick-off, then event ID, via `odds_lambda.storage.readers.OddsReader.get_events_by_date_range` with its sport and status filters. Each item: `id`, `sport_key`, `sport_title`, `home_team`, `away_team`, `commence_time`, status, scores and `completed_at`. Live events are excluded, so an event disappears once the update-status job marks it `LIVE`; that job must be running for the status to change ([status lifecycle](../collection/event-status-lifecycle.md)).
 
@@ -69,7 +69,7 @@ Output: `event`, `snapshot_time` (newest contributing retail snapshot), `sharp_b
 
 Divergence is vig-inclusive on both sides, so use `market_hold` to separate vig from it ([retail-sharp divergence](../modelling/sharp-benchmark.md#retail-sharp-divergence)); the feature and screener copies of the sharp-price logic differ ([code copies](../modelling/sharp-benchmark.md#code-copies)).
 
-Sharp prices are keyed by `(outcome, line)` as retail rows are bucketed by `(outcome, point)`, so on `totals` and `spreads` each retail row is compared with the sharp price at its own line, and a line with no sharp price has a null divergence. `odds_mcp.server.save_match_brief` stamps one sharp price per outcome, from the outcome's lowest line (`odds_mcp.prices.SharpLines.by_outcome`), and `odds_mcp.server.place_bet` records the devigged sharp price of the selection on its line ([sharp fields](bets.md#sharp-fields)).
+Sharp prices are keyed by `(outcome, line)` as retail rows are bucketed by `(outcome, point)`, so on `totals` and `spreads` each retail row is compared with the sharp price at its own line, and a line with no sharp price has a null divergence. `odds_mcp.server.save_brief` stamps one sharp price per outcome, from the outcome's lowest line (`odds_mcp.prices.SharpLines.by_outcome`), and `odds_mcp.server.place_bet` records the devigged sharp price of the selection on its line ([sharp fields](bets.md#sharp-fields)).
 
 Outcomes resolve their sharp price independently ([priority semantics](../modelling/sharp-benchmark.md#priority-semantics)), so read `sharp_snapshot_time` and `sharp_age_seconds` per row.
 
@@ -77,5 +77,5 @@ Outcomes resolve their sharp price independently ([priority semantics](../modell
 
 ## Related
 
-- [Sport context tools](mcp-sport-context-tools.md), [Briefs](match-briefs.md), [Bets](bets.md)
+- [Sport context tools](mcp-sport-context-tools.md), [Briefs](briefs.md), [Bets](bets.md)
 - [Prices tables](../storage/price-tables.md)

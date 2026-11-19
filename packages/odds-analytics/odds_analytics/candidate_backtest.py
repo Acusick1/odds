@@ -221,7 +221,7 @@ async def _decide(
                     None,
                     books,
                     bet_selections=bet_selections,
-                    fixture_leagues=candidate_leagues(candidate),
+                    game_leagues=candidate_leagues(candidate),
                 )
                 bet_selections.update(intent.selection for intent in intents)
                 counts.decisions += 1

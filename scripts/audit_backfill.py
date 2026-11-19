@@ -2,8 +2,8 @@
 
 Read-only. For each season of ``--manifest`` it reads the season's FINAL events, the historical
 (``source_stamped``) Odds API snapshots stored on them and the recorded provider gaps, and prints
-Markdown tables of: fixtures with and without a stored snapshot, and listings in stored responses
-that attached to no event; each book's fixture coverage; the share of each coverage band's
+Markdown tables of: games with and without a stored snapshot, and listings in stored responses
+that attached to no event; each book's game coverage; the share of each coverage band's
 whole-minute decisions that find a snapshot within the band's max input age at the snapshots'
 actual times; the latest Betfair Exchange price at or before kick-off and its age; provider gaps
 and off-phase snapshots; and the planned calls against the stored snapshot times. Prices are
@@ -29,7 +29,7 @@ from odds_analytics.backfill_checks import (
     stored_call_window,
     stored_market,
 )
-from odds_analytics.backfill_plan import Band, Call, Fixture, Manifest, Season, plan
+from odds_analytics.backfill_plan import Band, Call, Game, Manifest, Season, plan
 from odds_analytics.holdout import intersecting
 from odds_core.as_of import latest_snapshot
 from odds_core.bookmakers import (
@@ -59,7 +59,7 @@ class StoredSnapshot:
 
 
 @dataclass(frozen=True)
-class AuditFixture:
+class AuditGame:
     event_id: int
     home: str
     away: str
@@ -80,8 +80,8 @@ class Gap:
 
 @dataclass(frozen=True)
 class BandCoverage:
-    """A fixture band's whole-minute decisions: those served, all of them, and of the unserved,
-    those before the fixture's first stored snapshot (not yet listed) and, of the rest, those a
+    """A game band's whole-minute decisions: those served, all of them, and of the unserved,
+    those before the game's first stored snapshot (not yet listed) and, of the rest, those a
     provider gap's planned snapshot would have served."""
 
     served: int
@@ -99,7 +99,7 @@ def band_coverage(
 ) -> BandCoverage:
     """Count ``band``'s whole-minute decisions before ``kickoff`` that find a snapshot in
     ``snapshot_times`` (sorted) at most the band's max age old and no later than the decision.
-    The fixture counts as listed from the first of ``snapshot_times``."""
+    The game counts as listed from the first of ``snapshot_times``."""
     first, last = band.decision_span(kickoff)
     decisions = np.arange(
         int(first.timestamp()), int(last.timestamp()) + 1, MINUTE_SECONDS, dtype=np.int64
@@ -158,9 +158,9 @@ def reconcile_calls(
     stored: Mapping[int, Sequence[datetime]],
     gaps: Sequence[Gap],
 ) -> CallReconciliation:
-    """Each planned call is stored as the executor's skip judges it: a fixture it serves has a
+    """Each planned call is stored as the executor's skip judges it: a game it serves has a
     requested-market snapshot time in ``stored`` (by event, sorted) inside the call's stored
-    window (``stored_call_window``), or it serves no fixture. Otherwise it is a gap when a
+    window (``stored_call_window``), or it serves no game. Otherwise it is a gap when a
     recorded gap covers it, else missing."""
     used: set[datetime] = set()
     n_stored = n_gap = 0
@@ -169,7 +169,7 @@ def reconcile_calls(
         after, until = stored_call_window(manifest, call.time)
         hits = [
             times[i]
-            for event_id in {t.fixture.event_id for t in call.serves}
+            for event_id in {t.game.event_id for t in call.serves}
             if (i := bisect_right(times := stored.get(event_id, ()), until) - 1) >= 0
             and times[i] > after
         ]
@@ -193,13 +193,13 @@ def reconcile_calls(
 
 
 def calls_before_listing(calls: Sequence[Call], listed: dict[int, datetime]) -> list[datetime]:
-    """Planned calls none of whose served fixtures was listed by then, judged by ``listed``,
-    each fixture's first stored snapshot (a fixture never stored counts as never listed)."""
+    """Planned calls none of whose served games was listed by then, judged by ``listed``,
+    each game's first stored snapshot (a game never stored counts as never listed)."""
     return [
         call.time
         for call in calls
         if not any(
-            (first := listed.get(t.fixture.event_id)) is not None
+            (first := listed.get(t.game.event_id)) is not None
             and first <= call.time + TIMESTAMP_TOLERANCE
             for t in call.serves
         )
@@ -208,7 +208,7 @@ def calls_before_listing(calls: Sequence[Call], listed: dict[int, datetime]) -> 
 
 @dataclass(frozen=True)
 class ClosePoint:
-    """A fixture's latest Betfair Exchange snapshot at or before kick-off within
+    """A game's latest Betfair Exchange snapshot at or before kick-off within
     ``CLOSE_LOOKBACK``: its age, whether it has a back price on every outcome, and whether that
     price is usable (back overround at most ``MAX_EXCHANGE_OVERROUND``)."""
 
@@ -265,9 +265,9 @@ def book_aliases(book: str) -> list[str]:
 # --- Database reads -----------------------------------------------------------------------
 
 
-async def load_audit_fixtures(
+async def load_audit_games(
     session: AsyncSession, sport: str, season: Season, market: Market
-) -> list[AuditFixture]:
+) -> list[AuditGame]:
     events = (
         await session.execute(
             text(
@@ -299,7 +299,7 @@ async def load_audit_fixtures(
     for event_id, time, books in rows:
         by_event[event_id].append(StoredSnapshot(time, frozenset(books)))
     return [
-        AuditFixture(e.id, e.home_team, e.away_team, e.commence_time, tuple(by_event[e.id]))
+        AuditGame(e.id, e.home_team, e.away_team, e.commence_time, tuple(by_event[e.id]))
         for e in events
     ]
 
@@ -410,13 +410,11 @@ def farthest_lead(manifest: Manifest) -> int:
     return max(b.max_lead_minutes + b.max_input_age_minutes for b in manifest.coverage)
 
 
-def _season_gaps(
-    gaps: Sequence[Gap], fixtures: Sequence[AuditFixture], manifest: Manifest
-) -> list[Gap]:
-    if not fixtures:
+def _season_gaps(gaps: Sequence[Gap], games: Sequence[AuditGame], manifest: Manifest) -> list[Gap]:
+    if not games:
         return []
-    lo = min(f.kickoff for f in fixtures) - timedelta(minutes=farthest_lead(manifest))
-    hi = max(f.kickoff for f in fixtures)
+    lo = min(f.kickoff for f in games) - timedelta(minutes=farthest_lead(manifest))
+    hi = max(f.kickoff for f in games)
     return [g for g in gaps if lo <= g.planned <= hi]
 
 
@@ -433,7 +431,7 @@ def near_close_lines(
     lookback = f"{CLOSE_LOOKBACK.total_seconds() / 60:.0f} min"
     if sealed:
         caption = (
-            f"Per fixture, the latest exchange snapshot at or before kick-off within {lookback}, "
+            f"Per game, the latest exchange snapshot at or before kick-off within {lookback}, "
             "counted and aged only: this season is sealed "
             "([ADR-0021](../docs/adr/0021-sealed-holdout-and-one-shot-gate.md)), so no "
             "price-derived statistic is reported. Research inputs, not validated closing labels."
@@ -441,7 +439,7 @@ def near_close_lines(
         rows = [("Any exchange quote", any_ages, pct_any)]
     else:
         caption = (
-            f"Per fixture, the latest exchange snapshot at or before kick-off within {lookback}; "
+            f"Per game, the latest exchange snapshot at or before kick-off within {lookback}; "
             "usable means a back price on every outcome with back overround at most "
             f"{MAX_EXCHANGE_OVERROUND:.0%}. Research inputs, not validated closing labels."
         )
@@ -449,7 +447,7 @@ def near_close_lines(
     out.append(f"### Near kick-off `{EXCHANGE_BOOKMAKER}`, {name}\n\n{caption}")
     out.append(
         _table(
-            ["Price", "Fixtures with one"]
+            ["Price", "Games with one"]
             + [f"Within {m} min" for m in CLOSE_WINDOWS_MINUTES]
             + [f"p{p} age (min)" for p in AGE_PERCENTILES],
             [
@@ -465,9 +463,7 @@ def near_close_lines(
     )
     if not sealed:
         incomplete = sum(1 for p in points if p.age is not None and not p.complete)
-        out.append(
-            f"Latest exchange snapshot missing an outcome's back price: {incomplete} fixtures."
-        )
+        out.append(f"Latest exchange snapshot missing an outcome's back price: {incomplete} games.")
     return out
 
 
@@ -475,23 +471,23 @@ async def audit_season(
     session: AsyncSession, manifest: Manifest, name: str, season: Season, gaps: Sequence[Gap]
 ) -> str:
     market = stored_market(manifest, manifest.markets[0])
-    fixtures = await load_audit_fixtures(session, manifest.sport, season, market)
-    ids = [f.event_id for f in fixtures]
-    season_gaps = _season_gaps(gaps, fixtures, manifest)
+    games = await load_audit_games(session, manifest.sport, season, market)
+    ids = [f.event_id for f in games]
+    season_gaps = _season_gaps(gaps, games, manifest)
     out: list[str] = [f"## {name}"]
 
-    # Fixtures.
-    with_snaps = [f for f in fixtures if f.before_kickoff()]
-    missed = [f for f in fixtures if not f.before_kickoff()]
+    # Games.
+    with_snaps = [f for f in games if f.before_kickoff()]
+    missed = [f for f in games if not f.before_kickoff()]
     unmatched = await load_unmatched_listings(session, ids)
     out.append(
-        f"### Fixtures, {name}\n\n{len(fixtures)} FINAL fixtures; {len(with_snaps)} with a stored "
+        f"### Games, {name}\n\n{len(games)} FINAL games; {len(with_snaps)} with a stored "
         f"`{market}` snapshot at or before kick-off; {len(missed)} without."
     )
     if missed:
         out.append(
             _table(
-                ["Fixture", "Kick-off"], ((f"{f.home} v {f.away}", _iso(f.kickoff)) for f in missed)
+                ["Game", "Kick-off"], ((f"{f.home} v {f.away}", _iso(f.kickoff)) for f in missed)
             )
         )
     out.append(f"Listings in stored responses that attached to no event: {len(unmatched)}.")
@@ -499,10 +495,10 @@ async def audit_season(
         out.append(_table(["Home", "Away", "Listed kick-off", "Responses"], unmatched))
     others = await load_other_markets(session, ids, market)
     if others:
-        out.append(f"Odds API historical snapshots of these fixtures outside `{market}`:")
+        out.append(f"Odds API historical snapshots of these games outside `{market}`:")
         out.append(
             _table(
-                ["Market", "Stamped", "Snapshots", "Fixtures"],
+                ["Market", "Stamped", "Snapshots", "Games"],
                 (
                     (m or "none", "before KO" if pre else "after KO", n, ev)
                     for m, pre, n, ev in others
@@ -511,32 +507,32 @@ async def audit_season(
         )
 
     # Bookmakers.
-    fixture_books: Counter[str] = Counter()
+    game_books: Counter[str] = Counter()
     snapshot_books: Counter[str] = Counter()
     n_pre = 0
-    for f in fixtures:
+    for f in games:
         pre = f.before_kickoff()
         n_pre += len(pre)
-        fixture_books.update(set().union(*(s.books for s in pre)) if pre else set())
+        game_books.update(set().union(*(s.books for s in pre)) if pre else set())
         for s in pre:
             snapshot_books.update(s.books)
     out.append(
-        f"### Bookmakers, {name}\n\nShare of the {len(fixtures)} fixtures with the book in any "
+        f"### Bookmakers, {name}\n\nShare of the {len(games)} games with the book in any "
         "snapshot "
         f"at or before kick-off, and of the {n_pre:,} such snapshots."
     )
     out.append(
         _table(
-            ["Book", "Fixtures", "Snapshots", "Role", "Odds API keys aliased to it"],
+            ["Book", "Games", "Snapshots", "Role", "Odds API keys aliased to it"],
             (
                 (
                     f"`{b}`",
-                    _pct(n / len(fixtures)),
+                    _pct(n / len(games)),
                     _pct(snapshot_books[b] / n_pre) if n_pre else "-",
                     book_role(b),
                     ", ".join(f"`{k}`" for k in book_aliases(b)) or "none",
                 )
-                for b, n in sorted(fixture_books.items(), key=lambda kv: (-kv[1], kv[0]))
+                for b, n in sorted(game_books.items(), key=lambda kv: (-kv[1], kv[0]))
             ),
         )
     )
@@ -546,7 +542,7 @@ async def audit_season(
     for band in sorted(manifest.coverage, key=lambda b: b.min_lead_minutes):
         any_cov = [
             band_coverage(f.kickoff, [s.time for s in f.snapshots], band, season_gaps)
-            for f in fixtures
+            for f in games
         ]
         pair_cov = [
             band_coverage(
@@ -558,7 +554,7 @@ async def audit_season(
                 ],
                 band,
             )
-            for f in fixtures
+            for f in games
         ]
         served = sum(c.served for c in any_cov)
         total = sum(c.total for c in any_cov)
@@ -573,14 +569,14 @@ async def audit_season(
                 f"{unlisted:,}",
                 f"{in_gaps:,}",
                 f"{total - served - unlisted - in_gaps:,}",
-                f"{sum(1 for c in any_cov if c.served == c.total)}/{len(fixtures)}",
+                f"{sum(1 for c in any_cov if c.served == c.total)}/{len(games)}",
                 _pct(pair_served / total) if total else "-",
             )
         )
     out.append(
-        f"### Leads, {name}\n\nWhole-minute decisions per fixture and band, served when a stored "
+        f"### Leads, {name}\n\nWhole-minute decisions per game and band, served when a stored "
         "snapshot lies in `[t − max age, t]` at its actual time. Unserved decisions are split "
-        "into those before the fixture's first stored snapshot (not yet listed), those a "
+        "into those before the game's first stored snapshot (not yet listed), those a "
         "recorded gap's planned snapshot would have served, and the rest. The last column "
         "needs `betfair_exchange` and a UK retail book in the same snapshot."
     )
@@ -593,7 +589,7 @@ async def audit_season(
                 "Unserved: not listed",
                 "Unserved: gap",
                 "Unserved: other",
-                "Fixtures fully served",
+                "Games fully served",
                 "Served, exchange + retail",
             ],
             rows,
@@ -602,15 +598,15 @@ async def audit_season(
     horizon = timedelta(minutes=farthest_lead(manifest))
     late = [
         (f, f.snapshots[0].time)
-        for f in fixtures
+        for f in games
         if f.snapshots and f.snapshots[0].time > f.kickoff - horizon
     ]
     if late:
         by_lead = Counter(f"{(f.kickoff - first).total_seconds() / 3600:.0f}" for f, first in late)
         out.append(
-            f"Fixtures first stored less than {horizon.total_seconds() / 3600:.0f} h before "
+            f"Games first stored less than {horizon.total_seconds() / 3600:.0f} h before "
             "kick-off: "
-            f"{len(late)}, first stored at leads (h: fixtures) "
+            f"{len(late)}, first stored at leads (h: games) "
             + ", ".join(
                 f"{h}: {n}" for h, n in sorted(by_lead.items(), key=lambda kv: float(kv[0]))
             )
@@ -631,9 +627,9 @@ async def audit_season(
     by_event: dict[int, list[Quote]] = defaultdict(list)
     for q in exchange:
         by_event[q.event_id].append(q)
-    points = [close_point(f.kickoff, by_event[f.event_id], market) for f in fixtures]
-    sealed = is_sealed(manifest.sport, (f.kickoff for f in fixtures))
-    out.extend(near_close_lines(name, len(fixtures), points, sealed))
+    points = [close_point(f.kickoff, by_event[f.event_id], market) for f in games]
+    sealed = is_sealed(manifest.sport, (f.kickoff for f in games))
+    out.extend(near_close_lines(name, len(games), points, sealed))
 
     # Gaps and off-phase snapshots.
     stored = await load_stored_times(session, ids)
@@ -658,15 +654,15 @@ async def audit_season(
     )
 
     # Calls.
-    calls = plan(manifest, [Fixture(f.event_id, f.kickoff) for f in fixtures])
+    calls = plan(manifest, [Game(f.event_id, f.kickoff) for f in games])
     rec = reconcile_calls(
         manifest,
         calls,
-        {f.event_id: [snap.time for snap in f.snapshots] for f in fixtures},
+        {f.event_id: [snap.time for snap in f.snapshots] for f in games},
         season_gaps,
     )
     unlisted_calls = calls_before_listing(
-        calls, {f.event_id: f.snapshots[0].time for f in fixtures if f.snapshots}
+        calls, {f.event_id: f.snapshots[0].time for f in games if f.snapshots}
     )
     out.append(
         f"### Calls, {name}\n\nPlanned {rec.planned:,}; stored {rec.stored:,}; covered by a "
@@ -676,7 +672,7 @@ async def audit_season(
         f"{len(stored) * manifest.units_per_call:,} units. `{market}` snapshot times matching no "
         f"planned call (gap returns, probes): {len(rec.unplanned):,}. Planned calls that serve "
         "only "
-        f"fixtures not yet stored at that time (not listed): {len(unlisted_calls):,}."
+        f"games not yet stored at that time (not listed): {len(unlisted_calls):,}."
     )
     if rec.missing:
         out.append("Missing calls: " + ", ".join(_iso(t) for t in rec.missing[:20]))

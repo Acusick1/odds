@@ -243,5 +243,5 @@ class TestSmokeTags:
     def test_data_jobs_are_smoke_safe(self) -> None:
         from odds_lambda.scheduling.jobs import is_smoke_unsafe
 
-        for job in ("fetch-oddsportal", "fetch-espn-fixtures", "fetch-betfair-exchange"):
+        for job in ("fetch-oddsportal", "fetch-espn-games", "fetch-betfair-exchange"):
             assert not is_smoke_unsafe(job)

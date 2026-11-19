@@ -26,7 +26,7 @@ class TestWriteCLI:
         - Writes odds data to database
         - Validates full write pipeline (CLI → Stub → DB)
         """
-        # Load sample odds data from fixture
+        # Load sample odds data from game
         fixture_path = Path(__file__).parent.parent / "fixtures" / "sample_odds_response.json"
         with open(fixture_path) as f:
             event_data = json.load(f)

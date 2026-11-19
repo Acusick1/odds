@@ -1,4 +1,4 @@
-"""A rule declares fixture inputs on its spec: the declaration, the hash and the state."""
+"""A rule declares game inputs on its spec: the declaration, the hash and the state."""
 
 from __future__ import annotations
 
@@ -11,8 +11,8 @@ from odds_core.market_prices import Outcome
 from odds_core.time import season_start
 from odds_lambda.candidate_rules import (
     BetIntent,
-    FixtureContext,
-    FixtureInput,
+    GameContext,
+    GameInput,
     MarketState,
     PreviousResult,
     RuleSpec,
@@ -22,50 +22,48 @@ from odds_lambda.candidate_rules import (
 from odds_lambda.candidate_rules.pinning import rule_sha256
 from odds_lambda.candidate_rules.registry import RULES
 
-BOTH = frozenset({FixtureInput.PREVIOUS_RESULT, FixtureInput.CONCURRENT_KICKOFFS})
+BOTH = frozenset({GameInput.PREVIOUS_RESULT, GameInput.CONCURRENT_KICKOFFS})
 KICKOFF = datetime(2026, 4, 10, 15, 0, tzinfo=UTC)
 
 
 class TestDeclaration:
-    def test_the_gap_and_model_rules_declare_no_fixture_input(self) -> None:
+    def test_the_gap_and_model_rules_declare_no_game_input(self) -> None:
         for rule in ("exchange_gap", "polymarket_gap", "retail_ev_model"):
-            assert not RULES[rule].fixture_inputs
+            assert not RULES[rule].game_inputs
 
     def test_the_declaration_is_part_of_the_rule_hash(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         before = rule_sha256("exchange_gap")
-        monkeypatch.setitem(
-            RULES, "exchange_gap", replace(RULES["exchange_gap"], fixture_inputs=BOTH)
-        )
+        monkeypatch.setitem(RULES, "exchange_gap", replace(RULES["exchange_gap"], game_inputs=BOTH))
         declared = rule_sha256("exchange_gap")
         monkeypatch.setitem(
             RULES,
             "exchange_gap",
             replace(
                 RULES["exchange_gap"],
-                fixture_inputs=frozenset({FixtureInput.CONCURRENT_KICKOFFS}),
+                game_inputs=frozenset({GameInput.CONCURRENT_KICKOFFS}),
             ),
         )
         assert len({before, declared, rule_sha256("exchange_gap")}) == 3
 
     def test_a_state_of_a_rule_declaring_nothing_has_an_empty_context(self) -> None:
         state = MarketState(1, "soccer_epl", "1x2", KICKOFF, KICKOFF - timedelta(hours=1))
-        assert state.fixture == FixtureContext()
-        assert state.input_event_ids == [] and not state.missing_fixture
-        assert dict(state.fixture.previous) == {}
-        assert state.fixture.concurrent_kickoffs is None
+        assert state.game == GameContext()
+        assert state.input_event_ids == [] and not state.missing_game
+        assert dict(state.game.previous) == {}
+        assert state.game.concurrent_kickoffs is None
 
 
 class TestRuleReceivesContext:
     def test_a_rule_reads_the_context_off_its_state(self) -> None:
-        seen: list[FixtureContext] = []
+        seen: list[GameContext] = []
 
         def rule(state: MarketState, params: object) -> list[BetIntent]:
-            seen.append(state.fixture)
+            seen.append(state.game)
             return [BetIntent(Outcome.HOME, "bet365", 2.0, 1.0)]
 
-        context = FixtureContext(
+        context = GameContext(
             previous=MappingProxyType(
                 {
                     Outcome.HOME: PreviousResult(2, KICKOFF - timedelta(days=5), 0, 3),
@@ -83,13 +81,13 @@ class TestRuleReceivesContext:
             KICKOFF - timedelta(hours=1),
             snapshot_id=7,
             snapshot_time=KICKOFF - timedelta(hours=1, minutes=2),
-            fixture=context,
+            game=context,
         )
         spec = RuleSpec(
             rule,
             object,  # type: ignore[arg-type]
             frozenset({SharpInput.EXCHANGE}),
-            fixture_inputs=BOTH,
+            game_inputs=BOTH,
             estimate_basis=None,
         )
 
@@ -105,9 +103,9 @@ class TestRuleReceivesContext:
             "1x2",
             KICKOFF,
             KICKOFF - timedelta(hours=1),
-            fixture=FixtureContext(overdue_results=(Outcome.HOME,)),
+            game=GameContext(overdue_results=(Outcome.HOME,)),
         )
-        assert state.missing_fixture and not state.has_input
+        assert state.missing_game and not state.has_input
         assert apply_rule(RULES["exchange_gap"], object(), state)[1] == []  # type: ignore[arg-type]
 
 
