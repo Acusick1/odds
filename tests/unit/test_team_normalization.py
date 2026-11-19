@@ -65,6 +65,25 @@ class TestNormalizeTeamName:
         assert normalize_team_name("Some Random FC") == "Some Random FC"
 
 
+# Every spelling of each club in the stored La Liga events, by canonical (ESPN) name.
+LA_LIGA_STORED_SPELLINGS: dict[str, list[str]] = {
+    "Athletic Bilbao": ["Ath. Bilbao", "Ath Bilbao", "Athletic Club"],
+    "Atlético Madrid": ["Atletico Madrid", "Ath Madrid", "Atl. Madrid"],
+    "Celta Vigo": ["Celta de Vigo", "Celta"],
+    "Deportivo La Coruña": ["A Coruna", "Dep. A Coruna", "La Coruna", "Deportivo"],
+    "Málaga": ["Malaga"],
+    "Racing Santander": ["Santander"],
+    "Real Betis": ["Bétis", "Betis"],
+}
+
+
+class TestLaLigaStoredSpellings:
+    @pytest.mark.parametrize("canonical", list(LA_LIGA_STORED_SPELLINGS))
+    def test_every_spelling_maps_to_the_canonical_name(self, canonical: str) -> None:
+        spellings = [canonical, *LA_LIGA_STORED_SPELLINGS[canonical]]
+        assert {normalize_team_name(s) for s in spellings} == {canonical}
+
+
 # Each club's spellings in its 2024-26 seasons: football-data.co.uk, OddsPortal results, and the
 # Odds API's free /events listing on 2026-11-05 (None for a club it no longer lists).
 FOOTBALL_CLUBS: dict[str, list[tuple[str, str, str | None]]] = {

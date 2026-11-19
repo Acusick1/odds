@@ -29,8 +29,8 @@ from __future__ import annotations
 # name keeps it in the Championship. Aliases cover the football-data.co.uk and OddsPortal
 # spellings of every club in those leagues' 2024-26 seasons, and the Odds API's own variants
 # ("Girona FC" in its second division). A club promoted since (no Odds API history) takes the
-# OddsPortal spelling ("Bolton", "Schalke"). ESPN's and Betfair's spellings of every club in the
-# 2026-27 seasons are aliases too.
+# OddsPortal spelling ("Bolton", "Schalke"), or in La Liga ESPN's ("Racing Santander"). ESPN's
+# and Betfair's spellings of every club in the 2026-27 seasons are aliases too.
 #
 # Pipeline canonical NBA names are The Odds API's full names ("Boston Celtics"); the
 # 30 are the values of odds_lambda.polymarket_matching.NBA_ABBREV_MAP. OddsPortal and
@@ -91,10 +91,14 @@ _TEAM_ALIASES: dict[str, str] = {
     # ---- La Liga
     "alaves": "Alavés",
     "ath bilbao": "Athletic Bilbao",
+    "ath. bilbao": "Athletic Bilbao",
     "ath madrid": "Atlético Madrid",
     "atl. madrid": "Atlético Madrid",
+    "atletico madrid": "Atlético Madrid",
     "betis": "Real Betis",
+    "bétis": "Real Betis",
     "celta": "Celta Vigo",
+    "celta de vigo": "Celta Vigo",
     "elche": "Elche CF",
     "espanol": "Espanyol",
     "girona fc": "Girona",
@@ -105,9 +109,12 @@ _TEAM_ALIASES: dict[str, str] = {
     "real valladolid cf": "Real Valladolid",
     "vallecano": "Rayo Vallecano",
     "athletic club": "Athletic Bilbao",
+    "a coruna": "Deportivo La Coruña",
     "dep. a coruna": "Deportivo La Coruña",
     "deportivo": "Deportivo La Coruña",
+    "la coruna": "Deportivo La Coruña",
     "malaga": "Málaga",
+    "santander": "Racing Santander",
     # ---- Serie A
     "atalanta": "Atalanta BC",
     "inter": "Inter Milan",
