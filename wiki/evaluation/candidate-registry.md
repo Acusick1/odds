@@ -84,7 +84,7 @@ The [version check](#version-check) fails a change that modifies or removes a co
 
 ## Version check
 
-`scripts.check_candidate_versions.check` compares the working tree's `candidates/*.yaml` with the same files at a base commit. It runs as the `candidate-versions` pre-commit hook ([code conventions](../foundations/code-conventions.md#mechanical-gates)), locally and in the `Lint` workflow. The base is `--base`, else the merge-base of `HEAD` with `origin/main`, else with `main`, else `HEAD`.
+`scripts.check_candidate_versions.check` compares the working tree's `candidates/*.yaml` with the same files at a base commit, as parsed YAML, so formatting and comments are not changes. It runs as the `candidate-versions` pre-commit hook ([code conventions](../foundations/code-conventions.md#mechanical-gates)), locally and in the `Lint` workflow. The base is `--base`, else the merge-base of `HEAD` with `origin/main`, else with `main`, else `HEAD`.
 
 It fails when:
 

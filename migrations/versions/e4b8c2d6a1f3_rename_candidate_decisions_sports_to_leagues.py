@@ -9,6 +9,7 @@ match the candidate's ``leagues`` field. Nothing is dropped or copied; the downg
 back.
 """
 
+import sqlalchemy as sa
 from alembic import op
 
 revision = "e4b8c2d6a1f3"
@@ -18,8 +19,10 @@ depends_on = None
 
 
 def upgrade() -> None:
+    op.execute(sa.text("SET lock_timeout = '10s'"))
     op.alter_column("candidate_decisions", "sports", new_column_name="leagues")
 
 
 def downgrade() -> None:
+    op.execute(sa.text("SET lock_timeout = '10s'"))
     op.alter_column("candidate_decisions", "leagues", new_column_name="sports")
