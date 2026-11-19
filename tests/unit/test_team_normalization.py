@@ -65,15 +65,14 @@ class TestNormalizeTeamName:
         assert normalize_team_name("Some Random FC") == "Some Random FC"
 
 
-# Every spelling of each club in the stored La Liga events, by canonical (ESPN) name.
+# Spellings in stored La Liga events that FOOTBALL_CLUBS below does not cover, by canonical name.
 LA_LIGA_STORED_SPELLINGS: dict[str, list[str]] = {
-    "Athletic Bilbao": ["Ath. Bilbao", "Ath Bilbao", "Athletic Club"],
-    "Atlético Madrid": ["Atletico Madrid", "Ath Madrid", "Atl. Madrid"],
-    "Celta Vigo": ["Celta de Vigo", "Celta"],
-    "Deportivo La Coruña": ["A Coruna", "Dep. A Coruna", "La Coruna", "Deportivo"],
-    "Málaga": ["Malaga"],
+    "Athletic Bilbao": ["Ath. Bilbao"],
+    "Atlético Madrid": ["Atletico Madrid"],
+    "Celta Vigo": ["Celta de Vigo"],
+    "Deportivo La Coruña": ["A Coruna", "Dep. A Coruna", "La Coruna"],
     "Racing Santander": ["Santander"],
-    "Real Betis": ["Bétis", "Betis"],
+    "Real Betis": ["Bétis"],
 }
 
 
