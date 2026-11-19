@@ -25,8 +25,8 @@ def _make_odds_response() -> OddsResponse:
 def _make_event(
     odds_api_id: str,
     hours_from_now: float = 24.0,
-    home_team: str = "Lakers",
-    away_team: str = "Celtics",
+    home_team: str = "Los Angeles Lakers",
+    away_team: str = "Boston Celtics",
 ) -> ApiEvent:
     return ApiEvent(
         odds_api_id=odds_api_id,
@@ -91,7 +91,9 @@ class TestEventSyncService:
         await test_session.commit()
 
         # Sync returns the same event + one new one
-        new_event = _make_event("sync_new_event", home_team="Warriors", away_team="Heat")
+        new_event = _make_event(
+            "sync_new_event", home_team="Golden State Warriors", away_team="Miami Heat"
+        )
         client = StubOddsClient(
             _make_odds_response(),
             _make_events_response([existing, new_event]),
