@@ -72,7 +72,7 @@ def pooled_draft(
             "kind": "rule",
             "market": prereg.market,
             "books": prereg.books,
-            "sports": list(leagues) if leagues is not None else prereg.leagues,
+            "leagues": list(leagues) if leagues is not None else prereg.leagues,
             "version": prereg.version,
             "issue": prereg.issue,
             "start_date": today,
@@ -111,7 +111,7 @@ async def run_holdout(
         resolve_rule(draft)
     except ValueError as exc:
         raise HoldoutRefused(str(exc)) from exc
-    windows = {sport: windows_of(sport)[0] for sport in draft.sports}
+    windows = {sport: windows_of(sport)[0] for sport in draft.leagues}
     backfill_start = await earliest_backfill(session)
     with exclusive_lock(directory.parent):
         reservation = reserve(plan, directory, backfill_start, now)
@@ -119,7 +119,7 @@ async def run_holdout(
             session,
             draft,
             list(windows.values()),
-            [reservation.access(sport) for sport in draft.sports],
+            [reservation.access(sport) for sport in draft.leagues],
             now,
         )
         row = reservation.record(
@@ -211,7 +211,7 @@ async def replay_spent(
             f"{spent.row.rule_sha256}: the code that ran is not this checkout's"
         )
     _, pooled = await _replay_windows(
-        session, draft, windows, [spent.access(sport) for sport in draft.sports], now
+        session, draft, windows, [spent.access(sport) for sport in draft.leagues], now
     )
     wrong = differences(gate(pooled.overall), spent.row.result)
     if wrong:

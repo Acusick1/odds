@@ -3,13 +3,13 @@ description: Back the longest UK retail price on the outcome whose Betfair Excha
 kind: rule
 market: 1x2
 books: uk_retail
-sports: [soccer_epl, soccer_spain_la_liga, soccer_italy_serie_a, soccer_germany_bundesliga, soccer_france_ligue_one, soccer_efl_champ]
+leagues: [soccer_epl, soccer_spain_la_liga, soccer_italy_serie_a, soccer_germany_bundesliga, soccer_france_ligue_one, soccer_efl_champ]
 version: 1
 issue: 835
 start_date: 2026-11-13
 status: active
 rule: favourite_price
-rule_sha256: b8901ae49cdfc34a2368b16d0a35cc45df4773c772d54c05edd2720248372b67
+rule_sha256: b0d7dca4b712d6d9a47e4915536121292d25c9c687b6dfedb9cb04223d3b1333
 params:
   min_probability: 0.6
   threshold: 0.005

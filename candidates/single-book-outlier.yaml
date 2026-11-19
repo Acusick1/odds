@@ -3,13 +3,13 @@ description: Back a UK retail book whose price on an outcome is at least 1.05 ti
 kind: rule
 market: 1x2
 books: uk_retail
-sports: [soccer_epl, soccer_spain_la_liga, soccer_italy_serie_a, soccer_germany_bundesliga, soccer_france_ligue_one, soccer_efl_champ]
+leagues: [soccer_epl, soccer_spain_la_liga, soccer_italy_serie_a, soccer_germany_bundesliga, soccer_france_ligue_one, soccer_efl_champ]
 version: 1
 issue: 833
 start_date: 2026-11-13
 status: active
 rule: single_book_outlier
-rule_sha256: 3356086d69c5c03d9c0c43fd452c4b8fc8f116fb147392d15908e38f68d37505
+rule_sha256: d73130fd25c451467ec93242c364a67f69735a05e390c5d7e183423346e7a777
 params:
   min_ratio: 1.05
   gap: 0.01

@@ -67,7 +67,7 @@ class CoverageRow:
 class CandidateCoverage:
     name: str
     version: int
-    sports: tuple[str, ...]
+    leagues: tuple[str, ...]
     market: str
     inputs: tuple[str, ...]
     minutes: list[int]
@@ -143,7 +143,7 @@ async def candidate_coverage(
         await session.scalars(
             select(Event)
             .where(
-                col(Event.sport_key).in_(candidate.sports),
+                col(Event.sport_key).in_(candidate.leagues),
                 col(Event.commence_time) >= now - PAST,
                 col(Event.commence_time) <= now + UPCOMING,
                 col(Event.status).notin_((EventStatus.POSTPONED, EventStatus.CANCELLED)),
@@ -202,7 +202,7 @@ async def candidate_coverage(
     return CandidateCoverage(
         name=candidate.name,
         version=candidate.version,
-        sports=candidate.sports,
+        leagues=candidate.leagues,
         market=candidate.market.value,
         inputs=(RETAIL, *(i.value for i in sorted(spec.sharp_inputs))),
         minutes=minutes,

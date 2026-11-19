@@ -49,7 +49,7 @@ def validate_candidate_rules(candidates: Sequence[Candidate]) -> None:
         if not isinstance(candidate, RuleCandidate):
             continue
         resolve_rule(candidate)
-        if unclosed := [s for s in candidate.sports if (s, candidate.market) not in CLOSES]:
+        if unclosed := [s for s in candidate.leagues if (s, candidate.market) not in CLOSES]:
             raise ValueError(
                 f"candidate {candidate.name!r}: {', '.join(unclosed)} has no entry for market "
                 f"{candidate.market.value!r} in `odds_core.close.CLOSES`"

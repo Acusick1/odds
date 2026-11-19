@@ -318,7 +318,7 @@ class DecisionStart(NamedTuple):
     """A candidate version's first recorded decision and the leagues it listed when deciding."""
 
     first: datetime
-    sports: frozenset[str]
+    leagues: frozenset[str]
 
 
 def family_starts(
@@ -332,7 +332,7 @@ def family_starts(
 
     A version counts from its first recorded decision in ``decisions`` when its name's registry
     entry has ``candidate``'s rule and market and the leagues the version decided with
-    intersect ``candidate.sports``: not transitive, so a pooled {EPL, Serie A} shares a family
+    intersect ``candidate.leagues``: not transitive, so a pooled {EPL, Serie A} shares a family
     with EPL alone and with Serie A alone, which do not share one with each other. A version
     with no decision has taken no look, and a ``start_date`` can be back-dated where a decision
     cannot. An unregistered ``draft`` counts from ``draft_start``, unless it already has a
@@ -348,7 +348,7 @@ def family_starts(
     starts = {
         key: d.first
         for key, d in decisions.items()
-        if key[0] in members and not d.sports.isdisjoint(candidate.sports)
+        if key[0] in members and not d.leagues.isdisjoint(candidate.leagues)
     }
     if draft is not None and draft_start is not None:
         starts.setdefault(draft, draft_start)
@@ -650,7 +650,7 @@ def summarize_candidates(
             return lambda _: 1
         recorded = decisions.get((name, version))
         if recorded is not None:
-            entry = entry.model_copy(update={"sports": tuple(recorded.sports)})
+            entry = entry.model_copy(update={"leagues": tuple(recorded.leagues)})
         starts = family_starts(entry, registry, decisions)
         return lambda when: family_size_at(starts, when)
 
@@ -760,7 +760,7 @@ async def load_decision_starts(session: AsyncSession) -> dict[tuple[str, int], D
         name.label("name"),
         version.label("version"),
         col(CandidateDecision.decision_time).label("decision_time"),
-        func.unnest(CandidateDecision.sports).label("sport"),
+        func.unnest(CandidateDecision.leagues).label("sport"),
     ).subquery()
     rows = await session.execute(
         select(
@@ -771,8 +771,8 @@ async def load_decision_starts(session: AsyncSession) -> dict[tuple[str, int], D
         ).group_by(unnested.c.name, unnested.c.version)
     )
     return {
-        (name, version): DecisionStart(first, frozenset(sports))
-        for name, version, first, sports in rows.all()
+        (name, version): DecisionStart(first, frozenset(leagues))
+        for name, version, first, leagues in rows.all()
     }
 
 

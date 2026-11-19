@@ -192,7 +192,7 @@ class TestDeclaration:
                 "kind": "rule",
                 "books": "uk_retail",
                 "market": market,
-                "sports": ["soccer_epl"],
+                "leagues": ["soccer_epl"],
                 "version": 1,
                 "issue": 1,
                 "start_date": "2026-01-01",

@@ -38,18 +38,18 @@ class _CandidateBase(BaseModel):
     name: str = Field(pattern=NAME_PATTERN)
     description: str
     # The leagues it bets in; a pooled candidate lists several and is judged on one series.
-    sports: tuple[SportKey, ...] = Field(min_length=1)
+    leagues: tuple[SportKey, ...] = Field(min_length=1)
     version: Annotated[int, Field(strict=True, gt=0)]
     issue: PositiveInt
     start_date: date
     status: CandidateStatus
 
-    @field_validator("sports")
+    @field_validator("leagues")
     @classmethod
-    def _distinct(cls, sports: tuple[SportKey, ...]) -> tuple[SportKey, ...]:
-        if len(set(sports)) != len(sports):
+    def _distinct(cls, leagues: tuple[SportKey, ...]) -> tuple[SportKey, ...]:
+        if len(set(leagues)) != len(leagues):
             raise ValueError("a league is listed twice")
-        return sports
+        return leagues
 
 
 class RuleCandidate(_CandidateBase):
@@ -101,7 +101,7 @@ def load_candidates(directory: Path) -> list[Candidate]:
         sport
         for c in candidates
         if c.kind == "agent" and c.status != CandidateStatus.KILLED
-        for sport in c.sports
+        for sport in c.leagues
     )
     for sport, count in live_agents_per_sport.items():
         if count > 1:

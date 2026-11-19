@@ -92,7 +92,7 @@ def list_candidates(
         table.add_row(
             c.name,
             c.kind,
-            ", ".join(c.sports),
+            ", ".join(c.leagues),
             str(c.version),
             c.status,
             c.start_date.isoformat(),

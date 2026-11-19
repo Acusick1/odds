@@ -23,7 +23,7 @@ RULE_CANDIDATE: dict[str, object] = {
     "kind": "rule",
     "books": "uk_retail",
     "market": "1x2",
-    "sports": ["soccer_epl"],
+    "leagues": ["soccer_epl"],
     "version": 1,
     "issue": 610,
     "start_date": "2026-11-01",
@@ -37,7 +37,7 @@ AGENT: dict[str, object] = {
     "name": "epl-agent",
     "description": "The EPL betting agent.",
     "kind": "agent",
-    "sports": ["soccer_epl"],
+    "leagues": ["soccer_epl"],
     "version": 3,
     "issue": 611,
     "start_date": "2026-11-02",
@@ -118,7 +118,7 @@ class TestLoadCandidates:
 
     def test_agents_for_different_sports_allowed(self, tmp_path: Path) -> None:
         write(tmp_path, AGENT)
-        write(tmp_path, {**AGENT, "name": "mlb-agent", "sports": ["baseball_mlb"]})
+        write(tmp_path, {**AGENT, "name": "mlb-agent", "leagues": ["baseball_mlb"]})
         assert len(load_candidates(tmp_path)) == 2
 
     def test_a_rule_candidate_file_must_declare_its_book_set(self, tmp_path: Path) -> None:

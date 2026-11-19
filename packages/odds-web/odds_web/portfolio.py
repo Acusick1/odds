@@ -128,7 +128,7 @@ def scope_of(entry: Candidate | None) -> str:
     no longer holds has no leagues or market of its own to show."""
     if entry is None:
         return "—"
-    leagues = ", ".join(entry.sports)
+    leagues = ", ".join(entry.leagues)
     if isinstance(entry, RuleCandidate):
         return f"{leagues} · {entry.market}"
     return f"{leagues} · agent"
@@ -174,7 +174,7 @@ def no_ev_reason(summary: CandidateSummary, entry: Candidate | None = None) -> s
     if summary.bets_with_close == 0:
         no_close = summary.bets_without_close > 0 or (
             isinstance(entry, RuleCandidate)
-            and all(close_spec(sport, entry.market) is None for sport in entry.sports)
+            and all(close_spec(sport, entry.market) is None for sport in entry.leagues)
         )
         return "EV not scoreable" if no_close else "no bets with a close"
     return "too few events"

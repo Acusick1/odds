@@ -52,7 +52,7 @@ def candidate(**overrides: Any) -> RuleCandidate:
         "kind": "rule",
         "books": "uk_retail",
         "market": "1x2",
-        "sports": ["soccer_epl"],
+        "leagues": ["soccer_epl"],
         "version": 1,
         "issue": 626,
         "start_date": "2026-01-01",
@@ -384,7 +384,7 @@ class TestReplay:
         )
         await session.commit()
 
-        result = await run(session, candidate(market="h2h", sports=["basketball_nba"]))
+        result = await run(session, candidate(market="h2h", leagues=["basketball_nba"]))
 
         assert result.coverage.bets == 1 and result.coverage.bets_with_close == 1
         # The home side won at 2.2.
@@ -477,7 +477,7 @@ class TestSubstituteClose:
 
         result = await replay(
             session,
-            candidate(sports=["soccer_spain_la_liga"]),
+            candidate(leagues=["soccer_spain_la_liga"]),
             date(2025, 4, 1),
             date(2025, 4, 30),
             1,
@@ -570,13 +570,13 @@ class TestFamilySize:
     async def test_loader_reads_each_versions_own_leagues(self, pglite_async_session) -> None:
         session = pglite_async_session
         await add_event(session, 1, KICKOFF)
-        for version, sports in ((1, ["soccer_epl"]), (2, ["soccer_epl", "soccer_italy_serie_a"])):
+        for version, leagues in ((1, ["soccer_epl"]), (2, ["soccer_epl", "soccer_italy_serie_a"])):
             for minutes in (60, 120):
                 session.add(
                     CandidateDecision(
                         candidate_name="gap",
                         candidate_version=version,
-                        sports=sports,
+                        leagues=leagues,
                         event_id=1,
                         minutes_before_kickoff=minutes,
                         decision_time=KICKOFF,
@@ -588,8 +588,8 @@ class TestFamilySize:
 
         starts = await load_decision_starts(session)
 
-        assert starts[("gap", 1)].sports == {"soccer_epl"}
-        assert starts[("gap", 2)].sports == {"soccer_epl", "soccer_italy_serie_a"}
+        assert starts[("gap", 1)].leagues == {"soccer_epl"}
+        assert starts[("gap", 2)].leagues == {"soccer_epl", "soccer_italy_serie_a"}
 
     async def test_report_counts_versions_from_their_first_decision(
         self, pglite_async_session
@@ -606,7 +606,7 @@ class TestFamilySize:
                 CandidateDecision(
                     candidate_name="gap",
                     candidate_version=version,
-                    sports=["soccer_epl"],
+                    leagues=["soccer_epl"],
                     event_id=event_id,
                     minutes_before_kickoff=60,
                     decision_time=when,
@@ -636,7 +636,7 @@ POOLED_KICKOFF = datetime(2025, 4, 10, 15, 0, tzinfo=UTC)
 
 
 class TestPooledLeagues:
-    pooled = candidate(name="pooled", sports=["soccer_epl", "soccer_italy_serie_a"])
+    pooled = candidate(name="pooled", leagues=["soccer_epl", "soccer_italy_serie_a"])
 
     async def add_two_leagues(self, session: Any) -> None:
         await add_event(session, 1, POOLED_KICKOFF)
@@ -682,7 +682,7 @@ class TestPooledLeagues:
         assert all(b.bets_with_close == 1 for b in result.summary.leagues)
         assert result.overall is not None and result.overall.n == 2
         assert result.league_coverage is not None
-        epl, serie_a = (result.league_coverage[s] for s in self.pooled.sports)
+        epl, serie_a = (result.league_coverage[s] for s in self.pooled.leagues)
         assert (epl.events, epl.decisions, epl.bets) == (1, 1, 1)
         assert (serie_a.events, serie_a.with_input, serie_a.bets) == (2, 1, 1)
 
@@ -697,7 +697,7 @@ class TestPooledLeagues:
                 CandidateDecision(
                     candidate_name=name,
                     candidate_version=1,
-                    sports=["soccer_epl" if name == "epl-only" else "soccer_efl_champ"],
+                    leagues=["soccer_epl" if name == "epl-only" else "soccer_efl_champ"],
                     event_id=1,
                     minutes_before_kickoff=60,
                     decision_time=decided,
@@ -708,7 +708,7 @@ class TestPooledLeagues:
         await session.commit()
         registry = [
             candidate(name="epl-only"),
-            candidate(name="champ-only", sports=["soccer_efl_champ"]),
+            candidate(name="champ-only", leagues=["soccer_efl_champ"]),
         ]
 
         starts = family_starts(

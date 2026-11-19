@@ -271,7 +271,7 @@ async def run_rule(
 def candidate_leagues(candidate: RuleCandidate) -> tuple[str, ...]:
     """The leagues whose kick-offs a candidate's rule counts as concurrent: every league it bets
     in."""
-    return tuple(candidate.sports)
+    return tuple(candidate.leagues)
 
 
 async def add_fixture_context(

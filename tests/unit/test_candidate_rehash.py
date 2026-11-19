@@ -37,7 +37,7 @@ def candidate(name: str, rule_sha256: str = OLD) -> dict[str, Any]:
         "kind": "rule",
         "books": "uk_retail",
         "market": "1x2",
-        "sports": ["soccer_epl"],
+        "leagues": ["soccer_epl"],
         "version": 1,
         "issue": 1,
         "start_date": "2020-01-01",

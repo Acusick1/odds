@@ -3,13 +3,13 @@ description: Back the longest UK retail price when the Betfair Exchange fair pro
 kind: rule
 market: 1x2
 books: uk_retail
-sports: [soccer_epl, soccer_spain_la_liga, soccer_italy_serie_a, soccer_germany_bundesliga, soccer_france_ligue_one, soccer_efl_champ]
+leagues: [soccer_epl, soccer_spain_la_liga, soccer_italy_serie_a, soccer_germany_bundesliga, soccer_france_ligue_one, soccer_efl_champ]
 version: 1
 issue: 842
 start_date: 2026-11-13
 status: active
 rule: exchange_gap
-rule_sha256: 2ee58aef8f449795684d7a21202ebbcb3885af6e0d848f1f713af9609188ef24
+rule_sha256: 892883432d49bf6d5a54afb1b3ed1355002ffb352fd64c75c863fc99d75ca6b0
 params:
   threshold: 0.03
   minutes_before_kickoff: [360]

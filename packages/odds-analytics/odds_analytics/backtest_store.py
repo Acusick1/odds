@@ -94,7 +94,9 @@ def replay_record(
         else (overall.mean_ev, overall.ci95[0], overall.ci95[1], REPLAY_INTERVAL_LEVEL)
     )
     bets = tuple(_placement_order(result.bets))
-    run = _run(candidate, kind, result.start, result.end, candidate.sports, git_sha, bets, estimate)
+    run = _run(
+        candidate, kind, result.start, result.end, candidate.leagues, git_sha, bets, estimate
+    )
     return RunRecord(run, bets)
 
 

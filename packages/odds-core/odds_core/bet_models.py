@@ -66,7 +66,7 @@ class CandidateDecision(SQLModel, table=True):
     candidate_name: str = Field(index=True)
     candidate_version: int
     event_id: int = Field(sa_type=BigInteger, foreign_key="events.id", index=True)
-    sports: list[str] = Field(
+    leagues: list[str] = Field(
         sa_column=Column(ARRAY(String), nullable=False),
         description=(
             "The league keys the candidate version listed when it decided, which its "

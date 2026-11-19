@@ -248,7 +248,7 @@ async def load_decisions(session: AsyncSession, name: str, version: int) -> list
         .options(
             defer(CandidateDecision.input_event_ids),  # type: ignore[arg-type]
             defer(CandidateDecision.input_fixture),  # type: ignore[arg-type]
-            defer(CandidateDecision.sports),  # type: ignore[arg-type]
+            defer(CandidateDecision.leagues),  # type: ignore[arg-type]
         )
         .where(
             CandidateDecision.candidate_name == name,
