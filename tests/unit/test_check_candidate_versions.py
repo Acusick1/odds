@@ -114,7 +114,7 @@ class TestCheckCandidateVersions:
 
 
 class TestLeagueField:
-    """A one-league `sport` reads as `sports: [it]`: the rename alone is no change."""
+    """A one-league `sport` or a `sports` list reads as `leagues`: the rename alone is no change."""
 
     @pytest.fixture
     def repo(self, candidates_repo: Path) -> Path:
@@ -125,10 +125,10 @@ class TestLeagueField:
         git(candidates_repo, "commit", "-q", "-m", "base")
         return candidates_repo
 
-    def write(self, repo: Path, sports: str, version: int = 2) -> None:
+    def write(self, repo: Path, leagues: str, version: int = 2) -> None:
         path = repo / "candidates" / "back-longest.yaml"
         path.write_text(
-            BASE_YAML.replace("version: 2", f"version: {version}") + f"sports: {sports}\n"
+            BASE_YAML.replace("version: 2", f"version: {version}") + f"leagues: {leagues}\n"
         )
 
     def errors(self, repo: Path) -> list[str]:
@@ -144,15 +144,22 @@ class TestLeagueField:
         self.write(repo, "[soccer_epl]")
         assert self.errors(repo) == []
 
+    def test_renaming_sports_to_leagues_passes(self, repo: Path) -> None:
+        (repo / "candidates" / "back-longest.yaml").write_text(BASE_YAML + "sports: [soccer_epl]\n")
+        git(repo, "add", "candidates")
+        git(repo, "commit", "-q", "-m", "sports base")
+        self.write(repo, "[soccer_epl]")
+        assert self.errors(repo) == []
+
     def test_renaming_to_another_league_fails(self, repo: Path) -> None:
         self.write(repo, "[soccer_italy_serie_a]")
         (error,) = self.errors(repo)
-        assert "sports changed without a version bump" in error
+        assert "leagues changed without a version bump" in error
 
     def test_adding_a_league_without_a_bump_fails(self, repo: Path) -> None:
         self.write(repo, "[soccer_epl, soccer_italy_serie_a]")
         (error,) = self.errors(repo)
-        assert "sports changed without a version bump" in error
+        assert "leagues changed without a version bump" in error
 
     def test_adding_a_league_with_a_bump_passes(self, repo: Path) -> None:
         self.write(repo, "[soccer_epl, soccer_italy_serie_a]", version=3)
@@ -163,7 +170,7 @@ class TestLeagueField:
         git(repo, "commit", "-qam", "pooled")
         self.write(repo, "[soccer_epl]", version=3)
         (error,) = self.errors(repo)
-        assert "sports changed without a version bump" in error
+        assert "leagues changed without a version bump" in error
 
 
 class TestBooksField:

@@ -84,7 +84,7 @@ class Replay:
 def _leagues(path: Path) -> tuple[str, ...]:
     candidate = load_candidate_file(path)
     assert isinstance(candidate, RuleCandidate)  # noqa: S101
-    return candidate.sports
+    return candidate.leagues
 
 
 # Prints the holdout windows a checkout's code seals, as JSON.

@@ -53,7 +53,7 @@ def rule_candidate(name: str, sport: str, market: str, rule: str) -> RuleCandida
     return RuleCandidate(
         name=name,
         description="d",
-        sports=(sport,),
+        leagues=(sport,),
         version=1,
         issue=1,
         start_date="2026-01-01",
@@ -74,7 +74,7 @@ CANDIDATES: list[RuleCandidate | AgentCandidate] = [
     AgentCandidate(
         name="mlb-agent",
         description="d",
-        sports=("baseball_mlb",),
+        leagues=("baseball_mlb",),
         version=1,
         issue=1,
         start_date="2026-01-01",
@@ -187,7 +187,7 @@ async def populated(odds_web_session: AsyncSession) -> AsyncSession:
                 CandidateDecision(
                     candidate_name=candidate.name,
                     candidate_version=candidate.version,
-                    sports=["soccer_epl"],
+                    leagues=["soccer_epl"],
                     event_id=event_id,
                     minutes_before_kickoff=60,
                     decision_time=PLAYED - timedelta(minutes=60),

@@ -39,12 +39,12 @@ SIX_DAYS_BEFORE = KICKOFF - timedelta(days=6)
 DEV_KICKOFF = datetime(2025, 4, 12, 15, 0, tzinfo=UTC)
 
 
-def crowded(sports: list[str], at_least: int) -> RuleCandidate:
+def crowded(leagues: list[str], at_least: int) -> RuleCandidate:
     params = {"min_concurrent_kickoffs": at_least, "threshold": 0.0, **BASE}
     return candidate(
         rule="crowded_gap",
         rule_sha256=rule_sha256("crowded_gap"),
-        sports=sports,
+        leagues=leagues,
         params=params,
     )
 

@@ -58,7 +58,7 @@ def rule_candidate(
     return RuleCandidate(
         name=name,
         description="d",
-        sports=(sport,),
+        leagues=(sport,),
         version=1,
         issue=1,
         start_date="2026-01-01",
@@ -75,7 +75,7 @@ def agent(name: str = "mlb-agent") -> AgentCandidate:
     return AgentCandidate(
         name=name,
         description="d",
-        sports=("baseball_mlb",),
+        leagues=("baseball_mlb",),
         version=1,
         issue=1,
         start_date="2026-01-01",

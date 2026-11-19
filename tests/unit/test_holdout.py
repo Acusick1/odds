@@ -47,7 +47,7 @@ def git(root: Path, *args: str) -> str:
 def draft(**changes: object) -> RuleCandidate:
     data = {
         **{k: v for k, v in RULE_CANDIDATE.items() if k != "rule_sha256"},
-        "sports": ["soccer_spain_la_liga"],
+        "leagues": ["soccer_spain_la_liga"],
         "params": dict(HOLDOUT_CELL),
         **changes,
     }
@@ -159,7 +159,7 @@ class TestSealInTheLibrary:
         monkeypatch.setattr("odds_cli.commands.candidates.async_session_maker", session)
         monkeypatch.setattr("odds_cli.commands.candidates.load_decision_starts", starts)
         primary, other = tmp_path / "epl.yaml", tmp_path / "laliga.yaml"
-        primary.write_text(yaml.safe_dump(draft(sports=["soccer_epl"]).model_dump(mode="json")))
+        primary.write_text(yaml.safe_dump(draft(leagues=["soccer_epl"]).model_dump(mode="json")))
         other.write_text(yaml.safe_dump(draft(issue=999).model_dump(mode="json")))
 
         result = RUNNER.invoke(
@@ -614,13 +614,13 @@ class TestRun:
             **kw: Any,
         ) -> bt.Replayed:
             granted = tuple(a.window.sport for a in kw["access"])
-            calls.append((candidate.sports, dict(ranges), granted))
+            calls.append((candidate.leagues, dict(ranges), granted))
             return replayed(
                 [
                     scored_bet(
                         n * 100 + i, 0.6 if sport == "soccer_spain_la_liga" else 0.3, 2025, sport
                     )
-                    for n, sport in enumerate(candidate.sports)
+                    for n, sport in enumerate(candidate.leagues)
                     for i in range(40)
                 ]
             )
@@ -819,7 +819,7 @@ class TestSpentReplay:
                     scored_bet(
                         n * 100 + i, 0.6 if sport == "soccer_spain_la_liga" else 0.3, 2025, sport
                     )
-                    for n, sport in enumerate(candidate.sports)
+                    for n, sport in enumerate(candidate.leagues)
                     for i in range(state["per_league"])
                 ]
             )

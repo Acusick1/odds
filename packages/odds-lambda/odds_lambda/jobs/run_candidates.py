@@ -111,7 +111,7 @@ async def runnable_candidates(sport: SportKey, today: datetime) -> list[Runnable
     for candidate in loaded:
         if (
             not isinstance(candidate, RuleCandidate)
-            or sport not in candidate.sports
+            or sport not in candidate.leagues
             or candidate.status != CandidateStatus.ACTIVE
             or candidate.start_date > today.date()
         ):
@@ -230,7 +230,7 @@ async def _decide(
     decision = CandidateDecision(
         candidate_name=candidate.name,
         candidate_version=candidate.version,
-        sports=list(candidate.sports),
+        leagues=list(candidate.leagues),
         event_id=event.id,
         minutes_before_kickoff=minutes,
         decision_time=t,

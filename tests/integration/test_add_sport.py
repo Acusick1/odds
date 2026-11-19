@@ -126,7 +126,7 @@ class TestAddedSport:
         candidate = RuleCandidate(
             name="exchange-gap-laliga",
             description="d",
-            sports=(SPORT,),
+            leagues=(SPORT,),
             version=1,
             issue=1,
             start_date="2026-01-01",

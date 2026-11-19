@@ -108,7 +108,7 @@ def registry_entry(name: str = "cand", version: int = 1) -> AgentCandidate:
     return AgentCandidate(
         name=name,
         description="d",
-        sports=("soccer_epl",),
+        leagues=("soccer_epl",),
         version=version,
         issue=1,
         start_date="2026-01-01",
@@ -419,7 +419,9 @@ class TestSummaries:
     def test_each_version_carries_its_own_registry_entry(self) -> None:
         sequence = [bet(0, version=1), bet(1, version=2)]
         v1, v2 = registry_entry(version=1), registry_entry(version=2)
-        v2 = v2.model_copy(update={"sports": ("basketball_nba",), "status": CandidateStatus.KILLED})
+        v2 = v2.model_copy(
+            update={"leagues": ("basketball_nba",), "status": CandidateStatus.KILLED}
+        )
 
         by_version = {
             s.version: s for s in summarize_candidates(sequence, [v2], NOW, n_boot=N_BOOT)
@@ -428,8 +430,8 @@ class TestSummaries:
 
         assert by_version[1].registered is None and by_version[2].registered == v2
         assert by_version[2].status is CandidateStatus.KILLED
-        assert both[1].registered == v1 and both[1].registered.sports == ("soccer_epl",)
-        assert both[2].registered.sports == ("basketball_nba",)  # type: ignore[union-attr]
+        assert both[1].registered == v1 and both[1].registered.leagues == ("soccer_epl",)
+        assert both[2].registered.leagues == ("basketball_nba",)  # type: ignore[union-attr]
 
     def test_registered_candidate_without_bets_is_listed(self) -> None:
         summary = summarize_candidates([], [registry_entry("fresh", 4)], NOW, n_boot=N_BOOT)[0]
@@ -481,7 +483,7 @@ def rule_candidate(name: str, version: int = 1, start: str = "2026-01-01", **ove
             "kind": "rule",
             "books": "uk_retail",
             "market": "1x2",
-            "sports": ["soccer_epl"],
+            "leagues": ["soccer_epl"],
             "version": version,
             "issue": 1,
             "start_date": start,
@@ -523,8 +525,8 @@ EPL = "soccer_epl"
 SERIE_A = "soccer_italy_serie_a"
 
 
-def decided(day: int, *sports: str) -> DecisionStart:
-    return DecisionStart(at(day), frozenset(sports or (EPL,)))
+def decided(day: int, *leagues: str) -> DecisionStart:
+    return DecisionStart(at(day), frozenset(leagues or (EPL,)))
 
 
 class TestFamilyStarts:
@@ -559,7 +561,7 @@ class TestFamilyStarts:
         registry = [
             rule_candidate("a"),
             rule_candidate("b", rule="polymarket_gap"),
-            rule_candidate("c", sports=["baseball_mlb"], market="h2h"),
+            rule_candidate("c", leagues=["baseball_mlb"], market="h2h"),
             rule_candidate("d", market="totals"),
         ]
         decisions = {
@@ -569,7 +571,7 @@ class TestFamilyStarts:
         assert self.starts(registry, decisions) == [at(1)]
 
     def test_a_pooled_version_shares_the_family_of_each_league_it_lists(self) -> None:
-        registry = [rule_candidate("pooled", sports=[EPL, SERIE_A])]
+        registry = [rule_candidate("pooled", leagues=[EPL, SERIE_A])]
         assert self.starts(registry, {("pooled", 1): decided(1, EPL, SERIE_A)}) == [at(1)]
 
     def test_draft_counts_once_from_the_given_time(self) -> None:
@@ -588,8 +590,8 @@ class TestFamilyStarts:
 
 class TestFamilyOfIntersectingLeagues:
     epl = rule_candidate("epl")
-    serie_a = rule_candidate("serie-a", sports=[SERIE_A])
-    pooled = rule_candidate("pooled", sports=[EPL, SERIE_A])
+    serie_a = rule_candidate("serie-a", leagues=[SERIE_A])
+    pooled = rule_candidate("pooled", leagues=[EPL, SERIE_A])
     registry = [epl, serie_a, pooled]
     decisions = {
         ("epl", 1): decided(1),
@@ -607,15 +609,15 @@ class TestFamilyOfIntersectingLeagues:
         assert self.k(self.epl) == self.k(self.serie_a) == 2
 
     def test_another_market_with_the_same_leagues_is_another_family(self) -> None:
-        totals = rule_candidate("totals", sports=[EPL, SERIE_A], market="totals")
+        totals = rule_candidate("totals", leagues=[EPL, SERIE_A], market="totals")
         assert family_starts(totals, self.registry, self.decisions) == []
 
 
 class TestPastVersionLeagues:
     """v1 listed EPL and v2 lists EPL and Serie A: each counts by the leagues it decided with."""
 
-    v2 = rule_candidate("gap", version=2, sports=[EPL, SERIE_A])
-    serie_a = rule_candidate("serie-a", sports=[SERIE_A])
+    v2 = rule_candidate("gap", version=2, leagues=[EPL, SERIE_A])
+    serie_a = rule_candidate("serie-a", leagues=[SERIE_A])
     registry = [v2, serie_a]
     decisions = {
         ("gap", 1): decided(1, EPL),

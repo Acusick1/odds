@@ -90,7 +90,7 @@ def write_candidate(directory: Path, name: str = "cand", **fields: Any) -> None:
         "kind": "rule",
         "books": "uk_retail",
         "market": "1x2",
-        "sports": [EPL],
+        "leagues": [EPL],
         "version": 1,
         "issue": 1,
         "start_date": (NOW - timedelta(days=1)).date().isoformat(),
@@ -202,7 +202,7 @@ class TestDecisions:
                 "kind": "rule",
                 "books": "uk_retail",
                 "market": "1x2",
-                "sports": [EPL],
+                "leagues": [EPL],
                 "version": 1,
                 "issue": 1,
                 "start_date": "2026-01-01",
@@ -335,7 +335,7 @@ class TestDecisions:
                 CandidateDecision(
                     candidate_name="cand",
                     candidate_version=1,
-                    sports=["soccer_epl"],
+                    leagues=["soccer_epl"],
                     event_id=1,
                     minutes_before_kickoff=60,
                     decision_time=DUE - timedelta(minutes=60),
@@ -522,7 +522,7 @@ class TestTotals:
                 "kind": "rule",
                 "books": "uk_retail",
                 "market": "totals",
-                "sports": [EPL],
+                "leagues": [EPL],
                 "version": 1,
                 "issue": 1,
                 "start_date": "2026-01-01",
@@ -604,7 +604,7 @@ class TestCandidateSelection:
         write_candidate(registry, "killed", status="killed")
         write_candidate(registry, "promoted", status="promoted")
         write_candidate(registry, "future", start_date=(NOW + timedelta(days=1)).date().isoformat())
-        write_candidate(registry, "mlb", sports=["baseball_mlb"], market="h2h")
+        write_candidate(registry, "mlb", leagues=["baseball_mlb"], market="h2h")
 
         runnable = await runnable_candidates(EPL, NOW)
 
@@ -613,7 +613,7 @@ class TestCandidateSelection:
     async def test_a_pooled_candidate_runs_in_the_job_of_each_league_it_lists(
         self, registry
     ) -> None:
-        write_candidate(registry, "pooled", sports=[EPL, "soccer_italy_serie_a"])
+        write_candidate(registry, "pooled", leagues=[EPL, "soccer_italy_serie_a"])
 
         for sport, expected in ((EPL, ["pooled"]), ("soccer_italy_serie_a", ["pooled"])):
             runnable = await runnable_candidates(sport, NOW)
@@ -875,7 +875,7 @@ class TestFlatStakeBets:
         decision = CandidateDecision(
             candidate_name="cand",
             candidate_version=1,
-            sports=["soccer_epl"],
+            leagues=["soccer_epl"],
             event_id=1,
             minutes_before_kickoff=60,
             decision_time=NOW,
@@ -913,7 +913,7 @@ class TestFlatStakeBets:
         decision = CandidateDecision(
             candidate_name="cand",
             candidate_version=1,
-            sports=["soccer_epl"],
+            leagues=["soccer_epl"],
             event_id=1,
             minutes_before_kickoff=60,
             decision_time=NOW,

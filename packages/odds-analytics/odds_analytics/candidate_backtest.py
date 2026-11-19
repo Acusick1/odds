@@ -290,7 +290,7 @@ async def _decide_leagues(
 ) -> list[ScoredBet]:
     """``_decide`` per league of ``events``, counting each league apart."""
     bets: list[ScoredBet] = []
-    for league in candidate.sports:
+    for league in candidate.leagues:
         league_events = [e for e in events if e.sport_key == league]
         if league_events:
             bets += await _decide(
@@ -315,8 +315,8 @@ async def collect(
     ``ranges`` and settle its bets, pooled in decision-time order. A sealed range needs the
     league's ``access``."""
     grants = {a.window.sport: a for a in access}
-    spans = [(league, span) for league in candidate.sports for span in ranges.get(league, ())]
-    for league in candidate.sports:
+    spans = [(league, span) for league in candidate.leagues for span in ranges.get(league, ())]
+    for league in candidate.leagues:
         ordered = sorted(ranges.get(league, ()))
         for (_, earlier_last), (later_first, _) in zip(ordered, ordered[1:], strict=False):
             # An event on a shared day would be decided once per range.
@@ -330,7 +330,7 @@ async def collect(
         events += await final_events(session, league, first, last, grants.get(league))
     events.sort(key=lambda e: (e.commence_time, e.id))
     range_events = len(events)
-    counts: dict[str, _Counts] = {league: _Counts() for league in candidate.sports}
+    counts: dict[str, _Counts] = {league: _Counts() for league in candidate.leagues}
     refits: list[Refit] = []
     tuning: Tuning | None = None
     if isinstance(spec, ModelRuleSpec):
@@ -360,7 +360,7 @@ async def collect(
     return Replayed(
         bets,
         counts,
-        {league: scored.count(league) for league in candidate.sports},
+        {league: scored.count(league) for league in candidate.leagues},
         range_events,
         tuning,
         tuple(refits),
@@ -445,7 +445,7 @@ async def replay(
     replayed = await collect(
         session,
         candidate,
-        {league: [(start, end)] for league in candidate.sports},
+        {league: [(start, end)] for league in candidate.leagues},
         only_events,
         holdout_access,
     )

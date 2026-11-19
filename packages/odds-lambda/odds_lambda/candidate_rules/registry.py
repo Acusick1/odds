@@ -70,7 +70,7 @@ def resolve_rule(candidate: RuleCandidate) -> tuple[RuleSpec | ModelRuleSpec, Ru
             f"candidate {candidate.name!r}: unknown rule {candidate.rule!r}, "
             f"known rules {sorted(RULES)}"
         )
-    for sport in candidate.sports:
+    for sport in candidate.leagues:
         sport_markets = SPORT_MARKETS.get(sport, frozenset())
         if candidate.market not in sport_markets:
             raise ValueError(
@@ -83,7 +83,7 @@ def resolve_rule(candidate: RuleCandidate) -> tuple[RuleSpec | ModelRuleSpec, Ru
             f"candidate {candidate.name!r}: rule {candidate.rule!r} has no model for market "
             f"{candidate.market.value!r}, model markets {sorted(m.value for m in spec.markets)}"
         )
-    for sport in candidate.sports:
+    for sport in candidate.leagues:
         sport_markets = SPORT_MARKETS.get(sport, frozenset())
         if candidate.market in spec.also_markets or not spec.also_markets <= sport_markets:
             raise ValueError(
@@ -112,7 +112,7 @@ def input_leads(candidates: Sequence[Candidate], sport: str) -> list[timedelta]:
     for candidate in candidates:
         if (
             not isinstance(candidate, RuleCandidate)
-            or sport not in candidate.sports
+            or sport not in candidate.leagues
             or candidate.status != CandidateStatus.ACTIVE
         ):
             continue

@@ -5,7 +5,7 @@ description: Back the longest UK retail price when the price-only retail-EV mode
 kind: rule
 market: 1x2
 books: uk_retail
-sports: [soccer_epl]
+leagues: [soccer_epl]
 version: 1
 issue: 680
 start_date: 2026-10-19

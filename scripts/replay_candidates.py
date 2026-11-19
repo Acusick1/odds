@@ -73,29 +73,37 @@ def resolve(candidate: RuleCandidate) -> tuple[Any, Any]:
 
 def load(path: Path) -> RuleCandidate:
     """The candidate file parsed by this checkout's model: a revision before pooled leagues
-    names its one league ``sport``, a later one lists ``sports``, a revision before book
-    sets has no ``books``, and a revision before rule candidates calls the kind ``mechanical``."""
+    names its one league ``sport``, a later one lists them as ``sports``, the current one as
+    ``leagues``, a revision before book sets has no ``books``, and a revision before rule
+    candidates calls the kind ``mechanical``."""
     raw = yaml.safe_load(path.read_text())
     if "books" not in RuleCandidate.model_fields:
         raw.pop("books", None)
-    if "sports" in RuleCandidate.model_fields:
-        if "sport" in raw:
-            raw["sports"] = [raw.pop("sport")]
-    elif "sports" in raw:
-        (raw["sport"],) = raw.pop("sports")
-    (raw["kind"],) = typing.get_args(RuleCandidate.model_fields["kind"].annotation)
+    fields = RuleCandidate.model_fields
+    listed = raw.pop("leagues", None) or raw.pop("sports", None) or [raw.pop("sport")]
+    if "leagues" in fields:
+        raw["leagues"] = listed
+    elif "sports" in fields:
+        raw["sports"] = listed
+    else:
+        (raw["sport"],) = listed
+    (raw["kind"],) = typing.get_args(fields["kind"].annotation)
     return RuleCandidate.model_validate(raw)
 
 
 def leagues(candidate: RuleCandidate) -> list[str]:
     raw: Any = candidate
-    return list(raw.sports) if hasattr(raw, "sports") else [raw.sport]
+    for name in ("leagues", "sports"):
+        if hasattr(raw, name):
+            return list(getattr(raw, name))
+    return [raw.sport]
 
 
 def in_league(candidate: RuleCandidate, league: str) -> RuleCandidate:
     """``candidate`` restricted to ``league``, whose development days differ from another's."""
-    if "sports" in RuleCandidate.model_fields:
-        return candidate.model_copy(update={"sports": (league,)})
+    for name in ("leagues", "sports"):
+        if name in RuleCandidate.model_fields:
+            return candidate.model_copy(update={name: (league,)})
     return candidate
 
 

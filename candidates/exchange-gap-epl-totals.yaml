@@ -3,7 +3,7 @@ description: On each half goal line of over/under, back the longest UK retail pr
 kind: rule
 market: totals
 books: uk_retail
-sports: [soccer_epl]
+leagues: [soccer_epl]
 version: 3
 issue: 708
 start_date: 2026-11-14

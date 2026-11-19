@@ -845,7 +845,7 @@ def _candidate(**overrides: Any) -> RuleCandidate:
         "kind": "rule",
         "books": "uk_retail",
         "market": "1x2",
-        "sports": ["soccer_epl"],
+        "leagues": ["soccer_epl"],
         "version": 1,
         "issue": 626,
         "start_date": "2026-11-01",
@@ -887,7 +887,7 @@ class TestValidateCandidateRules:
         ],
     )
     def test_each_sport_decides_its_markets(self, sport: str, market: str) -> None:
-        resolve_rule(_candidate(sports=[sport], market=market))
+        resolve_rule(_candidate(leagues=[sport], market=market))
 
     @pytest.mark.parametrize(
         "sport",
@@ -903,7 +903,7 @@ class TestValidateCandidateRules:
     def test_each_football_league_decides_the_three_way_and_totals(
         self, sport: str, market: str
     ) -> None:
-        resolve_rule(_candidate(sports=[sport], market=market))
+        resolve_rule(_candidate(leagues=[sport], market=market))
 
     @pytest.mark.parametrize(
         ("sport", "market"),
@@ -911,19 +911,19 @@ class TestValidateCandidateRules:
     )
     def test_a_market_the_sport_does_not_decide_fails(self, sport: str, market: str) -> None:
         with pytest.raises(ValueError, match=f"no rule decides market '{market}' for sport"):
-            resolve_rule(_candidate(sports=[sport], market=market))
+            resolve_rule(_candidate(leagues=[sport], market=market))
 
     def test_a_pooled_candidate_needs_its_market_in_every_league(self) -> None:
-        resolve_rule(_candidate(sports=["soccer_epl", "soccer_italy_serie_a"]))
+        resolve_rule(_candidate(leagues=["soccer_epl", "soccer_italy_serie_a"]))
         with pytest.raises(ValueError, match="for sport 'basketball_nba'"):
-            resolve_rule(_candidate(sports=["soccer_epl", "basketball_nba"]))
+            resolve_rule(_candidate(leagues=["soccer_epl", "basketball_nba"]))
 
     def test_a_league_listed_twice_fails(self) -> None:
         with pytest.raises(ValidationError, match="listed twice"):
-            _candidate(sports=["soccer_epl", "soccer_epl"])
+            _candidate(leagues=["soccer_epl", "soccer_epl"])
 
     def test_registration_accepts_a_league_whose_close_is_none(self) -> None:
-        validate_candidate_rules([_candidate(sports=["baseball_mlb"], market="h2h")])
+        validate_candidate_rules([_candidate(leagues=["baseball_mlb"], market="h2h")])
 
     def test_registration_refuses_a_league_missing_from_closes(
         self, monkeypatch: pytest.MonkeyPatch
@@ -931,10 +931,10 @@ class TestValidateCandidateRules:
         closes = {k: v for k, v in pinning.CLOSES.items() if k != ("baseball_mlb", Market.H2H)}
         monkeypatch.setattr(pinning, "CLOSES", closes)
         with pytest.raises(ValueError, match="baseball_mlb has no entry for market 'h2h'"):
-            validate_candidate_rules([_candidate(sports=["baseball_mlb"], market="h2h")])
+            validate_candidate_rules([_candidate(leagues=["baseball_mlb"], market="h2h")])
 
     def test_a_league_without_a_close_still_resolves_as_a_draft(self) -> None:
-        resolve_rule(_candidate(sports=["baseball_mlb"], market="h2h"))
+        resolve_rule(_candidate(leagues=["baseball_mlb"], market="h2h"))
 
     def test_market_without_a_rule_fails(self) -> None:
         with pytest.raises(ValueError, match="'gap'.*no rule decides market 'spreads'"):
@@ -981,7 +981,7 @@ class TestInputLeads:
                 name="later",
                 params={**PARAMS.model_dump(mode="json"), "minutes_before_kickoff": [30, 15]},
             ),
-            _candidate(name="mlb", sports=["baseball_mlb"], market="h2h"),
+            _candidate(name="mlb", leagues=["baseball_mlb"], market="h2h"),
             _candidate(name="killed", status="killed"),
             _candidate(name="broken", params={"threshold": -1}),
         ]
@@ -992,7 +992,7 @@ class TestInputLeads:
         ]
 
     def test_a_pooled_candidate_gives_leads_in_each_of_its_leagues(self) -> None:
-        pooled = [_candidate(sports=["soccer_epl", "soccer_italy_serie_a"])]
+        pooled = [_candidate(leagues=["soccer_epl", "soccer_italy_serie_a"])]
         assert input_leads(pooled, "soccer_italy_serie_a") == [timedelta(minutes=60)]
         assert input_leads(pooled, "soccer_efl_champ") == []
 

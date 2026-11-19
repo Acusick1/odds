@@ -56,7 +56,7 @@ def candidate(rule: str = "exchange_gap", name: str = "exchange-gap-epl") -> Rul
     return RuleCandidate(
         name=name,
         description="d",
-        sports=("soccer_epl",),
+        leagues=("soccer_epl",),
         version=3,
         issue=1,
         start_date="2026-01-01",
@@ -169,7 +169,7 @@ class TestDecisionWindowCoverage:
             CandidateDecision(
                 candidate_name="exchange-gap-epl",
                 candidate_version=3,
-                sports=["soccer_epl"],
+                leagues=["soccer_epl"],
                 event_id=1,
                 minutes_before_kickoff=30,
                 decision_time=decided,

@@ -55,7 +55,7 @@ def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def no_bets(candidate: RuleCandidate, counts: _Counts, events: int) -> Replayed:
     """A replay of ``candidate``'s one league that decided ``events`` and placed no bet."""
-    (league,) = candidate.sports
+    (league,) = candidate.leagues
     return Replayed([], {league: counts}, {league: events}, 0, None, (), False)
 
 
@@ -510,7 +510,7 @@ class TestPerLeagueTable:
 class TestCloseSources:
     def result(self) -> BacktestResult:
         candidate = RuleCandidate.model_validate(RULE_CANDIDATE)
-        (league,) = candidate.sports
+        (league,) = candidate.leagues
 
         def bet(event_id: int, source: Source | None) -> ScoredBet:
             return ScoredBet(
