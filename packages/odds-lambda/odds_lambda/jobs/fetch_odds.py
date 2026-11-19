@@ -21,7 +21,7 @@ from odds_core.vocabulary import Market, Source
 from odds_lambda.collection_calendar import (
     CollectionSource,
     SportCollection,
-    require_rows_for_fixtures,
+    require_rows_for_games,
 )
 from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.event_sync import EventSyncService
@@ -193,7 +193,7 @@ async def main(ctx: JobContext) -> None:
     )
 
     # Smart execution gating, scoped to this job's sport(s) — fixes the prior
-    # all-sports bug where another sport's fixtures kept this job alive. The
+    # all-sports bug where another sport's games kept this job alive. The
     # resilient path keys off the soonest kickoff across this job's sports and
     # falls back to db_fallback cadence (should_execute=True, burning one cheap
     # /odds call) if the kickoff query fails, so the chain never breaks.
@@ -250,7 +250,7 @@ async def main(ctx: JobContext) -> None:
                     quota_remaining=sport_result.quota_remaining,
                 )
 
-            await require_rows_for_fixtures(
+            await require_rows_for_games(
                 plan.source, {r.sport_key: r.processed_events for r in results.sport_results}
             )
 

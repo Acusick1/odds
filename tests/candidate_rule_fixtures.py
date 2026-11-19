@@ -6,7 +6,7 @@ from __future__ import annotations
 from odds_core.market_prices import Outcome
 from odds_lambda.candidate_rules import BetIntent, MarketState, RuleParams
 
-# The estimated EV of every bet the fixture rules take.
+# The estimated EV of every bet the game rules take.
 ESTIMATED_EV = 0.04
 
 

@@ -1,4 +1,4 @@
-"""Tests for the fixture-aware collection guards and the per-source stale-data check."""
+"""Tests for the game-aware collection guards and the per-source stale-data check."""
 
 from __future__ import annotations
 
@@ -21,9 +21,9 @@ from odds_lambda.collection_calendar import (
     EmptyCollectionError,
     EventKey,
     MlbGameKey,
-    fixture_calendar,
+    game_calendar,
     latest_snapshot_time,
-    require_rows_for_fixtures,
+    require_rows_for_games,
 )
 from odds_lambda.health_monitor import HealthMonitor
 from odds_lambda.jobs import (
@@ -140,8 +140,8 @@ def guard_session(monkeypatch: pytest.MonkeyPatch, pglite_async_session: Any) ->
     )
 
 
-class TestFixtureCalendar:
-    async def test_counts_scheduled_fixtures_inside_the_horizon(
+class TestGameCalendar:
+    async def test_counts_scheduled_games_inside_the_horizon(
         self, pglite_async_session: Any, seed: Callable[..., Any]
     ) -> None:
         await seed(NOW + timedelta(hours=5))
@@ -150,7 +150,7 @@ class TestFixtureCalendar:
         await seed(NOW + timedelta(hours=2), status=EventStatus.FINAL)
         await seed(NOW + timedelta(hours=2), sport_key="baseball_mlb")
 
-        calendar = await fixture_calendar(
+        calendar = await game_calendar(
             pglite_async_session, "soccer_epl", now=NOW, horizon=timedelta(hours=48)
         )
 
@@ -158,7 +158,7 @@ class TestFixtureCalendar:
         assert calendar.next_kickoff == NOW + timedelta(hours=5)
 
     async def test_empty_calendar_has_no_next_kickoff(self, pglite_async_session: Any) -> None:
-        calendar = await fixture_calendar(
+        calendar = await game_calendar(
             pglite_async_session, "soccer_epl", now=NOW, horizon=timedelta(hours=48)
         )
 
@@ -215,46 +215,44 @@ class TestLatestSnapshotTime:
 
 
 @pytest.mark.usefixtures("guard_session")
-class TestRequireRowsForFixtures:
-    async def test_zero_rows_with_fixtures_in_the_horizon_raises(
+class TestRequireRowsForGames:
+    async def test_zero_rows_with_games_in_the_horizon_raises(
         self, seed: Callable[..., Any]
     ) -> None:
         await seed(NOW + timedelta(hours=20))
 
         with pytest.raises(EmptyCollectionError, match="oddsportal wrote 0 rows for soccer_epl"):
-            await require_rows_for_fixtures(fetch_oddsportal.SOURCE, {"soccer_epl": 0}, now=NOW)
+            await require_rows_for_games(fetch_oddsportal.SOURCE, {"soccer_epl": 0}, now=NOW)
 
     async def test_rows_written_passes(self, seed: Callable[..., Any]) -> None:
         await seed(NOW + timedelta(hours=20))
 
-        await require_rows_for_fixtures(fetch_oddsportal.SOURCE, {"soccer_epl": 4}, now=NOW)
+        await require_rows_for_games(fetch_oddsportal.SOURCE, {"soccer_epl": 4}, now=NOW)
 
-    async def test_no_fixtures_passes(self) -> None:
-        await require_rows_for_fixtures(fetch_oddsportal.SOURCE, {"soccer_epl": 0}, now=NOW)
+    async def test_no_games_passes(self) -> None:
+        await require_rows_for_games(fetch_oddsportal.SOURCE, {"soccer_epl": 0}, now=NOW)
 
-    async def test_fixtures_beyond_the_horizon_pass(self, seed: Callable[..., Any]) -> None:
+    async def test_games_beyond_the_horizon_pass(self, seed: Callable[..., Any]) -> None:
         await seed(NOW + timedelta(days=6))
 
-        await require_rows_for_fixtures(fetch_oddsportal.SOURCE, {"soccer_epl": 0}, now=NOW)
+        await require_rows_for_games(fetch_oddsportal.SOURCE, {"soccer_epl": 0}, now=NOW)
 
-    async def test_fixtures_all_accounted_for_pass(self, seed: Callable[..., Any]) -> None:
+    async def test_games_all_accounted_for_pass(self, seed: Callable[..., Any]) -> None:
         await seed(NOW + timedelta(hours=2))
 
-        await require_rows_for_fixtures(
+        await require_rows_for_games(
             fetch_betfair_exchange.SOURCE,
             {"soccer_epl": 0},
             accounted_by_sport={"soccer_epl": {EventKey(1)}},
             now=NOW,
         )
 
-    async def test_a_fixture_beyond_the_accounted_ones_raises(
-        self, seed: Callable[..., Any]
-    ) -> None:
+    async def test_a_game_beyond_the_accounted_ones_raises(self, seed: Callable[..., Any]) -> None:
         await seed(NOW + timedelta(hours=2))
         await seed(NOW + timedelta(hours=3))
 
-        with pytest.raises(EmptyCollectionError, match="with 1 fixture"):
-            await require_rows_for_fixtures(
+        with pytest.raises(EmptyCollectionError, match="with 1 game"):
+            await require_rows_for_games(
                 fetch_betfair_exchange.SOURCE,
                 {"soccer_epl": 0},
                 accounted_by_sport={"soccer_epl": {EventKey(1)}},
@@ -267,14 +265,14 @@ class TestRequireRowsForFixtures:
         await seed_mlb_game(NOW + timedelta(hours=2))
         await seed_mlb_game(NOW + timedelta(hours=3))
 
-        with pytest.raises(EmptyCollectionError, match="with 1 fixture"):
-            await require_rows_for_fixtures(
+        with pytest.raises(EmptyCollectionError, match="with 1 game"):
+            await require_rows_for_games(
                 fetch_betfair_exchange.SOURCE,
                 {"baseball_mlb": 0},
                 accounted_by_sport={"baseball_mlb": {MlbGameKey(1)}},
                 now=NOW,
             )
-        await require_rows_for_fixtures(
+        await require_rows_for_games(
             fetch_betfair_exchange.SOURCE,
             {"baseball_mlb": 0},
             accounted_by_sport={"baseball_mlb": {MlbGameKey(1), MlbGameKey(2)}},
@@ -287,7 +285,7 @@ class TestRequireRowsForFixtures:
         await seed_mlb_game(NOW + timedelta(hours=5))
 
         with pytest.raises(EmptyCollectionError, match="baseball_mlb"):
-            await require_rows_for_fixtures(
+            await require_rows_for_games(
                 fetch_oddsportal.SOURCE, {"soccer_epl": 6, "baseball_mlb": 0}, now=NOW
             )
 
@@ -295,19 +293,19 @@ class TestRequireRowsForFixtures:
         await seed(NOW + timedelta(hours=5))
 
         with pytest.raises(EmptyCollectionError, match="errors: unusable_outcomes: A v B"):
-            await require_rows_for_fixtures(
+            await require_rows_for_games(
                 fetch_betfair_exchange.SOURCE,
                 {"soccer_epl": 0},
                 errors_by_sport={"soccer_epl": ["unusable_outcomes: A v B"]},
                 now=NOW,
             )
 
-    async def test_betfair_mlb_horizon_ignores_fixtures_it_has_not_listed_yet(
+    async def test_betfair_mlb_horizon_ignores_games_it_has_not_listed_yet(
         self, seed_mlb_game: Callable[..., Any]
     ) -> None:
         await seed_mlb_game(NOW + timedelta(hours=30))
 
-        await require_rows_for_fixtures(fetch_betfair_exchange.SOURCE, {"baseball_mlb": 0}, now=NOW)
+        await require_rows_for_games(fetch_betfair_exchange.SOURCE, {"baseball_mlb": 0}, now=NOW)
 
     async def test_betfair_mlb_game_inside_its_horizon_raises(
         self, seed_mlb_game: Callable[..., Any]
@@ -315,7 +313,7 @@ class TestRequireRowsForFixtures:
         await seed_mlb_game(NOW + timedelta(hours=4))
 
         with pytest.raises(EmptyCollectionError, match="baseball_mlb"):
-            await require_rows_for_fixtures(
+            await require_rows_for_games(
                 fetch_betfair_exchange.SOURCE, {"baseball_mlb": 0}, now=NOW
             )
 
@@ -323,16 +321,14 @@ class TestRequireRowsForFixtures:
         await seed(NOW + timedelta(hours=70))
 
         with pytest.raises(EmptyCollectionError, match="soccer_epl"):
-            await require_rows_for_fixtures(
-                fetch_betfair_exchange.SOURCE, {"soccer_epl": 0}, now=NOW
-            )
+            await require_rows_for_games(fetch_betfair_exchange.SOURCE, {"soccer_epl": 0}, now=NOW)
 
     async def test_a_sport_the_source_does_not_cover_is_ignored(
         self, seed_mlb_game: Callable[..., Any]
     ) -> None:
         await seed_mlb_game(NOW + timedelta(hours=1))
 
-        await require_rows_for_fixtures(fetch_odds.SOURCE, {"baseball_mlb": 0}, now=NOW)
+        await require_rows_for_games(fetch_odds.SOURCE, {"baseball_mlb": 0}, now=NOW)
 
 
 class TestCheckStaleSources:
@@ -340,7 +336,7 @@ class TestCheckStaleSources:
     def _monitor(session: Any) -> HealthMonitor:
         return HealthMonitor(session, get_settings())
 
-    async def test_flags_a_source_that_stopped_writing_before_a_fixture(
+    async def test_flags_a_source_that_stopped_writing_before_a_game(
         self, pglite_async_session: Any, seed: Callable[..., Any]
     ) -> None:
         await seed(NOW + timedelta(hours=4), snapshots=((OP, NOW - timedelta(hours=5)),))
@@ -511,7 +507,7 @@ class TestCheckStaleSources:
 
         assert [s.source for s in stale] == ["oddsportal"]
 
-    async def test_mlb_fixtures_come_from_the_stats_api_schedule(
+    async def test_mlb_games_come_from_the_stats_api_schedule(
         self, pglite_async_session: Any, seed: Callable[..., Any]
     ) -> None:
         evening = NOW + timedelta(hours=8)
@@ -606,7 +602,7 @@ class TestCheckStaleSources:
 
         assert await self._monitor(pglite_async_session).check_stale_sources(NOW) == []
 
-    async def test_gap_counts_from_the_fixture_entering_the_horizon(
+    async def test_gap_counts_from_the_game_entering_the_horizon(
         self, pglite_async_session: Any, seed: Callable[..., Any]
     ) -> None:
         await seed(NOW + timedelta(hours=47), snapshots=((OP, NOW - timedelta(days=14)),))
@@ -1109,7 +1105,7 @@ class TestMlbCalendar:
 
     @staticmethod
     async def _count(session: Any) -> int:
-        calendar = await fixture_calendar(
+        calendar = await game_calendar(
             session, "baseball_mlb", now=NOW, horizon=timedelta(hours=48)
         )
         return calendar.kickoffs_in_horizon
@@ -1136,7 +1132,7 @@ class TestMlbCalendar:
             {"game_status": "If Necessary"},
         ],
     )
-    async def test_unplayed_or_untimed_games_are_not_fixtures(
+    async def test_unplayed_or_untimed_games_are_not_games(
         self, pglite_async_session: Any, fields: dict[str, Any]
     ) -> None:
         pglite_async_session.add(
@@ -1146,7 +1142,7 @@ class TestMlbCalendar:
 
         assert await self._count(pglite_async_session) == 0
 
-    async def test_a_scheduled_game_is_a_fixture(self, pglite_async_session: Any) -> None:
+    async def test_a_scheduled_game_is_a_game(self, pglite_async_session: Any) -> None:
         pglite_async_session.add(
             self._game(
                 1, NOW + timedelta(hours=5), NOW - timedelta(hours=2), game_status="Scheduled"
@@ -1211,7 +1207,7 @@ class TestOddsPortalJob:
         )
         monkeypatch.setattr(fetch_oddsportal, "ingest_league", AsyncMock(return_value=stats))
 
-    async def test_zero_rows_with_fixtures_fails_without_a_heartbeat(
+    async def test_zero_rows_with_games_fails_without_a_heartbeat(
         self, monkeypatch: pytest.MonkeyPatch, seed: Callable[..., Any], alerts: _AlertRecorder
     ) -> None:
         await seed(datetime.now(UTC) + timedelta(hours=20))
@@ -1222,7 +1218,7 @@ class TestOddsPortalJob:
 
         assert alerts.heartbeats == []
 
-    async def test_listing_of_only_started_events_passes_with_fixtures(
+    async def test_listing_of_only_started_events_passes_with_games(
         self, monkeypatch: pytest.MonkeyPatch, seed: Callable[..., Any], alerts: _AlertRecorder
     ) -> None:
         await seed(datetime.now(UTC) + timedelta(hours=20))
@@ -1243,7 +1239,7 @@ class TestOddsPortalJob:
 
         assert alerts.heartbeats == []
 
-    async def test_zero_rows_without_fixtures_writes_a_heartbeat(
+    async def test_zero_rows_without_games_writes_a_heartbeat(
         self, monkeypatch: pytest.MonkeyPatch, alerts: _AlertRecorder
     ) -> None:
         self._ingest(monkeypatch, 0)
@@ -1295,7 +1291,7 @@ class TestBetfairJob:
         )
         monkeypatch.setattr(fetch_betfair_exchange, "ingest_sport", AsyncMock(return_value=stats))
 
-    async def test_zero_rows_with_fixtures_fails_without_a_heartbeat(
+    async def test_zero_rows_with_games_fails_without_a_heartbeat(
         self, monkeypatch: pytest.MonkeyPatch, seed: Callable[..., Any], alerts: _AlertRecorder
     ) -> None:
         await seed(datetime.now(UTC) + timedelta(hours=5))
@@ -1313,11 +1309,11 @@ class TestBetfairJob:
             events_seen=len(event_ids),
             books_fetched=len(event_ids),
             books_in_play=len(event_ids),
-            accounted_fixtures={EventKey(i) for i in event_ids},
+            accounted_games={EventKey(i) for i in event_ids},
         )
         monkeypatch.setattr(fetch_betfair_exchange, "ingest_sport", AsyncMock(return_value=stats))
 
-    async def test_a_run_whose_only_fixture_is_accounted_for_passes_with_a_heartbeat(
+    async def test_a_run_whose_only_game_is_accounted_for_passes_with_a_heartbeat(
         self, monkeypatch: pytest.MonkeyPatch, seed: Callable[..., Any], alerts: _AlertRecorder
     ) -> None:
         await seed(datetime.now(UTC) + timedelta(hours=1))
@@ -1327,7 +1323,7 @@ class TestBetfairJob:
 
         assert alerts.heartbeats == ["heartbeat:fetch-betfair-exchange-epl"]
 
-    async def test_an_accounted_fixture_does_not_excuse_a_pre_play_one_with_no_rows(
+    async def test_an_accounted_game_does_not_excuse_a_pre_play_one_with_no_rows(
         self, monkeypatch: pytest.MonkeyPatch, seed: Callable[..., Any], alerts: _AlertRecorder
     ) -> None:
         now = datetime.now(UTC)
@@ -1335,12 +1331,12 @@ class TestBetfairJob:
         await seed(now + timedelta(hours=4))
         self._ingest_accounted(monkeypatch, 1)
 
-        with pytest.raises(EmptyCollectionError, match="with 1 fixture"):
+        with pytest.raises(EmptyCollectionError, match="with 1 game"):
             await fetch_betfair_exchange.main(JobContext(sport="soccer_epl"))
 
         assert alerts.heartbeats == []
 
-    async def test_zero_rows_without_fixtures_writes_a_heartbeat(
+    async def test_zero_rows_without_games_writes_a_heartbeat(
         self, monkeypatch: pytest.MonkeyPatch, alerts: _AlertRecorder
     ) -> None:
         self._ingest(monkeypatch, 0)
@@ -1404,15 +1400,15 @@ class TestBetfairEplAccounting:
 
         stats = await self._ingest(kickoff)
 
-        assert stats.accounted_fixtures == {EventKey(1)}
-        await require_rows_for_fixtures(
+        assert stats.accounted_games == {EventKey(1)}
+        await require_rows_for_games(
             fetch_betfair_exchange.SOURCE,
             {"soccer_epl": stats.snapshots_stored},
-            accounted_by_sport={"soccer_epl": stats.accounted_fixtures},
+            accounted_by_sport={"soccer_epl": stats.accounted_games},
             now=NOW,
         )
 
-    async def test_another_pre_play_fixture_with_no_rows_still_raises(
+    async def test_another_pre_play_game_with_no_rows_still_raises(
         self, pglite_async_session: Any
     ) -> None:
         kickoff = NOW + timedelta(hours=1)
@@ -1426,11 +1422,11 @@ class TestBetfairEplAccounting:
 
         stats = await self._ingest(kickoff)
 
-        with pytest.raises(EmptyCollectionError, match="with 1 fixture"):
-            await require_rows_for_fixtures(
+        with pytest.raises(EmptyCollectionError, match="with 1 game"):
+            await require_rows_for_games(
                 fetch_betfair_exchange.SOURCE,
                 {"soccer_epl": stats.snapshots_stored},
-                accounted_by_sport={"soccer_epl": stats.accounted_fixtures},
+                accounted_by_sport={"soccer_epl": stats.accounted_games},
                 now=NOW,
             )
 
@@ -1483,11 +1479,11 @@ class TestBetfairNbaAccounting:
             SPORT_CONFIG["basketball_nba"], client=client, lookahead_hours=72, snapshot_time=NOW
         )
 
-        assert (stats.snapshots_stored, stats.accounted_fixtures) == (0, {EventKey(1)})
-        await require_rows_for_fixtures(
+        assert (stats.snapshots_stored, stats.accounted_games) == (0, {EventKey(1)})
+        await require_rows_for_games(
             fetch_betfair_exchange.SOURCE,
             {"basketball_nba": stats.snapshots_stored},
-            accounted_by_sport={"basketball_nba": stats.accounted_fixtures},
+            accounted_by_sport={"basketball_nba": stats.accounted_games},
             now=NOW,
         )
 
@@ -1527,7 +1523,7 @@ class TestFetchOddsJob:
         service.ingest_sports = AsyncMock(return_value=results)
         monkeypatch.setattr(fetch_odds, "build_ingestion_service", lambda c, s: service)
 
-    async def test_zero_rows_with_fixtures_fails_and_alerts(
+    async def test_zero_rows_with_games_fails_and_alerts(
         self, monkeypatch: pytest.MonkeyPatch, seed: Callable[..., Any], alerts: _AlertRecorder
     ) -> None:
         await seed(datetime.now(UTC) + timedelta(hours=10))
@@ -1542,7 +1538,7 @@ class TestFetchOddsJob:
         assert odds_core.alerts.send_job_failure.await_args.args[0] == "fetch-odds-epl"  # type: ignore[attr-defined]
         assert alerts.heartbeats == []
 
-    async def test_zero_rows_without_fixtures_passes(
+    async def test_zero_rows_without_games_passes(
         self, monkeypatch: pytest.MonkeyPatch, alerts: _AlertRecorder
     ) -> None:
         self._ingest(monkeypatch, 0)

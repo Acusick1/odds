@@ -618,7 +618,7 @@ class TestLiveIngestion:
 
         assert stats.snapshots_stored == 1
 
-    async def test_a_second_match_for_a_fixture_is_refused_and_logged_once(
+    async def test_a_second_match_for_a_game_is_refused_and_logged_once(
         self, pglite_async_session: Any, patch_live: FakeClient, gamma_event: Any
     ) -> None:
         pglite_async_session.add(make_epl_event(1, KICKOFF, "Bournemouth", "Chelsea"))

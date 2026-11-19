@@ -1,5 +1,5 @@
 # Odds API historical backfill of MLB 2024, 2025 and 2026 (#785, map #774).
-# A top-up is a new manifest. Snapshot grid, billing, books and fixture horizon follow the
+# A top-up is a new manifest. Snapshot grid, billing, books and game horizon follow the
 # probe (#729, #787).
 sport: baseball_mlb
 # Calendar-year windows: each holds its regular season and post-season; 2026 also holds the All-Star Game.
@@ -24,8 +24,8 @@ probe:
   snapshots:
     - 2024-07-20T15:55:38Z
     - 2026-07-18T15:55:38Z
-  # Call sharing needs fixtures as far ahead as the earliest coverage, 8 h plus its 1 h max age.
-  min_fixture_lead_hours: 9
+  # Call sharing needs games as far ahead as the earliest coverage, 8 h plus its 1 h max age.
+  min_game_lead_hours: 9
   # Betfair Exchange is the scoring reference and close (ADR-0012); no current candidate or
   # model uses Pinnacle.
   required_bookmakers:

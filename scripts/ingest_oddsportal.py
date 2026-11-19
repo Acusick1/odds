@@ -283,7 +283,7 @@ async def ingest_season(
                 msg = f"{record.get('home_team', '?')} vs {record.get('away_team', '?')}: {e}"
                 stats.errors.append(msg)
                 log.error(f"  Error: {msg}")
-            # One commit per game releases the fixture lock the resolver took.
+            # One commit per game releases the game lock the resolver took.
             await session.commit()
 
     return stats

@@ -1,5 +1,5 @@
 # Odds API historical totals of EPL in the last hour before kick-off, 2024-25 and
-# 2025-26 (#859 step 10). Snapshot grid, billing, books and fixture horizon follow the
+# 2025-26 (#859 step 10). Snapshot grid, billing, books and game horizon follow the
 # probe (#729, #787).
 sport: soccer_epl
 # FDUK's Betfair Exchange over/under 2.5 close, the only totals close, starts in 2024-25.
@@ -21,7 +21,7 @@ snapshot_grid:
 probe:
   snapshots:
     - 2025-09-13T09:55:38Z
-  # Call sharing needs fixtures as far ahead as the earliest coverage, 1 h plus its 10 min max age.
-  min_fixture_lead_hours: 2
+  # Call sharing needs games as far ahead as the earliest coverage, 1 h plus its 10 min max age.
+  min_game_lead_hours: 2
   required_bookmakers:
     totals: [pinnacle, williamhill]

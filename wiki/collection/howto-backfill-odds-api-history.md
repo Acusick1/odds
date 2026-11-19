@@ -28,7 +28,7 @@ Costs a historical purchase before it is bought, buys it, audits what it stored,
    - List market keys only (`markets: [h2h]`); a call stores every line the books return.
    - Put each probe snapshot inside a season and on the snapshot grid, seconds included (such as `2025-09-13T09:55:38Z`); loading the manifest rejects one that is not.
 2. Make sure the manifest's seasons are stored as FINAL events; the planner reads events from the database, and the executor stores prices only on stored events. `odds discover games --start D --end D --sport S` stores the events the Odds API lists for a window, spending league S's key, resolving each to an existing event or creating a SCHEDULED one at its pre-game start; a game a snapshot lists already under way is skipped, since the API lists it at its actual start ([commands](odds-api-backfill.md#commands)). For MLB, `odds events sync-mlb-seasons --season YEAR` stores every played game as a FINAL event from the free MLB Stats API instead ([MLB season load](mlb-season-load.md)).
-3. Print the cost.
+3. Print the cost of every season's calls; this makes no API calls.
    ```bash
    uv run odds backfill plan --manifest backfills/odds-api-epl-2022-26.yaml --cost
    ```

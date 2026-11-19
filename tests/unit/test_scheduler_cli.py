@@ -202,8 +202,8 @@ class TestSmokeCommand:
         assert recorder.ran == []
 
     def test_failing_job_yields_nonzero_exit(self) -> None:
-        settings = _settings(["fetch-oddsportal", "fetch-espn-fixtures"], ["soccer_epl"])
-        recorder = _JobRecorder(fail_bases={"fetch-espn-fixtures"})
+        settings = _settings(["fetch-oddsportal", "fetch-espn-games"], ["soccer_epl"])
+        recorder = _JobRecorder(fail_bases={"fetch-espn-games"})
         result = _invoke_smoke([], settings, recorder)
 
         assert result.exit_code == 1
@@ -218,12 +218,12 @@ class TestSmokeCommand:
         assert result.exit_code == 2
 
     def test_clean_run_exits_zero(self) -> None:
-        settings = _settings(["fetch-oddsportal", "fetch-espn-fixtures"], ["soccer_epl"])
+        settings = _settings(["fetch-oddsportal", "fetch-espn-games"], ["soccer_epl"])
         recorder = _JobRecorder()
         result = _invoke_smoke([], settings, recorder)
 
         assert result.exit_code == 0
-        assert recorder.ran_bases == {"fetch-oddsportal", "fetch-espn-fixtures"}
+        assert recorder.ran_bases == {"fetch-oddsportal", "fetch-espn-games"}
 
 
 class TestRunOnceCommand:

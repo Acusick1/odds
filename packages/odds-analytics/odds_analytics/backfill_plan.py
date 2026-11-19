@@ -43,7 +43,7 @@ Region = Literal["us", "us2", "uk", "au", "eu"]
 
 
 class Season(_Frozen):
-    """Fixtures kicking off in ``[start, end)``."""
+    """Games kicking off in ``[start, end)``."""
 
     start: AwareDatetime
     end: AwareDatetime
@@ -92,12 +92,12 @@ class GridStep(_Frozen):
 
 
 class Probe(_Frozen):
-    """The snapshot times to request before the full run, and what each must return: fixtures
-    at least ``min_fixture_lead_hours`` ahead, ``required_bookmakers`` on each market, and the
+    """The snapshot times to request before the full run, and what each must return: games
+    at least ``min_game_lead_hours`` ahead, ``required_bookmakers`` on each market, and the
     manifest's ``Manifest.units_per_call`` bill."""
 
     snapshots: tuple[AwareDatetime, ...] = Field(min_length=1)
-    min_fixture_lead_hours: PositiveInt
+    min_game_lead_hours: PositiveInt
     required_bookmakers: dict[ApiMarket, tuple[str, ...]]
 
 
@@ -136,9 +136,9 @@ class Manifest(_Frozen):
         longest = max(
             timedelta(minutes=band.max_lead_minutes) + band.max_age for band in self.coverage
         )
-        if timedelta(hours=self.probe.min_fixture_lead_hours) < longest:
+        if timedelta(hours=self.probe.min_game_lead_hours) < longest:
             raise ValueError(
-                f"the probe's fixture lead is shorter than the earliest coverage, {longest}"
+                f"the probe's game lead is shorter than the earliest coverage, {longest}"
             )
         for market, books in self.probe.required_bookmakers.items():
             if market not in self.markets:
@@ -245,7 +245,7 @@ def ceil_minute(t: datetime) -> datetime:
 
 
 @dataclass(frozen=True)
-class Fixture:
+class Game:
     event_id: int
     kickoff: datetime
 
@@ -258,9 +258,9 @@ class Fixture:
 
 @dataclass(frozen=True)
 class Target:
-    """One fixture's band: calls from ``start`` to ``end`` can be its decisions' inputs."""
+    """One game's band: calls from ``start`` to ``end`` can be its decisions' inputs."""
 
-    fixture: Fixture
+    game: Game
     band: Band
     start: datetime
     end: datetime
@@ -271,31 +271,31 @@ class Target:
 
 @dataclass(frozen=True)
 class Call:
-    """One historical odds request for the grid snapshot at ``time`` and the fixture bands it
+    """One historical odds request for the grid snapshot at ``time`` and the game bands it
     gives inputs to."""
 
     time: datetime
     serves: tuple[Target, ...]
 
 
-def targets(manifest: Manifest, fixtures: Sequence[Fixture]) -> list[Target]:
+def targets(manifest: Manifest, games: Sequence[Game]) -> list[Target]:
     out: list[Target] = []
-    for fixture in fixtures:
+    for game in games:
         for band in manifest.coverage:
-            first, last = band.decision_span(fixture.kickoff)
-            out.append(Target(fixture, band, first - band.max_age, last))
+            first, last = band.decision_span(game.kickoff)
+            out.append(Target(game, band, first - band.max_age, last))
     return out
 
 
 def _required_ages(
-    manifest: Manifest, fixtures: Sequence[Fixture]
+    manifest: Manifest, games: Sequence[Game]
 ) -> list[tuple[datetime, datetime, timedelta]]:
     """Disjoint ``[start, end)`` stretches of decision time, each with the strictest max age of
     the bands covering it, in time order."""
     edges: dict[datetime, list[tuple[timedelta, int]]] = {}
-    for fixture in {f.kickoff for f in fixtures}:
+    for game in {f.kickoff for f in games}:
         for band in manifest.coverage:
-            first, last = band.decision_span(fixture)
+            first, last = band.decision_span(game)
             edges.setdefault(first, []).append((band.max_age, 1))
             edges.setdefault(last + MINUTE, []).append((band.max_age, -1))
     active: Counter[timedelta] = Counter()
@@ -310,15 +310,15 @@ def _required_ages(
     return stretches
 
 
-def plan(manifest: Manifest, fixtures: Sequence[Fixture]) -> list[Call]:
-    """The fewest grid-aligned calls that give every decision minute of every fixture's bands
+def plan(manifest: Manifest, games: Sequence[Game]) -> list[Call]:
+    """The fewest grid-aligned calls that give every decision minute of every game's bands
     an input at most the band's max age old.
 
     Greedy by decision time: at the first decision minute the last call is too old for, a new
     call goes at the latest snapshot at or before it.
     """
     times: list[datetime] = []
-    for start, end, age in _required_ages(manifest, fixtures):
+    for start, end, age in _required_ages(manifest, games):
         t = start
         while t < end:
             if times and times[-1] >= t - age:
@@ -329,7 +329,7 @@ def plan(manifest: Manifest, fixtures: Sequence[Fixture]) -> list[Call]:
                 raise ValueError(f"no snapshot in [{(t - age).isoformat()}, {t.isoformat()}]")
             times.append(call)
     by_time: dict[datetime, list[Target]] = {t: [] for t in times}
-    for target in targets(manifest, fixtures):
+    for target in targets(manifest, games):
         lo = bisect.bisect_left(times, target.start)
         hi = bisect.bisect_right(times, target.end)
         for t in times[lo:hi]:
@@ -337,7 +337,7 @@ def plan(manifest: Manifest, fixtures: Sequence[Fixture]) -> list[Call]:
     return [Call(t, tuple(by_time[t])) for t in times]
 
 
-async def load_fixtures(session: AsyncSession, sport: str, season: Season) -> list[Fixture]:
+async def load_games(session: AsyncSession, sport: str, season: Season) -> list[Game]:
     """The season's FINAL stored events."""
     rows = await session.execute(
         select(Event.id, Event.commence_time)
@@ -349,4 +349,4 @@ async def load_fixtures(session: AsyncSession, sport: str, season: Season) -> li
         )
         .order_by(Event.commence_time, Event.id)
     )
-    return [Fixture(event_id, kickoff) for event_id, kickoff in rows.all()]
+    return [Game(event_id, kickoff) for event_id, kickoff in rows.all()]

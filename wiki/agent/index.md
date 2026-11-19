@@ -14,9 +14,9 @@ An LLM agent per league (EPL, MLB) runs as a `claude` subprocess over the odds-m
 - [Agent run traces](agent-run-traces.md) — Where each agent wake-up's stream-json trace is written, how files are named, limited and pruned, which messages reach structlog, and what the summary viewer reads.
 - [Agent runtime and the agent-run job](agent-run-job.md) — The claude subprocess, the agent-run job flow and cadence, agent_wakeups, odds agent run and the database role.
 - [Bets](bets.md) — The bets table, the bet service, MCP and CLI entry points, portfolio maths and settlement.
-- [Briefs](match-briefs.md) — The match_briefs table, the sharp-price stamp, and the save, get and slate MCP tools.
-- [MCP odds and retail-edge tools](mcp-market-tools.md) — get_upcoming_fixtures, get_current_odds, get_odds_history and find_retail_edges, with inputs, anchor-relative price resolution, ranking and dispersion statistics, and the limits of their prices.
-- [MCP sport context tools](mcp-sport-context-tools.md) — EPL get_team_context (form, fixtures, standings from ESPN fixtures) and MLB get_probable_pitchers (live read-through with cached fallback), and their data dependencies.
+- [Briefs](briefs.md) — The briefs table, the sharp-price stamp, and the save, get and slate MCP tools.
+- [MCP odds and retail-edge tools](mcp-market-tools.md) — get_upcoming_games, get_current_odds, get_odds_history and find_retail_edges, with inputs, anchor-relative price resolution, ranking and dispersion statistics, and the limits of their prices.
+- [MCP sport context tools](mcp-sport-context-tools.md) — EPL get_team_context (form, games, standings from ESPN games) and MLB get_probable_pitchers (live read-through with cached fallback), and their data dependencies.
 - [odds-mcp server](mcp-server.md) — How the FastMCP server is launched and mounted, the 16-tool catalogue and owning pages, sport sub-servers, shared vocabulary, and the scrape and scheduling tools (refresh_scrape, get_scrape_status, get_scheduled_jobs, schedule_next_wakeup).
 
 ### Explanation

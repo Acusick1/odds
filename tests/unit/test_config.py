@@ -63,7 +63,7 @@ class TestSettings:
                 "fetch-oddsportal",
                 "fetch-oddsportal-results",
                 "fetch-mlb-results",
-                "fetch-espn-fixtures",
+                "fetch-espn-games",
                 "fetch-betfair-exchange",
                 "fetch-polymarket-odds",
                 "fetch-mlb-probables",

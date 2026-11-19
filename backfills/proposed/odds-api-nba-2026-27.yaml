@@ -1,5 +1,5 @@
 # Odds API historical backfill of NBA 2026-27 to 1 December 2026 (#859 step 10). Snapshot
-# grid, billing, books and fixture horizon follow the probe (#729, #787).
+# grid, billing, books and game horizon follow the probe (#729, #787).
 sport: basketball_nba
 # The window starts at opening night, so preseason is excluded (#782), and ends at the
 # latest start of the month's extra purchases (#859).
@@ -22,8 +22,8 @@ snapshot_grid:
 probe:
   snapshots:
     - 2026-11-07T00:55:38Z
-  # Call sharing needs fixtures as far ahead as the earliest coverage, 8 h plus its 1 h max age.
-  min_fixture_lead_hours: 9
+  # Call sharing needs games as far ahead as the earliest coverage, 8 h plus its 1 h max age.
+  min_game_lead_hours: 9
   # Betfair Exchange is the scoring reference and close (ADR-0012); no current candidate or
   # model uses Pinnacle.
   required_bookmakers:

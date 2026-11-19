@@ -137,7 +137,7 @@ class TestProximityScheduling:
             ),
             patch("odds_core.config.get_settings") as mock_settings,
             patch(
-                "odds_lambda.jobs.fetch_oddsportal.require_rows_for_fixtures",
+                "odds_lambda.jobs.fetch_oddsportal.require_rows_for_games",
                 new_callable=AsyncMock,
             ) as validate_rows,
             patch(
@@ -145,7 +145,7 @@ class TestProximityScheduling:
                 side_effect=self._noop_alert_context,
             ),
             patch(
-                "odds_lambda.collection_calendar.next_fixture_kickoff",
+                "odds_lambda.collection_calendar.next_game_kickoff",
                 new_callable=AsyncMock,
                 return_value=datetime.now(UTC) + timedelta(hours=20),
             ),
@@ -189,7 +189,7 @@ class TestProximityScheduling:
                 side_effect=self._noop_alert_context,
             ),
             patch(
-                "odds_lambda.collection_calendar.next_fixture_kickoff",
+                "odds_lambda.collection_calendar.next_game_kickoff",
                 new_callable=AsyncMock,
                 side_effect=Exception("DB connection refused"),
             ),
@@ -236,7 +236,7 @@ class TestProximityScheduling:
                 side_effect=self._noop_alert_context,
             ),
             patch(
-                "odds_lambda.collection_calendar.next_fixture_kickoff",
+                "odds_lambda.collection_calendar.next_game_kickoff",
                 new_callable=AsyncMock,
                 return_value=kickoff,
             ),
@@ -283,7 +283,7 @@ class TestProximityScheduling:
                 side_effect=self._noop_alert_context,
             ),
             patch(
-                "odds_lambda.collection_calendar.next_fixture_kickoff",
+                "odds_lambda.collection_calendar.next_game_kickoff",
                 new_callable=AsyncMock,
                 return_value=kickoff,
             ),
@@ -310,7 +310,7 @@ class TestProximityScheduling:
 
 
 class TestDormancy:
-    """With no fixture in sight the job only books its next check-in."""
+    """With no game in sight the job only books its next check-in."""
 
     @staticmethod
     async def _run(next_kickoff: datetime | None) -> tuple[AsyncMock, AsyncMock, list[str]]:
@@ -334,12 +334,12 @@ class TestDormancy:
             patch("odds_core.config.get_settings") as mock_settings,
             patch("odds_lambda.scheduling.collection.job_alert_context", side_effect=alert_context),
             patch(
-                "odds_lambda.collection_calendar.next_fixture_kickoff",
+                "odds_lambda.collection_calendar.next_game_kickoff",
                 new_callable=AsyncMock,
                 return_value=next_kickoff,
             ),
             patch(
-                "odds_lambda.jobs.fetch_oddsportal.require_rows_for_fixtures",
+                "odds_lambda.jobs.fetch_oddsportal.require_rows_for_games",
                 new_callable=AsyncMock,
             ),
         ):
@@ -351,7 +351,7 @@ class TestDormancy:
         return mock_ingest, mock_backend, entered
 
     @pytest.mark.asyncio
-    async def test_no_fixture_skips_the_scrape_and_checks_in_later(self) -> None:
+    async def test_no_game_skips_the_scrape_and_checks_in_later(self) -> None:
         now = datetime.now(UTC)
 
         ingest, backend, _ = await self._run(None)
@@ -368,7 +368,7 @@ class TestDormancy:
         assert entered == ["fetch-oddsportal-mlb"]
 
     @pytest.mark.asyncio
-    async def test_a_fixture_beyond_the_horizon_wakes_the_chain_when_it_enters(self) -> None:
+    async def test_a_game_beyond_the_horizon_wakes_the_chain_when_it_enters(self) -> None:
         kickoff = datetime.now(UTC) + timedelta(days=DORMANCY_HORIZON_DAYS, hours=2)
 
         ingest, backend, _ = await self._run(kickoff)
@@ -378,7 +378,7 @@ class TestDormancy:
         assert booked == kickoff - timedelta(days=DORMANCY_HORIZON_DAYS)
 
     @pytest.mark.asyncio
-    async def test_a_fixture_inside_the_horizon_scrapes(self) -> None:
+    async def test_a_game_inside_the_horizon_scrapes(self) -> None:
         kickoff = datetime.now(UTC) + timedelta(days=DORMANCY_HORIZON_DAYS - 1)
 
         ingest, _, _ = await self._run(kickoff)
@@ -420,7 +420,7 @@ class TestDroppedGamesAlert:
                 "odds_lambda.jobs.fetch_oddsportal.alert_dropped_games", new_callable=AsyncMock
             ) as alert,
             patch(
-                "odds_lambda.jobs.fetch_oddsportal.require_rows_for_fixtures",
+                "odds_lambda.jobs.fetch_oddsportal.require_rows_for_games",
                 new_callable=AsyncMock,
             ),
             patch(
@@ -433,7 +433,7 @@ class TestDroppedGamesAlert:
                 side_effect=recording_alert_context,
             ),
             patch(
-                "odds_lambda.collection_calendar.next_fixture_kickoff",
+                "odds_lambda.collection_calendar.next_game_kickoff",
                 new_callable=AsyncMock,
                 return_value=datetime.now(UTC) + timedelta(hours=5),
             ),

@@ -1,4 +1,4 @@
-"""What the stored events say about the fixtures around a match at a decision time: each team's
+"""What the stored events say about the games around a match at a decision time: each team's
 previous result and the kick-offs near the match's own. Read-only input to a rule, loaded by
 the one query pair the runner, the replay backtest and the parity check share."""
 
@@ -32,8 +32,8 @@ NOT_A_MATCH: tuple[EventStatus, ...] = (
 )
 
 
-class FixtureInput(StrEnum):
-    """A fixture input a rule reads."""
+class GameInput(StrEnum):
+    """A game input a rule reads."""
 
     PREVIOUS_RESULT = "previous_result"
     CONCURRENT_KICKOFFS = "concurrent_kickoffs"
@@ -66,8 +66,8 @@ class PreviousResult:
 
 
 @dataclass(frozen=True)
-class FixtureContext:
-    """The fixture inputs a rule declared; what it did not declare stays empty or ``None``.
+class GameContext:
+    """The game inputs a rule declared; what it did not declare stays empty or ``None``.
 
     ``previous`` holds, for the home and the away team (``Outcome.HOME``, ``Outcome.AWAY``),
     the previous league match of the match's season, or ``None`` for a team with no earlier
@@ -113,7 +113,7 @@ class FixtureContext:
     @classmethod
     def from_record(
         cls, record: Mapping[str, Any] | None, event_ids: Collection[int] = ()
-    ) -> FixtureContext:
+    ) -> GameContext:
         """The context ``to_record`` recorded; an empty one for ``None``."""
         record = record or {}
         previous: dict[Outcome, PreviousResult | None] = {}
@@ -176,16 +176,16 @@ def _known_result(
     )
 
 
-async def load_fixture_context(
+async def load_game_context(
     session: AsyncSession,
     event: Event,
     kickoff: datetime,
     decision_time: datetime,
-    inputs: frozenset[FixtureInput],
+    inputs: frozenset[GameInput],
     leagues: Collection[str],
     known_at: datetime | None = None,
-) -> FixtureContext:
-    """The fixture inputs ``inputs`` names, for ``event`` kicking off at ``kickoff``, as known
+) -> GameContext:
+    """The game inputs ``inputs`` names, for ``event`` kicking off at ``kickoff``, as known
     at ``decision_time``.
 
     The previous match of a team is its latest earlier match of ``event``'s league in the
@@ -200,7 +200,7 @@ async def load_fixture_context(
     pending: list[Outcome] = []
     overdue: list[Outcome] = []
     ids: set[int] = set()
-    if FixtureInput.PREVIOUS_RESULT in inputs:
+    if GameInput.PREVIOUS_RESULT in inputs:
         for side, team in ((Outcome.HOME, event.home_team), (Outcome.AWAY, event.away_team)):
             found = (
                 await session.execute(
@@ -228,7 +228,7 @@ async def load_fixture_context(
                 recent = found.commence_time + RESULT_STORE_LAG > decision_time
                 (pending if recent else overdue).append(side)
     concurrent: int | None = None
-    if FixtureInput.CONCURRENT_KICKOFFS in inputs:
+    if GameInput.CONCURRENT_KICKOFFS in inputs:
         near = (
             (
                 await session.execute(
@@ -246,7 +246,7 @@ async def load_fixture_context(
         )
         ids.update(i for i in near if i is not None)
         concurrent = len(near) + 1
-    return FixtureContext(
+    return GameContext(
         previous=MappingProxyType(previous),
         pending_results=tuple(pending),
         overdue_results=tuple(overdue),

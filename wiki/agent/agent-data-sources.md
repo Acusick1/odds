@@ -15,7 +15,7 @@ The [betting agent](betting-agent.md) draws on two kinds of source. The split de
 
 ## Scheduled collection
 
-Every odds feed, and what each supplies, is on [data sources](../collection/data-sources.md); the agent reads them through the [MCP tools](mcp-server.md). Beside the odds feeds, the agent's tools read ESPN fixtures (the all-competition EPL schedule, [EPL context](../collection/epl-context-data.md)) and the MLB Stats API's probable pitchers ([MLB pitchers](../collection/mlb-probable-pitchers.md)). Every scheduled collector runs on the production host ([job deployment matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). ESPN lineups are loaded only by a manual script (`scripts.ingest_espn_lineups`); the lineup rejection below applies to lineup timing for the agent, not to ESPN fixtures.
+Every odds feed, and what each supplies, is on [data sources](../collection/data-sources.md); the agent reads them through the [MCP tools](mcp-server.md). Beside the odds feeds, the agent's tools read ESPN games (the all-competition EPL schedule, [EPL context](../collection/epl-context-data.md)) and the MLB Stats API's probable pitchers ([MLB pitchers](../collection/mlb-probable-pitchers.md)). Every scheduled collector runs on the production host ([job deployment matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). ESPN lineups are loaded only by a manual script (`scripts.ingest_espn_lineups`); the lineup rejection below applies to lineup timing for the agent, not to ESPN games.
 
 ## On-demand research
 
@@ -40,7 +40,7 @@ Not collected on a schedule; the agent searches and browses these each wake-up w
 | Accumulator popularity | No source publishes most-backed acca legs with volume; tipster output is not crowd data |
 | Tipster consensus (Predictz, Forebet) | Model-driven, lags sharp money, no signal for anticipating line movement |
 | FPL API ownership and transfers | Tested as XGBoost features (#255): R² below the baseline without them; transfer spikes lag the news sources the agent searches directly |
-| API-Football | Free tier blocks current-season fixture lookup (2022-2024 only) and the lineups endpoint needs the gated fixture ids; Pro plan about $20 per month |
+| API-Football | Free tier blocks current-season game lookup (2022-2024 only) and the lineups endpoint needs the gated game ids; Pro plan about $20 per month |
 | football-data.org | A different site from football-data.co.uk; lineups cost €29 per month and timing is undocumented |
 | ESPN API (for lineups) | Lineups appear around KO-60 but non-monotonically (present at KO-60, gone by KO-45 in a 2026-04-14 Champions League test; nothing at KO-59 in a 2026-04-13 EPL test); 403 from cloud and datacenter IPs |
 | Polymarket (as a sentiment source) | The EPL book tracks Betfair Exchange within 0.35-0.5 pp ([#518](https://github.com/Acusick1/odds/issues/518)), so it adds a price reference, not independent sentiment; UK trading is blocked. See [Polymarket odds snapshots](../collection/polymarket-odds-snapshots.md) and [ADR-0013](../../docs/adr/0013-collect-polymarket-epl-as-sharp-reference.md) |

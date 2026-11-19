@@ -12,8 +12,8 @@ from odds_core.market_prices import Outcome
 from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.candidate_rules import (
     BetIntent,
-    FixtureContext,
-    FixtureInput,
+    GameContext,
+    GameInput,
     MarketState,
     PreviousResult,
     apply_rule,
@@ -49,7 +49,7 @@ def exchange(home: float, draw: float, away: float) -> ExchangePrice:
 def state(
     retail: Retail,
     fair: ExchangePrice | None = None,
-    fixture: FixtureContext | None = None,
+    game: GameContext | None = None,
 ) -> MarketState:
     return MarketState(
         event_id=1,
@@ -61,7 +61,7 @@ def state(
         snapshot_time=T,
         retail={None: retail} if retail else {},
         exchange={} if fair is None else {None: fair},
-        fixture=fixture or FixtureContext(),
+        game=game or GameContext(),
     )
 
 
@@ -69,10 +69,8 @@ def lost_by(margin: int) -> PreviousResult:
     return PreviousResult(2, KICKOFF - timedelta(days=6), 0, margin)
 
 
-def previous(
-    home: PreviousResult | None = None, away: PreviousResult | None = None
-) -> FixtureContext:
-    return FixtureContext(previous=MappingProxyType({HOME: home, AWAY: away}))
+def previous(home: PreviousResult | None = None, away: PreviousResult | None = None) -> GameContext:
+    return GameContext(previous=MappingProxyType({HOME: home, AWAY: away}))
 
 
 class TestFavouritePrice:
@@ -146,8 +144,8 @@ class TestCrowdedGap:
     FAIR = exchange(0.5, 0.25, 0.25)
 
     @staticmethod
-    def crowd(count: int | None) -> FixtureContext:
-        return FixtureContext(concurrent_kickoffs=count)
+    def crowd(count: int | None) -> GameContext:
+        return GameContext(concurrent_kickoffs=count)
 
     def test_the_gap_bet_when_enough_kickoffs_are_concurrent(self) -> None:
         s = state({"bet365": {HOME: 2.4}, "betway": {HOME: 2.6}}, self.FAIR, self.crowd(3))
@@ -206,51 +204,51 @@ class TestLastResultOverreaction:
     PARAMS = LastResultParams(min_margin=2, **BASE)
 
     def test_a_side_that_lost_by_the_margin_at_its_longest_price(self) -> None:
-        s = state({"bet365": {HOME: 2.0}, "betway": {HOME: 2.2}}, fixture=previous(home=lost_by(2)))
+        s = state({"bet365": {HOME: 2.0}, "betway": {HOME: 2.2}}, game=previous(home=lost_by(2)))
         assert last_result_overreaction(s, self.PARAMS) == [BetIntent(HOME, "betway", 2.2, 1.0)]
 
     def test_the_away_side_qualifies_too(self) -> None:
-        s = state({"bet365": {HOME: 2.0, AWAY: 3.5}}, fixture=previous(away=lost_by(4)))
+        s = state({"bet365": {HOME: 2.0, AWAY: 3.5}}, game=previous(away=lost_by(4)))
         assert last_result_overreaction(s, self.PARAMS) == [BetIntent(AWAY, "bet365", 3.5, 1.0)]
 
     def test_a_bet_carries_no_estimate(self) -> None:
-        s = state({"bet365": {HOME: 2.0}}, fixture=previous(home=lost_by(2)))
+        s = state({"bet365": {HOME: 2.0}}, game=previous(home=lost_by(2)))
         [bet] = last_result_overreaction(s, self.PARAMS)
         assert bet.estimated_ev is None
 
     def test_a_smaller_loss_does_not_qualify(self) -> None:
-        s = state({"bet365": {HOME: 2.0}}, fixture=previous(home=lost_by(1)))
+        s = state({"bet365": {HOME: 2.0}}, game=previous(home=lost_by(1)))
         assert last_result_overreaction(s, self.PARAMS) == []
 
     @pytest.mark.parametrize("scored", [2, 5])
     def test_a_draw_or_a_win_does_not_qualify(self, scored: int) -> None:
         drawn_or_won = PreviousResult(2, KICKOFF - timedelta(days=6), scored, 2)
-        s = state({"bet365": {HOME: 2.0}}, fixture=previous(home=drawn_or_won))
+        s = state({"bet365": {HOME: 2.0}}, game=previous(home=drawn_or_won))
         assert last_result_overreaction(s, self.PARAMS) == []
 
     def test_a_team_with_no_previous_match_does_not_qualify(self) -> None:
-        s = state({"bet365": {HOME: 2.0, AWAY: 3.0}}, fixture=previous(None, None))
+        s = state({"bet365": {HOME: 2.0, AWAY: 3.0}}, game=previous(None, None))
         assert last_result_overreaction(s, self.PARAMS) == []
 
     def test_a_state_without_a_context_does_not_qualify(self) -> None:
         assert last_result_overreaction(state({"bet365": {HOME: 2.0}}), self.PARAMS) == []
 
     def test_a_side_no_book_quotes_does_not_qualify(self) -> None:
-        s = state({"bet365": {AWAY: 3.0}}, fixture=previous(home=lost_by(3)))
+        s = state({"bet365": {AWAY: 3.0}}, game=previous(home=lost_by(3)))
         assert last_result_overreaction(s, self.PARAMS) == []
 
     def test_both_sides_qualifying_bets_home(self) -> None:
         s = state(
-            {"bet365": {HOME: 2.0, AWAY: 9.0}}, fixture=previous(home=lost_by(2), away=lost_by(5))
+            {"bet365": {HOME: 2.0, AWAY: 9.0}}, game=previous(home=lost_by(2), away=lost_by(5))
         )
         assert last_result_overreaction(s, self.PARAMS) == [BetIntent(HOME, "bet365", 2.0, 1.0)]
 
     def test_the_other_side_bets_when_the_home_side_has_no_price(self) -> None:
-        s = state({"bet365": {AWAY: 3.0}}, fixture=previous(home=lost_by(2), away=lost_by(2)))
+        s = state({"bet365": {AWAY: 3.0}}, game=previous(home=lost_by(2), away=lost_by(2)))
         assert last_result_overreaction(s, self.PARAMS) == [BetIntent(AWAY, "bet365", 3.0, 1.0)]
 
     def test_a_larger_margin_param_needs_a_larger_loss(self) -> None:
-        s = state({"bet365": {HOME: 2.0}}, fixture=previous(home=lost_by(3)))
+        s = state({"bet365": {HOME: 2.0}}, game=previous(home=lost_by(3)))
         assert last_result_overreaction(s, LastResultParams(min_margin=4, **BASE)) == []
         assert last_result_overreaction(s, LastResultParams(min_margin=3, **BASE)) != []
 
@@ -262,17 +260,17 @@ class TestLastResultOverreaction:
 
 class TestRegistered:
     @pytest.mark.parametrize(
-        ("rule", "fixture_inputs"),
+        ("rule", "game_inputs"),
         [
             ("favourite_price", frozenset()),
-            ("crowded_gap", frozenset({FixtureInput.CONCURRENT_KICKOFFS})),
-            ("last_result_overreaction", frozenset({FixtureInput.PREVIOUS_RESULT})),
+            ("crowded_gap", frozenset({GameInput.CONCURRENT_KICKOFFS})),
+            ("last_result_overreaction", frozenset({GameInput.PREVIOUS_RESULT})),
         ],
     )
-    def test_each_rule_declares_the_fixture_inputs_it_reads(
-        self, rule: str, fixture_inputs: frozenset[FixtureInput]
+    def test_each_rule_declares_the_game_inputs_it_reads(
+        self, rule: str, game_inputs: frozenset[GameInput]
     ) -> None:
-        assert RULES[rule].fixture_inputs == fixture_inputs
+        assert RULES[rule].game_inputs == game_inputs
 
     def test_a_state_without_inputs_gives_no_bets(self) -> None:
         empty = MarketState(1, "soccer_epl", "1x2", KICKOFF, T)
@@ -280,7 +278,7 @@ class TestRegistered:
         assert apply_rule(spec, params, empty)[1] == []  # type: ignore[arg-type]
 
     def test_an_already_bet_selection_is_not_bet_again(self) -> None:
-        s = state({"bet365": {HOME: 2.0}}, fixture=previous(home=lost_by(2)))
+        s = state({"bet365": {HOME: 2.0}}, game=previous(home=lost_by(2)))
         spec, params = RULES["last_result_overreaction"], LastResultParams(min_margin=2, **BASE)
         assert apply_rule(spec, params, s)[1] != []  # type: ignore[arg-type]
         assert apply_rule(spec, params, s, bet_selections={(HOME, None)})[1] == []  # type: ignore[arg-type]

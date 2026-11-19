@@ -18,7 +18,7 @@ type:
 
 Both are sport-scoped: callers pass a ``sport_key`` and queries filter on it,
 fixing the prior all-sports bug where a per-sport compound job was kept alive by
-another sport's fixtures.
+another sport's games.
 """
 
 from __future__ import annotations
@@ -66,8 +66,8 @@ OVERNIGHT_WINDOWS: dict[str, OvernightWindow] = {
 }
 
 # A collector that discovers its own events goes dormant when its sport has no
-# fixture inside this horizon. It is longer than any gap between two Premier
-# League fixtures (about 20 days) so dormancy only ever means an off-season.
+# game inside this horizon. It is longer than any gap between two Premier
+# League games (about 20 days) so dormancy only ever means an off-season.
 DORMANCY_HORIZON_DAYS = 28
 
 
@@ -124,8 +124,8 @@ class CadenceConfig(Cadence):
     than a browser-driven scrape).
 
     ``no_game`` is the check-in interval used when there is no upcoming game
-    (off-season / fixtures not yet posted); the check-in does no overnight skip
-    and is brought forward to the moment the next fixture enters the lookahead.
+    (off-season / games not yet posted); the check-in does no overnight skip
+    and is brought forward to the moment the next game enters the lookahead.
     ``db_fallback`` is the interval a caller should use when the kickoff query
     itself fails (DB unreachable), so scheduling never blocks on DB
     availability.
@@ -172,10 +172,10 @@ def _idle_next_execution(
     *,
     lookahead_days: int,
 ) -> datetime:
-    """Check-in time while no fixture is within the lookahead.
+    """Check-in time while no game is within the lookahead.
 
-    The check-in is brought forward to the moment a known fixture enters the
-    lookahead, so the job is awake exactly when its fixtures are.
+    The check-in is brought forward to the moment a known game enters the
+    lookahead, so the job is awake exactly when its games are.
     """
     check_in = now + timedelta(hours=cadence.no_game)
     if next_kickoff is None:

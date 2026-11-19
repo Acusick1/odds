@@ -58,7 +58,7 @@ class TestBetfairDormancy:
             patch("odds_lambda.scheduling.collection.job_alert_context", alert_context),
             patch.object(fetch_betfair_exchange, "BetfairExchangeClient") as client,
             patch(
-                "odds_lambda.collection_calendar.next_fixture_kickoff",
+                "odds_lambda.collection_calendar.next_game_kickoff",
                 new_callable=AsyncMock,
                 return_value=None,
             ),
@@ -80,7 +80,7 @@ class TestBetfairDormancy:
         )
 
     @pytest.mark.asyncio
-    async def test_a_fixture_inside_the_horizon_logs_in(
+    async def test_a_game_inside_the_horizon_logs_in(
         self,
         booked: SimpleNamespace,
         heartbeats: list[str],
@@ -92,9 +92,7 @@ class TestBetfairDormancy:
             patch("odds_lambda.scheduling.collection.job_alert_context", alert_context),
             patch.object(fetch_betfair_exchange, "resolve_cert_paths", return_value=(None, None)),
             patch.object(fetch_betfair_exchange, "BetfairExchangeClient") as client,
-            patch.object(
-                fetch_betfair_exchange, "require_rows_for_fixtures", new_callable=AsyncMock
-            ),
+            patch.object(fetch_betfair_exchange, "require_rows_for_games", new_callable=AsyncMock),
             patch.object(
                 fetch_betfair_exchange,
                 "ingest_sport",
@@ -102,7 +100,7 @@ class TestBetfairDormancy:
                 return_value=fetch_betfair_exchange.IngestionStats(sport=EPL),
             ),
             patch(
-                "odds_lambda.collection_calendar.next_fixture_kickoff",
+                "odds_lambda.collection_calendar.next_game_kickoff",
                 new_callable=AsyncMock,
                 return_value=datetime.now(UTC) + timedelta(days=DORMANCY_HORIZON_DAYS - 1),
             ),

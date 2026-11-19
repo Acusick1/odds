@@ -7,8 +7,8 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from odds_core.epl_data_models import EspnFixtureRecord
-from odds_lambda.storage.espn_fixture_writer import EspnFixtureWriter
+from odds_core.epl_data_models import EspnGameRecord
+from odds_lambda.storage.espn_game_writer import EspnGameWriter
 
 
 def _pl_record(
@@ -23,13 +23,13 @@ def _pl_record(
     state: str | None = "post",
     competition: str = "Premier League",
     season: str = "2025-26",
-) -> EspnFixtureRecord:
-    return EspnFixtureRecord(
+) -> EspnGameRecord:
+    return EspnGameRecord(
         date=date,
         team=team,
         opponent=opponent,
         competition=competition,
-        match_round="Regular Season",
+        game_round="Regular Season",
         home_away=home_away,
         score_team=score_team,
         score_opponent=score_opponent,
@@ -50,8 +50,8 @@ def _match_records(
     state: str | None = "post",
     competition: str = "Premier League",
     season: str = "2025-26",
-) -> list[EspnFixtureRecord]:
-    """Both sides of a single match as paired fixture records."""
+) -> list[EspnGameRecord]:
+    """Both sides of a single match as paired game records."""
     return [
         _pl_record(
             team=home,
@@ -81,10 +81,10 @@ def _match_records(
 
 
 class TestDeriveStandings:
-    """Hand-crafted fixture sets → known-good standings."""
+    """Hand-crafted game sets → known-good standings."""
 
-    def _build(self, records: list[EspnFixtureRecord]) -> list[Any]:
-        # Build fake EspnFixture objects with the fields the deriver reads.
+    def _build(self, records: list[EspnGameRecord]) -> list[Any]:
+        # Build fake EspnGame objects with the fields the deriver reads.
         rows: list[Any] = []
         for r in records:
             row = MagicMock()
@@ -103,7 +103,7 @@ class TestDeriveStandings:
         from odds_mcp.tools.epl import _derive_standings
 
         # A beats B 2-0, A draws C 1-1, B beats C 3-1
-        records: list[EspnFixtureRecord] = []
+        records: list[EspnGameRecord] = []
         records.extend(
             _match_records(
                 "A",
@@ -172,7 +172,7 @@ class TestDeriveStandings:
         # X beats Z 4-2 → X: 3 pts, GD +2, GF 4
         # Y beats Z 3-1 → Y: 3 pts, GD +2, GF 3
         # Z loses both  → Z: 0 pts, GD -4, GF 3
-        records: list[EspnFixtureRecord] = []
+        records: list[EspnGameRecord] = []
         records.extend(
             _match_records(
                 "X",
@@ -204,7 +204,7 @@ class TestDeriveStandings:
         from odds_mcp.tools.epl import _derive_standings
 
         # An FA Cup win does NOT count toward the league table.
-        records: list[EspnFixtureRecord] = []
+        records: list[EspnGameRecord] = []
         records.extend(
             _match_records(
                 "A",
@@ -221,7 +221,7 @@ class TestDeriveStandings:
     def test_only_counts_final_status(self) -> None:
         from odds_mcp.tools.epl import _derive_standings
 
-        records: list[EspnFixtureRecord] = []
+        records: list[EspnGameRecord] = []
         records.extend(
             _match_records(
                 "A",
@@ -240,7 +240,7 @@ class TestDeriveStandings:
         from odds_mcp.tools.epl import _derive_standings
 
         # Final row with blank scores (ESPN quirk) is ignored.
-        records: list[EspnFixtureRecord] = []
+        records: list[EspnGameRecord] = []
         records.extend(
             _match_records(
                 "A",
@@ -277,20 +277,20 @@ class TestDeriveStandings:
 
 
 class TestGetTeamContextAsOf:
-    """Integration-ish: seed ESPN fixtures, call the MCP tool, assert semantics."""
+    """Integration-ish: seed ESPN games, call the MCP tool, assert semantics."""
 
     @pytest.mark.asyncio
     async def test_last_results_respects_as_of_cutoff(
         self, pglite_async_session, test_engine
     ) -> None:
-        """as_of must exclude fixtures strictly in the future (no look-ahead)."""
+        """as_of must exclude games strictly in the future (no look-ahead)."""
         from odds_mcp.tools import epl as mcp_server
 
-        writer = EspnFixtureWriter(pglite_async_session)
+        writer = EspnGameWriter(pglite_async_session)
 
         # Arsenal record: one completed PL match in the past (1 Sep), one
         # upcoming (15 Sep). With as_of = 10 Sep, only the 1 Sep result counts.
-        records: list[EspnFixtureRecord] = []
+        records: list[EspnGameRecord] = []
         records.extend(
             _match_records(
                 "Arsenal",
@@ -311,7 +311,7 @@ class TestGetTeamContextAsOf:
                 state="pre",
             )
         )
-        await writer.upsert_fixtures(records)
+        await writer.upsert_games(records)
         await pglite_async_session.commit()
 
         from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -331,9 +331,9 @@ class TestGetTeamContextAsOf:
         assert len(result["last_results"]) == 1
         assert result["last_results"][0]["opponent"] == "Chelsea"
         assert result["last_results"][0]["outcome"] == "W"
-        # Upcoming: Liverpool fixture still in the future.
-        assert len(result["upcoming_fixtures"]) == 1
-        assert result["upcoming_fixtures"][0]["opponent"] == "Liverpool"
+        # Upcoming: Liverpool game still in the future.
+        assert len(result["upcoming_games"]) == 1
+        assert result["upcoming_games"][0]["opponent"] == "Liverpool"
 
     @pytest.mark.asyncio
     async def test_in_progress_rows_skipped_from_both_sides(
@@ -342,11 +342,11 @@ class TestGetTeamContextAsOf:
         from odds_mcp.tools import epl as mcp_server
         from sqlalchemy.ext.asyncio import async_sessionmaker
 
-        writer = EspnFixtureWriter(pglite_async_session)
+        writer = EspnGameWriter(pglite_async_session)
 
         # A match currently in progress should NOT appear in last_results (no
-        # final score yet) nor in upcoming_fixtures (already kicked off).
-        records: list[EspnFixtureRecord] = []
+        # final score yet) nor in upcoming_games (already kicked off).
+        records: list[EspnGameRecord] = []
         records.extend(
             _match_records(
                 "Arsenal",
@@ -358,7 +358,7 @@ class TestGetTeamContextAsOf:
                 state="in",
             )
         )
-        await writer.upsert_fixtures(records)
+        await writer.upsert_games(records)
         await pglite_async_session.commit()
 
         test_session_maker = async_sessionmaker(test_engine, expire_on_commit=False)
@@ -374,7 +374,7 @@ class TestGetTeamContextAsOf:
             )
 
         assert result["last_results"] == []
-        assert result["upcoming_fixtures"] == []
+        assert result["upcoming_games"] == []
 
     @pytest.mark.asyncio
     async def test_normalises_team_alias(self, pglite_async_session, test_engine) -> None:
@@ -382,7 +382,7 @@ class TestGetTeamContextAsOf:
         from odds_mcp.tools import epl as mcp_server
         from sqlalchemy.ext.asyncio import async_sessionmaker
 
-        writer = EspnFixtureWriter(pglite_async_session)
+        writer = EspnGameWriter(pglite_async_session)
         records = _match_records(
             "Wolves",
             "Arsenal",
@@ -390,7 +390,7 @@ class TestGetTeamContextAsOf:
             score_home=1,
             score_away=0,
         )
-        await writer.upsert_fixtures(records)
+        await writer.upsert_games(records)
         await pglite_async_session.commit()
 
         test_session_maker = async_sessionmaker(test_engine, expire_on_commit=False)
@@ -412,8 +412,8 @@ class TestGetTeamContextAsOf:
         from odds_mcp.tools import epl as mcp_server
         from sqlalchemy.ext.asyncio import async_sessionmaker
 
-        writer = EspnFixtureWriter(pglite_async_session)
-        records: list[EspnFixtureRecord] = []
+        writer = EspnGameWriter(pglite_async_session)
+        records: list[EspnGameRecord] = []
         records.extend(
             _match_records(
                 "Arsenal",
@@ -437,7 +437,7 @@ class TestGetTeamContextAsOf:
                 competition="Champions League",
             )
         )
-        await writer.upsert_fixtures(records)
+        await writer.upsert_games(records)
         await pglite_async_session.commit()
 
         test_session_maker = async_sessionmaker(test_engine, expire_on_commit=False)
@@ -449,7 +449,7 @@ class TestGetTeamContextAsOf:
                 include_standings=False,
             )
 
-        competitions = {f["competition"] for f in result["upcoming_fixtures"]}
+        competitions = {f["competition"] for f in result["upcoming_games"]}
         assert competitions == {"Premier League", "Champions League"}
 
     @pytest.mark.asyncio
@@ -457,8 +457,8 @@ class TestGetTeamContextAsOf:
         from odds_mcp.tools import epl as mcp_server
         from sqlalchemy.ext.asyncio import async_sessionmaker
 
-        writer = EspnFixtureWriter(pglite_async_session)
-        records: list[EspnFixtureRecord] = []
+        writer = EspnGameWriter(pglite_async_session)
+        records: list[EspnGameRecord] = []
         # Arsenal beats Chelsea, then draws Liverpool.
         records.extend(
             _match_records(
@@ -478,7 +478,7 @@ class TestGetTeamContextAsOf:
                 score_away=1,
             )
         )
-        await writer.upsert_fixtures(records)
+        await writer.upsert_games(records)
         await pglite_async_session.commit()
 
         test_session_maker = async_sessionmaker(test_engine, expire_on_commit=False)
@@ -505,12 +505,12 @@ class TestGetTeamContextAsOf:
         from odds_mcp.tools import epl as mcp_server
         from sqlalchemy.ext.asyncio import async_sessionmaker
 
-        writer = EspnFixtureWriter(pglite_async_session)
+        writer = EspnGameWriter(pglite_async_session)
 
         # Two legacy rows: Arsenal beats Chelsea (Full Time) and Arsenal draws
         # Liverpool (Final Score - After Extra Time). Both have state=None
         # so must be recognised via the fallback set.
-        records: list[EspnFixtureRecord] = []
+        records: list[EspnGameRecord] = []
         records.extend(
             _match_records(
                 "Arsenal",
@@ -533,7 +533,7 @@ class TestGetTeamContextAsOf:
                 state=None,
             )
         )
-        await writer.upsert_fixtures(records)
+        await writer.upsert_games(records)
         await pglite_async_session.commit()
 
         test_session_maker = async_sessionmaker(test_engine, expire_on_commit=False)

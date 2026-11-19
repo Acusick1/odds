@@ -182,8 +182,8 @@ class EventMerger:
             groups.append(cluster)
         return groups
 
-    async def find_repeated_fixtures(self, sport_key: str) -> list[list[Event]]:
-        """Fixtures stored more than once in a season that are not twins.
+    async def find_repeated_games(self, sport_key: str) -> list[list[Event]]:
+        """Games stored more than once in a season that are not twins.
 
         A home and away pair meets once a season in a league, so a second event
         is a rescheduled match stored under a second id.

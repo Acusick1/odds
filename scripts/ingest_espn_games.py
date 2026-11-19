@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Fetch all-competition fixture dates from ESPN Site API.
+"""Fetch all-competition game dates from ESPN Site API.
 
-Downloads fixture schedules for every EPL team across all relevant competitions
+Downloads game schedules for every EPL team across all relevant competitions
 (Premier League, FA Cup, League Cup, Champions League, Europa League, Conference
-League) and writes one CSV per season to data/espn_fixtures/ and/or upserts
+League) and writes one CSV per season to data/espn_games/ and/or upserts
 to the database.
 
 These CSVs are loaded as a pandas DataFrame by the training pipeline to provide
@@ -12,16 +12,16 @@ cup matches.
 
 Usage:
     # Fetch all seasons (2015 onwards) — CSV + DB
-    uv run python scripts/ingest_espn_fixtures.py
+    uv run python scripts/ingest_espn_games.py
 
     # Fetch a single season
-    uv run python scripts/ingest_espn_fixtures.py --season 2024
+    uv run python scripts/ingest_espn_games.py --season 2024
 
     # CSV-only (no DB write)
-    uv run python scripts/ingest_espn_fixtures.py --skip-db
+    uv run python scripts/ingest_espn_games.py --skip-db
 
 Live daily refresh of the current season is handled by the
-``fetch-espn-fixtures`` scheduled job — this script is for backfill / manual
+``fetch-espn-games`` scheduled job — this script is for backfill / manual
 multi-season ingest / CSV export.
 """
 
@@ -34,25 +34,25 @@ import logging
 from pathlib import Path
 
 from odds_core.database import async_session_maker
-from odds_core.epl_data_models import EspnFixtureRecord
-from odds_lambda.espn_fixture_fetcher import SEASONS, EspnFixtureFetcher
-from odds_lambda.storage.espn_fixture_writer import EspnFixtureWriter
+from odds_core.epl_data_models import EspnGameRecord
+from odds_lambda.espn_game_fetcher import SEASONS, EspnGameFetcher
+from odds_lambda.storage.espn_game_writer import EspnGameWriter
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
     datefmt="%H:%M:%S",
 )
-log = logging.getLogger("ingest_espn_fixtures")
+log = logging.getLogger("ingest_espn_games")
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "espn_fixtures"
+DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "espn_games"
 
 CSV_COLUMNS = [
     "date",
     "team",
     "opponent",
     "competition",
-    "match_round",
+    "game_round",
     "home_away",
     "score_team",
     "score_opponent",
@@ -60,13 +60,13 @@ CSV_COLUMNS = [
 ]
 
 
-def _record_to_csv_row(record: EspnFixtureRecord) -> dict[str, str]:
+def _record_to_csv_row(record: EspnGameRecord) -> dict[str, str]:
     return {
         "date": record.date.isoformat().replace("+00:00", "Z"),
         "team": record.team,
         "opponent": record.opponent,
         "competition": record.competition,
-        "match_round": record.match_round,
+        "game_round": record.game_round,
         "home_away": record.home_away,
         "score_team": record.score_team,
         "score_opponent": record.score_opponent,
@@ -74,11 +74,11 @@ def _record_to_csv_row(record: EspnFixtureRecord) -> dict[str, str]:
     }
 
 
-def write_csv(records: list[EspnFixtureRecord], season: int) -> Path:
-    """Write fixtures to CSV file."""
+def write_csv(records: list[EspnGameRecord], season: int) -> Path:
+    """Write games to CSV file."""
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     label = SEASONS[season]
-    path = DATA_DIR / f"fixtures_{label}.csv"
+    path = DATA_DIR / f"games_{label}.csv"
 
     with open(path, "w", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=CSV_COLUMNS)
@@ -88,11 +88,11 @@ def write_csv(records: list[EspnFixtureRecord], season: int) -> Path:
     return path
 
 
-async def write_db(records: list[EspnFixtureRecord]) -> int:
-    """Write fixtures to database via EspnFixtureWriter."""
+async def write_db(records: list[EspnGameRecord]) -> int:
+    """Write games to database via EspnGameWriter."""
     async with async_session_maker() as session:
-        writer = EspnFixtureWriter(session)
-        count = await writer.upsert_fixtures(records)
+        writer = EspnGameWriter(session)
+        count = await writer.upsert_games(records)
         await session.commit()
     return count
 
@@ -100,27 +100,27 @@ async def write_db(records: list[EspnFixtureRecord]) -> int:
 async def _run(seasons: list[int], skip_db: bool) -> None:
     total_records = 0
 
-    async with EspnFixtureFetcher() as fetcher:
-        season_records: list[tuple[int, list[EspnFixtureRecord]]] = []
+    async with EspnGameFetcher() as fetcher:
+        season_records: list[tuple[int, list[EspnGameRecord]]] = []
         for season in seasons:
             label = SEASONS[season]
-            log.info(f"[{label}] Fetching fixtures...")
+            log.info(f"[{label}] Fetching games...")
             records = await fetcher.fetch_season(season)
             path = write_csv(records, season)
             total_records += len(records)
-            log.info(f"[{label}] Wrote {len(records)} fixtures to {path}")
+            log.info(f"[{label}] Wrote {len(records)} games to {path}")
             season_records.append((season, records))
 
     if not skip_db:
         for season, records in season_records:
             count = await write_db(records)
-            log.info(f"[{SEASONS[season]}] Upserted {count} fixtures to database")
+            log.info(f"[{SEASONS[season]}] Upserted {count} games to database")
 
-    log.info(f"\nTotal: {total_records} fixtures across {len(seasons)} seasons")
+    log.info(f"\nTotal: {total_records} games across {len(seasons)} seasons")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Fetch ESPN fixture schedules for EPL teams")
+    parser = argparse.ArgumentParser(description="Fetch ESPN game schedules for EPL teams")
     parser.add_argument(
         "--season",
         type=int,

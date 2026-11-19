@@ -23,7 +23,7 @@ from odds_core.quotes import Quote
 from odds_core.vocabulary import Market, Side, Source
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from odds_lambda.candidate_rules.fixture_context import FixtureContext
+from odds_lambda.candidate_rules.game_context import GameContext
 from odds_lambda.candidate_rules.inputs import RETAIL_SOURCES, SharpInput, rule_quotes
 
 # A market's line, None in a market without lines.
@@ -65,9 +65,9 @@ class MarketState:
     source stored one. ``lookbacks`` holds the state at each lookback point the rule declared,
     keyed by its minutes before the decision time, each built as of that point with the same
     extra markets and no lookbacks of its own. A state without a snapshot has no inputs: no
-    retail prices, no sharp prices, no extra markets and no lookbacks. ``fixture`` holds the
-    fixture inputs the rule declared, read-only, which the loader of the rule adds
-    (``odds_lambda.candidate_rules.rules.add_fixture_context``); a state whose ``fixture`` has
+    retail prices, no sharp prices, no extra markets and no lookbacks. ``game`` holds the
+    game inputs the rule declared, read-only, which the loader of the rule adds
+    (``odds_lambda.candidate_rules.rules.add_game_context``); a state whose ``game`` has
     unknown results has no inputs too.
     """
 
@@ -86,7 +86,7 @@ class MarketState:
     also: Mapping[Market, MarketState] = field(default_factory=lambda: MappingProxyType({}))
     lookbacks: Mapping[int, MarketState] = field(default_factory=lambda: MappingProxyType({}))
     input_ids: tuple[int, ...] = ()
-    fixture: FixtureContext = field(default_factory=FixtureContext)
+    game: GameContext = field(default_factory=GameContext)
 
     @property
     def has_input(self) -> bool:
@@ -101,18 +101,18 @@ class MarketState:
 
     @property
     def input_event_ids(self) -> list[int]:
-        """The events the fixture inputs were read from."""
-        return list(self.fixture.event_ids)
+        """The events the game inputs were read from."""
+        return list(self.game.event_ids)
 
     @property
-    def missing_fixture(self) -> bool:
-        """Whether a fixture input has no known result, which leaves the state without inputs."""
-        return bool(self.fixture.unknown_results)
+    def missing_game(self) -> bool:
+        """Whether a game input has no known result, which leaves the state without inputs."""
+        return bool(self.game.unknown_results)
 
     @property
-    def fixture_overdue(self) -> bool:
+    def game_overdue(self) -> bool:
         """Whether a previous result is overdue, not merely pending."""
-        return bool(self.fixture.overdue_results)
+        return bool(self.game.overdue_results)
 
 
 def is_bettable_line(market: Market, line: Line) -> bool:

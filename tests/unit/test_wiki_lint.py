@@ -674,7 +674,7 @@ def line_of(repo: Path, needle: str) -> int:
 
 @pytest.fixture
 def committed(repo: Path) -> Path:
-    """The `repo` fixture with its wiki committed, so pages have a last commit."""
+    """The `repo` game with its wiki committed, so pages have a last commit."""
     put_a(repo, "Runs `pkg.mod.Box.run`.")
     commit(repo, "wiki", message="wiki")
     return repo

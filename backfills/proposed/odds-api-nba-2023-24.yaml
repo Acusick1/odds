@@ -1,5 +1,5 @@
 # Odds API historical backfill of NBA 2023-24 (#859 step 10). A top-up of
-# odds-api-nba-2024-26.yaml. Snapshot grid, billing, books and fixture horizon follow the
+# odds-api-nba-2024-26.yaml. Snapshot grid, billing, books and game horizon follow the
 # probe (#729, #787).
 sport: basketball_nba
 # The window starts at opening night, so preseason is excluded (#782).
@@ -23,8 +23,8 @@ probe:
   snapshots:
     - 2023-12-16T15:55:38Z
     - 2024-03-16T15:55:38Z
-  # Call sharing needs fixtures as far ahead as the earliest coverage, 8 h plus its 1 h max age.
-  min_fixture_lead_hours: 9
+  # Call sharing needs games as far ahead as the earliest coverage, 8 h plus its 1 h max age.
+  min_game_lead_hours: 9
   # Betfair Exchange is the scoring reference and close (ADR-0012); no current candidate or
   # model uses Pinnacle.
   required_bookmakers:

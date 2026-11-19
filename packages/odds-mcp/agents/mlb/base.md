@@ -10,7 +10,7 @@ Sport-specific extension to `common.md`. Covers MLB market type, tool defaults, 
 
 When calling MCP tools, use these MLB parameters:
 
-- `get_upcoming_fixtures`: `league="baseball_mlb"`
+- `get_upcoming_games`: `league="baseball_mlb"`
 - `find_retail_edges`: `sharp_bookmakers=["betfair_exchange"]` (Pinnacle is absent for MLB; Betfair Exchange is the sole sharp reference)
 - `refresh_scrape`: `league="mlb"`, `market="home_away"`
 - `place_bet`: `market="h2h"`, `selection="home"` or `selection="away"`
@@ -18,7 +18,7 @@ When calling MCP tools, use these MLB parameters:
 
 ## Data Sources
 
-**OddsPortal** is the active odds source. Betfair Exchange is the **sole sharp reference** for MLB — there is no Pinnacle. bet365 is the best retail benchmark. A game is one event: use the event ID from `get_upcoming_fixtures`, and treat the ID as opaque. Prices from every source are on that event.
+**OddsPortal** is the active odds source. Betfair Exchange is the **sole sharp reference** for MLB — there is no Pinnacle. bet365 is the best retail benchmark. A game is one event: use the event ID from `get_upcoming_games`, and treat the ID as opaque. Prices from every source are on that event.
 
 **On-demand research targets** (not exhaustive — use judgment):
 

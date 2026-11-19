@@ -230,15 +230,15 @@ class TestFailedRun:
     async def test_failed_cron_run_does_not_add_a_one_off_run(self, warning: AsyncMock) -> None:
         with _job(_fail_before_booking):
             async with LocalSchedulerBackend() as backend:
-                await backend.schedule_cron("fetch-espn-fixtures-epl", "0 6 * * *")
+                await backend.schedule_cron("fetch-espn-games-epl", "0 6 * * *")
 
                 with pytest.raises(RuntimeError, match="DNS failure"):
                     await runner.run_chain_job(
                         backend,
-                        "fetch-espn-fixtures-epl",
+                        "fetch-espn-games-epl",
                         lambda: _fail_before_booking(JobContext()),
                     )
 
-                assert await backend.get_one_off_run("fetch-espn-fixtures-epl") is None
-                assert await backend.get_job_status("fetch-espn-fixtures-epl") is not None
+                assert await backend.get_one_off_run("fetch-espn-games-epl") is None
+                assert await backend.get_job_status("fetch-espn-games-epl") is not None
         warning.assert_not_awaited()

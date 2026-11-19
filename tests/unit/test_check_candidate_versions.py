@@ -114,7 +114,7 @@ class TestCheckCandidateVersions:
 
 
 class TestLeagueField:
-    """A one-league `sport` or a `sports` list reads as `leagues`: the rename alone is no change."""
+    """A one-league `sport` reads as `leagues: [it]`: the rename alone is no change."""
 
     @pytest.fixture
     def repo(self, candidates_repo: Path) -> Path:
@@ -141,13 +141,6 @@ class TestLeagueField:
         return result.stderr.splitlines()
 
     def test_renaming_sport_to_a_one_league_list_passes(self, repo: Path) -> None:
-        self.write(repo, "[soccer_epl]")
-        assert self.errors(repo) == []
-
-    def test_renaming_sports_to_leagues_passes(self, repo: Path) -> None:
-        (repo / "candidates" / "back-longest.yaml").write_text(BASE_YAML + "sports: [soccer_epl]\n")
-        git(repo, "add", "candidates")
-        git(repo, "commit", "-q", "-m", "sports base")
         self.write(repo, "[soccer_epl]")
         assert self.errors(repo) == []
 

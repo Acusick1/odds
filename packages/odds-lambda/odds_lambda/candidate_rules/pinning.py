@@ -27,7 +27,7 @@ RULE_ROOTS: tuple[object | str, ...] = (
 def rule_sha256(rule_name: str) -> str:
     """Hash of every first-party module in the import closure of the rule function, its params
     model, ``RULE_ROOTS`` and a model rule's ``model_roots`` (``code_hash.code_sha256``), then
-    the rule's sharp inputs, extra markets and fixture inputs."""
+    the rule's sharp inputs, extra markets and game inputs."""
     spec = RULES[rule_name]
     roots: list[object | str] = [spec.function, spec.params_model, *RULE_ROOTS]
     if isinstance(spec, ModelRuleSpec):
@@ -37,7 +37,7 @@ def rule_sha256(rule_name: str) -> str:
         [
             f"sharp_inputs={sorted(i.value for i in spec.sharp_inputs)}",
             f"also_markets={sorted(m.value for m in spec.also_markets)}",
-            f"fixture_inputs={sorted(i.value for i in spec.fixture_inputs)}",
+            f"game_inputs={sorted(i.value for i in spec.game_inputs)}",
         ],
     )
 

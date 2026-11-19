@@ -145,8 +145,8 @@ class CollectionSlot:
     latest: time
 
 
-# football-data.co.uk/matches.php: weekend fixtures are collected on Friday afternoons
-# generally not later than 17:00, midweek fixtures on Tuesdays not later than 13:00.
+# football-data.co.uk/matches.php: weekend games are collected on Friday afternoons
+# generally not later than 17:00, midweek games on Tuesdays not later than 13:00.
 WEEKEND_SLOT = CollectionSlot(weekday=4, latest=time(17, 0))
 MIDWEEK_SLOT = CollectionSlot(weekday=1, latest=time(13, 0))
 MIDWEEK_WEEKDAYS = frozenset({1, 2, 3})
@@ -462,7 +462,7 @@ async def ingest_season(
     async with async_session_maker() as session:
         for row in rows:
             await ingest_row(session, league, row, stats)
-            # One commit per match releases the fixture lock the resolver took.
+            # One commit per match releases the game lock the resolver took.
             await session.commit()
 
     return stats

@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from odds_core.match_brief_models import BriefDecision, MatchBrief
+from odds_core import brief_models, epl_data_models  # noqa: F401  (register the tables renamed)
 from odds_core.models import (
     AlertHistory,
     DataQualityLog,
@@ -68,11 +68,30 @@ def _event(event_id: int | None, home: str) -> Event:
     )
 
 
+def run_game_brief_rename(connection: Any, step: str) -> None:
+    """Run the ``step`` of the migration renaming ``match_briefs`` and ``espn_fixtures``."""
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "migrations"
+        / "versions"
+        / "b9d4e1a7c3f5_rename_match_briefs_and_espn_fixtures.py"
+    )
+    spec = importlib.util.spec_from_file_location("b9d4e1a7c3f5_migration", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    with Operations.context(MigrationContext.configure(connection)):
+        getattr(module, step)()
+
+
 @pytest.fixture
 async def session(paper_trades_session: AsyncSession, migration: ModuleType) -> AsyncSession:
     """Integer-keyed events 1 to 4 with rows referencing them; events 1 and 2 have the string
     ids an upgrade kept, 3 holds an Odds API id and 4 nothing."""
     session = paper_trades_session
+    # The migration acts on the briefs table under its name then.
+    connection = await session.connection()
+    await connection.run_sync(lambda c: run_game_brief_rename(c, "downgrade"))
     # A later table that references events; the schema this migration re-keys has none.
     await session.execute(text("DROP TABLE IF EXISTS event_postponements"))
     session.add_all([_event(1, "Arsenal"), _event(2, "Brentford"), _event(3, "Burnley")])
@@ -89,7 +108,6 @@ async def session(paper_trades_session: AsyncSession, migration: ModuleType) -> 
                 market=Market.ONE_X_TWO,
                 time_basis=TimeBasis.OBSERVED,
             ),
-            MatchBrief(event_id=3, decision=BriefDecision.WATCHING, summary="s", brief_text="t"),
             DataQualityLog(event_id=None, severity="warning", issue_type="x", description="d"),
             DataQualityLog(event_id=4, severity="warning", issue_type="x", description="d"),
             AlertHistory(
@@ -101,6 +119,12 @@ async def session(paper_trades_session: AsyncSession, migration: ModuleType) -> 
         ]
     )
     await session.flush()
+    await session.execute(
+        text(
+            "INSERT INTO match_briefs (event_id, decision, summary, brief_text, created_at)"
+            " VALUES (3, 'WATCHING', 's', 't', now())"
+        )
+    )
     await session.execute(text(migration.LEGACY_TABLE_DDL))
     await session.execute(
         text(

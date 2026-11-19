@@ -17,7 +17,7 @@ from odds_lambda.betfair.constants import SPORT_CONFIG
 from odds_lambda.collection_calendar import (
     EmptyCollectionError,
     MlbGameKey,
-    require_rows_for_fixtures,
+    require_rows_for_games,
 )
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.health_monitor import HealthMonitor
@@ -652,7 +652,7 @@ class TestDroppedGamesAlert:
 
 
 class TestBetfairUnpricedBooks:
-    """Books the run saw but did not price account for the fixture they identify (#634)."""
+    """Books the run saw but did not price account for the game they identify (#634)."""
 
     SNAPSHOT = EVENING - timedelta(minutes=30)
     BETFAIR_START = EVENING - timedelta(minutes=40)
@@ -667,7 +667,7 @@ class TestBetfairUnpricedBooks:
             snapshot_time=self.SNAPSHOT,
         )
 
-        assert stats.accounted_fixtures == {MlbGameKey(813001)}
+        assert stats.accounted_games == {MlbGameKey(813001)}
         assert (stats.books_in_play, stats.snapshots_stored) == (1, 0)
         assert await _mlb_events(job_session) == []
         assert await _snapshot_event_ids(job_session) == []
@@ -682,7 +682,7 @@ class TestBetfairUnpricedBooks:
         )
 
         assert (stats.snapshots_stored, stats.books_pre_play_past_start) == (1, 1)
-        assert stats.accounted_fixtures == set()
+        assert stats.accounted_games == set()
         snapshot = (await job_session.execute(select(OddsSnapshot))).scalar_one()
         event = (await _mlb_events(job_session))[0]
         assert snapshot.event_id == event.id
@@ -714,11 +714,11 @@ class TestBetfairUnpricedBooks:
             snapshot_time=self.SNAPSHOT,
         )
 
-        assert (stats.snapshots_stored, stats.accounted_fixtures) == (0, {MlbGameKey(813001)})
-        await require_rows_for_fixtures(
+        assert (stats.snapshots_stored, stats.accounted_games) == (0, {MlbGameKey(813001)})
+        await require_rows_for_games(
             fetch_betfair_exchange.SOURCE,
             {MLB: stats.snapshots_stored},
-            accounted_by_sport={MLB: stats.accounted_fixtures},
+            accounted_by_sport={MLB: stats.accounted_games},
             now=self.SNAPSHOT,
         )
 
@@ -732,7 +732,7 @@ class TestBetfairUnpricedBooks:
             snapshot_time=self.SNAPSHOT,
         )
 
-        assert (stats.snapshots_stored, stats.accounted_fixtures) == (0, {MlbGameKey(813001)})
+        assert (stats.snapshots_stored, stats.accounted_games) == (0, {MlbGameKey(813001)})
 
     async def test_a_suspended_book_with_no_prices_accounts_for_its_game(
         self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
@@ -744,7 +744,7 @@ class TestBetfairUnpricedBooks:
             snapshot_time=self.SNAPSHOT,
         )
 
-        assert stats.accounted_fixtures == {MlbGameKey(813001)}
+        assert stats.accounted_games == {MlbGameKey(813001)}
         assert stats.snapshots_stored == 0
 
     async def test_an_unpriced_book_that_is_open_accounts_for_its_game(
@@ -756,7 +756,7 @@ class TestBetfairUnpricedBooks:
             _book(LISTED, EVENING, YANKEES, RED_SOX, priced=False), snapshot_time=self.SNAPSHOT
         )
 
-        assert stats.accounted_fixtures == {MlbGameKey(813001)}
+        assert stats.accounted_games == {MlbGameKey(813001)}
 
     @pytest.mark.parametrize("inplay", [True, False])
     async def test_a_book_with_no_start_time_stores_and_accounts_for_nothing(
@@ -768,7 +768,7 @@ class TestBetfairUnpricedBooks:
             _book(LISTED, None, YANKEES, RED_SOX, inplay=inplay), snapshot_time=self.SNAPSHOT
         )
 
-        assert (stats.accounted_fixtures, stats.snapshots_stored) == (set(), 0)
+        assert (stats.accounted_games, stats.snapshots_stored) == (set(), 0)
         assert await _snapshot_event_ids(job_session) == []
 
     async def test_a_priced_pre_play_book_still_stores_and_accounts_for_nothing(
@@ -780,7 +780,7 @@ class TestBetfairUnpricedBooks:
             _book(LISTED, EVENING, YANKEES, RED_SOX), snapshot_time=self.SNAPSHOT
         )
 
-        assert (stats.snapshots_stored, stats.accounted_fixtures) == (1, set())
+        assert (stats.snapshots_stored, stats.accounted_games) == (1, set())
 
     async def test_the_event_listing_looks_back_for_started_games(
         self, job_session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]
@@ -823,11 +823,11 @@ class TestBetfairUnpricedBooks:
             _book(LISTED, row_start, YANKEES, RED_SOX, inplay=True), snapshot_time=snapshot_time
         )
 
-        assert stats.accounted_fixtures == set()
-        with pytest.raises(EmptyCollectionError, match="with 1 fixture"):
-            await require_rows_for_fixtures(
+        assert stats.accounted_games == set()
+        with pytest.raises(EmptyCollectionError, match="with 1 game"):
+            await require_rows_for_games(
                 fetch_betfair_exchange.SOURCE,
                 {MLB: 0},
-                accounted_by_sport={MLB: stats.accounted_fixtures},
+                accounted_by_sport={MLB: stats.accounted_games},
                 now=snapshot_time,
             )

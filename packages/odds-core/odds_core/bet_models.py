@@ -98,15 +98,15 @@ class CandidateDecision(SQLModel, table=True):
         default_factory=list,
         sa_column=Column(ARRAY(BigInteger), nullable=False, server_default=text("'{}'")),
         description=(
-            "Ids of the events the rule's fixture inputs were read from (the previous matches "
+            "Ids of the events the rule's game inputs were read from (the previous matches "
             "and the concurrent kick-offs); empty for a rule with none, and when missed"
         ),
     )
-    input_fixture: dict[str, Any] | None = Field(
+    input_game: dict[str, Any] | None = Field(
         default=None,
         sa_column=Column(JSONB, nullable=True),
         description=(
-            "The fixture values the rule consumed (each team's previous result and the "
+            "The game values the rule consumed (each team's previous result and the "
             "concurrent kick-off count), which parity replays; null for a rule with none"
         ),
     )

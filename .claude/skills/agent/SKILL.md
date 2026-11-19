@@ -17,7 +17,7 @@ Read both of these files and follow their instructions:
 Run the betting agent workflow autonomously — do not ask for confirmation, just execute. Follow the Wake-Up Workflow section in the base file: orient, settle, triage, research, brief, decide.
 
 If arguments remain after the sport, interpret them as special actions:
-- `review` — Load recent match briefs and bets. Summarise performance and reasoning quality. No research or bets.
+- `review` — Load recent briefs and bets. Summarise performance and reasoning quality. No research or bets.
 
 Examples:
 - `/agent` — EPL wake-up workflow

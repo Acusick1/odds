@@ -13,10 +13,10 @@ from odds_analytics.backfill_executor import (
     CallProgress,
 )
 from odds_analytics.backfill_plan import (
-    Fixture,
+    Game,
     Manifest,
     Season,
-    load_fixtures,
+    load_games,
     plan,
 )
 from odds_core.backfill_models import OddsApiSnapshotGap
@@ -47,7 +47,7 @@ def plan_backfill(
     """
     Plan the Odds API historical calls an acquisition manifest needs, from stored FINAL events.
 
-    Makes no API calls. Without --cost it prints each call's time and how many fixture bands it
+    Makes no API calls. Without --cost it prints each call's time and how many game bands it
     serves.
 
     Example:
@@ -55,13 +55,13 @@ def plan_backfill(
     """
     manifest = Manifest.load(Path(manifest_file))
     seasons = _select_seasons(manifest, season)
-    fixtures, balance = asyncio.run(_load_season_fixtures(manifest, seasons))
+    games, balance = asyncio.run(_load_season_games(manifest, seasons))
     if cost:
-        console.print(_cost_table(manifest, fixtures, balance))
+        console.print(_cost_table(manifest, games, balance))
         return
-    for name, season_fixtures in fixtures.items():
+    for name, season_games in games.items():
         console.print(f"[bold]{name}[/bold]")
-        for call in plan(manifest, season_fixtures):
+        for call in plan(manifest, season_games):
             console.print(f"  {utc_isoformat(call.time)}  {len(call.serves)}")
 
 
@@ -73,20 +73,18 @@ def _select_seasons(manifest: Manifest, season: list[str] | None) -> dict[str, S
     return {name: s for name, s in manifest.seasons.items() if not season or name in season}
 
 
-async def _load_season_fixtures(
+async def _load_season_games(
     manifest: Manifest, seasons: dict[str, Season]
-) -> tuple[dict[str, list[Fixture]], int | None]:
-    """The seasons' fixtures, and the balance of the acquisition key (its newest recorded
+) -> tuple[dict[str, list[Game]], int | None]:
+    """The seasons' games, and the balance of the acquisition key (its newest recorded
     quota), or None when no recent fetch recorded one."""
     api = get_settings().api
     async with async_session_maker() as session:
-        fixtures = {
-            name: await load_fixtures(session, manifest.sport, s) for name, s in seasons.items()
-        }
+        games = {name: await load_games(session, manifest.sport, s) for name, s in seasons.items()}
         quota = (await OddsReader(session).get_latest_quota_by_key(api)).get(
             api.acquisition_key_index
         )
-    return fixtures, quota.remaining if quota else None
+    return games, quota.remaining if quota else None
 
 
 def _duration(delta: timedelta) -> str:
@@ -97,9 +95,7 @@ def _duration(delta: timedelta) -> str:
     return f"{minutes}m"
 
 
-def _cost_table(
-    manifest: Manifest, fixtures: dict[str, list[Fixture]], balance: int | None
-) -> Table:
+def _cost_table(manifest: Manifest, games: dict[str, list[Game]], balance: int | None) -> Table:
     """Calls and units per season for all bands, then the calls each band adds to the
     others."""
     table = Table(
@@ -107,12 +103,12 @@ def _cost_table(
         "what it adds to all the others."
     )
     table.add_column("Band")
-    for name, season_fixtures in fixtures.items():
-        table.add_column(f"{name} ({len(season_fixtures)} fixtures)", justify="right")
+    for name, season_games in games.items():
+        table.add_column(f"{name} ({len(season_games)} games)", justify="right")
     table.add_column("Total", justify="right")
 
     def counts(cut: Manifest | None) -> list[int]:
-        calls = [len(plan(cut, f)) if cut else 0 for f in fixtures.values()]
+        calls = [len(plan(cut, f)) if cut else 0 for f in games.values()]
         return [*calls, sum(calls)]
 
     def cells(calls: list[int]) -> list[str]:
@@ -152,7 +148,7 @@ def execute_backfill(
     skip_existing: bool = typer.Option(
         True,
         "--skip-existing/--no-skip-existing",
-        help="Skip calls whose fixtures already have the snapshot the call returns",
+        help="Skip calls whose games already have the snapshot the call returns",
     ),
     max_units: int | None = typer.Option(
         None, "--max-units", help="Stop before a call that would take the run past this many units"
@@ -217,12 +213,10 @@ async def _execute_backfill_async(
 ) -> None:
     if not dry_run:
         _require_acquisition_key()
-    fixtures, balance = await _load_season_fixtures(manifest, seasons)
-    calls = [
-        call for season_fixtures in fixtures.values() for call in plan(manifest, season_fixtures)
-    ]
+    games, balance = await _load_season_games(manifest, seasons)
+    calls = [call for season_games in games.values() for call in plan(manifest, season_games)]
     if not calls:
-        console.print("[red]No calls planned: no FINAL fixtures in the selected seasons[/red]")
+        console.print("[red]No calls planned: no FINAL games in the selected seasons[/red]")
         raise typer.Exit(1)
 
     units = len(calls) * manifest.units_per_call
@@ -289,7 +283,7 @@ def _result_table(result: BackfillResult, dry_run: bool, title: str) -> Table:
     if dry_run:
         table.add_row("Calls that would be made", f"{result.would_fetch:,}")
     table.add_row("Units used", f"{result.units_used:,}")
-    table.add_row("Fixtures stored", f"{result.fixtures_stored:,}")
+    table.add_row("Games stored", f"{result.games_stored:,}")
     table.add_row("Snapshots stored", f"{result.snapshots_stored:,}")
     table.add_row("Provider gaps", f"{result.provider_gaps:,}")
     table.add_row("Off-phase snapshots", f"{result.off_phase_snapshots:,}")
@@ -303,7 +297,7 @@ def _progress_line(update: CallProgress) -> str:
     when = utc_isoformat(update.time)
     if update.status == "fetched":
         line = (
-            f"[green]fetched[/green] {when}  {update.fixtures_stored} fixtures, "
+            f"[green]fetched[/green] {when}  {update.games_stored} games, "
             f"{update.units_used} units, quota {update.quota_remaining}"
         )
         return f"{line}  [yellow]{update.message}[/yellow]" if update.message else line
@@ -374,7 +368,7 @@ def _probe_table(manifest: Manifest, checks: list[ResponseCheck]) -> Table:
         "Lag",
         "Units",
         "Grid gaps",
-        "Farthest fixture",
+        "Farthest game",
         "Books (events, farthest lead)",
     ):
         table.add_column(column)

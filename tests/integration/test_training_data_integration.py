@@ -7,7 +7,7 @@ Tests the full flow:
 3. Data preparation based on strategy type
 4. Output shape verification
 
-These tests use fixtures to create known test data for predictable results.
+These tests use games to create known test data for predictable results.
 """
 
 from __future__ import annotations

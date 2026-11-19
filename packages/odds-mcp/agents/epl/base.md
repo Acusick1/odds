@@ -8,7 +8,7 @@ Sport-specific extension to `common.md`. Covers EPL market type, data sources, e
 
 ## Data Sources
 
-**OddsPortal** is the active odds source, with UK bookmakers (bet365, betway, betfred) and sharp references (Betfair Exchange). A match is one event: use the event ID from `get_upcoming_fixtures`, and treat the ID as opaque. Prices from every source are on that event.
+**OddsPortal** is the active odds source, with UK bookmakers (bet365, betway, betfred) and sharp references (Betfair Exchange). A match is one event: use the event ID from `get_upcoming_games`, and treat the ID as opaque. Prices from every source are on that event.
 
 **FPL API** (Fantasy Premier League): when available, ownership percentages and weekly transfer volumes are a public-sentiment signal — high ownership or transfer surges indicate casual-money conviction. May not be active.
 
@@ -16,7 +16,7 @@ Sport-specific extension to `common.md`. Covers EPL market type, data sources, e
 
 - BBC Sport: confirmed lineups, match previews, injury round-ups
 - Club websites / official X accounts: lineup announcements, press conference quotes
-- ESPN: fixture context, form guides
+- ESPN: game context, form guides
 - RotoWire: predicted and confirmed lineups
 - Understat: xG data, shot maps, underlying performance trends
 - Reddit r/soccer: match threads and pre-match discussion for fan sentiment and early team news leaks
@@ -32,10 +32,10 @@ Concrete examples that fit each `common.md` edge category in an EPL context:
 
 **3. Structural biases** — public money loading on big-six teams (Arsenal, Liverpool, Man City, Man Utd, Chelsea, Tottenham); accumulator distortion on popular acca legs; weekend / televised-match liability shading; promoted-team prices often overshoot in both directions early-season and take weeks to calibrate.
 
-**4. Fundamental value** — tactical matchup reads (press triggers, pressing structure, set-piece threat); rotation logic under fixture congestion (UCL / FA Cup / title-race prioritisation); mid-table fixtures with thin public attention where sharp consolidates less; manager-state or tilt-state not yet reflected in form-based pricing.
+**4. Fundamental value** — tactical matchup reads (press triggers, pressing structure, set-piece threat); rotation logic under game congestion (UCL / FA Cup / title-race prioritisation); mid-table games with thin public attention where sharp consolidates less; manager-state or tilt-state not yet reflected in form-based pricing.
 
 ## Sport-Mechanical Workflow Notes
 
 - **Lineup drops** land roughly 60 minutes before kick-off. Close-to-KO deep research should target that window.
 - **Kick-off clusters** (UK): Sat 12:30 / 15:00 / 17:30; Sun 14:00 / 16:30; occasional Fri / Mon evening slots.
-- **Team context** — `get_team_context` returns recent PL form (last 5 W/D/L), upcoming fixtures across all competitions (rotation-risk signal), and a derived standings position. Use for fundamental-value reads where rotation under fixture congestion, form trajectory, or table-position incentives plausibly diverge from what sharp is pricing.
+- **Team context** — `get_team_context` returns recent PL form (last 5 W/D/L), upcoming games across all competitions (rotation-risk signal), and a derived standings position. Use for fundamental-value reads where rotation under game congestion, form trajectory, or table-position incentives plausibly diverge from what sharp is pricing.

@@ -1,4 +1,4 @@
-"""Failure behaviour of the fetch-espn-fixtures job body."""
+"""Failure behaviour of the fetch-espn-games job body."""
 
 from __future__ import annotations
 
@@ -7,23 +7,23 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from odds_core.epl_data_models import EspnFixtureRecord
-from odds_lambda.collection_calendar import EmptyCollectionError, FixtureCalendar
-from odds_lambda.espn_fixture_fetcher import (
+from odds_core.epl_data_models import EspnGameRecord
+from odds_lambda.collection_calendar import EmptyCollectionError, GameCalendar
+from odds_lambda.espn_game_fetcher import (
     EspnSeasonFetchError,
     EspnUpcomingFetchError,
-    UpcomingFixtures,
+    UpcomingGames,
 )
-from odds_lambda.jobs import fetch_espn_fixtures
+from odds_lambda.jobs import fetch_espn_games
 
 
-def _record(competition: str) -> EspnFixtureRecord:
-    return EspnFixtureRecord(
+def _record(competition: str) -> EspnGameRecord:
+    return EspnGameRecord(
         date=datetime.now(UTC) + timedelta(days=1),
         team="Arsenal",
         opponent="Chelsea",
         competition=competition,
-        match_round="",
+        game_round="",
         home_away="home",
         score_team="",
         score_opponent="",
@@ -35,8 +35,8 @@ def _record(competition: str) -> EspnFixtureRecord:
 
 def _fetcher(
     *,
-    past: list[EspnFixtureRecord] | None = None,
-    upcoming: UpcomingFixtures | None = None,
+    past: list[EspnGameRecord] | None = None,
+    upcoming: UpcomingGames | None = None,
     upcoming_error: Exception | None = None,
     season_error: Exception | None = None,
 ) -> MagicMock:
@@ -45,7 +45,7 @@ def _fetcher(
     fetcher.__aexit__ = AsyncMock(return_value=None)
     fetcher.fetch_season = AsyncMock(return_value=past or [], side_effect=season_error)
     fetcher.fetch_upcoming = AsyncMock(
-        return_value=upcoming or UpcomingFixtures(records=[], failed_leagues=[]),
+        return_value=upcoming or UpcomingGames(records=[], failed_leagues=[]),
         side_effect=upcoming_error,
     )
     return fetcher
@@ -54,27 +54,27 @@ def _fetcher(
 @pytest.fixture
 def calendar() -> Iterator[AsyncMock]:
     with (
-        patch.object(fetch_espn_fixtures, "event_calendar", new_callable=AsyncMock) as mock,
-        patch.object(fetch_espn_fixtures, "async_session_maker", MagicMock()),
+        patch.object(fetch_espn_games, "event_calendar", new_callable=AsyncMock) as mock,
+        patch.object(fetch_espn_games, "async_session_maker", MagicMock()),
     ):
         yield mock
 
 
 @pytest.fixture
 def upsert() -> Iterator[AsyncMock]:
-    with patch.object(fetch_espn_fixtures, "_upsert", new_callable=AsyncMock) as mock:
+    with patch.object(fetch_espn_games, "_upsert", new_callable=AsyncMock) as mock:
         mock.side_effect = lambda records: len(records)
         yield mock
 
 
 @pytest.fixture
 def warning() -> Iterator[AsyncMock]:
-    with patch.object(fetch_espn_fixtures, "send_job_warning", new_callable=AsyncMock) as mock:
+    with patch.object(fetch_espn_games, "send_job_warning", new_callable=AsyncMock) as mock:
         yield mock
 
 
-def _scheduled(count: int) -> FixtureCalendar:
-    return FixtureCalendar(
+def _scheduled(count: int) -> GameCalendar:
+    return GameCalendar(
         next_kickoff=datetime.now(UTC) + timedelta(days=3) if count else None,
         kickoffs_in_horizon=count,
     )
@@ -89,9 +89,9 @@ class TestFetchAndUpsertFailures:
         past = [_record("Premier League")]
         fetcher = _fetcher(past=past, upcoming_error=EspnUpcomingFetchError("eng.1"))
 
-        with patch.object(fetch_espn_fixtures, "EspnFixtureFetcher", return_value=fetcher):
+        with patch.object(fetch_espn_games, "EspnGameFetcher", return_value=fetcher):
             with pytest.raises(EspnUpcomingFetchError):
-                await fetch_espn_fixtures._fetch_and_upsert(2026)
+                await fetch_espn_games._fetch_and_upsert(2026)
 
         upsert.assert_awaited_once_with(past)
 
@@ -101,13 +101,13 @@ class TestFetchAndUpsertFailures:
     ) -> None:
         upcoming = [_record("Premier League")]
         fetcher = _fetcher(
-            upcoming=UpcomingFixtures(records=upcoming, failed_leagues=[]),
+            upcoming=UpcomingGames(records=upcoming, failed_leagues=[]),
             season_error=EspnSeasonFetchError("all teams"),
         )
 
-        with patch.object(fetch_espn_fixtures, "EspnFixtureFetcher", return_value=fetcher):
+        with patch.object(fetch_espn_games, "EspnGameFetcher", return_value=fetcher):
             with pytest.raises(EspnSeasonFetchError):
-                await fetch_espn_fixtures._fetch_and_upsert(2026)
+                await fetch_espn_games._fetch_and_upsert(2026)
 
         upsert.assert_awaited_once_with(upcoming)
 
@@ -117,11 +117,11 @@ class TestFetchAndUpsertFailures:
     ) -> None:
         calendar.return_value = _scheduled(10)
         cup = _record("League Cup")
-        fetcher = _fetcher(upcoming=UpcomingFixtures(records=[cup], failed_leagues=[]))
+        fetcher = _fetcher(upcoming=UpcomingGames(records=[cup], failed_leagues=[]))
 
-        with patch.object(fetch_espn_fixtures, "EspnFixtureFetcher", return_value=fetcher):
+        with patch.object(fetch_espn_games, "EspnGameFetcher", return_value=fetcher):
             with pytest.raises(EmptyCollectionError, match="no upcoming Premier League"):
-                await fetch_espn_fixtures._fetch_and_upsert(2026)
+                await fetch_espn_games._fetch_and_upsert(2026)
 
         upsert.assert_awaited_once_with([cup])
 
@@ -129,21 +129,21 @@ class TestFetchAndUpsertFailures:
     async def test_empty_without_scheduled_events_passes(self, calendar: AsyncMock) -> None:
         calendar.return_value = _scheduled(0)
 
-        with patch.object(fetch_espn_fixtures, "EspnFixtureFetcher", return_value=_fetcher()):
-            assert await fetch_espn_fixtures._fetch_and_upsert(2026) == (0, 0, 0)
+        with patch.object(fetch_espn_games, "EspnGameFetcher", return_value=_fetcher()):
+            assert await fetch_espn_games._fetch_and_upsert(2026) == (0, 0, 0)
 
     @pytest.mark.asyncio
     async def test_cup_failures_warn_and_continue(
         self, calendar: AsyncMock, warning: AsyncMock
     ) -> None:
-        upcoming = UpcomingFixtures(
+        upcoming = UpcomingGames(
             records=[_record("Premier League")], failed_leagues=["eng.fa", "uefa.europa"]
         )
 
         with patch.object(
-            fetch_espn_fixtures, "EspnFixtureFetcher", return_value=_fetcher(upcoming=upcoming)
+            fetch_espn_games, "EspnGameFetcher", return_value=_fetcher(upcoming=upcoming)
         ):
-            assert await fetch_espn_fixtures._fetch_and_upsert(2026) == (0, 1, 1)
+            assert await fetch_espn_games._fetch_and_upsert(2026) == (0, 1, 1)
 
         warning.assert_awaited_once()
         assert "eng.fa, uefa.europa" in warning.await_args.args[1]
@@ -156,13 +156,13 @@ class TestNbaSchedule:
         with patch("odds_lambda.espn_nba_schedule.sync_upcoming", new_callable=AsyncMock) as mock:
             yield mock
 
-    async def test_nba_run_syncs_the_schedule_not_the_epl_fixtures(self, sync: AsyncMock) -> None:
+    async def test_nba_run_syncs_the_schedule_not_the_epl_games(self, sync: AsyncMock) -> None:
         from odds_lambda.espn_nba_schedule import SyncReport
         from odds_lambda.scheduling.jobs import JobContext
 
         sync.return_value = SyncReport(games=5, created=2, matched=3)
-        with patch.object(fetch_espn_fixtures, "_fetch_and_upsert", new_callable=AsyncMock) as epl:
-            await fetch_espn_fixtures.main(JobContext(sport="basketball_nba"))
+        with patch.object(fetch_espn_games, "_fetch_and_upsert", new_callable=AsyncMock) as epl:
+            await fetch_espn_games.main(JobContext(sport="basketball_nba"))
 
         sync.assert_awaited_once()
         epl.assert_not_awaited()
@@ -174,13 +174,13 @@ class TestNbaSchedule:
         sync.return_value = SyncReport(games=1, errors=["X at Y: boom"])
 
         with pytest.raises(RuntimeError, match="1 NBA games failed"):
-            await fetch_espn_fixtures.main(JobContext(sport="basketball_nba"))
+            await fetch_espn_games.main(JobContext(sport="basketball_nba"))
 
     async def test_other_sports_are_rejected(self) -> None:
         from odds_lambda.scheduling.jobs import JobContext
 
         with pytest.raises(ValueError, match="supports"):
-            await fetch_espn_fixtures.main(JobContext(sport="baseball_mlb"))
+            await fetch_espn_games.main(JobContext(sport="baseball_mlb"))
 
 
 class TestFootballSchedule:
@@ -193,18 +193,18 @@ class TestFootballSchedule:
 
     @pytest.fixture
     def alert(self) -> Iterator[AsyncMock]:
-        with patch.object(fetch_espn_fixtures, "alert_dropped_games", new_callable=AsyncMock) as m:
+        with patch.object(fetch_espn_games, "alert_dropped_games", new_callable=AsyncMock) as m:
             yield m
 
-    async def test_a_league_run_syncs_that_leagues_scoreboard_not_the_epl_fixtures(
+    async def test_a_league_run_syncs_that_leagues_scoreboard_not_the_epl_games(
         self, sync: AsyncMock, alert: AsyncMock
     ) -> None:
         from odds_lambda.espn_football_schedule import LEAGUES, SyncReport
         from odds_lambda.scheduling.jobs import JobContext
 
         sync.return_value = SyncReport(games=20, created=20)
-        with patch.object(fetch_espn_fixtures, "_fetch_and_upsert", new_callable=AsyncMock) as epl:
-            await fetch_espn_fixtures.main(JobContext(sport="soccer_spain_la_liga"))
+        with patch.object(fetch_espn_games, "_fetch_and_upsert", new_callable=AsyncMock) as epl:
+            await fetch_espn_games.main(JobContext(sport="soccer_spain_la_liga"))
 
         assert sync.await_args.args[0] is LEAGUES["soccer_spain_la_liga"]
         epl.assert_not_awaited()
@@ -223,11 +223,9 @@ class TestFootballSchedule:
         )
         sync.return_value = SyncReport(games=11, dropped=[dropped])
 
-        await fetch_espn_fixtures.main(JobContext(sport="soccer_efl_champ"))
+        await fetch_espn_games.main(JobContext(sport="soccer_efl_champ"))
 
-        alert.assert_awaited_once_with(
-            "fetch-espn-fixtures-championship", [dropped], stored="event"
-        )
+        alert.assert_awaited_once_with("fetch-espn-games-championship", [dropped], stored="event")
 
     async def test_failed_matches_fail_the_run(self, sync: AsyncMock, alert: AsyncMock) -> None:
         from odds_lambda.espn_football_schedule import SyncReport
@@ -236,7 +234,7 @@ class TestFootballSchedule:
         sync.return_value = SyncReport(games=1, errors=["X at Y: boom"])
 
         with pytest.raises(RuntimeError, match="1 Serie A matches failed"):
-            await fetch_espn_fixtures.main(JobContext(sport="soccer_italy_serie_a"))
+            await fetch_espn_games.main(JobContext(sport="soccer_italy_serie_a"))
 
     @pytest.mark.parametrize(("in_horizon", "warned"), [(3, True), (0, False)])
     async def test_an_empty_listing_warns_only_when_events_are_scheduled(
@@ -246,15 +244,15 @@ class TestFootballSchedule:
         from odds_lambda.scheduling.jobs import JobContext
 
         sync.return_value = SyncReport()
-        calendar = FixtureCalendar(next_kickoff=None, kickoffs_in_horizon=in_horizon)
+        calendar = GameCalendar(next_kickoff=None, kickoffs_in_horizon=in_horizon)
         with (
             patch.object(
-                fetch_espn_fixtures, "event_calendar", new_callable=AsyncMock, return_value=calendar
+                fetch_espn_games, "event_calendar", new_callable=AsyncMock, return_value=calendar
             ),
-            patch.object(fetch_espn_fixtures, "async_session_maker", MagicMock()),
-            patch.object(fetch_espn_fixtures, "send_job_warning", new_callable=AsyncMock) as warn,
+            patch.object(fetch_espn_games, "async_session_maker", MagicMock()),
+            patch.object(fetch_espn_games, "send_job_warning", new_callable=AsyncMock) as warn,
         ):
-            await fetch_espn_fixtures.main(JobContext(sport="soccer_france_ligue_one"))
+            await fetch_espn_games.main(JobContext(sport="soccer_france_ligue_one"))
 
         assert warn.await_count == int(warned)
 
@@ -262,14 +260,14 @@ class TestFootballSchedule:
 class TestNbaEmptyListing:
     @pytest.fixture
     def warn(self) -> Iterator[AsyncMock]:
-        with patch.object(fetch_espn_fixtures, "send_job_warning", new_callable=AsyncMock) as mock:
+        with patch.object(fetch_espn_games, "send_job_warning", new_callable=AsyncMock) as mock:
             yield mock
 
     async def _run(self, in_horizon: int) -> None:
         from odds_lambda.espn_nba_schedule import SyncReport
         from odds_lambda.scheduling.jobs import JobContext
 
-        calendar = FixtureCalendar(next_kickoff=None, kickoffs_in_horizon=in_horizon)
+        calendar = GameCalendar(next_kickoff=None, kickoffs_in_horizon=in_horizon)
         with (
             patch(
                 "odds_lambda.espn_nba_schedule.sync_upcoming",
@@ -277,11 +275,11 @@ class TestNbaEmptyListing:
                 return_value=SyncReport(),
             ),
             patch.object(
-                fetch_espn_fixtures, "event_calendar", new_callable=AsyncMock, return_value=calendar
+                fetch_espn_games, "event_calendar", new_callable=AsyncMock, return_value=calendar
             ),
-            patch.object(fetch_espn_fixtures, "async_session_maker", MagicMock()),
+            patch.object(fetch_espn_games, "async_session_maker", MagicMock()),
         ):
-            await fetch_espn_fixtures.main(JobContext(sport="basketball_nba"))
+            await fetch_espn_games.main(JobContext(sport="basketball_nba"))
 
     async def test_warns_when_events_are_scheduled(self, warn: AsyncMock) -> None:
         await self._run(in_horizon=3)
