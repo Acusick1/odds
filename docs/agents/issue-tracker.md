@@ -4,7 +4,7 @@ Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all o
 
 ## Conventions
 
-- **Create an issue**: `gh issue create --project "Personal" --title "..." --body "..."`. Use a heredoc for multi-line bodies. `--project` puts the issue on the `Personal` board; never omit it.
+- **Create an issue**: `gh issue create --title "..." --body "..."`, then `gh project item-add 2 --owner Acusick1 --url <issue-url>` to put it on the `Personal` board; never skip the second step. Use a heredoc for multi-line bodies. `gh issue create --project` fails with "Projects (classic) is being deprecated" (`gh` looks the board up through the retired classic API).
 - **Find unclaimed work**: `gh issue list --state open --search "no:assignee"`.
 - **Start work on an issue**:
   1. Confirm the issue is unassigned: `gh issue view <number> --json assignees`. If it is assigned and you are not resuming your own stopped work, stop and ask: another session may hold it, since sessions share one GitHub account.
