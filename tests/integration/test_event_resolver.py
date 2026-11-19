@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from odds_core.league_teams import UnknownTeam
 from odds_core.models import (
     DataQualityLog,
     Event,
@@ -13,7 +14,8 @@ from odds_core.models import (
     HealthCheckAcknowledgement,
 )
 from odds_core.vocabulary import HealthCheck, Source
-from odds_lambda.mlb_game_resolver import ResolutionRule, ResolvedGame
+from odds_lambda.live_events import DroppedGame, LiveEventFinder, SkipReason
+from odds_lambda.mlb_game_resolver import GameRow, ResolutionRule, ResolvedGame
 from odds_lambda.storage import event_resolver
 from odds_lambda.storage.event_resolver import (
     AmbiguousHistoricalMatch,
@@ -29,8 +31,10 @@ from odds_lambda.storage.event_resolver import (
     attach_events,
     attach_listing,
     event_lock_key,
+    find_event,
     resolve_event,
     resolve_events,
+    resolve_unscheduled_mlb_event,
 )
 from odds_lambda.storage.event_unmatched import clear_unmatched, mark_unmatched
 from sqlalchemy import func, select, text
@@ -205,6 +209,77 @@ class TestResolveEvent:
         resolved = await resolve_event(pglite_async_session, epl_listing())
 
         assert resolved.event.id == first.id
+
+
+class TestUnknownTeam:
+    @pytest.mark.asyncio
+    async def test_creates_no_event_for_a_name_outside_the_league(
+        self, pglite_async_session
+    ) -> None:
+        listing = ListedGame(
+            source=Source.ODDSPORTAL,
+            sport_key="soccer_spain_la_liga",
+            sport_title="La Liga",
+            home_team="Ath Bilbao FC",
+            away_team="Sevilla",
+            commence_time=TWIN_KICKOFF,
+            external_id="op-1",
+        )
+
+        with pytest.raises(UnknownTeam, match=r"soccer_spain_la_liga: team 'Ath Bilbao FC'"):
+            await resolve_event(pglite_async_session, listing)
+
+        assert await pglite_async_session.scalar(select(func.count()).select_from(Event)) == 0
+
+    @pytest.mark.asyncio
+    async def test_matches_no_event_stored_under_a_name_outside_the_league(
+        self, pglite_async_session
+    ) -> None:
+        pglite_async_session.add(make_epl_event(12, home_team="Arsenal FC"))
+        await pglite_async_session.flush()
+        listing = ListedGame(
+            source=Source.BETFAIR,
+            sport_key="soccer_epl",
+            sport_title="EPL",
+            home_team="Arsenal FC",
+            away_team="Chelsea",
+            commence_time=TWIN_KICKOFF,
+            external_id="bf-1",
+        )
+
+        with pytest.raises(UnknownTeam):
+            await attach_listing(pglite_async_session, listing)
+        with pytest.raises(UnknownTeam):
+            await find_event(pglite_async_session, listing)
+        with pytest.raises(UnknownTeam):
+            await resolve_event(pglite_async_session, listing)
+
+    @pytest.mark.asyncio
+    async def test_an_unscheduled_mlb_listing_is_refused(self, pglite_async_session) -> None:
+        with pytest.raises(UnknownTeam, match="baseball_mlb"):
+            await resolve_unscheduled_mlb_event(
+                pglite_async_session, Source.BETFAIR, "NY Yanks", RED_SOX, GAME_1_START, None, None
+            )
+
+    @pytest.mark.asyncio
+    async def test_a_live_run_drops_the_game_as_unknown_team(
+        self, pglite_async_session, stored_epl_event
+    ) -> None:
+        finder = LiveEventFinder("soccer_epl", "EPL", {})
+        game = GameRow("Arsenal FC", "Chelsea", TWIN_KICKOFF)
+
+        resolved = await finder.resolve(
+            pglite_async_session, game, Source.BETFAIR, "bf-1", stale_after=None
+        )
+        attached = await finder.attach_historical(
+            pglite_async_session, game, Source.BETFAIR, "bf-1"
+        )
+
+        for dropped in (resolved, attached):
+            assert isinstance(dropped, DroppedGame)
+            assert dropped.reason is SkipReason.UNKNOWN_TEAM
+            assert "soccer_epl: team 'Arsenal FC'" in dropped.detail
+        assert await external_ids(pglite_async_session, stored_epl_event) == {}
 
 
 class TestListedStartMovesTheEvent:
@@ -727,15 +802,17 @@ class TestHistoricalWindow:
         assert count.scalar_one() == 2
 
     @pytest.mark.asyncio
-    async def test_is_scoped_to_the_sport(self, pglite_async_session, stored_epl_event) -> None:
-        game = historical_listing()
+    async def test_is_scoped_to_the_sport(self, pglite_async_session) -> None:
+        # Relegated EPL clubs are Championship clubs too, so one pair can be in both leagues.
+        pglite_async_session.add(make_epl_event(12, home_team="Burnley", away_team="Hull"))
+        await pglite_async_session.flush()
         other_sport = ListedGame(
-            source=game.source,
-            sport_key="basketball_nba",
-            sport_title="NBA",
-            home_team=game.home_team,
-            away_team=game.away_team,
-            commence_time=game.commence_time,
+            source=Source.ODDSPORTAL,
+            sport_key="soccer_efl_champ",
+            sport_title="Championship",
+            home_team="Burnley",
+            away_team="Hull",
+            commence_time=TWIN_KICKOFF,
             match_window=MatchWindow.HISTORICAL,
         )
 

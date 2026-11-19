@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from re import Pattern, compile, escape
 from typing import Any, Literal
 
+from odds_core.league_teams import UnknownTeam, league_team
 from odds_core.sports import SportKey
-from odds_core.team import normalize_team_name
 
 from odds_lambda.polymarket_matching import NBA_ABBREV_MAP
 
@@ -17,9 +17,13 @@ Side = Literal["home", "draw", "away"]
 _CLUB_SUFFIX = compile(r"\s+A?FC$")
 
 
-def epl_team_name(team: Mapping[str, Any]) -> str:
-    """The events-table name of a Polymarket EPL team: no trailing FC or AFC."""
-    return normalize_team_name(_CLUB_SUFFIX.sub("", team["name"]))
+def epl_team_name(team: Mapping[str, Any]) -> str | None:
+    """The events-table name of a Polymarket EPL team, without its trailing FC or AFC; ``None``
+    for a name outside the league's canonical teams, whose match is dropped."""
+    try:
+        return league_team("soccer_epl", _CLUB_SUFFIX.sub("", team["name"]))
+    except UnknownTeam:
+        return None
 
 
 def nba_team_name(team: Mapping[str, Any]) -> str | None:

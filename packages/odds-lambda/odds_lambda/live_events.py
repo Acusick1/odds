@@ -16,6 +16,7 @@ from typing import Any
 import structlog
 from odds_core.alerts import send_recorded_alert
 from odds_core.config import get_settings
+from odds_core.league_teams import UnknownTeam
 from odds_core.team import normalize_team_name
 from odds_core.vocabulary import Source
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -68,7 +69,8 @@ class SkipReason(StrEnum):
     ID_REFUSED = "id_refused"
     # Listed already under way, at its actual start, and matching no event.
     UNDER_WAY = "under_way"
-    # A schedule lists a team the sport's roster does not name, so its event could not be matched.
+    # A team outside the league's canonical teams (``odds_core.league_teams``): its event is
+    # neither created nor matched.
     UNKNOWN_TEAM = "unknown_team"
 
 
@@ -183,7 +185,8 @@ class LiveEventFinder:
         with ``stale_after`` ``None`` a game creates an event however late.
 
         Without the MLB schedule a game attaches only to the one event of its pair within ±2 h
-        and never creates one, since a new event could not carry its ``gamePk``. Flushes; the
+        and never creates one, since a new event could not carry its ``gamePk``. A game naming a
+        team outside the league's is dropped as ``SkipReason.UNKNOWN_TEAM``. Flushes; the
         caller commits.
 
         Raises:
@@ -191,19 +194,22 @@ class LiveEventFinder:
                 before ``now``.
         """
         now = now or datetime.now(UTC)
-        mlb_game = await self._mlb_game(session, game, source, external_id)
-        if isinstance(mlb_game, (ResolvedEvent, DroppedGame)):
-            return mlb_game
-        return await resolve_event(
-            session,
-            self._listed(
-                game,
-                source,
-                external_id,
-                mlb_game,
-                earliest_created_start=None if stale_after is None else now - stale_after,
-            ),
-        )
+        try:
+            mlb_game = await self._mlb_game(session, game, source, external_id)
+            if isinstance(mlb_game, (ResolvedEvent, DroppedGame)):
+                return mlb_game
+            return await resolve_event(
+                session,
+                self._listed(
+                    game,
+                    source,
+                    external_id,
+                    mlb_game,
+                    earliest_created_start=None if stale_after is None else now - stale_after,
+                ),
+            )
+        except UnknownTeam as e:
+            return DroppedGame(game, SkipReason.UNKNOWN_TEAM, str(e))
 
     async def attach_historical(
         self, session: AsyncSession, game: GameRow, source: Source, external_id: str | None
@@ -216,16 +222,20 @@ class LiveEventFinder:
         An MLB game is its ``gamePk``'s event. Any other game is the event of its teams within
         ±2 h of the listed start, never found by the source's id, so a game listed at a kick-off
         its event no longer has (before a postponement) attaches to nothing, whatever the order
-        of the calls that listed it. Flushes; the caller commits.
+        of the calls that listed it. A game naming a team outside the league's is dropped as
+        ``SkipReason.UNKNOWN_TEAM``. Flushes; the caller commits.
         """
-        mlb_game = await self._mlb_game(session, game, source, external_id)
-        if isinstance(mlb_game, (ResolvedEvent, DroppedGame)):
-            return mlb_game
-        found = await attach_listing(
-            session,
-            self._listed(game, source, external_id, mlb_game),
-            by_listed_start=mlb_game is None,
-        )
+        try:
+            mlb_game = await self._mlb_game(session, game, source, external_id)
+            if isinstance(mlb_game, (ResolvedEvent, DroppedGame)):
+                return mlb_game
+            found = await attach_listing(
+                session,
+                self._listed(game, source, external_id, mlb_game),
+                by_listed_start=mlb_game is None,
+            )
+        except UnknownTeam as e:
+            return DroppedGame(game, SkipReason.UNKNOWN_TEAM, str(e))
         if isinstance(found, RefusedId):
             return DroppedGame(game, SkipReason.ID_REFUSED, describe_refusal(found))
         return found or DroppedGame(game, SkipReason.NO_EVENT)

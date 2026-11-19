@@ -7,22 +7,8 @@ Passthrough for names that are already canonical.
 
 from __future__ import annotations
 
-# Pipeline canonical EPL names (from The Odds API / events table):
-#   Arsenal, Aston Villa, Bournemouth, Brentford, Brighton, Burnley, Cardiff,
-#   Chelsea, Coventry, Crystal Palace, Everton, Fulham, Huddersfield, Hull, Ipswich,
-#   Leeds, Leicester, Liverpool, Luton, Manchester City, Manchester Utd,
-#   Middlesbrough, Newcastle, Norwich, Nottingham, Sheffield Utd, Southampton,
-#   Stoke, Sunderland, Swansea, Tottenham, Watford, West Brom, West Ham, Wolves
-#
-# Pipeline canonical MLB names (from The Odds API / events table):
-#   Arizona Diamondbacks, Athletics, Atlanta Braves, Baltimore Orioles,
-#   Boston Red Sox, Chicago Cubs, Chicago White Sox, Cincinnati Reds,
-#   Cleveland Guardians, Colorado Rockies, Detroit Tigers, Houston Astros,
-#   Kansas City Royals, Los Angeles Angels, Los Angeles Dodgers, Miami Marlins,
-#   Milwaukee Brewers, Minnesota Twins, New York Mets, New York Yankees,
-#   Philadelphia Phillies, Pittsburgh Pirates, San Diego Padres,
-#   San Francisco Giants, Seattle Mariners, St.Louis Cardinals, Tampa Bay Rays,
-#   Texas Rangers, Toronto Blue Jays, Washington Nationals.
+# Each league's canonical names are listed in odds_core.league_teams.LEAGUE_TEAMS. EPL and
+# MLB names are The Odds API's.
 #
 # Pipeline canonical names of the other football leagues are The Odds API's spellings
 # ("Atlético Madrid", "Borussia Monchengladbach"), except that a club with an EPL canonical
@@ -32,15 +18,14 @@ from __future__ import annotations
 # OddsPortal spelling ("Bolton", "Schalke"), or in La Liga ESPN's ("Racing Santander"). ESPN's
 # and Betfair's spellings of every club in the 2026-27 seasons are aliases too.
 #
-# Pipeline canonical NBA names are The Odds API's full names ("Boston Celtics"); the
-# 30 are the values of odds_lambda.polymarket_matching.NBA_ABBREV_MAP. OddsPortal and
+# Pipeline canonical NBA names are The Odds API's full names ("Boston Celtics"). OddsPortal and
 # Betfair already use them, so only the "LA" spellings of the two Los Angeles
 # teams need an alias. A bare nickname ("Wolves") is not an alias here: this map is
 # shared across sports and "Wolves" is the canonical EPL name.
 
 # Alias -> canonical. Keys are lowercased for case-insensitive lookup.
 # Cross-sport aliases share one map; lowercased keys do not collide between
-# the canonical sets above.
+# the leagues' canonical sets.
 _TEAM_ALIASES: dict[str, str] = {
     # ---- EPL: OddsPortal / football-data.co.uk / ESPN / FBref / Betfair variants
     "afc bournemouth": "Bournemouth",
@@ -116,6 +101,7 @@ _TEAM_ALIASES: dict[str, str] = {
     "malaga": "Málaga",
     "santander": "Racing Santander",
     # ---- Serie A
+    "ac monza": "Monza",
     "atalanta": "Atalanta BC",
     "inter": "Inter Milan",
     "milan": "AC Milan",

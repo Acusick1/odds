@@ -17,6 +17,7 @@ sources:
   - odds_lambda.jobs.fetch_espn_fixtures._sync_football_schedule
   - odds_lambda.espn_fixture_fetcher.EspnFixtureFetcher.fetch_month_scoreboard_json
   - odds_cli.commands.events.sync_football_schedule
+  - odds_core.league_teams.league_team
 mentions:
   - odds_lambda.live_events.alert_dropped_games
 status: stable
@@ -28,7 +29,7 @@ OddsPortal and Betfair list only events that already have prices, so a league wi
 
 ## Leagues
 
-A league is one `odds_lambda.espn_football_schedule.FootballLeague` in `odds_lambda.espn_football_schedule.LEAGUES`: its sport key, title, ESPN slug and `clubs`, the canonical names of the clubs in the league this season. Adding a league is one entry there, its aliases, and the steps of [add a league](howto-add-sport.md).
+A league is one `odds_lambda.espn_football_schedule.FootballLeague` in `odds_lambda.espn_football_schedule.LEAGUES`: its sport key, title and ESPN slug. Its clubs are its canonical teams in `odds_core.league_teams.LEAGUE_TEAMS`, the list the [event resolver](../storage/event-resolver.md#canonical-teams) refuses any other name by. Adding a league is one entry there, its teams and aliases, and the steps of [add a league](howto-add-sport.md).
 
 ## The job
 
@@ -40,7 +41,7 @@ A league is one `odds_lambda.espn_football_schedule.FootballLeague` in `odds_lam
 
 ## Dropped games
 
-`odds_lambda.espn_football_schedule.parse_scoreboard` drops a game with a team whose normalised name is not in the league's `clubs`: a promoted club or a spelling with no alias (`odds_core.team`), which would otherwise store an event under a name OddsPortal and Betfair do not use and split the event in two. Each is a `odds_lambda.live_events.DroppedGame` with reason `odds_lambda.live_events.SkipReason.UNKNOWN_TEAM`, and the job raises the dropped-games alert for it (`odds_lambda.live_events.alert_dropped_games`, key `games_dropped:fetch-espn-fixtures-<suffix>`), repeating at the stale-reminder interval until the club is added to `clubs` and its spellings in every source to the alias map ([add a sport](howto-add-sport.md)). Games with no two competitors, or a scheduled game with an invalid start, are skipped silently.
+`odds_lambda.espn_football_schedule.parse_scoreboard` drops a game with a team outside the league's canonical teams (`odds_core.league_teams.league_team`): a promoted club or a spelling with no alias (`odds_core.team`), which would otherwise store an event under a name OddsPortal and Betfair do not use and split the event in two. Each is a `odds_lambda.live_events.DroppedGame` with reason `odds_lambda.live_events.SkipReason.UNKNOWN_TEAM`, its detail naming the league and the raw name, and the job raises the dropped-games alert for it (`odds_lambda.live_events.alert_dropped_games`, key `games_dropped:fetch-espn-fixtures-<suffix>`), repeating at the stale-reminder interval until the club is added to `odds_core.league_teams.LEAGUE_TEAMS` and its spellings in every source to the alias map ([add a sport](howto-add-sport.md)). Games with no two competitors, or a scheduled game with an invalid start, are skipped silently.
 
 A run fails, alerting, when any event failed after the others are stored, and warns when ESPN lists no event while events are scheduled in the next `odds_lambda.espn_football_schedule.UPCOMING_DAYS` days; the close season is silent.
 
