@@ -14,8 +14,9 @@ import pytest
 import structlog
 import yaml
 from odds_analytics.candidate_parity import ParityStatus, check_parity
-from odds_core.bet_models import Bet, CandidateDecision, CandidateRegistryCheck
+from odds_core.bet_models import Bet, CandidateDecision
 from odds_core.bookmakers import BOOK_SETS, BookSet
+from odds_core.candidate_registry_models import CandidateRegistryCheck
 from odds_core.candidates import RuleCandidate
 from odds_core.models import Event, EventStatus
 from odds_lambda.betting import get_portfolio_summary, place_bet, settle_bets

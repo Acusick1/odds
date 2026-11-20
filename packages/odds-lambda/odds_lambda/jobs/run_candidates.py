@@ -16,8 +16,9 @@ from enum import StrEnum
 
 import structlog
 from odds_core.alerts import job_alert_context, send_recorded_alert, stale_reminder_interval
-from odds_core.bet_models import Bet, CandidateDecision, CandidateRegistryCheck
+from odds_core.bet_models import Bet, CandidateDecision
 from odds_core.bookmakers import BOOK_SETS
+from odds_core.candidate_registry_models import CandidateRegistryCheck
 from odds_core.candidates import (
     Candidate,
     CandidateStatus,

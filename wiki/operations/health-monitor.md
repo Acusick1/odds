@@ -33,7 +33,7 @@ sources:
   - odds_lambda.health_monitor.HealthMonitor.check_schedule_chains
   - odds_lambda.health_monitor.HealthMonitor.check_candidate_registry
   - odds_lambda.candidate_registry_checks
-  - odds_core.bet_models.CandidateRegistryCheck
+  - odds_core.candidate_registry_models.CandidateRegistryCheck
   - odds_lambda.health_monitor.HealthMonitor.check_persistent_unmatched_outcomes
   - odds_lambda.health_monitor.PersistentUnmatchedOutcome
   - odds_lambda.health_monitor.UNMATCHED_LOOKBACK
@@ -143,7 +143,7 @@ The alert fires after kick-off, when the close cannot be collected. It is a cove
 
 ## Candidate check
 
-Each [run-candidates](../evaluation/run-candidates-job.md#one-run) run replaces its league's row of `odds_core.bet_models.CandidateRegistryCheck` (table `candidate_registry_checks`, one row per league): the run time, the registry error when the registry could not be read, and the reason each skipped candidate is invalid, by name. `odds_lambda.health_monitor.HealthMonitor.check_candidate_registry` reads the rows of the leagues the job runs for (`odds_lambda.scheduling.jobs.resolve_target_sports`), only when `run-candidates` is in `odds_core.config.SchedulerConfig.bootstrap_jobs`, and reports each row with a registry error or an invalid candidate. A league whose latest run was clean reports nothing, so fixing a candidate clears the issue at the league's next run, at most `odds_lambda.jobs.run_candidates.MAX_WAIT` (30 min) later.
+Each [run-candidates](../evaluation/run-candidates-job.md#one-run) run replaces its league's row of `odds_core.candidate_registry_models.CandidateRegistryCheck` (table `candidate_registry_checks`, one row per league): the run time, the registry error when the registry could not be read, and the reason each skipped candidate is invalid, by name. `odds_lambda.health_monitor.HealthMonitor.check_candidate_registry` reads the rows of the leagues the job runs for (`odds_lambda.scheduling.jobs.resolve_target_sports`), only when `run-candidates` is in `odds_core.config.SchedulerConfig.bootstrap_jobs`, and reports each row with a registry error or an invalid candidate. A league whose latest run was clean reports nothing, so fixing a candidate clears the issue at the league's next run, at most `odds_lambda.jobs.run_candidates.MAX_WAIT` (30 min) later.
 
 The warning is the one the run itself sends, with the same type (`odds_lambda.candidate_registry_checks.candidates_alert_type`): `candidates_invalid:registry` for a registry error, else `candidates_invalid:` and the skipped candidates' names, sorted and comma-separated. The run and the health check therefore share one alert per set of skipped candidates, reminded every `stale_reminder_minutes`, and a run whose alert could not be sent is alerted again by the next health check. The message is cut at `odds_lambda.candidate_registry_checks.MAX_MESSAGE_CHARS`, below Discord's limit, after the names.
 

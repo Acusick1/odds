@@ -11,6 +11,7 @@ from odds_core.candidate_backtest_models import (  # noqa: F401
     CandidateBacktest,
     CandidateBacktestBet,
 )
+from odds_core.candidate_registry_models import CandidateRegistryCheck  # noqa: F401
 from odds_core.config import get_settings
 from odds_core.epl_data_models import EspnFixture, EspnLineup, FplAvailability  # noqa: F401
 from odds_core.game_log_models import NbaTeamGameLog  # noqa: F401

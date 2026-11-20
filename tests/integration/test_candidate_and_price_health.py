@@ -8,7 +8,7 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from odds_core.bet_models import CandidateRegistryCheck
+from odds_core.candidate_registry_models import CandidateRegistryCheck
 from odds_core.config import Settings, get_settings
 from odds_core.models import Event
 from odds_core.vocabulary import Source, TimeBasis

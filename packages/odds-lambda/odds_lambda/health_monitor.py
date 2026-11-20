@@ -19,7 +19,8 @@ from typing import NamedTuple, Protocol
 
 import structlog
 from odds_core.alerts import job_outage_alerted_at, send_recorded_alert
-from odds_core.bet_models import Bet, CandidateRegistryCheck
+from odds_core.bet_models import Bet
+from odds_core.candidate_registry_models import CandidateRegistryCheck
 from odds_core.close import (
     CLOSES,
     LIVE_CLOSE_WINDOW,
