@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
+import structlog
 import yaml
 from odds_lambda.candidate_rules.pinning import rule_sha256
 from odds_lambda.candidate_rules.snapshot import load_snapshot, registry_snapshot
@@ -87,11 +88,13 @@ class TestRunCandidatesKeepsItsFirstRegistry:
         self, registry: Path, alert: AsyncMock
     ) -> None:
         write(registry, rule_sha256="0" * 64)
-        assert await runnable_candidates(EPL, NOW) == []
+        # Captured, so this module's logger is not cached outside a later test's capture.
+        with structlog.testing.capture_logs() as logs:
+            assert await runnable_candidates(EPL, NOW) == []
+            write(registry)
+            assert await runnable_candidates(EPL, NOW) == []
 
-        write(registry)
-
-        assert await runnable_candidates(EPL, NOW) == []
+        assert [log["event"] for log in logs] == ["candidate_invalid"] * 2
         assert [call.args[0] for call in alert.await_args_list] == [f"candidate_invalid:{NAME}"] * 2
 
 
