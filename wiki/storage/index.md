@@ -23,6 +23,7 @@ Every table is a SQLModel class in `packages/odds-core/odds_core/`; migrations a
 | `fetch_logs` | `odds_core.models.FetchLog` | [Odds API ingestion](../collection/odds-ingestion-service.md) |
 | `odds_api_snapshot_gaps` | `odds_core.backfill_models.OddsApiSnapshotGap` | [Odds API historical backfill](../collection/odds-api-backfill.md#provider-gaps) |
 | `alert_history` | `odds_core.models.AlertHistory` | [Alerts and health](../operations/alerts.md) |
+| `job_runs` | `odds_core.job_run_models.JobRun` | [Local scheduler](../scheduling/local-scheduler.md#run-records) |
 | `match_briefs` | `odds_core.match_brief_models.MatchBrief` | [Briefs](../agent/match-briefs.md) |
 | `bets` | `odds_core.bet_models.Bet` | [Bets](../agent/bets.md) |
 | `candidate_backtests` | `odds_core.candidate_backtest_models.CandidateBacktest` | [Replay backtest](../evaluation/candidate-backtest.md#stored-runs) |

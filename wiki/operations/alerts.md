@@ -45,7 +45,7 @@ On AWS, the Lambda handler also sends its own critical on any exception ([lambda
 
 ## Alert history
 
-`odds_core.models.AlertHistory` (`alert_history`) holds `alert_type`, `severity`, `message`, `sent_at`, nullable JSON `context`, with composite index `ix_alert_type_sent_at` that serves both dedup and heartbeat lookups. It is one table serving as dedup ledger and heartbeat log. Writer: `odds_core.alerts.record_to_alert_history`. Readers: `odds_core.alerts.latest_sent_at` (behind `odds_core.alerts.send_recorded_alert`), `odds_lambda.health_readers.last_heartbeats` (behind `odds_lambda.health_monitor.HealthMonitor.check_job_heartbeats` and the [web UI's status strip](odds-web.md#status-strip)), `odds_lambda.health_monitor.HealthMonitor.purge_old_heartbeats`.
+`odds_core.models.AlertHistory` (`alert_history`) holds `alert_type`, `severity`, `message`, `sent_at`, nullable JSON `context`, with composite index `ix_alert_type_sent_at` that serves both dedup and heartbeat lookups. It is one table serving as dedup ledger and heartbeat log; run durations are not in it but in `job_runs` ([run records](../scheduling/local-scheduler.md#run-records)). Writer: `odds_core.alerts.record_to_alert_history`. Readers: `odds_core.alerts.latest_sent_at` (behind `odds_core.alerts.send_recorded_alert`), `odds_lambda.health_readers.last_heartbeats` (behind `odds_lambda.health_monitor.HealthMonitor.check_job_heartbeats` and the [web UI's status strip](odds-web.md#status-strip)), `odds_lambda.health_monitor.HealthMonitor.purge_old_heartbeats`.
 
 | `alert_type` (the dedup key) | Source | Severity |
 |---|---|---|

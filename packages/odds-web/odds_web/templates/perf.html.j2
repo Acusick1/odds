@@ -1,6 +1,9 @@
 {% extends "base.html.j2" %}
 {% block title %}Performance · odds{% endblock %}
 {% block content %}
+<h2>Job durations</h2>
+<p class="sub">Each scheduled job's last {{ recent_runs }} runs: the median, 95th-percentile and latest duration, and the interval, the median time between the starts of consecutive runs. A job is amber when its p95 duration reaches {{ late_percent }}% of its interval and red at {{ stale_percent }}%. Red points are failed or timed-out runs.</p>
+{% include "_job_runs.html.j2" %}
 <h2>Slowest queries</h2>
 <p class="sub">Every role's statements in this database, from <code>pg_stat_statements</code>: the top {{ query_top }} by total and by mean execution time since the statistics were last reset.</p>
 {% include "_queries.html.j2" %}

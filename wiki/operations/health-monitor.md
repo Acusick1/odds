@@ -1,10 +1,11 @@
 ---
 type: reference
 title: Health monitor, check-health job and odds status
-description: HealthMonitor, the check-health job's six checks, heartbeat purge, its own alert path, and what odds status show, quota and events print and read.
+description: HealthMonitor, the check-health job's six checks, heartbeat and job-run purges, its own alert path, and what odds status show, quota and events print and read.
 sources:
   - odds_lambda.health_monitor.HealthMonitor
   - odds_lambda.health_monitor.HealthMonitor.purge_old_heartbeats
+  - odds_lambda.health_monitor.HealthMonitor.purge_old_job_runs
   - odds_lambda.health_monitor.HealthMonitor.check_stale_sources
   - odds_lambda.health_monitor.StaleSource
   - odds_lambda.health_monitor.HealthMonitor.check_missing_betfair_closes
@@ -68,7 +69,7 @@ status: stable
 6. `odds_lambda.health_monitor.HealthMonitor.check_schedule_chains`: dead self-scheduling chains, each its own critical `dead_schedule_chain:<job>` ([Schedule chain check](#schedule-chain-check)).
 7. `odds_lambda.health_monitor.HealthMonitor.check_unsettled_events`: per league in `odds_lambda.health_monitor.UNSETTLED_SPORTS` (the six football leagues, MLB and NBA), current-season events still SCHEDULED or LIVE more than 24 h after kick-off (`odds_lambda.storage.unsettled_events.find_unsettled_events`), one warning `unsettled_events:<sport>` naming them, repeated once a day. The season starts on 1 August for football and NBA and on 1 January for MLB (`odds_core.time.season_start`). POSTPONED and CANCELLED events are not pending, so a postponed MLB event waiting on its replay stays quiet, and neither are UNMATCHED ones, the MLB events with no game in MLB's schedule, which no results job can settle ([results jobs](../collection/results-jobs.md), [no game in the schedule](../storage/event-resolver.md#no-game-in-the-schedule)).
 
-Then `odds_lambda.health_monitor.HealthMonitor.purge_old_heartbeats` runs on every health check, and it deletes `heartbeat:%` rows older than `heartbeat_retention_days` (7) and is the only retention sweep in the system.
+Then two retention sweeps run on every health check, the only ones in the system: `odds_lambda.health_monitor.HealthMonitor.purge_old_heartbeats` deletes `heartbeat:%` rows older than `heartbeat_retention_days` (7), and `odds_lambda.health_monitor.HealthMonitor.purge_old_job_runs` deletes [run records](../scheduling/local-scheduler.md#run-records) that started more than `odds_lambda.health_monitor.JOB_RUN_RETENTION` (30 days) ago.
 
 ## Dead-man's switch
 

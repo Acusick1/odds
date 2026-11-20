@@ -15,6 +15,7 @@ from odds_core.config import get_settings
 from odds_core.epl_data_models import EspnFixture, EspnLineup, FplAvailability  # noqa: F401
 from odds_core.game_log_models import NbaTeamGameLog  # noqa: F401
 from odds_core.injury_models import InjuryReport, InjuryStatus  # noqa: F401
+from odds_core.job_run_models import JobRun  # noqa: F401
 from odds_core.match_brief_models import MatchBrief  # noqa: F401
 from odds_core.mlb_data_models import MlbProbablePitchers  # noqa: F401
 

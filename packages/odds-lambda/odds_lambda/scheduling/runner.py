@@ -9,6 +9,8 @@ from datetime import UTC, datetime, timedelta
 import structlog
 from odds_core.alerts import send_job_failure, send_outage_warning
 from odds_core.config import get_settings
+from odds_core.database import async_session_maker
+from odds_core.job_run_models import JobOutcome, JobRun
 
 from odds_lambda.scheduling import jobs
 from odds_lambda.scheduling.backends.local import LocalSchedulerBackend
@@ -96,13 +98,53 @@ async def _keep_chain_alive(backend: LocalSchedulerBackend, job_name: str, now: 
         )
 
 
+async def record_job_run(
+    job_name: str, started_at: datetime, finished_at: datetime, outcome: JobOutcome
+) -> None:
+    """Store one run of ``job_name``; a no-op under ``SCHEDULER_DRY_RUN``, like heartbeats."""
+    if get_settings().scheduler.dry_run:
+        return
+    async with async_session_maker() as session:
+        session.add(
+            JobRun(
+                job_name=job_name, started_at=started_at, finished_at=finished_at, outcome=outcome
+            )
+        )
+        await session.commit()
+
+
 async def run_scheduled_job(job_name: str, ctx: JobContext) -> None:
-    """Task function behind every local schedule; resolves the job at run time."""
+    """Task function behind every local schedule; resolves the job at run time and records
+    the run's start, finish and outcome."""
     base_name, _ = resolve_job_name(job_name)
     job = jobs.get_job_function(base_name)
-    await run_chain_job(
-        LocalSchedulerBackend(dry_run=get_settings().scheduler.dry_run),
-        job_name,
-        lambda: job(ctx),
-        timeout=JOB_TIMEOUT,
-    )
+    started_at = datetime.now(UTC)
+    finished_at = started_at
+
+    # The run ends when the job body does, before any chain recovery or alert.
+    async def run() -> None:
+        nonlocal finished_at
+        try:
+            await job(ctx)
+        finally:
+            finished_at = datetime.now(UTC)
+
+    async def record(outcome: JobOutcome) -> None:
+        await _bounded(
+            record_job_run(job_name, started_at, finished_at, outcome), "job_run_record_failed"
+        )
+
+    try:
+        await run_chain_job(
+            LocalSchedulerBackend(dry_run=get_settings().scheduler.dry_run),
+            job_name,
+            run,
+            timeout=JOB_TIMEOUT,
+        )
+    except JobTimeoutError:
+        await record(JobOutcome.TIMED_OUT)
+        raise
+    except Exception:
+        await record(JobOutcome.FAILED)
+        raise
+    await record(JobOutcome.SUCCEEDED)

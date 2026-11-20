@@ -429,6 +429,7 @@ class TestCheckScheduleChains:
                 ("check_event_identity", []),
                 ("check_unsettled_events", []),
                 ("purge_old_heartbeats", 0),
+                ("purge_old_job_runs", 0),
                 (
                     "collect_metrics",
                     HealthMetrics(
@@ -476,6 +477,7 @@ class TestQuotaAlerts:
                 ("check_event_identity", []),
                 ("check_unsettled_events", []),
                 ("purge_old_heartbeats", 0),
+                ("purge_old_job_runs", 0),
                 (
                     "collect_metrics",
                     HealthMetrics(

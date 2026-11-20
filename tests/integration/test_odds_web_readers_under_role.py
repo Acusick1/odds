@@ -20,6 +20,7 @@ from odds_core.candidate_backtest_models import (
 )
 from odds_core.candidates import AgentCandidate, CandidateStatus, RuleCandidate
 from odds_core.config import SchedulerConfig, Settings, get_settings
+from odds_core.job_run_models import JobOutcome, JobRun
 from odds_core.mlb_data_models import MlbProbablePitchers
 from odds_core.models import AlertHistory, EventStatus, FetchLog
 from odds_lambda.candidate_rules.pinning import rule_sha256
@@ -226,6 +227,14 @@ async def populated(odds_web_session: AsyncSession) -> AsyncSession:
             )
         )
         await book(session, job, NOW + timedelta(minutes=30))
+        session.add(
+            JobRun(
+                job_name=job,
+                started_at=NOW - timedelta(minutes=11),
+                finished_at=NOW - timedelta(minutes=10),
+                outcome=JobOutcome.SUCCEEDED,
+            )
+        )
     await session.commit()
     return session
 
@@ -249,6 +258,7 @@ async def fetch_every_page(session: AsyncSession, registry_dir: Path) -> dict[st
         "/fragments/closes",
         "/perf",
         "/fragments/queries",
+        "/fragments/job-runs",
         *(f"/c/{c.name}/{c.version}" for c in CANDIDATES),
     ]
     app = create_app(WebDatabase(engine, makers), registry_dir, settings=settings())
@@ -278,6 +288,7 @@ class TestEveryReaderUnderTheRole:
         assert all(c.name in coverage for c in CANDIDATES if c.kind == "rule")
         for candidate in CANDIDATES:
             assert "bet365" in pages[f"/c/{candidate.name}/{candidate.version}"]
+        assert "run-candidates-soccer_epl" in pages["/fragments/job-runs"]
 
     @pytest.mark.parametrize("table", READ_TABLES)
     async def test_a_table_the_role_cannot_read_fails_a_page(

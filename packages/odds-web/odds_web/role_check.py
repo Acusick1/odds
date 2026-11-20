@@ -34,6 +34,7 @@ READ_TABLES = (
     "mlb_probable_pitchers",
     "schedules",
     "jobs",
+    "job_runs",
 )
 PROBE_TABLE = READ_TABLES[0]
 # The functions ``odds_web.grants`` defines, through which the role reads the query statistics.

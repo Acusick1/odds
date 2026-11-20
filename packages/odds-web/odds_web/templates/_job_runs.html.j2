@@ -1,0 +1,30 @@
+{% from "_macros.html.j2" import section_state %}
+<div id="job-runs" hx-get="{{ url_path('job_runs_fragment') }}" hx-trigger="every 60s" hx-swap="outerHTML">
+{{ section_state(job_runs) }}
+{% if job_runs.value is not none %}
+<div class="scroll {{ 'stale' if job_runs.failure }}">
+<table class="job-runs">
+<thead><tr><th>Job</th><th class="r">Runs</th><th class="r">p50</th><th class="r">p95</th><th class="r">Latest</th><th class="r">Interval</th><th>Recent runs</th></tr></thead>
+<tbody>
+{% for j in job_runs.value %}
+{% set interval = j.interval_ms %}{% set fraction = j.p95_fraction %}
+<tr><td title="{{ j.job_name }}: {{ j.state }}{% if fraction is not none %}, p95 is {{ (fraction * 100) | round | int }}% of the interval{% endif %}"><span class="dot {{ j.state }}"></span> {{ j.job_name }}</td>
+<td class="r num">{{ j.runs | length }}</td>
+<td class="r num">{{ j.p50_ms | duration }}</td>
+<td class="r num">{{ j.p95_ms | duration }}</td>
+<td class="r num">{{ j.latest_ms | duration }}</td>
+<td class="r num">{{ '—' if interval is none else interval | duration }}</td>
+<td><svg width="{{ spark_width + 6 }}" height="{{ spark_height + 6 }}" role="img" aria-label="durations of the last {{ j.runs | length }} runs of {{ j.job_name }}">
+<g transform="translate(3 3)">
+{% set points = j.spark_points() %}
+{% if points | length > 1 %}<polyline class="spark {{ j.state }}" points="{% for x, y, _ in points %}{{ x }},{{ y }} {% endfor %}"/>
+{% elif points[0][2].succeeded %}<circle class="only" cx="{{ points[0][0] }}" cy="{{ points[0][1] }}" r="2.5"/>{% endif %}
+{% for x, y, run in points %}{% if not run.succeeded %}<circle class="failed" cx="{{ x }}" cy="{{ y }}" r="2.5"><title>{{ run.started_at | stamp }}: {{ run.outcome }} after {{ run.duration_ms | duration }}</title></circle>{% endif %}{% endfor %}
+</g></svg></td></tr>
+{% else %}
+<tr><td colspan="7" class="sub">no job runs recorded</td></tr>
+{% endfor %}
+</tbody></table>
+</div>
+{% endif %}
+</div>

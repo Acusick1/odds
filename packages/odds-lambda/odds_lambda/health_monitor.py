@@ -29,6 +29,7 @@ from odds_core.close import (
 )
 from odds_core.config import Settings, get_settings
 from odds_core.database import async_session_maker
+from odds_core.job_run_models import JobRun
 from odds_core.market_prices import THREE_WAY_MARKET, TOTALS_MARKET
 from odds_core.models import (
     AlertHistory,
@@ -40,7 +41,7 @@ from odds_core.models import (
 )
 from odds_core.vocabulary import HealthCheck, Market, Source
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.health_readers import (
@@ -82,6 +83,8 @@ EVENT_IDS_SHOWN = 10
 UNSETTLED_ALERT_MINUTES = 24 * 60
 GAME_PK_GRACE = timedelta(hours=24)
 GAME_PK_ALERT_INTERVAL = timedelta(hours=24)
+# How long job runs are kept before the health check purges them.
+JOB_RUN_RETENTION = timedelta(days=30)
 # The sports whose three-way market closes at the live Betfair price.
 BETFAIR_CLOSE_SPORTS: tuple[str, ...] = tuple(
     sport
@@ -676,8 +679,6 @@ class HealthMonitor:
         Returns:
             Number of rows deleted.
         """
-        from sqlalchemy import delete
-
         cutoff = datetime.now(UTC) - timedelta(days=self.settings.alerts.heartbeat_retention_days)
         result = await self.session.execute(
             delete(AlertHistory).where(
@@ -689,6 +690,16 @@ class HealthMonitor:
         if deleted:
             await self.session.commit()
             logger.info("heartbeats_purged", deleted=deleted)
+        return deleted
+
+    async def purge_old_job_runs(self) -> int:
+        """Delete job runs that started before ``JOB_RUN_RETENTION``; returns how many."""
+        cutoff = datetime.now(UTC) - JOB_RUN_RETENTION
+        result = await self.session.execute(delete(JobRun).where(JobRun.started_at < cutoff))
+        deleted = result.rowcount
+        if deleted:
+            await self.session.commit()
+            logger.info("job_runs_purged", deleted=deleted)
         return deleted
 
     async def check_system_health(self, now: datetime | None = None) -> HealthStatus:
@@ -821,8 +832,9 @@ class HealthMonitor:
                 ):
                     alerts_sent.append(chain.alert_type)
 
-            # Housekeeping: purge old heartbeat rows
+            # Housekeeping: purge old heartbeat rows and job runs
             await self.purge_old_heartbeats()
+            await self.purge_old_job_runs()
 
             overall_healthy = len(issues_detected) == 0
 
