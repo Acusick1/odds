@@ -17,8 +17,8 @@ from datetime import UTC, datetime
 
 import structlog
 from odds_core.database import async_session_maker
+from odds_core.league_teams import UnknownTeam, league_team
 from odds_core.models import EventStatus
-from odds_core.team import normalize_team_name
 from odds_core.time import season_start
 
 from odds_lambda.jobs.fetch_oddsportal import _LEAGUE_SPEC_BY_SPORT
@@ -111,24 +111,30 @@ async def process_results(
         logger.warning("results_fetch_incomplete", matches=len(fetched.matches))
     stats.matches_fetched = len(fetched.matches)
 
-    matches = [
-        FinishedMatch(
-            home_team=normalize_team_name(m.home_team),
-            away_team=normalize_team_name(m.away_team),
-            start_time=m.start_time,
-            home_score=m.home_score,
-            away_score=m.away_score,
-        )
-        for m in fetched.matches
-    ]
-    cancelled = [
-        CancelledMatch(
-            home_team=normalize_team_name(m.home_team),
-            away_team=normalize_team_name(m.away_team),
-            start_time=m.start_time,
-        )
-        for m in fetched.cancelled
-    ]
+    matches: list[FinishedMatch] = []
+    cancelled: list[CancelledMatch] = []
+    for m in (*fetched.matches, *fetched.cancelled):
+        try:
+            home, away = league_team(sport_key, m.home_team), league_team(sport_key, m.away_team)
+        except UnknownTeam as e:
+            # A result under an unknown spelling would leave its event unsettled without a word.
+            stats.errors.append(str(e))
+            logger.error("result_team_refused", error=str(e))
+            continue
+        if isinstance(m, FinishedMatch):
+            matches.append(
+                FinishedMatch(
+                    home_team=home,
+                    away_team=away,
+                    start_time=m.start_time,
+                    home_score=m.home_score,
+                    away_score=m.away_score,
+                )
+            )
+        else:
+            cancelled.append(
+                CancelledMatch(home_team=home, away_team=away, start_time=m.start_time)
+            )
     pending_by_id = {event.id: event for event in pending_events}
 
     async with async_session_maker() as session:

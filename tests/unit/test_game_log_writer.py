@@ -28,6 +28,6 @@ class TestAbbrevToCanonical:
             )
 
     def test_matches_the_polymarket_abbreviation_table(self):
-        from odds_lambda.polymarket_matching import NBA_ABBREV_MAP
+        from odds_core.league_teams import NBA_ABBREV_MAP
 
         assert set(_ABBREV_TO_CANONICAL.values()) == set(NBA_ABBREV_MAP.values())

@@ -8,7 +8,7 @@ sources:
   - odds_lambda.polymarket_sports.PolymarketSportConfig
   - odds_lambda.polymarket_sports.epl_team_name
   - odds_lambda.polymarket_sports.nba_team_name
-  - odds_lambda.polymarket_matching.NBA_ABBREV_MAP
+  - odds_core.league_teams.NBA_ABBREV_MAP
   - odds_lambda.polymarket_odds
   - odds_lambda.polymarket_odds.TIER_STEPS
   - odds_lambda.polymarket_odds.MAX_HORIZON
@@ -73,7 +73,7 @@ Polymarket's EPL and NBA event markets are stored as `odds_core.models.OddsSnaps
 | Ticker | `epl-{home}-{away}-date` | `nba-{away}-{home}-date` |
 | Market key, sides | `1x2`, home / draw / away | `h2h`, home / away |
 | Markets | three Yes/No markets, one per side | one moneyline market whose two outcomes are the teams |
-| Team names | Gamma name, minus ` FC`/` AFC`, as its canonical EPL name (`odds_core.league_teams.league_team`), none for a name outside the league's canonical teams (`odds_lambda.polymarket_sports.epl_team_name`) | the ticker abbreviation in `odds_lambda.polymarket_matching.NBA_ABBREV_MAP` (full names such as `Los Angeles Clippers`), none for an unknown abbreviation, because a nickname such as `Spurs` is ambiguous across leagues (`odds_lambda.polymarket_sports.nba_team_name`) |
+| Team names | Gamma name, minus ` FC`/` AFC`, as its canonical EPL name (`odds_core.league_teams.league_team`), none for a name outside the league's canonical teams (`odds_lambda.polymarket_sports.epl_team_name`) | the ticker abbreviation in `odds_core.league_teams.NBA_ABBREV_MAP` (full names such as `Los Angeles Clippers`), none for an unknown abbreviation, because a nickname such as `Spurs` is ambiguous across leagues (`odds_lambda.polymarket_sports.nba_team_name`) |
 
 `odds_lambda.polymarket_fetcher.PolymarketClient.get_events` fetches one Gamma page for a league (at most `odds_lambda.polymarket_fetcher.GAMMA_PAGE_SIZE`, 25, events: an NBA event nests hundreds of prop markets, about 1 MB, so a page of 100 outruns the request timeout) and `odds_lambda.polymarket_fetcher.PolymarketClient.get_all_events` pages until an empty page and keeps one event per Polymarket id, because offset paging can repeat an event when the listing shifts. Gamma keeps `active=true` on closed events, so listing closed events passes `active=None`. `ends_after` and `ends_before` bound the events' end dates (`end_date_min`, `end_date_max`; an event ends at its start time), so a listing reads only the events in range: the job lists the next seven days and the backfill everything since `--since`. The series mixes game events with prop events (corners, exact score, player props), so `odds_lambda.polymarket_odds.parse_match_event` keeps only events whose slug is `{prefix}-{home3}-{away3}-YYYY-MM-DD`. For EPL it classifies the event's markets by slug suffix (`-{home3}`, `-draw`, `-{away3}`), not by title or order, because titles differ between seasons. For NBA the event market is the one whose slug is the event's own, and its outcomes are matched to the `teams` entries by name, not by position in the ticker. An event with an unknown or missing market is skipped with a warning. Gamma's `bestBid` and `bestAsk` of an NBA market quote its first outcome, so the second outcome's bid and ask are `1 - ask` and `1 - bid`. Team names come from the event's `teams` entries (`ordering` home or away) through the league's `team_name` (table above).
 

@@ -7,10 +7,8 @@ from dataclasses import dataclass
 from re import Pattern, compile, escape
 from typing import Any, Literal
 
-from odds_core.league_teams import UnknownTeam, league_team
+from odds_core.league_teams import NBA_ABBREV_MAP, UnknownTeam, league_team
 from odds_core.sports import SportKey
-
-from odds_lambda.polymarket_matching import NBA_ABBREV_MAP
 
 Side = Literal["home", "draw", "away"]
 

@@ -14,6 +14,40 @@ from types import MappingProxyType
 
 from odds_core.team import normalize_team_name
 
+# NBA ticker abbreviation (Polymarket's, PBPStats') → canonical team name
+NBA_ABBREV_MAP: dict[str, str] = {
+    "atl": "Atlanta Hawks",
+    "bos": "Boston Celtics",
+    "bkn": "Brooklyn Nets",
+    "cha": "Charlotte Hornets",
+    "chi": "Chicago Bulls",
+    "cle": "Cleveland Cavaliers",
+    "dal": "Dallas Mavericks",
+    "den": "Denver Nuggets",
+    "det": "Detroit Pistons",
+    "gsw": "Golden State Warriors",
+    "hou": "Houston Rockets",
+    "ind": "Indiana Pacers",
+    "lac": "Los Angeles Clippers",
+    "lal": "Los Angeles Lakers",
+    "mem": "Memphis Grizzlies",
+    "mia": "Miami Heat",
+    "mil": "Milwaukee Bucks",
+    "min": "Minnesota Timberwolves",
+    "nop": "New Orleans Pelicans",
+    "nyk": "New York Knicks",
+    "okc": "Oklahoma City Thunder",
+    "orl": "Orlando Magic",
+    "phi": "Philadelphia 76ers",
+    "phx": "Phoenix Suns",
+    "por": "Portland Trail Blazers",
+    "sac": "Sacramento Kings",
+    "sas": "San Antonio Spurs",
+    "tor": "Toronto Raptors",
+    "uta": "Utah Jazz",
+    "was": "Washington Wizards",
+}
+
 # Keyed by every ``odds_core.sports.SportKey``.
 LEAGUE_TEAMS: Mapping[str, frozenset[str]] = MappingProxyType(
     {
@@ -242,40 +276,7 @@ LEAGUE_TEAMS: Mapping[str, frozenset[str]] = MappingProxyType(
                 "Washington Nationals",
             }
         ),
-        "basketball_nba": frozenset(
-            {
-                "Atlanta Hawks",
-                "Boston Celtics",
-                "Brooklyn Nets",
-                "Charlotte Hornets",
-                "Chicago Bulls",
-                "Cleveland Cavaliers",
-                "Dallas Mavericks",
-                "Denver Nuggets",
-                "Detroit Pistons",
-                "Golden State Warriors",
-                "Houston Rockets",
-                "Indiana Pacers",
-                "Los Angeles Clippers",
-                "Los Angeles Lakers",
-                "Memphis Grizzlies",
-                "Miami Heat",
-                "Milwaukee Bucks",
-                "Minnesota Timberwolves",
-                "New Orleans Pelicans",
-                "New York Knicks",
-                "Oklahoma City Thunder",
-                "Orlando Magic",
-                "Philadelphia 76ers",
-                "Phoenix Suns",
-                "Portland Trail Blazers",
-                "Sacramento Kings",
-                "San Antonio Spurs",
-                "Toronto Raptors",
-                "Utah Jazz",
-                "Washington Wizards",
-            }
-        ),
+        "basketball_nba": frozenset(NBA_ABBREV_MAP.values()),
     }
 )
 

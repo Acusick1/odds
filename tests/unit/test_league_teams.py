@@ -6,7 +6,6 @@ import pytest
 from odds_core.league_teams import LEAGUE_TEAMS, UnknownTeam, league_team
 from odds_core.sports import SUPPORTED_SPORTS
 from odds_core.team import _TEAM_ALIASES, normalize_team_name
-from odds_lambda.polymarket_matching import NBA_ABBREV_MAP
 
 # A relegated EPL club plays in the Championship; no other club is in two leagues.
 SHARED_LEAGUES = {"soccer_epl", "soccer_efl_champ"}
@@ -35,9 +34,6 @@ class TestLeagueTeams:
             for team in LEAGUE_TEAMS[a] & LEAGUE_TEAMS[b]
         }
         assert overlap == set()
-
-    def test_the_nba_teams_are_the_polymarket_abbreviations_teams(self) -> None:
-        assert set(NBA_ABBREV_MAP.values()) == LEAGUE_TEAMS["basketball_nba"]
 
 
 class TestLeagueTeam:

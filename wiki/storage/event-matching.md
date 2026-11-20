@@ -9,7 +9,7 @@ sources:
   - odds_lambda.storage.event_resolver.MatchWindow
   - odds_lambda.odds_api_events
   - odds_lambda.storage.nba_event_match.match_nba_event
-  - odds_lambda.polymarket_matching.NBA_ABBREV_MAP
+  - odds_core.league_teams.NBA_ABBREV_MAP
   - odds_lambda.storage.event_resolver.attach_event
   - odds_lambda.polymarket_sports.PolymarketSportConfig
   - odds_core.team.normalize_team_name

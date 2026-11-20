@@ -29,7 +29,7 @@ OddsPortal and Betfair list only events that already have prices, so a league wi
 
 ## Leagues
 
-A league is one `odds_lambda.espn_football_schedule.FootballLeague` in `odds_lambda.espn_football_schedule.LEAGUES`: its sport key, title and ESPN slug. Its clubs are its canonical teams in `odds_core.league_teams.LEAGUE_TEAMS`, the list the [event resolver](../storage/event-resolver.md#canonical-teams) refuses any other name by. Adding a league is one entry there, its teams and aliases, and the steps of [add a league](howto-add-sport.md).
+A league is one `odds_lambda.espn_football_schedule.FootballLeague` in `odds_lambda.espn_football_schedule.LEAGUES`: its sport key, title and ESPN slug. Its clubs are its canonical teams in `odds_core.league_teams.LEAGUE_TEAMS`, of every stored season rather than only this one, the list the [event resolver](../storage/event-resolver.md#canonical-teams) refuses any other name by. Adding a league is one entry there, its teams and aliases, and the steps of [add a league](howto-add-sport.md).
 
 ## The job
 
