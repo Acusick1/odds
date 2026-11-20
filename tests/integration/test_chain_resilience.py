@@ -71,6 +71,12 @@ def _soon() -> datetime:
     return datetime.now(UTC) + timedelta(milliseconds=100)
 
 
+@pytest.fixture(autouse=True)
+def no_run_records() -> Iterator[None]:
+    with patch.object(runner, "record_job_run", new=AsyncMock()):
+        yield
+
+
 @pytest.fixture
 def probe() -> Probe:
     return Probe()

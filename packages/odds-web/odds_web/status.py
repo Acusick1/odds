@@ -32,9 +32,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 class ChipState(StrEnum):
     OK = "ok"
-    # A job past its heartbeat expectation, or a source past its staleness threshold.
+    # A job past its heartbeat expectation, a source past its staleness threshold, or a job
+    # whose run durations reach ``odds_web.perf.LATE_FRACTION`` of its interval.
     LATE = "late"
-    # Older than ``STALE_FACTOR`` times what the job or source is allowed.
+    # Older than ``STALE_FACTOR`` times what the job or source is allowed, or run durations at
+    # ``odds_web.perf.STALE_FRACTION`` of the interval.
     STALE = "stale"
     # Not enough history to judge.
     UNKNOWN = "unknown"

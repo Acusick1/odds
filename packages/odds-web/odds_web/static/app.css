@@ -114,4 +114,9 @@ h4.run { font-size: 12px; margin: 16px 0 4px; font-weight: 600; }
 table.blocks td.text { white-space: normal; }
 #killed td.text { white-space: normal; }
 table.queries td.text { white-space: normal; min-width: 32em; }
+svg .spark { fill: none; stroke: var(--muted-foreground); stroke-width: 1.5; }
+svg .spark.late { stroke: var(--status-late); }
+svg .spark.stale { stroke: var(--status-stale); }
+svg circle.failed { fill: var(--status-stale); stroke-width: 1; }
+svg circle.only { fill: var(--muted-foreground); stroke-width: 1; }
 table.queries code { font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }

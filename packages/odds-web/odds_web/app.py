@@ -43,8 +43,18 @@ from odds_web.coverage import (
 from odds_web.db import WebDatabase, web_database_from_settings
 from odds_web.decisions import DecisionHistory, load_decision_history
 from odds_web.ledger import LedgerPage, load_ledger_page
+from odds_web.perf import (
+    LATE_FRACTION,
+    RECENT_RUNS,
+    SPARK_HEIGHT,
+    SPARK_WIDTH,
+    STALE_FRACTION,
+    JobDurations,
+    QueryStats,
+    load_job_durations,
+    load_query_stats,
+)
 from odds_web.perf import TOP as QUERY_TOP
-from odds_web.perf import QueryStats, load_query_stats
 from odds_web.portfolio import AXIS_PERCENT, FOREST_WIDTH, PortfolioRow, portfolio_rows
 from odds_web.status import StatusStrip, load_status
 
@@ -144,6 +154,11 @@ def create_app(
         ago=_ago,
         close_weeks=CLOSE_WEEKS,
         query_top=QUERY_TOP,
+        recent_runs=RECENT_RUNS,
+        late_percent=round(LATE_FRACTION * 100),
+        stale_percent=round(STALE_FRACTION * 100),
+        spark_width=SPARK_WIDTH,
+        spark_height=SPARK_HEIGHT,
         bucket_minutes=BUCKET_MINUTES,
         coverage_past_days=PAST.days,
         coverage_upcoming_hours=int(UPCOMING.total_seconds() // 3600),
@@ -246,6 +261,13 @@ def create_app(
     async def queries_section() -> Section[QueryStats]:
         return Section.of(await cache.get("queries", load_queries))
 
+    async def load_job_runs() -> list[JobDurations]:
+        async with database.session_maker() as session:
+            return await load_job_durations(session)
+
+    async def job_runs_section() -> Section[list[JobDurations]]:
+        return Section.of(await cache.get("job-runs", load_job_runs))
+
     async def status_section() -> Section[StatusStrip]:
         return Section.of(await cache.get("status", load_status_strip))
 
@@ -297,10 +319,18 @@ def create_app(
             request, "_queries.html.j2", {"queries": await queries_section()}
         )
 
+    @app.get("/fragments/job-runs", response_class=HTMLResponse)
+    async def job_runs_fragment(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request, "_job_runs.html.j2", {"job_runs": await job_runs_section()}
+        )
+
     @app.get("/perf", response_class=HTMLResponse)
     async def perf(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
-            request, "perf.html.j2", {"queries": await queries_section()}
+            request,
+            "perf.html.j2",
+            {"job_runs": await job_runs_section(), "queries": await queries_section()},
         )
 
     @app.get("/", response_class=HTMLResponse)
