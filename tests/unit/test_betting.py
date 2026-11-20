@@ -48,7 +48,7 @@ class TestPlaceBetCandidate:
 
     @pytest.fixture
     def registry(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-        monkeypatch.setattr("odds_lambda.betting.candidates_dir", lambda: tmp_path)
+        monkeypatch.setattr("odds_lambda.candidate_rules.snapshot.candidates_dir", lambda: tmp_path)
         return tmp_path
 
     @staticmethod

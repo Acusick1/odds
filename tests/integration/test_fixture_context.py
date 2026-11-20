@@ -416,8 +416,7 @@ def declares_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, declares_fixture: None) -> Path:
-    monkeypatch.setattr("odds_lambda.jobs.run_candidates.candidates_dir", lambda: tmp_path)
-    monkeypatch.setattr("odds_lambda.betting.candidates_dir", lambda: tmp_path)
+    monkeypatch.setattr("odds_lambda.candidate_rules.snapshot.candidates_dir", lambda: tmp_path)
     (tmp_path / "gap.yaml").write_text(yaml.safe_dump(candidate().model_dump(mode="json")))
     assert load_candidate_file(tmp_path / "gap.yaml").name == "gap"
     return tmp_path

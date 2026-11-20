@@ -18,13 +18,7 @@ import structlog
 from odds_core.alerts import job_alert_context, send_recorded_alert, stale_reminder_interval
 from odds_core.bet_models import Bet, CandidateDecision
 from odds_core.bookmakers import BOOK_SETS
-from odds_core.candidates import (
-    Candidate,
-    CandidateStatus,
-    RuleCandidate,
-    candidates_dir,
-    load_candidates,
-)
+from odds_core.candidates import CandidateStatus, RuleCandidate
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
 from odds_core.market_prices import Outcome
@@ -44,8 +38,8 @@ from odds_lambda.candidate_rules import (
     decision_times,
     run_rule,
 )
-from odds_lambda.candidate_rules.pinning import validate_candidate_rules
 from odds_lambda.candidate_rules.registry import RULES
+from odds_lambda.candidate_rules.snapshot import registry_snapshot
 from odds_lambda.scheduling.helpers import self_schedule
 from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
 
@@ -94,21 +88,15 @@ async def _alert_invalid(name: str, error: ValueError) -> None:
 
 
 async def runnable_candidates(sport: SportKey, today: datetime) -> list[RunnableCandidate]:
-    """Active rule candidates that bet in ``sport``, have started and validate.
+    """Active rule candidates that bet in ``sport``, have started and validate, from the
+    process's ``registry_snapshot``.
 
     An invalid candidate, or one whose rule needs a fitted model (which only a replay fits), is
-    skipped with one alert per ``stale_reminder_interval``; an unreadable registry skips them
-    all.
+    skipped with one alert per ``stale_reminder_interval``.
     """
-    try:
-        loaded: Sequence[Candidate] = load_candidates(candidates_dir())
-    except ValueError as exc:
-        logger.error("candidate_registry_invalid", error=str(exc))
-        await _alert_invalid("registry", exc)
-        return []
-
+    snapshot = registry_snapshot()
     runnable: list[RunnableCandidate] = []
-    for candidate in loaded:
+    for candidate in snapshot.candidates:
         if (
             not isinstance(candidate, RuleCandidate)
             or sport not in candidate.leagues
@@ -116,17 +104,17 @@ async def runnable_candidates(sport: SportKey, today: datetime) -> list[Runnable
             or candidate.start_date > today.date()
         ):
             continue
-        try:
-            spec = RULES.get(candidate.rule)
-            if isinstance(spec, ModelRuleSpec):
-                raise ValueError(
-                    f"candidate {candidate.name!r}: rule {candidate.rule!r} needs a fitted model, "
-                    "which only the replay backtest fits; the live runner does not run it"
-                )
-            validate_candidate_rules([candidate])
-        except ValueError as exc:
-            logger.error("candidate_invalid", candidate=candidate.name, error=str(exc))
-            await _alert_invalid(candidate.name, exc)
+        spec = RULES.get(candidate.rule)
+        if isinstance(spec, ModelRuleSpec):
+            error = ValueError(
+                f"candidate {candidate.name!r}: rule {candidate.rule!r} needs a fitted model, "
+                "which only the replay backtest fits; the live runner does not run it"
+            )
+        else:
+            error = snapshot.invalid.get(candidate.name)
+        if error is not None:
+            logger.error("candidate_invalid", candidate=candidate.name, error=str(error))
+            await _alert_invalid(candidate.name, error)
             continue
         assert isinstance(spec, RuleSpec)  # noqa: S101
         params = spec.params_model.model_validate(candidate.params)

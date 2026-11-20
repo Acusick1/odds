@@ -92,8 +92,7 @@ async def add_concurrent_matches(add_match: AddMatch, kickoff: datetime = KICKOF
 
 @pytest.fixture
 def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setattr("odds_lambda.jobs.run_candidates.candidates_dir", lambda: tmp_path)
-    monkeypatch.setattr("odds_lambda.betting.candidates_dir", lambda: tmp_path)
+    monkeypatch.setattr("odds_lambda.candidate_rules.snapshot.candidates_dir", lambda: tmp_path)
     return tmp_path
 
 

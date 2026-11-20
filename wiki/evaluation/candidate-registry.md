@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Candidate registry
-description: The candidate file format, the odds candidates list, rule-hash, report and rehash commands, which commands replay a candidate, how bets are scored and judged per candidate and how far their rule's estimate overstates their EV, and the version check that stops a candidate changing without a new version.
+description: The candidate file format, when the scheduler reads the registry, the odds candidates list, rule-hash, report and rehash commands, which commands replay a candidate, how bets are scored and judged per candidate and how far their rule's estimate overstates their EV, and the version check that stops a candidate changing without a new version.
 sources:
   - odds_core.candidates
   - odds_core.bookmakers.BookSet
@@ -13,6 +13,7 @@ sources:
   - odds_mcp.server.get_portfolio
   - scripts.check_candidate_versions
   - odds_lambda.candidate_rules.pinning.validate_candidate_rules
+  - odds_lambda.candidate_rules.snapshot
 status: stable
 ---
 
@@ -33,6 +34,14 @@ The registry is the `candidates/` directory: one `<name>.yaml` file per candidat
 `odds_core.candidates.load_candidates` raises a `ValueError` naming the file when a file fails validation, its `name` differs from its file stem or a rule-candidate file lacks `odds_core.candidates.RuleCandidate.rule_sha256`, and when a league is listed by more than one agent candidate whose status is active or promoted. Agents for one league share `packages/odds-mcp/agents/common.md` and the league's `base.md`, so two live agents for one league would run identical prompts. A killed agent does not count, so its replacement can be added.
 
 A change of status goes through a pull request. The [version](../foundations/glossary.md#version) is a strict positive integer (`"3"` is rejected) ([versioning](../foundations/goal-and-strategy.md#candidates)).
+
+## When the registry is read
+
+The scheduler reads the registry once, when it starts, and keeps it until it stops. It also keeps running the rule code it imported then, so a change to the checkout under it, such as a branch switch or a pull, takes effect only at the next restart, which `deploy.sh` makes ([deploy](../scheduling/howto-run-scheduler-service.md#redeploy)).
+
+`odds_lambda.candidate_rules.snapshot.registry_snapshot` reads the registry on its first call in a process and returns the same `odds_lambda.candidate_rules.snapshot.RegistrySnapshot` on every later call. `odds_lambda.candidate_rules.snapshot.load_snapshot` loads it with `odds_core.candidates.load_candidates` and validates each rule candidate with `odds_lambda.candidate_rules.pinning.validate_candidate_rules`, hashing its rule then ([rule pinning](candidate-rules.md#rule-pinning)). A registry that cannot be read raises `ValueError` and is not kept, so the next call reads the files again. An invalid candidate does not raise: its error is kept in `odds_lambda.candidate_rules.snapshot.RegistrySnapshot.invalid`.
+
+Three readers in the scheduler take the snapshot: the [run-candidates job](run-candidates-job.md#one-run), for the candidates it runs; `odds_lambda.jobs.fetch_oddsportal.candidate_scrape_leads`, for the [pre-decision scrapes](../collection/fetch-oddsportal-job.md#flow); and `odds_lambda.betting.place_bet`, for the checks on a candidate bet ([bets](../agent/bets.md#service-functions)). `odds scheduler start` takes it before it starts the scheduler, and exits 1 when the registry cannot be read, so the restart `deploy.sh` checks fails ([scheduler commands](../scheduling/local-scheduler.md#cli)). `odds scheduler smoke` makes the same check, so a deploy whose registry cannot be read stops before the restart. Any other process, such as `odds scheduler run-once` or the MCP server placing an agent's bet, reads the registry at its first call. The `odds candidates` commands, `odds_mcp.server.get_portfolio` and the web UI read the files each time they run.
 
 ## `odds candidates list`
 

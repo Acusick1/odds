@@ -37,8 +37,7 @@ NOW = T + timedelta(minutes=1)
 
 @pytest.fixture
 def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setattr("odds_lambda.jobs.run_candidates.candidates_dir", lambda: tmp_path)
-    monkeypatch.setattr("odds_lambda.betting.candidates_dir", lambda: tmp_path)
+    monkeypatch.setattr("odds_lambda.candidate_rules.snapshot.candidates_dir", lambda: tmp_path)
     fields = candidate().model_dump(mode="json")
     (tmp_path / "gap.yaml").write_text(yaml.safe_dump(fields))
     assert load_candidate_file(tmp_path / "gap.yaml").name == "gap"

@@ -77,8 +77,7 @@ def rules(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture
 def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setattr("odds_lambda.jobs.run_candidates.candidates_dir", lambda: tmp_path)
-    monkeypatch.setattr("odds_lambda.betting.candidates_dir", lambda: tmp_path)
+    monkeypatch.setattr("odds_lambda.candidate_rules.snapshot.candidates_dir", lambda: tmp_path)
     return tmp_path
 
 
@@ -671,15 +670,11 @@ class TestCandidateSelection:
         assert call.args[0] == "candidate_invalid:model"
         assert "needs a fitted model" in call.args[2]
 
-    async def test_unreadable_registry_alerts_and_runs_nothing(
-        self, registry, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        alert = AsyncMock()
-        monkeypatch.setattr(run_candidates, "send_recorded_alert", alert)
+    async def test_an_unreadable_registry_fails_the_run(self, registry) -> None:
         (registry / "broken.yaml").write_text("name: [")
 
-        assert await runnable_candidates(EPL, NOW) == []
-        assert alert.await_args.args[0] == "candidate_invalid:registry"
+        with pytest.raises(ValueError, match="broken.yaml"):
+            await runnable_candidates(EPL, NOW)
 
 
 def _event(kickoff: datetime) -> Any:
