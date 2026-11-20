@@ -18,7 +18,6 @@ import structlog
 from odds_core.alerts import job_alert_context, send_recorded_alert, stale_reminder_interval
 from odds_core.bet_models import Bet, CandidateDecision
 from odds_core.bookmakers import BOOK_SETS
-from odds_core.candidate_registry_models import CandidateRegistryCheck
 from odds_core.candidates import (
     Candidate,
     CandidateStatus,
@@ -146,14 +145,10 @@ async def record_selection(
 ) -> None:
     """Store the selection's failures as ``sport``'s registry check and commit, then send one
     alert naming every failed candidate, at most once per ``stale_reminder_interval``."""
-    await record_registry_check(session, sport, now, selection.invalid, selection.registry_error)
-    await session.commit()
-    check = CandidateRegistryCheck(
-        sport_key=sport,
-        checked_at=now,
-        registry_error=selection.registry_error,
-        invalid_candidates=selection.invalid,
+    check = await record_registry_check(
+        session, sport, now, selection.invalid, selection.registry_error
     )
+    await session.commit()
     if is_failed(check):
         await send_recorded_alert(
             candidates_alert_type(check),

@@ -21,8 +21,8 @@ async def record_registry_check(
     checked_at: datetime,
     invalid: Mapping[str, str],
     registry_error: str | None,
-) -> None:
-    """Replace ``sport``'s row with this run's findings. Does not commit."""
+) -> CandidateRegistryCheck:
+    """Replace ``sport``'s row with this run's findings and return them. Does not commit."""
     values = {
         "sport_key": sport,
         "checked_at": checked_at,
@@ -36,6 +36,7 @@ async def record_registry_check(
             set_={key: statement.excluded[key] for key in values if key != "sport_key"},
         )
     )
+    return CandidateRegistryCheck(**values)
 
 
 async def failed_registry_checks(

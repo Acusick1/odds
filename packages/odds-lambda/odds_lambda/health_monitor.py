@@ -100,7 +100,7 @@ BETFAIR_HISTORY_WINDOW = timedelta(hours=72)
 BETFAIR_CLOSE_ALERT_TYPE = "missing_betfair_close"
 RUN_CANDIDATES_JOB = "run-candidates"
 # How far back the unmatched-outcome check reads a source's row issues.
-UNMATCHED_LOOKBACK = timedelta(hours=24)
+UNMATCHED_LOOKBACK = timedelta(hours=72)
 UNMATCHED_ALERT_TYPE = "unmatched_outcomes"
 
 
@@ -468,7 +468,7 @@ class HealthMonitor:
         """
         moment = now or datetime.now(UTC)
         rows = await self.session.execute(
-            select(DataQualityLog.event_id, DataQualityLog.raw_data)
+            select(Event, DataQualityLog.raw_data)
             .join(Event, Event.id == DataQualityLog.event_id)  # type: ignore[arg-type]
             .where(
                 DataQualityLog.issue_type == RowIssueType.UNMATCHED_OUTCOME.value,
@@ -477,12 +477,14 @@ class HealthMonitor:
             )
         )
         names: dict[tuple[int, str], dict[datetime, set[str]]] = {}
-        for event_id, context in rows.tuples():
+        events: dict[int, Event] = {}
+        for event, context in rows.tuples():
             source = (context or {}).get("source")
             scraped = (context or {}).get("snapshot_time")
-            if event_id is None or source is None or scraped is None:
+            if source is None or scraped is None:
                 continue
-            by_scrape = names.setdefault((event_id, source), {})
+            events[event.id] = event
+            by_scrape = names.setdefault((event.id, source), {})
             by_scrape.setdefault(datetime.fromisoformat(scraped), set()).add(
                 str(context.get("outcome_name"))
             )
@@ -507,8 +509,7 @@ class HealthMonitor:
             persistent = by_scrape.get(latest[0], set()) & by_scrape.get(latest[1], set())
             if not persistent:
                 continue
-            event = await self.session.get(Event, event_id)
-            assert event is not None
+            event = events[event_id]
             found.append(
                 PersistentUnmatchedOutcome(
                     event_id=event_id,
