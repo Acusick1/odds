@@ -364,6 +364,29 @@ class TestProcessResults:
         assert stats.events_updated == 1
 
     @pytest.mark.asyncio
+    async def test_a_result_naming_an_unknown_team_is_an_error(self, test_session) -> None:
+        test_session.add(_make_event())
+        await test_session.commit()
+
+        with patch(
+            "odds_lambda.jobs.fetch_oddsportal_results.async_session_maker",
+            _session_maker(test_session),
+        ):
+            stats = await process_results(
+                fetched=_fetched(
+                    _make_match(home_team="Arsenal FC"),
+                    _make_match(home_team="Liverpool", away_team="Everton"),
+                    cancelled=[CancelledMatch("Arsenal", "Chelsea FC", KICKOFF)],
+                )
+            )
+
+        assert stats.events_updated == 0 and stats.events_cancelled == 0
+        assert stats.errors == [
+            "soccer_epl: team 'Arsenal FC' refused, normalises to 'Arsenal FC', not a canonical team",
+            "soccer_epl: team 'Chelsea FC' refused, normalises to 'Chelsea FC', not a canonical team",
+        ]
+
+    @pytest.mark.asyncio
     async def test_raises_when_rows_came_back_but_none_parsed_as_finished(
         self, test_session
     ) -> None:

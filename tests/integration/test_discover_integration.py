@@ -60,9 +60,9 @@ class TestDiscoverIntegration:
                 assert event.completed_at is None
 
             # Verify team names
-            lakers_event = next(e for e in events if e.home_team == "Lakers")
-            assert lakers_event.home_team == "Lakers"
-            assert lakers_event.away_team == "Celtics"
+            lakers_event = next(e for e in events if e.home_team == "Los Angeles Lakers")
+            assert lakers_event.home_team == "Los Angeles Lakers"
+            assert lakers_event.away_team == "Boston Celtics"
 
     @pytest.mark.asyncio
     async def test_discover_updates_existing_events(
@@ -148,8 +148,8 @@ class TestDiscoverIntegration:
                             "sport_key": "basketball_nba",
                             "sport_title": "NBA",
                             "commence_time": "2024-10-15T19:00:00Z",
-                            "home_team": "Lakers",
-                            "away_team": "Celtics",
+                            "home_team": "Los Angeles Lakers",
+                            "away_team": "Boston Celtics",
                         }
                     ],
                     "quota_remaining": 19990,
@@ -163,8 +163,8 @@ class TestDiscoverIntegration:
                             "sport_key": "basketball_nba",
                             "sport_title": "NBA",
                             "commence_time": "2024-10-16T19:00:00Z",
-                            "home_team": "Warriors",
-                            "away_team": "Heat",
+                            "home_team": "Golden State Warriors",
+                            "away_team": "Miami Heat",
                         }
                     ],
                     "quota_remaining": 19989,
@@ -252,8 +252,8 @@ class TestDiscoverIntegration:
             sport_key="basketball_nba",
             sport_title="NBA",
             commence_time=datetime(2024, 10, 15, 19, 0, 0, tzinfo=UTC),
-            home_team="Lakers",
-            away_team="Celtics",
+            home_team="Los Angeles Lakers",
+            away_team="Boston Celtics",
             status=EventStatus.FINAL,
             home_score=108,
             away_score=105,
@@ -269,8 +269,8 @@ class TestDiscoverIntegration:
                     "sport_key": "basketball_nba",
                     "sport_title": "NBA",
                     "commence_time": "2024-10-15T19:00:00Z",
-                    "home_team": "Lakers",
-                    "away_team": "Celtics",
+                    "home_team": "Los Angeles Lakers",
+                    "away_team": "Boston Celtics",
                 }
             ],
             "quota_remaining": 19990,

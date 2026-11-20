@@ -19,10 +19,6 @@ Scoreboard = Callable[[str], dict[str, Any]]
 
 class TestRosters:
     @pytest.mark.parametrize("league", LEAGUES.values(), ids=lambda league: league.sport_key)
-    def test_every_club_is_its_own_canonical_name(self, league: Any) -> None:
-        assert {c for c in league.clubs if normalize_team_name(c) != c} == set()
-
-    @pytest.mark.parametrize("league", LEAGUES.values(), ids=lambda league: league.sport_key)
     def test_the_recorded_scoreboard_names_only_the_leagues_clubs(
         self, league: Any, espn_football_scoreboard: Scoreboard
     ) -> None:
@@ -30,17 +26,6 @@ class TestRosters:
 
         assert parsed.dropped == []
         assert len(parsed.games) == len(espn_football_scoreboard(league.slug)["events"])
-
-    def test_the_clubs_of_two_leagues_do_not_overlap_except_in_the_championship(self) -> None:
-        # Relegated EPL clubs are in the Championship; no other club plays in two leagues.
-        overlap = [
-            c
-            for a in LEAGUES.values()
-            for b in LEAGUES.values()
-            if a.sport_key < b.sport_key
-            for c in a.clubs & b.clubs
-        ]
-        assert overlap == []
 
     @pytest.mark.parametrize(
         ("espn", "canonical"),

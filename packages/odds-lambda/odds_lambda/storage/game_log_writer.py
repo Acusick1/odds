@@ -6,6 +6,7 @@ from datetime import date
 
 import structlog
 from odds_core.game_log_models import NbaTeamGameLog
+from odds_core.league_teams import NBA_ABBREV_MAP
 from odds_core.team import normalize_team_name
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,40 +16,8 @@ from odds_lambda.storage.nba_event_match import match_nba_event
 
 logger = structlog.get_logger(__name__)
 
-# nba_api abbreviation → canonical team name (from nba_api.stats.static.teams)
-# Hardcoded to avoid importing nba_api at write time.
-_ABBREV_TO_CANONICAL: dict[str, str] = {
-    "ATL": "Atlanta Hawks",
-    "BOS": "Boston Celtics",
-    "BKN": "Brooklyn Nets",
-    "CHA": "Charlotte Hornets",
-    "CHI": "Chicago Bulls",
-    "CLE": "Cleveland Cavaliers",
-    "DAL": "Dallas Mavericks",
-    "DEN": "Denver Nuggets",
-    "DET": "Detroit Pistons",
-    "GSW": "Golden State Warriors",
-    "HOU": "Houston Rockets",
-    "IND": "Indiana Pacers",
-    "LAC": "Los Angeles Clippers",
-    "LAL": "Los Angeles Lakers",
-    "MEM": "Memphis Grizzlies",
-    "MIA": "Miami Heat",
-    "MIL": "Milwaukee Bucks",
-    "MIN": "Minnesota Timberwolves",
-    "NOP": "New Orleans Pelicans",
-    "NYK": "New York Knicks",
-    "OKC": "Oklahoma City Thunder",
-    "ORL": "Orlando Magic",
-    "PHI": "Philadelphia 76ers",
-    "PHX": "Phoenix Suns",
-    "POR": "Portland Trail Blazers",
-    "SAC": "Sacramento Kings",
-    "SAS": "San Antonio Spurs",
-    "TOR": "Toronto Raptors",
-    "UTA": "Utah Jazz",
-    "WAS": "Washington Wizards",
-}
+# nba_api abbreviation → canonical team name.
+_ABBREV_TO_CANONICAL: dict[str, str] = {k.upper(): v for k, v in NBA_ABBREV_MAP.items()}
 
 
 class GameLogWriter:

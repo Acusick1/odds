@@ -1,8 +1,9 @@
 """Unit tests for the NBA abbreviation lookup and full-name normalization."""
 
 import pytest
+from odds_core.league_teams import NBA_ABBREV_MAP
 from odds_core.team import normalize_team_name
-from odds_lambda.polymarket_matching import CANONICAL_TO_ABBREV, NBA_ABBREV_MAP
+from odds_lambda.polymarket_matching import CANONICAL_TO_ABBREV
 
 
 class TestAbbrevMap:

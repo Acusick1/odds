@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
 import structlog
+from odds_core.league_teams import league_team
 from odds_core.models import DataQualityLog, Event, EventExternalId, EventStatus
 from odds_core.team import normalize_team_name
 from odds_core.time import ensure_utc
@@ -151,9 +152,10 @@ async def resolve_event(session: AsyncSession, game: ListedGame) -> ResolvedEven
             ``game.earliest_created_start``.
         AmbiguousHistoricalMatch: when a historical game is ambiguous (``_match_historical``);
             nothing is written.
+        UnknownTeam: when a team is not one of the league's (``_league_teams``); nothing is
+            written.
     """
-    home_team = normalize_team_name(game.home_team)
-    away_team = normalize_team_name(game.away_team)
+    home_team, away_team = _league_teams(game)
     resolved = await _lock_and_find(session, game, home_team, away_team)
     if resolved is None:
         resolved = ResolvedEvent(
@@ -177,6 +179,7 @@ async def attach_event(session: AsyncSession, game: ListedGame) -> ResolvedEvent
 
     Raises:
         LockOrderError: as ``resolve_event``.
+        UnknownTeam: as ``resolve_event``.
     """
     attached = await attach_listing(session, game)
     return attached if isinstance(attached, ResolvedEvent) else None
@@ -197,10 +200,10 @@ async def attach_listing(
 
     Raises:
         LockOrderError: as ``resolve_event``.
+        UnknownTeam: as ``resolve_event``.
         ValueError: ``by_listed_start`` for an MLB game.
     """
-    home_team = normalize_team_name(game.home_team)
-    away_team = normalize_team_name(game.away_team)
+    home_team, away_team = _league_teams(game)
     if by_listed_start:
         if game.mlb_game is not None:
             raise ValueError("an MLB game is found by its gamePk, not by its listed start")
@@ -221,10 +224,8 @@ async def attach_listing(
 
 async def find_event(session: AsyncSession, game: ListedGame) -> ResolvedEvent | None:
     """The existing event ``attach_event`` would find for ``game``, without the lock and without
-    recording anything. Read-only."""
-    return await _find(
-        session, game, normalize_team_name(game.home_team), normalize_team_name(game.away_team)
-    )
+    recording anything. Read-only. Raises ``UnknownTeam`` as ``resolve_event``."""
+    return await _find(session, game, *_league_teams(game))
 
 
 async def attach_events(
@@ -253,9 +254,10 @@ async def resolve_unscheduled_mlb_event(
 
     Only the one event of the pair within ±2 h matches, and only for a row with no doubleheader
     game number: without the schedule either game could be another. Flushes; the caller commits.
+    Raises ``UnknownTeam`` as ``resolve_event``.
     """
-    home = normalize_team_name(home_team)
-    away = normalize_team_name(away_team)
+    home = league_team(MLB_SPORT_KEY, home_team)
+    away = league_team(MLB_SPORT_KEY, away_team)
     await _lock(session, event_lock_key(MLB_SPORT_KEY, home, away))
     if game_number is not None:
         return None
@@ -282,6 +284,13 @@ async def record_external_id(
     caller holds the event's fixture lock (``lock_fixture``). Refusals follow ``resolve_event``
     and are logged once per event and id. Flushes; the caller commits."""
     return await _record_external_id(session, event, source, external_id, log_repeats=False)
+
+
+def _league_teams(game: ListedGame) -> tuple[str, str]:
+    """The game's home and away teams by their canonical names in its league
+    (``odds_core.league_teams.league_team``), which raises ``UnknownTeam`` for any other name:
+    an event of the league is created or matched only under its canonical names."""
+    return league_team(game.sport_key, game.home_team), league_team(game.sport_key, game.away_team)
 
 
 def _lock_key(game: ListedGame) -> int:

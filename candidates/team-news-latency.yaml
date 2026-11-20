@@ -9,7 +9,7 @@ issue: 832
 start_date: 2026-11-13
 status: active
 rule: team_news_lag
-rule_sha256: 0948f45fdfc9df58f5c6c57e41e0b17ae15ddd96bedef5db035a364c446e83c3
+rule_sha256: 6ffb7ac8e630f7ea6da3e049ac1bb84603e34b7bbb4332011009ad25c9f596d7
 params:
   lookbacks:
     - minutes_before_decision: 15

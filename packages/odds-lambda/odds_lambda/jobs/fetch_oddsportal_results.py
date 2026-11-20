@@ -13,12 +13,13 @@ without scores are pending, so re-runs after settling find nothing to process.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import structlog
 from odds_core.database import async_session_maker
+from odds_core.league_teams import UnknownTeam, league_team
 from odds_core.models import EventStatus
-from odds_core.team import normalize_team_name
 from odds_core.time import season_start
 
 from odds_lambda.jobs.fetch_oddsportal import _LEAGUE_SPEC_BY_SPORT
@@ -55,6 +56,21 @@ def _raise_if_feed_parsed_nothing(fetched: FetchedResults, pending: list[Pending
             f"results feed returned {fetched.rows_seen} rows but no finished or cancelled match, "
             f"with {stale} pending events older than {STALE_AFTER}; page format may have changed"
         )
+
+
+def _canonical[M: (FinishedMatch, CancelledMatch)](
+    match: M, sport_key: str, stats: ResultsStats
+) -> M | None:
+    """The row with the league's canonical team names; ``None``, recorded in ``stats.errors``,
+    for a row naming another team, which would otherwise leave its event unsettled silently."""
+    try:
+        home = league_team(sport_key, match.home_team)
+        away = league_team(sport_key, match.away_team)
+    except UnknownTeam as e:
+        stats.errors.append(str(e))
+        logger.error("result_team_refused", error=str(e))
+        return None
+    return replace(match, home_team=home, away_team=away)
 
 
 async def process_results(
@@ -111,24 +127,8 @@ async def process_results(
         logger.warning("results_fetch_incomplete", matches=len(fetched.matches))
     stats.matches_fetched = len(fetched.matches)
 
-    matches = [
-        FinishedMatch(
-            home_team=normalize_team_name(m.home_team),
-            away_team=normalize_team_name(m.away_team),
-            start_time=m.start_time,
-            home_score=m.home_score,
-            away_score=m.away_score,
-        )
-        for m in fetched.matches
-    ]
-    cancelled = [
-        CancelledMatch(
-            home_team=normalize_team_name(m.home_team),
-            away_team=normalize_team_name(m.away_team),
-            start_time=m.start_time,
-        )
-        for m in fetched.cancelled
-    ]
+    matches = [c for m in fetched.matches if (c := _canonical(m, sport_key, stats))]
+    cancelled = [c for m in fetched.cancelled if (c := _canonical(m, sport_key, stats))]
     pending_by_id = {event.id: event for event in pending_events}
 
     async with async_session_maker() as session:

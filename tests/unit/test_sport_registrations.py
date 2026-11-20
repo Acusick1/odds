@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 from odds_core.close import CLOSES
 from odds_core.job_specs import JOB_SPECS
+from odds_core.league_teams import LEAGUE_TEAMS
 from odds_core.sports import LEAGUE_TIMEZONES, SUPPORTED_SPORTS
 from odds_lambda.candidate_rules.registry import SPORT_MARKETS
 from odds_lambda.collection_calendar import CollectionSource
@@ -23,12 +24,13 @@ COLLECTED = [
 
 class TestSportRegistrations:
     @pytest.mark.parametrize("sport_key", SUPPORTED_SPORTS)
-    def test_every_sport_has_a_timezone_kickoff_authority_and_candidate_markets(
+    def test_every_sport_has_a_timezone_kickoff_authority_candidate_markets_and_teams(
         self, sport_key: str
     ) -> None:
         assert sport_key in LEAGUE_TIMEZONES, f"{sport_key} has no LEAGUE_TIMEZONES entry"
         assert sport_key in KICKOFF_AUTHORITY, f"{sport_key} has no KICKOFF_AUTHORITY entry"
         assert sport_key in SPORT_MARKETS, f"{sport_key} has no SPORT_MARKETS entry"
+        assert LEAGUE_TEAMS.get(sport_key), f"{sport_key} has no LEAGUE_TEAMS entry"
 
     def test_candidate_markets_name_only_supported_sports(self) -> None:
         assert set(SPORT_MARKETS) <= set(SUPPORTED_SPORTS)

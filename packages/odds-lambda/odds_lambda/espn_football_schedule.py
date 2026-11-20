@@ -5,7 +5,8 @@ feed of its own leaves their collectors dormant, and collection is what creates 
 ([dormancy](../../wiki/scheduling/decision-engine.md#dormancy)). ESPN's scoreboard lists every
 match of a league with its kick-off and an id of its own (``odds_core.vocabulary.Source.ESPN``);
 the events it creates are the schedule that wakes those collectors. A league is one
-``FootballLeague`` in ``LEAGUES``: its ESPN slug and the clubs ESPN may list for it.
+``FootballLeague`` in ``LEAGUES``: its ESPN slug. Its clubs are its canonical teams
+(``odds_core.league_teams.LEAGUE_TEAMS``).
 """
 
 from __future__ import annotations
@@ -18,9 +19,9 @@ from typing import Any
 
 import structlog
 from odds_core.database import async_session_maker
+from odds_core.league_teams import UnknownTeam, league_team
 from odds_core.models import EventStatus
 from odds_core.sports import SportKey
-from odds_core.team import normalize_team_name
 from odds_core.vocabulary import Source
 
 from odds_lambda.espn_fixture_fetcher import EspnFixtureFetcher
@@ -56,9 +57,6 @@ class FootballLeague:
     sport_title: str
     # ESPN's scoreboard slug under ``soccer/``.
     slug: str
-    # Canonical names (``odds_core.team.normalize_team_name``) of the clubs in the league this
-    # season. A club outside it, listed by ESPN, is a promotion, or a spelling with no alias.
-    clubs: frozenset[str]
 
 
 LEAGUES: Mapping[SportKey, FootballLeague] = MappingProxyType(
@@ -69,146 +67,26 @@ LEAGUES: Mapping[SportKey, FootballLeague] = MappingProxyType(
                 "soccer_efl_champ",
                 "Championship",
                 "eng.2",
-                frozenset(
-                    {
-                        "Birmingham City",
-                        "Blackburn Rovers",
-                        "Bolton",
-                        "Bristol City",
-                        "Burnley",
-                        "Cardiff",
-                        "Charlton Athletic",
-                        "Derby County",
-                        "Lincoln",
-                        "Middlesbrough",
-                        "Millwall",
-                        "Norwich",
-                        "Portsmouth",
-                        "Preston North End",
-                        "Queens Park Rangers",
-                        "Sheffield Utd",
-                        "Southampton",
-                        "Stoke",
-                        "Swansea",
-                        "Watford",
-                        "West Brom",
-                        "West Ham",
-                        "Wolves",
-                        "Wrexham AFC",
-                    }
-                ),
             ),
             FootballLeague(
                 "soccer_spain_la_liga",
                 "La Liga",
                 "esp.1",
-                frozenset(
-                    {
-                        "Alavés",
-                        "Athletic Bilbao",
-                        "Atlético Madrid",
-                        "Barcelona",
-                        "CA Osasuna",
-                        "Celta Vigo",
-                        "Deportivo La Coruña",
-                        "Elche CF",
-                        "Espanyol",
-                        "Getafe",
-                        "Levante",
-                        "Málaga",
-                        "Racing Santander",
-                        "Rayo Vallecano",
-                        "Real Betis",
-                        "Real Madrid",
-                        "Real Sociedad",
-                        "Sevilla",
-                        "Valencia",
-                        "Villarreal",
-                    }
-                ),
             ),
             FootballLeague(
                 "soccer_italy_serie_a",
                 "Serie A",
                 "ita.1",
-                frozenset(
-                    {
-                        "AC Milan",
-                        "AS Roma",
-                        "Atalanta BC",
-                        "Bologna",
-                        "Cagliari",
-                        "Como",
-                        "Fiorentina",
-                        "Frosinone",
-                        "Genoa",
-                        "Inter Milan",
-                        "Juventus",
-                        "Lazio",
-                        "Lecce",
-                        "Monza",
-                        "Napoli",
-                        "Parma",
-                        "Sassuolo",
-                        "Torino",
-                        "Udinese",
-                        "Venezia",
-                    }
-                ),
             ),
             FootballLeague(
                 "soccer_germany_bundesliga",
                 "Bundesliga",
                 "ger.1",
-                frozenset(
-                    {
-                        "1. FC Köln",
-                        "Augsburg",
-                        "Bayer Leverkusen",
-                        "Bayern Munich",
-                        "Borussia Dortmund",
-                        "Borussia Monchengladbach",
-                        "Eintracht Frankfurt",
-                        "Elversberg",
-                        "FSV Mainz 05",
-                        "Hamburger SV",
-                        "Paderborn",
-                        "RB Leipzig",
-                        "SC Freiburg",
-                        "Schalke",
-                        "TSG Hoffenheim",
-                        "Union Berlin",
-                        "VfB Stuttgart",
-                        "Werder Bremen",
-                    }
-                ),
             ),
             FootballLeague(
                 "soccer_france_ligue_one",
                 "Ligue 1",
                 "fra.1",
-                frozenset(
-                    {
-                        "AS Monaco",
-                        "Angers",
-                        "Auxerre",
-                        "Brest",
-                        "Le Havre",
-                        "Le Mans",
-                        "Lille",
-                        "Lorient",
-                        "Lyon",
-                        "Marseille",
-                        "Nice",
-                        "Paris FC",
-                        "Paris Saint Germain",
-                        "RC Lens",
-                        "Rennes",
-                        "Strasbourg",
-                        "Toulouse",
-                        "Troyes",
-                    }
-                ),
             ),
         )
     }
@@ -242,7 +120,7 @@ class EspnFootballGame:
 @dataclass
 class ParsedScoreboard:
     games: list[EspnFootballGame] = field(default_factory=list)
-    # Matches with a side outside the league's clubs, which are not stored.
+    # Matches with a side outside the league's canonical teams, which are not stored.
     dropped: list[DroppedGame] = field(default_factory=list)
 
 
@@ -272,9 +150,9 @@ def parse_scoreboard(data: dict[str, Any], league: FootballLeague) -> ParsedScor
 
     Skipped: events without two competitors and, unless ESPN postpones or cancels them, matches
     whose start ESPN marks invalid (those only have their status applied). A match
-    with a side whose normalised name is not in ``league.clubs`` is dropped, and reported in
-    ``dropped``: stored under a spelling OddsPortal and Betfair do not use, it would split the
-    fixture into two events.
+    with a side outside the league's canonical teams (``odds_core.league_teams.league_team``) is
+    dropped, and reported in ``dropped``: stored under a spelling OddsPortal and Betfair do not
+    use, it would split the fixture into two events.
     """
     parsed = ParsedScoreboard()
     for event in data.get("events", []):
@@ -293,19 +171,12 @@ def parse_scoreboard(data: dict[str, Any], league: FootballLeague) -> ParsedScor
             sides["home"]["team"].get("displayName", ""),
             sides["away"]["team"].get("displayName", ""),
         )
-        home, away = normalize_team_name(raw[0]), normalize_team_name(raw[1])
-        unknown = [
-            name
-            for name, canonical in zip(raw, (home, away), strict=True)
-            if canonical not in league.clubs
-        ]
-        if unknown:
+        try:
+            home = league_team(league.sport_key, raw[0])
+            away = league_team(league.sport_key, raw[1])
+        except UnknownTeam as e:
             parsed.dropped.append(
-                DroppedGame(
-                    GameRow(raw[0], raw[1], start),
-                    SkipReason.UNKNOWN_TEAM,
-                    f"{', '.join(repr(n) for n in unknown)} not a {league.sport_title} club",
-                )
+                DroppedGame(GameRow(raw[0], raw[1], start), SkipReason.UNKNOWN_TEAM, str(e))
             )
             continue
         status_type = competition.get("status", {}).get("type", {})

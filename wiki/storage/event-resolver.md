@@ -1,9 +1,10 @@
 ---
 type: reference
 title: Event resolver
-description: How resolve_event finds or creates the one event a source lists (lock, lookup order, ±2 h match, creation) and records the source's id, and which ids it refuses.
+description: How resolve_event finds or creates the one event a source lists (canonical team gate, lock, lookup order, ±2 h match, creation) and records the source's id, and which ids it refuses.
 sources:
   - odds_lambda.storage.event_resolver
+  - odds_core.league_teams
   - odds_core.models.EventExternalId
   - odds_lambda.storage.event_unmatched
   - odds_lambda.storage.game_pks
@@ -30,9 +31,14 @@ status: stable
 
 The result is an `odds_lambda.storage.event_resolver.ResolvedEvent`: the event and an `odds_lambda.storage.event_resolver.Resolution` saying how it was found (`by_external_id`, `by_game_pk`, `matched` or `created`).
 
+## Canonical teams
+
+Each team name is first resolved to its canonical name in the game's league by `odds_core.league_teams.league_team`: the name normalised by `odds_core.team.normalize_team_name` must be in the league's `odds_core.league_teams.LEAGUE_TEAMS`, the canonical name of every team the league's stored events name, across every season stored (NBA's are the values of `odds_core.league_teams.NBA_ABBREV_MAP`, the ticker abbreviation lookup). Any other name, or a league with no list, raises `odds_core.league_teams.UnknownTeam` naming the league and the raw name, before the lock and before anything is written. An event is therefore created or matched only under its league's canonical names, so one team cannot be stored under two spellings, and a stored event under any other name is never matched. `odds_lambda.storage.event_resolver.resolve_event`, `odds_lambda.storage.event_resolver.attach_listing` (and so `odds_lambda.storage.event_resolver.attach_event`), `odds_lambda.storage.event_resolver.find_event` and `odds_lambda.storage.event_resolver.resolve_unscheduled_mlb_event` all raise it. `odds_lambda.live_events.LiveEventFinder` turns it into a dropped game, which the run alerts on ([Event matching across sources](event-matching.md#refused-team-names)); the direct callers count it as a per-game error.
+
+A promoted club, or a season further back, needs its canonical name added to `odds_core.league_teams.LEAGUE_TEAMS`, and any new spelling an alias in `odds_core.team`, before its events can be stored ([Add a league](../collection/howto-add-sport.md)).
+
 ## Steps
 
-Team names are normalized with `odds_core.team.normalize_team_name` first.
 
 1. **Lock.** A transaction advisory lock (`pg_advisory_xact_lock`) on `odds_lambda.storage.event_resolver.event_lock_key` of (sport, home, away), held until the caller's transaction ends. Writers resolving the same event therefore run one after the other, and the second sees the event the first created. The key leaves out the date, so two sources placing one event on different UTC dates take the same lock. See [locks and transactions](#locks-and-transactions) for the order rule.
 2. **MLB by `gamePk`.** The event holding the `gamePk` as an `mlb_stats_api` external id (`odds_lambda.storage.game_pks.event_holding_game_pk`).
