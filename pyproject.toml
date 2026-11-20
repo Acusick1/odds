@@ -91,7 +91,7 @@ indent-style = "space"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests/unit", "tests/integration"]
-addopts = "-m 'not live_api'"
+addopts = "-m 'not live_api' --durations=25"
 pythonpath = ["scripts"]
 python_files = "test_*.py"
 python_classes = "Test*"

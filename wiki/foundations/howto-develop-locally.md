@@ -48,7 +48,7 @@ uv run pytest
 uv run pytest tests/unit/test_betting.py -v
 ```
 
-A bare `uv run pytest` from the repo root runs the offline suite, which is what CI runs ([Test suite](test-suite.md#configuration)). Two suites run only when asked for ([AGENTS.md](../../AGENTS.md#tests)):
+A bare `uv run pytest` from the repo root runs the offline suite, which is what CI runs, and ends by listing the 25 slowest test phases ([Test suite](test-suite.md#configuration)). Two suites run only when asked for ([AGENTS.md](../../AGENTS.md#tests)):
 
 - `uv run pytest -m live_api -v` calls third-party HTTP APIs.
 - `uv run pytest tests/migration -v` connects to whatever `DATABASE_URL` points at and includes write tests, so run it only against the local database ([Create and apply a database migration](howto-database-migration.md)); otherwise leave it to the deploy workflows.

@@ -35,7 +35,7 @@ Rule: use `datetime.now(UTC)` (`from datetime import UTC`), store UTC in the dat
 
 ## Lint coverage
 
-Ruff, configured once for every package in the root `pyproject.toml` (`[tool.ruff.lint]`), selects the whole `DTZ` (flake8-datetimez) family, so `datetime(...)` without `tzinfo`, `strptime` without `%z` or a chained `.replace(tzinfo=...)`, `date.today()`, `utcnow()` and `now()` without a zone all fail lint. The rules cover tests too, so a test that builds a naive datetime on purpose, to check how code handles one, carries `# noqa: DTZ001`.
+Ruff, configured for every package in one place (`[tool.ruff.lint]` in the root `pyproject.toml`), selects the whole `DTZ` (flake8-datetimez) family, so `datetime(...)` without `tzinfo`, `strptime` without `%z` or a chained `.replace(tzinfo=...)`, `date.today()`, `utcnow()` and `now()` without a zone all fail lint. The rules cover tests too, so a test that builds a naive datetime on purpose, to check how code handles one, carries `# noqa: DTZ001`.
 
 ## Helpers
 
