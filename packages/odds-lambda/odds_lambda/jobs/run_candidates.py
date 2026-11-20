@@ -16,7 +16,7 @@ from enum import StrEnum
 
 import structlog
 from odds_core.alerts import job_alert_context, send_recorded_alert, stale_reminder_interval
-from odds_core.bet_models import Bet, CandidateDecision
+from odds_core.bet_models import Bet, CandidateDecision, CandidateRegistryCheck
 from odds_core.bookmakers import BOOK_SETS
 from odds_core.candidates import (
     Candidate,
@@ -35,6 +35,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.betting import place_bet, settle_bets
+from odds_lambda.candidate_registry_checks import (
+    candidates_alert_type,
+    describe,
+    is_failed,
+    record_registry_check,
+)
 from odds_lambda.candidate_rules import (
     ModelRuleSpec,
     RuleParams,
@@ -84,30 +90,30 @@ class RunSummary:
     failed: int = 0
 
 
-async def _alert_invalid(name: str, error: ValueError) -> None:
-    await send_recorded_alert(
-        f"candidate_invalid:{name}",
-        "warning",
-        f"⚠️ Candidate {name} is skipped by run-candidates: {error}",
-        every=stale_reminder_interval(),
-    )
+@dataclass(frozen=True)
+class CandidateSelection:
+    """The candidates a run decides for, and those it skips as invalid with the reason, by
+    name; ``registry_error`` is set when the registry could not be read at all."""
+
+    runnable: list[RunnableCandidate]
+    invalid: dict[str, str]
+    registry_error: str | None = None
 
 
-async def runnable_candidates(sport: SportKey, today: datetime) -> list[RunnableCandidate]:
+def select_candidates(sport: SportKey, today: datetime) -> CandidateSelection:
     """Active rule candidates that bet in ``sport``, have started and validate.
 
     An invalid candidate, or one whose rule needs a fitted model (which only a replay fits), is
-    skipped with one alert per ``stale_reminder_interval``; an unreadable registry skips them
-    all.
+    skipped and listed in ``invalid``; an unreadable registry skips them all.
     """
     try:
         loaded: Sequence[Candidate] = load_candidates(candidates_dir())
     except ValueError as exc:
         logger.error("candidate_registry_invalid", error=str(exc))
-        await _alert_invalid("registry", exc)
-        return []
+        return CandidateSelection([], {}, registry_error=str(exc))
 
     runnable: list[RunnableCandidate] = []
+    invalid: dict[str, str] = {}
     for candidate in loaded:
         if (
             not isinstance(candidate, RuleCandidate)
@@ -126,12 +132,34 @@ async def runnable_candidates(sport: SportKey, today: datetime) -> list[Runnable
             validate_candidate_rules([candidate])
         except ValueError as exc:
             logger.error("candidate_invalid", candidate=candidate.name, error=str(exc))
-            await _alert_invalid(candidate.name, exc)
+            invalid[candidate.name] = str(exc)
             continue
         assert isinstance(spec, RuleSpec)  # noqa: S101
         params = spec.params_model.model_validate(candidate.params)
         runnable.append(RunnableCandidate(candidate, spec, params))
-    return runnable
+    return CandidateSelection(runnable, invalid)
+
+
+async def record_selection(
+    session: AsyncSession, sport: SportKey, selection: CandidateSelection, now: datetime
+) -> None:
+    """Store the selection's failures as ``sport``'s registry check and commit, then send one
+    alert naming every failed candidate, at most once per ``stale_reminder_interval``."""
+    await record_registry_check(session, sport, now, selection.invalid, selection.registry_error)
+    await session.commit()
+    check = CandidateRegistryCheck(
+        sport_key=sport,
+        checked_at=now,
+        registry_error=selection.registry_error,
+        invalid_candidates=selection.invalid,
+    )
+    if is_failed(check):
+        await send_recorded_alert(
+            candidates_alert_type(check),
+            "warning",
+            f"⚠️ {describe(check)}",
+            every=stale_reminder_interval(),
+        )
 
 
 async def candidate_events(session: AsyncSession, sport: SportKey, now: datetime) -> list[Event]:
@@ -439,7 +467,9 @@ async def main(ctx: JobContext) -> None:
     # A failure in these two steps, or in booking, ends the run before anything is booked;
     # the scheduler runner then re-books the chain.
     async with async_session_maker() as session:
-        runnable = await runnable_candidates(sport, now)
+        selection = select_candidates(sport, now)
+        await record_selection(session, sport, selection, now)
+        runnable = selection.runnable
         events = await candidate_events(session, sport, now)
 
     # Booked before the work so a crash leaves the chain intact.

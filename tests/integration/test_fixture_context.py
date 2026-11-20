@@ -29,7 +29,7 @@ from odds_lambda.candidate_rules import (
 )
 from odds_lambda.candidate_rules.fixture_context import RESULT_STORE_LAG
 from odds_lambda.candidate_rules.registry import RULES, resolve_rule
-from odds_lambda.jobs.run_candidates import candidate_events, run_decisions, runnable_candidates
+from odds_lambda.jobs.run_candidates import candidate_events, run_decisions, select_candidates
 from odds_lambda.storage.event_merge import EventMerger
 from odds_lambda.storage.writers import OddsWriter
 from sqlalchemy import select
@@ -447,7 +447,7 @@ class TestDecidingRule:
         await seed(pglite_async_session, 1, (2.2, 3.0, 3.0))
         await seed_matches(add_match)
         await pglite_async_session.commit()
-        item = (await runnable_candidates("soccer_epl", NOW))[0]
+        item = select_candidates("soccer_epl", NOW).runnable[0]
         event = await pglite_async_session.get(Event, 1)
         assert event is not None
 
@@ -528,7 +528,7 @@ class TestDecidingRule:
         await add_match(2, kickoff, "Arsenal", "Everton")
         await add_match(3, FIVE_DAYS_BEFORE, "Brentford", "Chelsea", score=(2, 1))
         await session.commit()
-        runnable = await runnable_candidates("soccer_epl", NOW)
+        runnable = select_candidates("soccer_epl", NOW).runnable
         events = await candidate_events(session, "soccer_epl", NOW)
         return await run_decisions(session, runnable, events, NOW)
 
