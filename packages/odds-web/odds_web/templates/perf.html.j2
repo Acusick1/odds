@@ -1,0 +1,7 @@
+{% extends "base.html.j2" %}
+{% block title %}Performance · odds{% endblock %}
+{% block content %}
+<h2>Slowest queries</h2>
+<p class="sub">Every role's statements in this database, from <code>pg_stat_statements</code>: the top {{ query_top }} by total and by mean execution time since the statistics were last reset.</p>
+{% include "_queries.html.j2" %}
+{% endblock %}

@@ -247,6 +247,8 @@ async def fetch_every_page(session: AsyncSession, registry_dir: Path) -> dict[st
         "/fragments/status-detail",
         "/fragments/coverage",
         "/fragments/closes",
+        "/perf",
+        "/fragments/queries",
         *(f"/c/{c.name}/{c.version}" for c in CANDIDATES),
     ]
     app = create_app(WebDatabase(engine, makers), registry_dir, settings=settings())

@@ -113,3 +113,5 @@ h4.run { font-size: 12px; margin: 16px 0 4px; font-weight: 600; }
 .sub.scope { white-space: normal; max-width: 26em; }
 table.blocks td.text { white-space: normal; }
 #killed td.text { white-space: normal; }
+table.queries td.text { white-space: normal; min-width: 32em; }
+table.queries code { font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }

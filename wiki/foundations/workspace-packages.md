@@ -63,7 +63,7 @@ Python 3.12+ (`pyproject.toml`), a uv workspace linted by one root ruff configur
 
 | Concern | Library | Declared in |
 |---|---|---|
-| ORM and driver | SQLModel (odds-analytics declares it too, for `sqlmodel.col`), asyncpg, on PostgreSQL 15, run by Docker Compose (`docker-compose.yml`) | `packages/odds-core/pyproject.toml`, `packages/odds-analytics/pyproject.toml` |
+| ORM and driver | SQLModel (odds-analytics declares it too, for `sqlmodel.col`), asyncpg, on PostgreSQL 15 with `pg_stat_statements` preloaded, run by Docker Compose (`docker-compose.yml`) | `packages/odds-core/pyproject.toml`, `packages/odds-analytics/pyproject.toml` |
 | Settings and logging | Pydantic Settings, structlog | `packages/odds-core/pyproject.toml` |
 | Local scheduler | APScheduler 4 (pinned alpha), tenacity retries | `packages/odds-lambda/pyproject.toml` |
 | Migrations | Alembic | `pyproject.toml` |
@@ -142,7 +142,7 @@ Importing `odds_core.alerts` builds `odds_core.config.get_settings()` ([Read at 
 
 ## odds-web
 
-`packages/odds-web/odds_web/` is the read-only web UI ([odds-web](../operations/odds-web.md)): `odds_web.app` (the FastAPI app and its routes), `odds_web.db`, `odds_web.cache`, one module per page or section (`odds_web.portfolio`, `odds_web.candidate_page`, `odds_web.backtests`, `odds_web.ledger`, `odds_web.decisions`, `odds_web.status`, `odds_web.coverage`, `odds_web.closes`). It declares odds-core, odds-analytics, odds-lambda, FastAPI, Jinja2, sqlalchemy, sqlmodel and structlog (`packages/odds-web/pyproject.toml`) and has no entry point of its own: `odds web serve` in odds-cli runs it.
+`packages/odds-web/odds_web/` is the read-only web UI ([odds-web](../operations/odds-web.md)): `odds_web.app` (the FastAPI app and its routes), `odds_web.db`, `odds_web.cache`, one module per page or section (`odds_web.portfolio`, `odds_web.candidate_page`, `odds_web.backtests`, `odds_web.ledger`, `odds_web.decisions`, `odds_web.status`, `odds_web.coverage`, `odds_web.closes`, `odds_web.perf`), and the role's grants and their check (`odds_web.grants`, `odds_web.role_check`). It declares odds-core, odds-analytics, odds-lambda, FastAPI, Jinja2, sqlalchemy, sqlmodel and structlog (`packages/odds-web/pyproject.toml`) and has no entry point of its own: `odds web serve` in odds-cli runs it.
 
 ## Dependency exceptions
 

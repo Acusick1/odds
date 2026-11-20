@@ -1,0 +1,30 @@
+{% from "_macros.html.j2" import section_state %}
+{% macro statements(rows) -%}
+<table class="queries">
+<thead><tr><th>Statement</th><th>Role</th><th class="r">Calls</th><th class="r">Total</th><th class="r">Mean</th><th class="r">Rows</th></tr></thead>
+<tbody>
+{% for q in rows %}
+<tr><td class="text"><code title="{{ q.query }}">{{ q.query | truncate(240) }}</code></td>
+<td>{{ q.role }}</td>
+<td class="r num">{{ '{:,}'.format(q.calls) }}</td>
+<td class="r num">{{ q.total_ms | duration }}</td>
+<td class="r num">{{ q.mean_ms | duration }}</td>
+<td class="r num">{{ '{:,}'.format(q.rows) }}</td></tr>
+{% else %}
+<tr><td colspan="6" class="sub">no statements recorded since the reset</td></tr>
+{% endfor %}
+</tbody></table>
+{%- endmacro %}
+<div id="queries" hx-get="{{ url_path('queries_fragment') }}" hx-trigger="every 60s" hx-swap="outerHTML">
+{{ section_state(queries) }}
+{% set s = queries.value %}
+{% if s is not none %}
+<div class="scroll {{ 'stale' if queries.failure }}">
+<p class="sub">Statistics reset {{ s.reset_at | stamp }}.</p>
+<h3>By total time</h3>
+{{ statements(s.by_total) }}
+<h3>By mean time</h3>
+{{ statements(s.by_mean) }}
+</div>
+{% endif %}
+</div>
