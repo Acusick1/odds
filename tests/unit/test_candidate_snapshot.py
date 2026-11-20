@@ -3,6 +3,7 @@ loaded, whatever the checkout holds later."""
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -40,6 +41,16 @@ def write(directory: Path, name: str = NAME, **fields: object) -> None:
         **fields,
     }
     (directory / f"{name}.yaml").write_text(yaml.safe_dump(data))
+
+
+@pytest.fixture(autouse=True)
+def uncached_loggers() -> Iterator[None]:
+    """Keep run_candidates' logger from caching the logging config of this test, which a later
+    reconfiguration would leave outside every other test's ``capture_logs``."""
+    config = structlog.get_config()
+    structlog.configure(cache_logger_on_first_use=False)
+    yield
+    structlog.configure(**config)
 
 
 @pytest.fixture
@@ -82,7 +93,6 @@ class TestRunCandidatesKeepsItsFirstRegistry:
         self, registry: Path, alert: AsyncMock
     ) -> None:
         write(registry, rule_sha256="0" * 64)
-        # Captured, so this module's logger is not cached outside a later test's capture.
         with structlog.testing.capture_logs() as logs:
             assert await runnable_candidates(EPL, NOW) == []
             write(registry)
