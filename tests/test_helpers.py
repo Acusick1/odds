@@ -680,10 +680,58 @@ async def book(session: AsyncSession, job: str, next_run: datetime | None) -> No
     )
 
 
+async def create_statement_statistics(session: AsyncSession) -> None:
+    """Stand in for ``pg_stat_statements``, which PGlite cannot load, with tables holding the
+    columns of its views that the ``odds_web`` statistics functions read."""
+    for statement in (
+        "CREATE TABLE IF NOT EXISTS pg_stat_statements (userid oid, dbid oid, queryid bigint, "
+        "query text, calls bigint, total_exec_time double precision, "
+        "mean_exec_time double precision, rows bigint)",
+        "CREATE TABLE IF NOT EXISTS pg_stat_statements_info (dealloc bigint, stats_reset timestamptz)",
+        # As the extension grants its views.
+        "GRANT SELECT ON pg_stat_statements, pg_stat_statements_info TO PUBLIC",
+    ):
+        await session.execute(text(statement))
+    await session.commit()
+
+
+async def record_statement(
+    session: AsyncSession,
+    queryid: int,
+    query: str,
+    calls: int,
+    total_ms: float,
+    *,
+    rows: int = 0,
+    dbid: int | None = None,
+) -> None:
+    """A ``pg_stat_statements`` row for the current role, in the database whose oid is ``dbid``
+    (default: this one)."""
+    await session.execute(
+        text(
+            "INSERT INTO pg_stat_statements VALUES ((SELECT oid FROM pg_roles WHERE rolname = "
+            "current_user), COALESCE(CAST(:dbid AS oid), "
+            "(SELECT oid FROM pg_database WHERE datname = current_database())), :queryid, "
+            ":query, :calls, :total, :mean, :rows)"
+        ),
+        {
+            "dbid": dbid,
+            "queryid": queryid,
+            "query": query,
+            "calls": calls,
+            "total": total_ms,
+            "mean": total_ms / calls,
+            "rows": rows,
+        },
+    )
+
+
 async def apply_odds_web_role(session: AsyncSession) -> None:
     """Create the ``odds_web`` role and apply its grants, as the host setup and ``deploy.sh`` do."""
-    # The APScheduler tables exist only once the scheduler has booted; the grants name them.
+    # The APScheduler tables exist only once the scheduler has booted; the grants name them, and
+    # the statistics functions read pg_stat_statements, which a migration creates.
     await create_scheduler_tables(session)
+    await create_statement_statistics(session)
     await session.execute(
         text(
             "DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'odds_web') "

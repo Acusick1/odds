@@ -43,6 +43,8 @@ from odds_web.coverage import (
 from odds_web.db import WebDatabase, web_database_from_settings
 from odds_web.decisions import DecisionHistory, load_decision_history
 from odds_web.ledger import LedgerPage, load_ledger_page
+from odds_web.perf import TOP as QUERY_TOP
+from odds_web.perf import QueryStats, load_query_stats
 from odds_web.portfolio import AXIS_PERCENT, FOREST_WIDTH, PortfolioRow, portfolio_rows
 from odds_web.status import StatusStrip, load_status
 
@@ -93,6 +95,14 @@ def _hhmm(value: datetime | None, now: datetime) -> str:
     return value.strftime("%H:%M" if value.date() == now.date() else "%a %H:%M")
 
 
+def _duration(milliseconds: float) -> str:
+    """A duration in milliseconds, in the largest unit that keeps it at least one."""
+    for unit, size in (("h", 3_600_000), ("min", 60_000), ("s", 1000)):
+        if milliseconds >= size:
+            return f"{milliseconds / size:,.1f} {unit}"
+    return f"{milliseconds:.2f} ms"
+
+
 def _ago(value: datetime | None, now: datetime) -> str:
     """How long before ``now`` ``value`` was, in its largest whole unit."""
     if value is None:
@@ -129,9 +139,11 @@ def create_app(
     templates.env.filters["hhmm"] = _hhmm
     templates.env.filters["stamp"] = _stamp
     templates.env.filters["percent"] = _percent
+    templates.env.filters["duration"] = _duration
     templates.env.globals.update(
         ago=_ago,
         close_weeks=CLOSE_WEEKS,
+        query_top=QUERY_TOP,
         bucket_minutes=BUCKET_MINUTES,
         coverage_past_days=PAST.days,
         coverage_upcoming_hours=int(UPCOMING.total_seconds() // 3600),
@@ -227,6 +239,13 @@ def create_app(
         async with database.session_maker() as session:
             return await close_coverage(session, datetime.now(UTC))
 
+    async def load_queries() -> QueryStats:
+        async with database.session_maker() as session:
+            return await load_query_stats(session)
+
+    async def queries_section() -> Section[QueryStats]:
+        return Section.of(await cache.get("queries", load_queries))
+
     async def status_section() -> Section[StatusStrip]:
         return Section.of(await cache.get("status", load_status_strip))
 
@@ -270,6 +289,18 @@ def create_app(
                 "closes": await closes_section(),
                 "status": await status_section(),
             },
+        )
+
+    @app.get("/fragments/queries", response_class=HTMLResponse)
+    async def queries_fragment(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request, "_queries.html.j2", {"queries": await queries_section()}
+        )
+
+    @app.get("/perf", response_class=HTMLResponse)
+    async def perf(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request, "perf.html.j2", {"queries": await queries_section()}
         )
 
     @app.get("/", response_class=HTMLResponse)

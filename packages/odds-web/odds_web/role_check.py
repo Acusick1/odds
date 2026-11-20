@@ -36,6 +36,19 @@ READ_TABLES = (
     "jobs",
 )
 PROBE_TABLE = READ_TABLES[0]
+# The functions ``odds_web.grants`` defines, through which the role reads the query statistics.
+READ_FUNCTIONS = ("odds_web_query_stats()", "odds_web_query_stats_reset()")
+# Predefined roles that read or write beyond the allowlists; the statistics are read through
+# ``READ_FUNCTIONS`` rather than ``pg_read_all_stats``.
+WIDENING_ROLES = (
+    "pg_read_all_data",
+    "pg_write_all_data",
+    "pg_read_all_stats",
+    "pg_monitor",
+    "pg_read_server_files",
+    "pg_write_server_files",
+    "pg_execute_server_program",
+)
 
 
 class RoleCheckFailed(RuntimeError):
@@ -43,8 +56,8 @@ class RoleCheckFailed(RuntimeError):
 
 
 async def check_role(connection: AsyncConnection) -> list[str]:
-    """Raise ``RoleCheckFailed`` unless the role reads every one of ``READ_TABLES`` and holds no
-    write right.
+    """Raise ``RoleCheckFailed`` unless the role reads every one of ``READ_TABLES``, reads the
+    query statistics through ``READ_FUNCTIONS``, holds no write right and is not elevated.
 
     The privilege catalogue is the authority; the attempted write confirms the server rejects it.
     """
@@ -59,6 +72,17 @@ async def check_role(connection: AsyncConnection) -> list[str]:
     if elevated:
         raise RoleCheckFailed("the role is a superuser or can create databases or roles")
     user = await connection.scalar(text("SELECT current_user"))
+    widening = (
+        await connection.scalars(
+            text(
+                "SELECT r FROM unnest(CAST(:roles AS text[])) r "
+                "WHERE pg_has_role(current_user, r, 'MEMBER') ORDER BY r"
+            ),
+            {"roles": list(WIDENING_ROLES)},
+        )
+    ).all()
+    if widening:
+        raise RoleCheckFailed(f"{user} is a member of {', '.join(widening)}")
     await connection.rollback()
 
     for table in READ_TABLES:
@@ -68,10 +92,28 @@ async def check_role(connection: AsyncConnection) -> list[str]:
             raise RoleCheckFailed(f"{user} cannot SELECT from {table}")
     report.append(f"{user} can SELECT from {len(READ_TABLES)} tables: {', '.join(READ_TABLES)}")
 
+    for function in READ_FUNCTIONS:
+        if not await connection.scalar(
+            text("SELECT has_function_privilege(current_user, :function, 'EXECUTE')"),
+            {"function": f"public.{function}"},
+        ):
+            raise RoleCheckFailed(f"{user} cannot execute {function}")
+    # Calling them proves pg_stat_statements exists and is preloaded.
+    try:
+        statements = await connection.scalar(text("SELECT count(*) FROM odds_web_query_stats()"))
+        await connection.scalar(text("SELECT odds_web_query_stats_reset()"))
+    except DBAPIError as exc:
+        raise RoleCheckFailed(f"{user} cannot read the query statistics: {exc.orig}") from exc
+    finally:
+        await connection.rollback()
+    report.append(f"{user} reads the statistics of {statements} statements")
+
     # ``information_schema.tables`` lists the tables the role holds any privilege on, so a table
-    # with a write privilege is among them.
+    # with a write privilege is among them. Each name is qualified by its own schema because the
+    # planner may test the privilege before the schema filter.
     privileges = " OR ".join(
-        f"has_table_privilege(current_user, format('public.%I', t.table_name), '{privilege}')"
+        "has_table_privilege(current_user, format('%I.%I', t.table_schema, t.table_name), "
+        f"'{privilege}')"
         for privilege in WRITE_PRIVILEGES
     )
     writable = (

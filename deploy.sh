@@ -3,13 +3,15 @@
 # Deploy-with-confidence for the always-on local scheduler and the web UI.
 #
 # Pulls the latest code and re-executes itself from the pulled copy, so every deploy runs
-# the script it just pulled; then syncs dependencies, applies migrations, smoke-tests
+# the script it just pulled; then syncs dependencies, recreates the Postgres container when
+# its docker-compose.yml definition changed, applies migrations, smoke-tests
 # the bootstrapped jobs, applies the odds_web role's grants and checks them as that role,
 # and only then restarts the systemd-managed scheduler and then odds-web. If migration,
 # smoke, the grants or the role check fails, the script aborts BEFORE the restarts;
-# the running services are untouched on the old code unless a migration was pending,
-# in which case both were stopped first and stay down.
+# the running services are untouched on the old code unless Postgres was recreated or a
+# migration was pending, in which case both were stopped first and stay down.
 #
+# Recreating Postgres restarts the database, so both services are stopped before it.
 # When the database is not at the migration head, both services are stopped before
 # the migration runs, because a migration may drop or rewrite what the running code
 # reads, and the database is dumped (scripts/backup-prod-db.sh) before migrating.
@@ -38,7 +40,7 @@ fi
 # that puts the uv installer's directory on PATH. Resolve every tool before the
 # pull so a missing one cannot leave the checkout ahead of the running scheduler.
 export PATH="$HOME/.local/bin:$PATH"
-for tool in git uv sudo systemctl; do
+for tool in git uv sudo systemctl docker; do
     if ! command -v "$tool" >/dev/null; then
         echo "deploy.sh: $tool not found on PATH ($PATH); $unchanged" >&2
         exit 1
@@ -93,6 +95,7 @@ scheduler_down=0
 web_down=0
 migration_committed=0
 grants_applied=0
+postgres_recreated=0
 previous_revision=""
 report_services_down() {
     local status=$? stopped=()
@@ -115,13 +118,14 @@ report_services_down() {
                 echo "  uv run alembic downgrade $previous_revision   # run first: the downgrade lives in the new code"
                 echo "  (rows the migration deleted do not come back; restore the pre-deploy dump in \${ODDS_BACKUP_DIR:-~/backups} for those)"
             fi
-            if (( grants_applied == 1 )); then
-                echo "  git checkout $previous_head && uv sync"
-                echo "  uv run python -m odds_web.grants   # on the old code: re-grants the tables it reads (skip if it predates odds_web.grants)"
-                echo "  sudo $SYSTEMCTL start $SERVICE $WEB_SERVICE"
-            else
-                echo "  git checkout $previous_head && uv sync && sudo $SYSTEMCTL start $SERVICE $WEB_SERVICE"
+            echo "  git checkout $previous_head && uv sync"
+            if (( postgres_recreated == 1 )); then
+                echo "  docker compose up -d --wait postgres   # on the old code: recreates Postgres from its old definition"
             fi
+            if (( grants_applied == 1 )); then
+                echo "  uv run python -m odds_web.grants   # on the old code: re-grants the tables it reads (skip if it predates odds_web.grants)"
+            fi
+            echo "  sudo $SYSTEMCTL start $SERVICE $WEB_SERVICE"
             echo "Or fix the failure and rerun ./deploy.sh."
         } >&2
     fi
@@ -131,20 +135,50 @@ trap report_services_down EXIT
 echo "==> uv sync"
 uv sync
 
-# Migration ordering: a pending migration runs with the scheduler stopped, so the
-# old code never reads a schema it does not know. The hand-run agent's MCP server
-# is not managed here: do not deploy during an agent session.
-if ! current_output="$(uv run alembic current)"; then
-    echo "deploy.sh: 'alembic current' failed, so whether a migration is pending is unknown; $SERVICE was not stopped" >&2
-    exit 1
-fi
-if ! grep -q "(head)" <<<"$current_output"; then
-    previous_revision="$(grep -oE '^[0-9a-z]+' <<<"$current_output" | head -1)"
-    echo "==> migration pending (database at '${previous_revision:-no revision}'): stopping $SERVICE and $WEB_SERVICE"
+# stop_services <reason>: stop the scheduler and the web service, once per deploy.
+stop_services() {
+    (( scheduler_down == 1 )) && return 0
+    echo "==> $1: stopping $SERVICE and $WEB_SERVICE"
     sudo "$SYSTEMCTL" stop "$SERVICE"
     scheduler_down=1
     sudo "$SYSTEMCTL" stop "$WEB_SERVICE"
     web_down=1
+}
+
+# Postgres reads docker-compose.yml only when its container is created, so a changed
+# definition (such as a preloaded library) takes effect only by recreating the container.
+# Compose labels the container with the hash of the definition it was created from.
+if ! wanted_hash="$(docker compose config --hash postgres)"; then
+    echo "deploy.sh: 'docker compose config' failed, so whether Postgres needs recreating is unknown; no service was stopped" >&2
+    exit 1
+fi
+wanted_hash="${wanted_hash##* }"
+running_hash=""
+container="$(docker compose ps -q postgres)"
+if [[ -n "$container" ]]; then
+    if ! running_hash="$(docker inspect --format '{{ index .Config.Labels "com.docker.compose.config-hash" }}' "$container")"; then
+        echo "deploy.sh: 'docker inspect' of the postgres container failed; no service was stopped" >&2
+        exit 1
+    fi
+fi
+if [[ "$running_hash" != "$wanted_hash" ]]; then
+    stop_services "the postgres definition changed"
+    echo "==> recreating postgres"
+    postgres_recreated=1
+    docker compose up -d --wait postgres
+fi
+
+# Migration ordering: a pending migration runs with the scheduler stopped, so the
+# old code never reads a schema it does not know. The hand-run agent's MCP server
+# is not managed here: do not deploy during an agent session.
+if ! current_output="$(uv run alembic current)"; then
+    echo "deploy.sh: 'alembic current' failed, so whether a migration is pending is unknown" >&2
+    (( scheduler_down == 1 )) || echo "deploy.sh: $SERVICE was not stopped" >&2
+    exit 1
+fi
+if ! grep -q "(head)" <<<"$current_output"; then
+    previous_revision="$(grep -oE '^[0-9a-z]+' <<<"$current_output" | head -1)"
+    stop_services "migration pending (database at '${previous_revision:-no revision}')"
     # Dump with the scheduler stopped, so the archive is the exact state the
     # migration starts from. A failed dump aborts before the migration.
     echo "==> backing up the database"

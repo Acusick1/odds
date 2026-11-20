@@ -2,6 +2,8 @@ services:
   postgres:
     image: postgres:15
     restart: unless-stopped
+    # Utility statements are not tracked: their text keeps its literals, such as a role's password.
+    command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements", "-c", "pg_stat_statements.track_utility=off"]
     shm_size: 1g
     environment:
       POSTGRES_DB: odds

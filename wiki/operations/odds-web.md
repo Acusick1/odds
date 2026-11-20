@@ -1,7 +1,7 @@
 ---
 type: reference
 title: odds-web, the read-only web UI
-description: What odds web serve runs, the database role and session it reads through, the report data and stored backtest runs behind the portfolio and candidate pages, the status strip and the data-health page, its cache and failure bounds, the vendored scripts, and how deploy.sh and systemd run it.
+description: What odds web serve runs, the database role and session it reads through, the report data and stored backtest runs behind the portfolio and candidate pages, the status strip, the data-health page and the performance page, its cache and failure bounds, the vendored scripts, and how deploy.sh and systemd run it.
 sources:
   - odds_cli.commands.web
   - odds_web.app
@@ -15,6 +15,7 @@ sources:
   - odds_web.ledger
   - odds_web.backtests
   - odds_web.decisions
+  - odds_web.perf
   - odds_web.role_check
   - odds_web.grants
   - odds_lambda.health_readers.source_freshness
@@ -44,19 +45,20 @@ status: stable
 
 # odds-web, the read-only web UI
 
-`odds-web` (`packages/odds-web`, import name `odds_web`) is a single-user, server-rendered web UI on the production host. It shows the [forward tests](../foundations/glossary.md#forward-test) of the [candidates](../foundations/glossary.md#candidate) ([Candidate registry](../evaluation/candidate-registry.md)) and the health of the data behind their verdicts, reachable from the host and over the tailnet. It writes nothing, and it calls the code that scores candidates rather than re-deriving a number ([ADR-0020](../../docs/adr/0020-read-only-web-ui-on-the-production-host.md)).
+`odds-web` (`packages/odds-web`, import name `odds_web`) is a single-user, server-rendered web UI on the production host. It shows the [forward tests](../foundations/glossary.md#forward-test) of the [candidates](../foundations/glossary.md#candidate) ([Candidate registry](../evaluation/candidate-registry.md)), the health of the data behind their verdicts and the database's slowest queries, reachable from the host and over the tailnet. It writes nothing, and it calls the code that scores candidates rather than re-deriving a number ([ADR-0020](../../docs/adr/0020-read-only-web-ui-on-the-production-host.md)).
 
 ## Running it
 
 `odds web serve [--port 8765]` (`odds_cli.commands.web.serve`) builds the app with `odds_web.app.create_app_from_settings` and runs uvicorn on `odds_cli.commands.web.LOOPBACK` (`127.0.0.1`). There is no host option, so only the host and `tailscale serve` reach it. It exits 1 without starting when `WEB_DATABASE_URL` is unset (`odds_web.db.WebDatabaseNotConfigured`). The command imports the web stack only when it runs, so no other `odds` command loads it.
 
-Systemd runs it as `odds-web.service` beside `odds-scheduler.service`, with `CPUQuota` and `MemoryMax` so it cannot starve the scheduler, and no systemd dependency on the scheduler in either direction. `deploy.sh` restarts it after the scheduler, on the code it just pulled ([Redeploy](../scheduling/howto-run-scheduler-service.md#redeploy)). The one-time host steps are in [Set up the odds-web host](howto-set-up-odds-web-host.md).
+Systemd runs it as `odds-web.service` beside `odds-scheduler.service`, with `CPUQuota` and `MemoryMax` so it cannot starve the scheduler, and no systemd dependency on the scheduler in either direction. `deploy.sh` restarts it after the scheduler, on the code it just pulled, and stops it with the scheduler before it recreates Postgres or runs a pending migration ([Redeploy](../scheduling/howto-run-scheduler-service.md#redeploy)). The one-time host steps are in [Set up the odds-web host](howto-set-up-odds-web-host.md).
 
 ## Database access
 
 The app never uses `odds_core.database.async_session_maker`, which binds to `DATABASE_URL` only. `odds_web.db.web_database_from_settings` builds its own engine from `odds_core.config.DatabaseConfig.web_url` (`WEB_DATABASE_URL`) and every reader takes a session from that factory (`odds_web.db.WebDatabase`).
 
-- **The role.** `WEB_DATABASE_URL` names the `odds_web` role. `odds_web.role_check.READ_TABLES` is the one allowlist of the tables the pages read: `events`, `odds_snapshots`, `prices`, `bets`, `candidate_decisions`, `candidate_backtests`, `candidate_backtest_bets`, `fetch_logs`, `alert_history`, `mlb_probable_pitchers` and the APScheduler `schedules` and `jobs` tables. `python -m odds_web.grants` (`odds_web.grants.apply_grants`) applies it over `DATABASE_URL`: it sets the role's `default_transaction_read_only`, grants `USAGE` on `public`, revokes every privilege on every public table and grants `SELECT` on the allowlist, in one transaction, so it is safe to re-run and a table removed from the list loses its grant. It sets no default privileges, so a table a reader starts using must be added to `odds_web.role_check.READ_TABLES`. `deploy.sh` runs it after every migration, then `python -m odds_web.role_check` as the role over `WEB_DATABASE_URL`, which probes each table in `odds_web.role_check.READ_TABLES` and fails the deploy before any restart if the role cannot read one, can write, or is elevated (the failure's rollback steps include re-running the grants on the old code) ([Redeploy](../scheduling/howto-run-scheduler-service.md#redeploy)).
+- **The role.** `WEB_DATABASE_URL` names the `odds_web` role. `odds_web.role_check.READ_TABLES` is the one allowlist of the tables the pages read: `events`, `odds_snapshots`, `prices`, `bets`, `candidate_decisions`, `candidate_backtests`, `candidate_backtest_bets`, `fetch_logs`, `alert_history`, `mlb_probable_pitchers` and the APScheduler `schedules` and `jobs` tables. `python -m odds_web.grants` (`odds_web.grants.apply_grants`) applies it over `DATABASE_URL`: it sets the role's `default_transaction_read_only`, grants `USAGE` on `public`, revokes every privilege on every public table and grants `SELECT` on the allowlist, in one transaction, so it is safe to re-run and a table removed from the list loses its grant. It sets no default privileges, so a table a reader starts using must be added to `odds_web.role_check.READ_TABLES`. `deploy.sh` runs it after every migration, then `python -m odds_web.role_check` as the role over `WEB_DATABASE_URL`, which probes each table in `odds_web.role_check.READ_TABLES` and each function in `odds_web.role_check.READ_FUNCTIONS`, and fails the deploy before any restart if the role cannot read one, can write, is elevated, or is a member of a predefined role in `odds_web.role_check.WIDENING_ROLES` (such as `pg_read_all_stats` or `pg_write_all_data`) (the failure's rollback steps include re-running the grants on the old code) ([Redeploy](../scheduling/howto-run-scheduler-service.md#redeploy)).
+- **Query statistics.** The role reads `pg_stat_statements` only through the two functions in `odds_web.role_check.READ_FUNCTIONS`, `odds_web_query_stats()` and `odds_web_query_stats_reset()`, which `odds_web.grants.apply_grants` drops and recreates from `odds_web.grants.STATISTICS_FUNCTIONS` on every run, so a change to their columns needs no migration. They are `SECURITY DEFINER`, owned by the role that applies the grants (the superuser), so they return every role's statements in the current database, and they return only the statement text, role, calls, execution times and rows the page shows ([ADR-0026](../../docs/adr/0026-web-role-reads-query-statistics.md)). The grants revoke every function privilege the role holds in `public`, revoke `EXECUTE` on the two from `PUBLIC` before granting it to the role, and revoke the `SELECT` on the extension's views that the extension grants to `PUBLIC`, so the role cannot read them directly. The role check calls both, so a deploy fails before any restart when the extension is missing or not preloaded. The extension is created by a migration and preloaded by the Compose Postgres ([Databases and environments](../foundations/databases-and-environments.md#query-statistics)).
 - **The engine.** `odds_web.db.build_web_database` opens at most `odds_web.db.POOL_SIZE` connections. Every transaction on it is `READ ONLY` and carries `odds_web.db.STATEMENT_TIMEOUT_MS` as its statement timeout (`odds_web.db.restrict_transactions`), so a DSN that is not the restricted role still cannot write through the app.
 - **`odds copy` and `--db`.** `odds_cli.db_override.override_database_url` swaps the database name in `WEB_DATABASE_URL` like the agent's DSN.
 
@@ -137,6 +139,10 @@ The judgements are the health monitor's own, so the strip and the alerts never d
 **Close coverage by week** (`odds_web.closes.close_coverage`) counts, for each league and market, every (event, market, line) a bet is on, for events kicking off in the last `odds_web.closes.WEEKS` (8) weeks, by kick-off week and by `odds_core.close.close_status`: live Betfair close, the league's fallback named by its source (FDUK or Polymarket), pending within `odds_core.close.close_grace`, no close, or unsupported for a market the league has no close for, such as MLB `h2h`.
 
 **Jobs, sources and quota** (`odds_web.status.StatusStrip`, the strip's own read) lists every job, every collection source and every Odds API key in three tables, each row with its state, last success or snapshot, and its threshold, next run or burn. It is where the idle sources and the healthy entries the strip leaves off are shown; the strip's "all" chip links to it (`/data#status`).
+
+## Performance page
+
+`/perf` holds one section, also served alone at `/fragments/queries` for htmx to refresh every 60 seconds. `odds_web.perf.load_query_stats` reads the top `odds_web.perf.TOP` (20) statements by total execution time and the top `odds_web.perf.TOP` by mean execution time, through the role's statistics functions, and when the statistics were last reset. Each row is one normalised statement as one role ran it (`odds_web.perf.QueryStat`): the scheduler's and the agent's statements sit beside the web UI's own, with its role, calls, total and mean time and rows. A statement's text is cut at 240 characters, with the full text in its tooltip. The section is cached and fails like the others: a database that is down shows "Database unavailable", and a missing extension or function shows "odds-web error".
 
 ## Layout
 

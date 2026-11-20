@@ -1,4 +1,5 @@
-"""deploy.sh against stand-in git, uv, sudo and systemctl commands that log what they are asked."""
+"""deploy.sh against stand-in git, uv, sudo, systemctl and docker commands that log what they are
+asked."""
 
 from __future__ import annotations
 
@@ -52,6 +53,14 @@ sudo)
     exit 0 ;;
 sleep)
     exit 0 ;;
+docker)
+    case "$1 $2" in
+    "compose config") [[ -n "${FAIL_COMPOSE_CONFIG:-}" ]] && exit 1; echo "postgres ${WANTED_HASH:-h1}" ;;
+    "compose ps") echo "${POSTGRES_CONTAINER-c0ffee}" ;;
+    "compose up") [[ -n "${FAIL_COMPOSE_UP:-}" ]] && exit 1 ;;
+    "inspect --format") [[ -n "${FAIL_INSPECT:-}" ]] && exit 1; echo "h1" ;;
+    esac
+    exit 0 ;;
 systemctl)
     case "$1" in
     cat) [[ "$2" == "odds-web.service" && -n "${WEB_UNIT_MISSING:-}" ]] && exit 1; exit 0 ;;
@@ -86,7 +95,7 @@ def host(tmp_path: Path) -> Path:
     backup.chmod(backup.stat().st_mode | stat.S_IXUSR)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for name in ("git", "uv", "sudo", "systemctl", "sleep"):
+    for name in ("git", "uv", "sudo", "systemctl", "sleep", "docker"):
         shim = bin_dir / name
         shim.write_text(SHIM)
         shim.chmod(0o755)
@@ -137,8 +146,17 @@ def calls(host: Path) -> list[str]:
 
 
 def mutating(host: Path) -> list[str]:
-    """Every call that could change the host: sudo, and git other than reading the head."""
-    return [c for c in calls(host) if c.split()[0] in ("sudo", "git") and "rev-parse" not in c]
+    """Every call that could change the host: sudo, git other than reading the head, and
+    recreating a container."""
+    return [
+        c
+        for c in calls(host)
+        if (c.split()[0] in ("sudo", "git") and "rev-parse" not in c)
+        or c.startswith("docker compose up")
+    ]
+
+
+RECREATE = "docker compose up -d --wait postgres"
 
 
 class TestPreflight:
@@ -339,6 +357,65 @@ class TestDeploy:
 
         assert result.returncode == 1
         assert [c.split()[-1] for c in calls(host) if " restart " in c] == ["odds-scheduler"]
+
+
+class TestPostgresDefinition:
+    def test_an_unchanged_definition_leaves_postgres_and_the_services_alone(
+        self, host: Path
+    ) -> None:
+        result = deploy(host)
+
+        assert result.returncode == 0, result.stderr
+        assert RECREATE not in calls(host)
+        assert not any(" stop " in c for c in calls(host))
+
+    @pytest.mark.parametrize(
+        "env", [{"WANTED_HASH": "h2"}, {"POSTGRES_CONTAINER": ""}], ids=["changed", "no-container"]
+    )
+    def test_a_changed_or_missing_container_is_recreated_with_both_services_stopped(
+        self, host: Path, env: dict[str, str]
+    ) -> None:
+        result = deploy(host, **env)
+
+        assert result.returncode == 0, result.stderr
+        log = calls(host)
+        stops = [i for i, c in enumerate(log) if " stop " in c]
+        assert [log[i].split()[-1] for i in stops] == ["odds-scheduler", "odds-web"]
+        recreate = log.index(RECREATE)
+        assert max(stops) < recreate < log.index("uv run alembic current")
+        assert recreate < log.index("uv run python -m odds_web.role_check")
+        assert [c.split()[-1] for c in log if " restart " in c] == ["odds-scheduler", "odds-web"]
+        assert not any(c.startswith("backup-prod-db.sh") for c in log)
+
+    def test_a_recreate_and_a_pending_migration_stop_each_service_once(self, host: Path) -> None:
+        result = deploy(host, WANTED_HASH="h2", ALEMBIC_CURRENT="abc123")
+
+        assert result.returncode == 0, result.stderr
+        log = calls(host)
+        assert [c.split()[-1] for c in log if " stop " in c] == ["odds-scheduler", "odds-web"]
+        assert log.index(RECREATE) < log.index("backup-prod-db.sh pre-deploy-def5678")
+
+    def test_a_failed_recreate_reports_both_services_stopped_and_the_old_definition(
+        self, host: Path
+    ) -> None:
+        result = deploy(host, WANTED_HASH="h2", FAIL_COMPOSE_UP="1")
+
+        assert result.returncode != 0
+        assert "FAILED with odds-scheduler odds-web STOPPED" in result.stderr
+        assert "docker compose up -d --wait postgres   # on the old code" in result.stderr
+        assert "alembic downgrade" not in result.stderr
+        assert not any("alembic" in c or " restart " in c for c in calls(host))
+
+    @pytest.mark.parametrize("failing", ["FAIL_COMPOSE_CONFIG", "FAIL_INSPECT"])
+    def test_a_failed_compose_read_exits_with_no_service_stopped(
+        self, host: Path, failing: str
+    ) -> None:
+        result = deploy(host, **{failing: "1"})
+
+        assert result.returncode == 1
+        assert "no service was stopped" in result.stderr
+        assert not any(" stop " in c for c in calls(host))
+        assert RECREATE not in calls(host)
 
 
 class TestReexecAfterPull:
