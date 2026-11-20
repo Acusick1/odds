@@ -70,8 +70,8 @@ def _print_bootstrap_result(con: Console, result: BootstrapResult) -> None:
             con.print(f"[yellow]  {result.job_name} bootstrap failed: {result.error}[/yellow]")
 
 
-def _load_candidate_registry() -> None:
-    """Load this process's candidate registry snapshot, or exit 1 when it is invalid."""
+def _pin_candidate_registry() -> None:
+    """Take this process's candidate registry snapshot, or exit 1 when it cannot be read."""
     from odds_lambda.candidate_rules.snapshot import registry_snapshot
 
     try:
@@ -145,8 +145,10 @@ def start_local(
         )
         raise typer.Exit(1)
 
-    # Every run in this process uses the registry and rule hashes of its start.
-    _load_candidate_registry()
+    # Every run in this process uses the registry, rule hashes and candidate runner of its start;
+    # the job module would otherwise be imported from the checkout of its first run.
+    _pin_candidate_registry()
+    import odds_lambda.jobs.run_candidates  # noqa: F401
 
     # Import backend
     try:
@@ -453,7 +455,7 @@ def smoke(
             to_run.append(name)
 
     # A registry the restarted scheduler would refuse fails the deploy before the restart.
-    _load_candidate_registry()
+    _pin_candidate_registry()
 
     console.print("[bold blue]Smoke-testing bootstrapped jobs...[/bold blue]")
     console.print(

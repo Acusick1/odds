@@ -1,10 +1,6 @@
 """The candidate registry as a process first read it, validated against the rule code that
-process imported.
-
-A long-running process (the scheduler, the MCP server) keeps running the rule code it imported
-at startup, so it must also keep the registry it validated then: a checkout changed under it
-(a branch switch, a pull without a restart) would otherwise pair new candidate files with old
-rule code.
+process imported, so a checkout changed under a running process never pairs new candidate files
+with old rule code.
 """
 
 from __future__ import annotations
@@ -13,6 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
+from types import MappingProxyType
 
 from odds_core.candidates import Candidate, RuleCandidate, candidates_dir, load_candidates
 
@@ -44,14 +41,11 @@ def load_snapshot(directory: Path) -> RegistrySnapshot:
             validate_candidate_rules([candidate])
         except ValueError as exc:
             invalid[candidate.name] = exc
-    return RegistrySnapshot(candidates, invalid)
+    return RegistrySnapshot(candidates, MappingProxyType(invalid))
 
 
 @cache
 def registry_snapshot() -> RegistrySnapshot:
-    """The registry this process loaded on its first call; ``ValueError`` while it is invalid.
-
-    ``odds scheduler start`` calls it before starting, so the scheduler fails to start on an
-    invalid registry and every run in it sees the registry of its start.
-    """
+    """The registry this process loaded on its first call; ``ValueError`` while it cannot be
+    read, which is not cached."""
     return load_snapshot(candidates_dir())

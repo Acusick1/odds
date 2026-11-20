@@ -75,12 +75,6 @@ def rules(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
 
-@pytest.fixture
-def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setattr("odds_lambda.candidate_rules.snapshot.candidates_dir", lambda: tmp_path)
-    return tmp_path
-
-
 def write_candidate(directory: Path, name: str = "cand", **fields: Any) -> None:
     rule = fields.get("rule", "bet_home")
     data = {

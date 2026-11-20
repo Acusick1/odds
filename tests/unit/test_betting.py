@@ -46,11 +46,6 @@ class TestPlaceBetCandidate:
         await test_session.flush()
         return event
 
-    @pytest.fixture
-    def registry(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-        monkeypatch.setattr("odds_lambda.candidate_rules.snapshot.candidates_dir", lambda: tmp_path)
-        return tmp_path
-
     @staticmethod
     async def _place(session, **candidate: object) -> Bet:
         return await place_bet(

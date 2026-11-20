@@ -38,11 +38,6 @@ class TestCadenceBands:
 
 
 class TestCandidateScrapeLeads:
-    @pytest.fixture
-    def registry(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-        monkeypatch.setattr("odds_lambda.candidate_rules.snapshot.candidates_dir", lambda: tmp_path)
-        return tmp_path
-
     def test_scrapes_five_minutes_before_each_decision(self, registry: Path) -> None:
         fields = {
             "name": "gap",

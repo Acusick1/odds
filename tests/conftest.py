@@ -36,6 +36,13 @@ def fresh_registry_snapshot() -> Iterator[None]:
     registry_snapshot.cache_clear()
 
 
+@pytest.fixture
+def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """An empty directory the registry snapshot reads in place of `candidates/`."""
+    monkeypatch.setattr("odds_lambda.candidate_rules.snapshot.candidates_dir", lambda: tmp_path)
+    return tmp_path
+
+
 @pytest.fixture(scope="session")
 def start_pglite_manager() -> Callable[[PGliteManager], None]:
     from unittest.mock import patch
