@@ -376,12 +376,14 @@ class TestProcessResults:
                 fetched=_fetched(
                     _make_match(home_team="Arsenal FC"),
                     _make_match(home_team="Liverpool", away_team="Everton"),
+                    cancelled=[CancelledMatch("Arsenal", "Chelsea FC", KICKOFF)],
                 )
             )
 
-        assert stats.events_updated == 0
+        assert stats.events_updated == 0 and stats.events_cancelled == 0
         assert stats.errors == [
-            "soccer_epl: team 'Arsenal FC' refused, normalises to 'Arsenal FC', not a canonical team"
+            "soccer_epl: team 'Arsenal FC' refused, normalises to 'Arsenal FC', not a canonical team",
+            "soccer_epl: team 'Chelsea FC' refused, normalises to 'Chelsea FC', not a canonical team",
         ]
 
     @pytest.mark.asyncio
