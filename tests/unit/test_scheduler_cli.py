@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import sys
 from datetime import UTC, datetime
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 import typer
-from odds_cli.commands.scheduler import _print_scheduled_jobs, run_once, smoke
+from odds_cli.commands.scheduler import _print_scheduled_jobs, run_once, smoke, start_local
 from odds_lambda.scheduling.backends.base import JobStatus, ScheduledJob
 from rich.console import Console
-from typer.testing import CliRunner
+from typer.testing import CliRunner, Result
 
 runner = CliRunner()
 
@@ -260,3 +263,53 @@ class TestRunOnceCommand:
 
         assert result.exit_code == 0
         assert recorder.ran == [("update-status", None)]
+
+
+def _invoke_start() -> Result:
+    test_app = typer.Typer()
+    test_app.command()(start_local)
+    with patch("odds_cli.commands.scheduler.get_settings", return_value=_settings([], [])):
+        return runner.invoke(test_app, [])
+
+
+class TestStartPinsTheCandidateRunner:
+    def test_start_imports_the_run_candidates_job_before_the_scheduler(
+        self, registry: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import odds_lambda.jobs
+
+        monkeypatch.delitem(sys.modules, "odds_lambda.jobs.run_candidates")
+        monkeypatch.delattr(odds_lambda.jobs, "run_candidates")
+        # An unimportable backend stops start right after the pin.
+        monkeypatch.setitem(sys.modules, "odds_lambda.scheduling.backends.local", None)
+
+        result = _invoke_start()
+
+        assert result.exit_code == 1
+        assert "Failed to import local backend" in result.output
+        assert "odds_lambda.jobs.run_candidates" in sys.modules
+
+
+class TestInvalidCandidateRegistry:
+    """``start`` and ``smoke`` refuse a candidate registry that cannot be read."""
+
+    @pytest.fixture(autouse=True)
+    def broken_registry(self, registry: Path) -> None:
+        (registry / "broken.yaml").write_text("name: [")
+
+    def test_start_exits_before_starting_the_scheduler(self) -> None:
+        backend = MagicMock()
+        with patch("odds_lambda.scheduling.backends.local.LocalSchedulerBackend", backend):
+            result = _invoke_start()
+
+        assert result.exit_code == 1
+        assert "invalid candidate registry" in result.output
+        backend.assert_not_called()
+
+    def test_smoke_fails_without_running_a_job(self) -> None:
+        recorder = _JobRecorder()
+        result = _invoke_smoke([], _settings(["fetch-oddsportal"], ["soccer_epl"]), recorder)
+
+        assert result.exit_code == 1
+        assert "invalid candidate registry" in result.output
+        assert recorder.ran == []

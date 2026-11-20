@@ -28,12 +28,12 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 
 import structlog
-from odds_core.candidates import candidates_dir, load_candidates
 from odds_core.database import async_session_maker
 from odds_core.job_specs import job_cadence
 from odds_core.vocabulary import Market, Source, TimeBasis
 
 from odds_lambda.candidate_rules.registry import input_leads
+from odds_lambda.candidate_rules.snapshot import registry_snapshot
 from odds_lambda.collection_calendar import (
     CollectionSource,
     SportCollection,
@@ -383,10 +383,11 @@ def candidate_scrape_leads(sport_key: str) -> list[Lead]:
     """A run ``SCRAPE_LEAD`` before each active rule candidate's decision time and
     lookback point, which still runs late until that time.
 
-    An unreadable registry gives none, so collection keeps its cadence.
+    Reads the process's ``registry_snapshot``. An unreadable registry gives none, so collection
+    keeps its cadence.
     """
     try:
-        candidates = load_candidates(candidates_dir())
+        candidates = registry_snapshot().candidates
     except ValueError as e:
         logger.error("candidate_registry_invalid", error=str(e))
         return []
