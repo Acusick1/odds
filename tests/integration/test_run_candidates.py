@@ -16,6 +16,7 @@ import yaml
 from odds_analytics.candidate_parity import ParityStatus, check_parity
 from odds_core.bet_models import Bet, CandidateDecision
 from odds_core.bookmakers import BOOK_SETS, BookSet
+from odds_core.candidate_registry_models import CandidateRegistryCheck
 from odds_core.candidates import RuleCandidate
 from odds_core.models import Event, EventStatus
 from odds_lambda.betting import get_portfolio_summary, place_bet, settle_bets
@@ -29,8 +30,9 @@ from odds_lambda.jobs.run_candidates import (
     MAX_WAIT,
     candidate_events,
     next_decision_wakeup,
+    record_selection,
     run_decisions,
-    runnable_candidates,
+    select_candidates,
 )
 from odds_lambda.scheduling.jobs import JobContext
 from sqlalchemy import select
@@ -119,7 +121,7 @@ async def add_event(
 
 
 async def run(session: Any, now: datetime = NOW) -> run_candidates.RunSummary:
-    runnable = await runnable_candidates(EPL, now)
+    runnable = select_candidates(EPL, now).runnable
     events = await candidate_events(session, EPL, now)
     return await run_decisions(session, runnable, events, now)
 
@@ -606,7 +608,7 @@ class TestCandidateSelection:
         write_candidate(registry, "future", start_date=(NOW + timedelta(days=1)).date().isoformat())
         write_candidate(registry, "mlb", leagues=["baseball_mlb"], market="h2h")
 
-        runnable = await runnable_candidates(EPL, NOW)
+        runnable = select_candidates(EPL, NOW).runnable
 
         assert [r.candidate.name for r in runnable] == ["active"]
 
@@ -616,35 +618,23 @@ class TestCandidateSelection:
         write_candidate(registry, "pooled", leagues=[EPL, "soccer_italy_serie_a"])
 
         for sport, expected in ((EPL, ["pooled"]), ("soccer_italy_serie_a", ["pooled"])):
-            runnable = await runnable_candidates(sport, NOW)
+            runnable = select_candidates(sport, NOW).runnable
             assert [r.candidate.name for r in runnable] == expected
-        assert await runnable_candidates("soccer_efl_champ", NOW) == []
+        assert select_candidates("soccer_efl_champ", NOW).runnable == []
 
-    async def test_invalid_candidates_alert_once_each_and_others_still_run(
-        self, registry, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        alert = AsyncMock()
-        monkeypatch.setattr(run_candidates, "send_recorded_alert", alert)
+    async def test_invalid_candidates_are_listed_and_others_still_run(self, registry) -> None:
         write_candidate(registry, "good")
         write_candidate(registry, "bad-params", params={"minutes_before_kickoff": [-1]})
         write_candidate(registry, "bad-hash", rule_sha256="0" * 64)
         write_candidate(registry, "bad-rule", rule="nonexistent", rule_sha256="0" * 64)
 
-        runnable = await runnable_candidates(EPL, NOW)
+        selection = select_candidates(EPL, NOW)
 
-        assert [r.candidate.name for r in runnable] == ["good"]
-        types = sorted(call.args[0] for call in alert.await_args_list)
-        assert types == [
-            "candidate_invalid:bad-hash",
-            "candidate_invalid:bad-params",
-            "candidate_invalid:bad-rule",
-        ]
+        assert [r.candidate.name for r in selection.runnable] == ["good"]
+        assert sorted(selection.invalid) == ["bad-hash", "bad-params", "bad-rule"]
+        assert selection.registry_error is None
 
-    async def test_a_model_rule_candidate_is_skipped_with_an_alert(
-        self, registry, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        alert = AsyncMock()
-        monkeypatch.setattr(run_candidates, "send_recorded_alert", alert)
+    async def test_a_model_rule_candidate_is_skipped_as_invalid(self, registry) -> None:
         write_candidate(registry, "good")
         write_candidate(
             registry,
@@ -664,22 +654,75 @@ class TestCandidateSelection:
             },
         )
 
-        runnable = await runnable_candidates(EPL, NOW)
+        selection = select_candidates(EPL, NOW)
 
-        assert [r.candidate.name for r in runnable] == ["good"]
+        assert [r.candidate.name for r in selection.runnable] == ["good"]
+        assert "needs a fitted model" in selection.invalid["model"]
+
+    async def test_unreadable_registry_runs_nothing(self, registry) -> None:
+        (registry / "broken.yaml").write_text("name: [")
+
+        selection = select_candidates(EPL, NOW)
+
+        assert selection.runnable == []
+        assert selection.registry_error
+
+
+class TestRecordSelection:
+    async def test_several_invalid_candidates_send_one_alert_naming_all(
+        self, pglite_async_session, registry, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        alert = AsyncMock()
+        monkeypatch.setattr(run_candidates, "send_recorded_alert", alert)
+        write_candidate(registry, "good")
+        write_candidate(registry, "bad-params", params={"minutes_before_kickoff": [-1]})
+        write_candidate(registry, "bad-hash", rule_sha256="0" * 64)
+        write_candidate(registry, "bad-rule", rule="nonexistent", rule_sha256="0" * 64)
+
+        await record_selection(pglite_async_session, EPL, select_candidates(EPL, NOW), NOW)
+
         [call] = alert.await_args_list
-        assert call.args[0] == "candidate_invalid:model"
-        assert "needs a fitted model" in call.args[2]
+        assert call.args[0] == "candidates_invalid:bad-hash,bad-params,bad-rule"
+        message = call.args[2]
+        assert EPL in message
+        for name in ("bad-hash", "bad-params", "bad-rule"):
+            assert name in message
+        assert "good" not in message
+        [check] = await all_of(pglite_async_session, CandidateRegistryCheck)
+        assert check.sport_key == EPL
+        assert sorted(check.invalid_candidates) == ["bad-hash", "bad-params", "bad-rule"]
+        assert check.registry_error is None
 
-    async def test_unreadable_registry_alerts_and_runs_nothing(
-        self, registry, monkeypatch: pytest.MonkeyPatch
+    async def test_a_registry_error_is_recorded_and_alerted(
+        self, pglite_async_session, registry, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         alert = AsyncMock()
         monkeypatch.setattr(run_candidates, "send_recorded_alert", alert)
         (registry / "broken.yaml").write_text("name: [")
 
-        assert await runnable_candidates(EPL, NOW) == []
-        assert alert.await_args.args[0] == "candidate_invalid:registry"
+        await record_selection(pglite_async_session, EPL, select_candidates(EPL, NOW), NOW)
+
+        assert alert.await_args.args[0] == "candidates_invalid:registry"
+        [check] = await all_of(pglite_async_session, CandidateRegistryCheck)
+        assert check.registry_error
+
+    async def test_a_clean_run_replaces_the_failed_check_and_sends_nothing(
+        self, pglite_async_session, registry, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        alert = AsyncMock()
+        monkeypatch.setattr(run_candidates, "send_recorded_alert", alert)
+        write_candidate(registry, "bad-hash", rule_sha256="0" * 64)
+        await record_selection(pglite_async_session, EPL, select_candidates(EPL, NOW), NOW)
+        (registry / "bad-hash.yaml").unlink()
+        write_candidate(registry, "good")
+        later = NOW + timedelta(minutes=30)
+
+        await record_selection(pglite_async_session, EPL, select_candidates(EPL, later), later)
+
+        assert alert.await_count == 1
+        [check] = await all_of(pglite_async_session, CandidateRegistryCheck)
+        assert check.invalid_candidates == {}
+        assert check.checked_at == later
 
 
 def _event(kickoff: datetime) -> Any:
@@ -749,7 +792,12 @@ class TestMain:
             yield
 
         monkeypatch.setattr(run_candidates, "async_session_maker", session_maker)
-        monkeypatch.setattr(run_candidates, "runnable_candidates", AsyncMock(return_value=[]))
+        monkeypatch.setattr(
+            run_candidates,
+            "select_candidates",
+            lambda *a: run_candidates.CandidateSelection([], {}),
+        )
+        monkeypatch.setattr(run_candidates, "record_selection", AsyncMock())
         monkeypatch.setattr(run_candidates, "candidate_events", AsyncMock(return_value=[]))
         monkeypatch.setattr(run_candidates, "self_schedule", schedule)
         monkeypatch.setattr(run_candidates, "settle_bets", settle)
@@ -800,7 +848,12 @@ class TestMain:
 
         schedule = AsyncMock()
         monkeypatch.setattr(run_candidates, "async_session_maker", session_maker)
-        monkeypatch.setattr(run_candidates, "runnable_candidates", AsyncMock(return_value=[]))
+        monkeypatch.setattr(
+            run_candidates,
+            "select_candidates",
+            lambda *a: run_candidates.CandidateSelection([], {}),
+        )
+        monkeypatch.setattr(run_candidates, "record_selection", AsyncMock())
         monkeypatch.setattr(run_candidates, "candidate_events", AsyncMock(return_value=[]))
         monkeypatch.setattr(run_candidates, "self_schedule", schedule)
         monkeypatch.setattr(run_candidates, "settle_bets", AsyncMock(return_value=[]))

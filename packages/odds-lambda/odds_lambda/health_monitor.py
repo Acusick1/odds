@@ -20,6 +20,7 @@ from typing import NamedTuple, Protocol
 import structlog
 from odds_core.alerts import job_outage_alerted_at, send_recorded_alert
 from odds_core.bet_models import Bet
+from odds_core.candidate_registry_models import CandidateRegistryCheck
 from odds_core.close import (
     CLOSES,
     LIVE_CLOSE_WINDOW,
@@ -33,6 +34,7 @@ from odds_core.job_run_models import JobRun
 from odds_core.market_prices import THREE_WAY_MARKET, TOTALS_MARKET
 from odds_core.models import (
     AlertHistory,
+    DataQualityLog,
     Event,
     EventExternalId,
     EventStatus,
@@ -44,6 +46,7 @@ from pydantic import BaseModel
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from odds_lambda import candidate_registry_checks
 from odds_lambda.health_readers import (
     DeadChain,
     Freshness,
@@ -53,6 +56,7 @@ from odds_lambda.health_readers import (
     source_freshness,
 )
 from odds_lambda.mlb_game_resolver import MLB_SPORT_KEY
+from odds_lambda.price_rows import RowIssueType
 from odds_lambda.scheduling.backends.base import ScheduledJob
 from odds_lambda.scheduling.jobs import (
     expected_compound_job_names,
@@ -94,6 +98,10 @@ BETFAIR_CLOSE_SPORTS: tuple[str, ...] = tuple(
 BETFAIR_CLOSE_JOB = "fetch-betfair-exchange"
 BETFAIR_HISTORY_WINDOW = timedelta(hours=72)
 BETFAIR_CLOSE_ALERT_TYPE = "missing_betfair_close"
+RUN_CANDIDATES_JOB = "run-candidates"
+# How far back the unmatched-outcome check reads a source's row issues.
+UNMATCHED_LOOKBACK = timedelta(hours=72)
+UNMATCHED_ALERT_TYPE = "unmatched_outcomes"
 
 
 class ScheduleReader(Protocol):
@@ -146,6 +154,27 @@ class MissingBetfairClose:
             f"{self.sport_key} {self.home_team} v {self.away_team} "
             f"({self.commence_time:%Y-%m-%d %H:%M} UTC, {self.event_id}; no close on "
             f"{', '.join(missing)})"
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class PersistentUnmatchedOutcome:
+    """An upcoming event whose last two scrapes by one source each left the same outcome names
+    unmatched to its teams, so that source's prices for them are dropped."""
+
+    event_id: int
+    sport_key: str
+    home_team: str
+    away_team: str
+    commence_time: datetime
+    source: str
+    outcome_names: tuple[str, ...]
+
+    def describe(self) -> str:
+        return (
+            f"{self.source} {self.sport_key} {self.home_team} v {self.away_team} "
+            f"({self.commence_time:%Y-%m-%d %H:%M} UTC, {self.event_id}): outcome "
+            f"{', '.join(self.outcome_names)} unmatched in its last two scrapes"
         )
 
 
@@ -418,6 +447,81 @@ class HealthMonitor:
         return {
             event_id for context in contexts for event_id in (context or {}).get("event_ids", [])
         }
+
+    async def check_candidate_registry(self) -> list[CandidateRegistryCheck]:
+        """The leagues whose latest run-candidates run skipped an invalid candidate or could
+        not read the registry, among the leagues the bootstrapped job runs for."""
+        if RUN_CANDIDATES_JOB not in self.settings.scheduler.bootstrap_jobs:
+            return []
+        sports = resolve_target_sports(RUN_CANDIDATES_JOB, self.settings.data_collection.sports)
+        return await candidate_registry_checks.failed_registry_checks(self.session, sports)
+
+    async def check_persistent_unmatched_outcomes(
+        self, now: datetime | None = None
+    ) -> list[PersistentUnmatchedOutcome]:
+        """Upcoming events where a source's two latest scrapes both logged the same
+        ``unmatched_outcome`` row issue.
+
+        A scrape is a distinct ``snapshot_time`` of the source's snapshots of the event; the
+        issues are those logged in the ``UNMATCHED_LOOKBACK`` with that ``snapshot_time`` in
+        their context. A scrape that matches the name clears it, and so does kick-off.
+        """
+        moment = now or datetime.now(UTC)
+        rows = await self.session.execute(
+            select(Event, DataQualityLog.raw_data)
+            .join(Event, Event.id == DataQualityLog.event_id)  # type: ignore[arg-type]
+            .where(
+                DataQualityLog.issue_type == RowIssueType.UNMATCHED_OUTCOME.value,
+                DataQualityLog.created_at >= moment - UNMATCHED_LOOKBACK,  # type: ignore[operator]
+                Event.commence_time > moment,
+            )
+        )
+        names: dict[tuple[int, str], dict[datetime, set[str]]] = {}
+        events: dict[int, Event] = {}
+        for event, context in rows.tuples():
+            source = (context or {}).get("source")
+            scraped = (context or {}).get("snapshot_time")
+            if source is None or scraped is None:
+                continue
+            events[event.id] = event
+            by_scrape = names.setdefault((event.id, source), {})
+            by_scrape.setdefault(datetime.fromisoformat(scraped), set()).add(
+                str(context.get("outcome_name"))
+            )
+
+        found: list[PersistentUnmatchedOutcome] = []
+        for (event_id, source), by_scrape in sorted(names.items()):
+            latest = (
+                (
+                    await self.session.execute(
+                        select(OddsSnapshot.snapshot_time)
+                        .where(OddsSnapshot.event_id == event_id, OddsSnapshot.source == source)
+                        .distinct()
+                        .order_by(OddsSnapshot.snapshot_time.desc())  # type: ignore[attr-defined]
+                        .limit(2)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            if len(latest) < 2:
+                continue
+            persistent = by_scrape.get(latest[0], set()) & by_scrape.get(latest[1], set())
+            if not persistent:
+                continue
+            event = events[event_id]
+            found.append(
+                PersistentUnmatchedOutcome(
+                    event_id=event_id,
+                    sport_key=event.sport_key,
+                    home_team=event.home_team,
+                    away_team=event.away_team,
+                    commence_time=event.commence_time,
+                    source=source,
+                    outcome_names=tuple(sorted(persistent)),
+                )
+            )
+        return found
 
     async def check_api_quota(self) -> list[QuotaReading]:
         """
@@ -714,6 +818,9 @@ class HealthMonitor:
         4. Job heartbeats (missing completions)
         5. Event identity: twins, repeated fixtures, MLB events without a gamePk
         6. Self-scheduling chains with no run booked or an overdue run
+        7. League events unsettled long after kick-off
+        8. Candidates the latest run-candidates run of a league skipped as invalid
+        9. Outcome names a source left unmatched in its last two scrapes of an event
 
         Returns:
             HealthStatus with metrics and alerts sent
@@ -831,6 +938,35 @@ class HealthMonitor:
                     message=f"🚨 Dead schedule chain: {issue}",
                 ):
                     alerts_sent.append(chain.alert_type)
+
+            # Check 8: Candidates the latest run-candidates run skipped
+            for check in await self.check_candidate_registry():
+                issue = candidate_registry_checks.describe(check)
+                issues_detected.append(issue)
+                alert = candidate_registry_checks.candidates_alert_type(check)
+                if await self._send_alert(
+                    alert_type=alert, severity="warning", message=f"⚠️ {issue}"
+                ):
+                    alerts_sent.append(alert)
+
+            # Check 9: Outcomes a source keeps leaving unmatched
+            unmatched = await self.check_persistent_unmatched_outcomes(moment)
+            issues_detected.extend(found.describe() for found in unmatched)
+            if unmatched:
+                shown = "; ".join(found.describe() for found in unmatched[:EVENT_IDS_SHOWN])
+                more = (
+                    f"; and {len(unmatched) - EVENT_IDS_SHOWN} more"
+                    if len(unmatched) > EVENT_IDS_SHOWN
+                    else ""
+                )
+                if await self._send_alert(
+                    alert_type=UNMATCHED_ALERT_TYPE,
+                    severity="warning",
+                    message=f"⚠️ {len(unmatched)} events have prices dropped by an unmatched "
+                    f"outcome name: {shown}{more}",
+                    context={"event_ids": [found.event_id for found in unmatched]},
+                ):
+                    alerts_sent.append(UNMATCHED_ALERT_TYPE)
 
             # Housekeeping: purge old heartbeat rows and job runs
             await self.purge_old_heartbeats()

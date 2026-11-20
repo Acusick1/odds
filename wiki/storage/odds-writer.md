@@ -27,7 +27,7 @@ status: stable
 
 1. Loads the event; a missing event raises `ValueError`, since outcomes are matched to its teams. `snapshot_time` defaults to now.
 2. If `validate`, runs the validator and writes one `odds_core.models.DataQualityLog` row for any warnings; storage proceeds regardless ([Odds validation](odds-validator.md)). `odds_lambda.ingestion.OddsIngestionService.ingest_sport` is the only caller that passes `validate`: the `validate` argument of that method or of `odds_lambda.ingestion.OddsIngestionService.ingest_sports` when given, else `odds_core.config.DataQualityConfig.enable_validation`. Every other caller uses the default `True`.
-3. Stores the envelope through `odds_lambda.storage.shaped_snapshots.store_shaped_snapshot`: one snapshot per market with its price rows, each skipped when a snapshot already holds its key (event, source, market, time) ([Writing price rows](price-tables.md#writing-price-rows)). When none is new, `odds_snapshot_already_stored` is logged.
+3. Stores the envelope through `odds_lambda.storage.shaped_snapshots.store_shaped_snapshot`: one snapshot per market with its price rows, each skipped when a snapshot already holds its key (event, source, market, time), and logs what no price row could take to `data_quality_logs` ([Writing price rows](price-tables.md#writing-price-rows)). When none is new, `odds_snapshot_already_stored` is logged.
 
 It returns an `odds_lambda.storage.writers.StoredEnvelope`: the stored snapshot of the envelope's first market, whether any of the envelope's snapshots was inserted, and `snapshots_written`, the number inserted (one for an envelope quoting no market). No tier or hours to kick-off is stored ([Fetch tier](fetch-tier.md)).
 

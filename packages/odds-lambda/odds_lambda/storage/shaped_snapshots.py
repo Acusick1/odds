@@ -73,12 +73,13 @@ async def store_shaped_snapshot(
     in ``odds_lambda.price_rows.MARKET_ORDER``, the first as ``ShapedWrite.first``. A snapshot
     whose key is already stored is not written (``odds_lambda.storage.snapshot_store.store_snapshot``).
     An envelope that quotes no market is stored as one snapshot with no market and no prices.
-    What the envelope held but no row could take is logged to ``data_quality_logs``. Flushes;
-    the caller commits.
+    What the envelope held but no row could take is logged to ``data_quality_logs``, with the
+    ``snapshot_time`` that identifies the scrape. Flushes; the caller commits.
     """
     expanded = expand_envelope(envelope, shape.source, event.home_team, event.away_team)
     for issue in expanded.issues:
-        record_issue(session, event.id, issue.issue_type.value, issue.description, issue.context)
+        context = {**issue.context, "snapshot_time": snapshot_time.isoformat()}
+        record_issue(session, event.id, issue.issue_type.value, issue.description, context)
     if not expanded.markets:
         snapshot = _snapshot(event, snapshot_time, shape, created_at)
         session.add(snapshot)

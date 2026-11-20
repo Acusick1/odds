@@ -20,7 +20,7 @@ status: stable
 
 # Odds snapshots table
 
-`odds_core.models.OddsSnapshot` (table `odds_snapshots`) holds the [snapshots](../foundations/glossary.md#snapshot) of each [event](events.md). A snapshot's prices are rows of the `prices` table, and the envelope they were read from is archived in `snapshot_payloads` ([Prices and snapshot payloads tables](price-tables.md)). Why odds are stored this way is on [How odds are stored](odds-storage-model.md). Every writer stores snapshots through `odds_lambda.storage.shaped_snapshots.store_shaped_snapshot` ([Writing price rows](price-tables.md#writing-price-rows)).
+`odds_core.models.OddsSnapshot` (table `odds_snapshots`) holds the [snapshots](../foundations/glossary.md#snapshot) of each [event](events.md). A snapshot's prices are rows of the `prices` table, and the envelope they were read from is archived in `snapshot_payloads` ([Prices and snapshot payloads tables](price-tables.md)). Why odds are stored this way is on [How odds are stored](odds-storage-model.md). Every writer stores snapshots through `odds_lambda.storage.shaped_snapshots.store_shaped_snapshot`, which logs what no price row could take to `data_quality_logs` ([Writing price rows](price-tables.md#writing-price-rows)).
 
 ## odds_snapshots
 

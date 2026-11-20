@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Health monitor, check-health job and odds status
-description: HealthMonitor, the check-health job's six checks, heartbeat and job-run purges, its own alert path, and what odds status show, quota and events print and read.
+description: HealthMonitor, the check-health job's checks, heartbeat and job-run purges, its own alert path, and what odds status show, quota and events print and read.
 sources:
   - odds_lambda.health_monitor.HealthMonitor
   - odds_lambda.health_monitor.HealthMonitor.purge_old_heartbeats
@@ -31,6 +31,12 @@ sources:
   - odds_lambda.health_monitor.HealthMonitor.check_unsettled_events
   - odds_lambda.storage.unsettled_events.find_unsettled_events
   - odds_lambda.health_monitor.HealthMonitor.check_schedule_chains
+  - odds_lambda.health_monitor.HealthMonitor.check_candidate_registry
+  - odds_lambda.candidate_registry_checks
+  - odds_core.candidate_registry_models.CandidateRegistryCheck
+  - odds_lambda.health_monitor.HealthMonitor.check_persistent_unmatched_outcomes
+  - odds_lambda.health_monitor.PersistentUnmatchedOutcome
+  - odds_lambda.health_monitor.UNMATCHED_LOOKBACK
   - odds_lambda.health_readers.DeadChain
   - odds_lambda.health_readers.dead_chains
   - odds_lambda.health_readers.JOB_ENABLED
@@ -68,6 +74,8 @@ status: stable
 5. `odds_lambda.health_monitor.HealthMonitor.check_event_identity`: per league, events stored as twins, pairings of a football league in `odds_lambda.health_monitor.LEAGUE_SPORTS` (the EPL, La Liga, Serie A, Bundesliga and Ligue 1; not the Championship, whose play-off semi-finals repeat league pairings) stored twice in a season, and MLB events (by integer id) over 24 h old holding no `gamePk` (`mlb_stats_api` external id) and no `missing_mlb_game_pk` acknowledgement (`odds_lambda.health_monitor.HealthMonitor.find_mlb_events_without_game_pk`), each its own warning (`duplicate_events:<sport>`, `repeated_fixtures:<sport>`, `missing_game_pk:baseball_mlb`). Nothing is merged; `odds events merge-twins --sport <sport> --apply` clears twins, and `odds events assign-game-pks --apply` the missing `gamePk`s ([Event merge](../storage/event-merge.md#detection)).
 6. `odds_lambda.health_monitor.HealthMonitor.check_schedule_chains`: dead self-scheduling chains, each its own critical `dead_schedule_chain:<job>` ([Schedule chain check](#schedule-chain-check)).
 7. `odds_lambda.health_monitor.HealthMonitor.check_unsettled_events`: per league in `odds_lambda.health_monitor.UNSETTLED_SPORTS` (the six football leagues, MLB and NBA), current-season events still SCHEDULED or LIVE more than 24 h after kick-off (`odds_lambda.storage.unsettled_events.find_unsettled_events`), one warning `unsettled_events:<sport>` naming them, repeated once a day. The season starts on 1 August for football and NBA and on 1 January for MLB (`odds_core.time.season_start`). POSTPONED and CANCELLED events are not pending, so a postponed MLB event waiting on its replay stays quiet, and neither are UNMATCHED ones, the MLB events with no game in MLB's schedule, which no results job can settle ([results jobs](../collection/results-jobs.md), [no game in the schedule](../storage/event-resolver.md#no-game-in-the-schedule)).
+8. `odds_lambda.health_monitor.HealthMonitor.check_candidate_registry`: leagues whose latest run-candidates run skipped an invalid candidate or could not read the registry ([Candidate check](#candidate-check)), each a warning naming the league and every skipped candidate with its reason.
+9. `odds_lambda.health_monitor.HealthMonitor.check_persistent_unmatched_outcomes`: upcoming events where one source's last two scrapes left the same outcome name unmatched, so that source's prices for it were dropped ([Unmatched-outcome check](#unmatched-outcome-check)), one warning `unmatched_outcomes` listing them.
 
 Then two retention sweeps run on every health check, the only ones in the system: `odds_lambda.health_monitor.HealthMonitor.purge_old_heartbeats` deletes `heartbeat:%` rows older than `heartbeat_retention_days` (7), and `odds_lambda.health_monitor.HealthMonitor.purge_old_job_runs` deletes [run records](../scheduling/local-scheduler.md#run-records) that started more than `odds_lambda.health_monitor.JOB_RUN_RETENTION` (30 days) ago.
 
@@ -132,6 +140,16 @@ The alert fires after kick-off, when the close cannot be collected. It is a cove
 - the scheduler was down at the close;
 - the job's chain had ended ([Schedule chain check](#schedule-chain-check));
 - the kick-off was added or moved after the job's last run booked its next one, so no close run was booked for it.
+
+## Candidate check
+
+Each [run-candidates](../evaluation/run-candidates-job.md#one-run) run replaces its league's row of `odds_core.candidate_registry_models.CandidateRegistryCheck` (table `candidate_registry_checks`, one row per league): the run time, the registry error when the registry could not be read, and the reason each skipped candidate is invalid, by name. `odds_lambda.health_monitor.HealthMonitor.check_candidate_registry` reads the rows of the leagues the job runs for (`odds_lambda.scheduling.jobs.resolve_target_sports`), only when `run-candidates` is in `odds_core.config.SchedulerConfig.bootstrap_jobs`, and reports each row with a registry error or an invalid candidate. A league whose latest run was clean reports nothing, so fixing a candidate clears the issue at the league's next run, at most `odds_lambda.jobs.run_candidates.MAX_WAIT` (30 min) later.
+
+The warning is the one the run itself sends, with the same type (`odds_lambda.candidate_registry_checks.candidates_alert_type`): `candidates_invalid:registry` for a registry error, else `candidates_invalid:` and the skipped candidates' names, sorted and comma-separated. The run and the health check therefore share one alert per set of skipped candidates, reminded every `stale_reminder_minutes`, and a run whose alert could not be sent is alerted again by the next health check. The message is cut at `odds_lambda.candidate_registry_checks.MAX_MESSAGE_CHARS`, below Discord's limit, after the names.
+
+## Unmatched-outcome check
+
+A source's price is dropped, not stored, when its outcome name is neither team after normalisation, a draw, over nor under; each drop is a `unmatched_outcome` row in `data_quality_logs`, whose context holds the source, the name and the scrape's snapshot time ([Reading an envelope](../storage/price-tables.md#reading-an-envelope)). `odds_lambda.health_monitor.HealthMonitor.check_persistent_unmatched_outcomes` reads the rows logged in `odds_lambda.health_monitor.UNMATCHED_LOOKBACK` (72 h, so a source that scrapes an event once a day, as the Odds API does 24 to 72 h out, still has two scrapes in it) for events that have not kicked off. For each event and source it takes the source's two latest snapshot times of the event; an outcome name logged at both is reported, with the event's league, teams, kick-off and id (`odds_lambda.health_monitor.PersistentUnmatchedOutcome`). One unmatched scrape, a later scrape that matches the name, or the kick-off clears it. The events of a run are one warning `unmatched_outcomes`, its `alert_history` context holding their ids, reminded every `stale_reminder_minutes`; the message lists the first 10. A team name is matched once it is an alias in `odds_core.team` of the event's canonical team name ([canonical teams](../storage/event-resolver.md#canonical-teams)).
 
 ## Heartbeats
 
