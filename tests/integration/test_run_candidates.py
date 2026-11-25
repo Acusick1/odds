@@ -24,6 +24,7 @@ from odds_lambda.candidate_rules import EstimateBasis, RuleSpec, SharpInput
 from odds_lambda.candidate_rules import rules as rules_module
 from odds_lambda.candidate_rules.pinning import rule_sha256
 from odds_lambda.candidate_rules.registry import RULES
+from odds_lambda.candidate_rules.snapshot import registry_snapshot
 from odds_lambda.jobs import run_candidates
 from odds_lambda.jobs.run_candidates import (
     MAX_LATENESS,
@@ -75,13 +76,6 @@ def rules(monkeypatch: pytest.MonkeyPatch) -> None:
                 estimate_basis=EstimateBasis.EXCHANGE,
             ),
         )
-
-
-@pytest.fixture
-def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setattr("odds_lambda.jobs.run_candidates.candidates_dir", lambda: tmp_path)
-    monkeypatch.setattr("odds_lambda.betting.candidates_dir", lambda: tmp_path)
-    return tmp_path
 
 
 def write_candidate(directory: Path, name: str = "cand", **fields: Any) -> None:
@@ -715,6 +709,8 @@ class TestRecordSelection:
         await record_selection(pglite_async_session, EPL, select_candidates(EPL, NOW), NOW)
         (registry / "bad-hash.yaml").unlink()
         write_candidate(registry, "good")
+        # The scheduler reads the fixed registry when it restarts.
+        registry_snapshot.cache_clear()
         later = NOW + timedelta(minutes=30)
 
         await record_selection(pglite_async_session, EPL, select_candidates(EPL, later), later)

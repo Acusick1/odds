@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 
 import structlog
 from odds_core.bet_models import Bet, BetResult, SharpReading
-from odds_core.candidates import CandidateStatus, candidates_dir, load_candidates
+from odds_core.candidates import CandidateStatus
 from odds_core.git_info import current_git_sha
 from odds_core.market_prices import (
     THREE_WAY_MARKET,
@@ -27,6 +27,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.candidate_rules import is_bettable_line
+from odds_lambda.candidate_rules.snapshot import registry_snapshot
 
 logger = structlog.get_logger()
 
@@ -55,8 +56,9 @@ BANKROLL_SIZED = Bet.bankroll_before.is_not(None)  # type: ignore[union-attr]
 
 
 def _check_candidate(name: str, version: int, event: Event, market: str) -> None:
-    """Raise ValueError unless the registry's candidate may place this bet today at this version."""
-    candidate = next((c for c in load_candidates(candidates_dir()) if c.name == name), None)
+    """Raise ValueError unless the process's registry snapshot lets the candidate place this bet
+    today at this version."""
+    candidate = registry_snapshot().get(name)
     if candidate is None:
         raise ValueError(f"Candidate '{name}' is not in the registry")
     if candidate.status != CandidateStatus.ACTIVE:

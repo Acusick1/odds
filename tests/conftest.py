@@ -6,7 +6,7 @@ import os
 import socket
 import subprocess
 import time
-from collections.abc import AsyncGenerator, Callable
+from collections.abc import AsyncGenerator, Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -24,6 +24,23 @@ os.environ.setdefault("ODDS_API_KEY", "test_api_key")
 os.environ["DISCORD_WEBHOOK_URL"] = ""
 os.environ["DEAD_MANS_SWITCH_URL"] = ""
 os.environ["ALERT_ENABLED"] = "false"
+
+
+@pytest.fixture(autouse=True)
+def fresh_registry_snapshot() -> Iterator[None]:
+    """Each test reads the registry its own fixtures write, not one an earlier test loaded."""
+    from odds_lambda.candidate_rules.snapshot import registry_snapshot
+
+    registry_snapshot.cache_clear()
+    yield
+    registry_snapshot.cache_clear()
+
+
+@pytest.fixture
+def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """An empty directory the registry snapshot reads in place of `candidates/`."""
+    monkeypatch.setattr("odds_lambda.candidate_rules.snapshot.candidates_dir", lambda: tmp_path)
+    return tmp_path
 
 
 @pytest.fixture(scope="session")

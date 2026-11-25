@@ -90,13 +90,6 @@ async def add_concurrent_matches(add_match: AddMatch, kickoff: datetime = KICKOF
     await add_match(3, kickoff + timedelta(minutes=5), "Villa", "Everton")
 
 
-@pytest.fixture
-def registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setattr("odds_lambda.jobs.run_candidates.candidates_dir", lambda: tmp_path)
-    monkeypatch.setattr("odds_lambda.betting.candidates_dir", lambda: tmp_path)
-    return tmp_path
-
-
 def register(registry: Path, cand: RuleCandidate) -> None:
     (registry / f"{cand.name}.yaml").write_text(yaml.safe_dump(cand.model_dump(mode="json")))
 
