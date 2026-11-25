@@ -3,7 +3,7 @@ sport's events.
 
 Each run takes every decision that is due, then settles bets, and books the next
 run at the earliest future decision time (at most ``MAX_WAIT`` away, to pick up new
-fixtures and registrations). A candidate version bets each selection of a match at most once,
+fixtures). A candidate version bets each selection of a match at most once,
 at the first of its decision times that qualifies.
 """
 
