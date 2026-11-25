@@ -12,7 +12,7 @@ from odds_analytics.candidate_parity import ParityStatus, check_parity
 from odds_core.bet_models import Bet, CandidateDecision
 from odds_core.candidates import load_candidate_file
 from odds_core.models import OddsSnapshot
-from odds_lambda.jobs.run_candidates import candidate_events, run_decisions, runnable_candidates
+from odds_lambda.jobs.run_candidates import candidate_events, run_decisions, select_candidates
 from sqlalchemy import select
 
 from tests.integration.test_candidate_backtest import (
@@ -67,7 +67,7 @@ async def seed(
 
 
 async def decide(session: Any) -> None:
-    runnable = await runnable_candidates("soccer_epl", NOW)
+    runnable = select_candidates("soccer_epl", NOW).runnable
     events = await candidate_events(session, "soccer_epl", NOW)
     summary = await run_decisions(session, runnable, events, NOW)
     assert summary.failed == 0

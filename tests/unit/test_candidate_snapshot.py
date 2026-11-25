@@ -6,15 +6,13 @@ from __future__ import annotations
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import AsyncMock
 
 import pytest
 import structlog
 import yaml
 from odds_lambda.candidate_rules.pinning import rule_sha256
 from odds_lambda.candidate_rules.snapshot import load_snapshot, registry_snapshot
-from odds_lambda.jobs import run_candidates
-from odds_lambda.jobs.run_candidates import runnable_candidates
+from odds_lambda.jobs.run_candidates import select_candidates
 
 from tests.unit.conftest import SourceEdit
 
@@ -53,19 +51,12 @@ def uncached_loggers() -> Iterator[None]:
     structlog.configure(**config)
 
 
-@pytest.fixture
-def alert(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
-    mock = AsyncMock()
-    monkeypatch.setattr(run_candidates, "send_recorded_alert", mock)
-    return mock
-
-
 class TestRunCandidatesKeepsItsFirstRegistry:
-    async def test_changed_files_and_rule_source_change_nothing(
-        self, registry: Path, edit_source: SourceEdit, alert: AsyncMock
+    def test_changed_files_and_rule_source_change_nothing(
+        self, registry: Path, edit_source: SourceEdit
     ) -> None:
         write(registry)
-        [first] = await runnable_candidates(EPL, NOW)
+        [first] = select_candidates(EPL, NOW).runnable
 
         # A pull that changes the rule's code and records its new hash in a new version, and
         # registers another candidate.
@@ -75,31 +66,25 @@ class TestRunCandidatesKeepsItsFirstRegistry:
         write(registry, version=2, rule_sha256=changed)
         write(registry, "other")
 
-        assert await runnable_candidates(EPL, NOW) == [first]
-        alert.assert_not_awaited()
+        assert select_candidates(EPL, NOW).runnable == [first]
 
-    async def test_a_registry_broken_after_the_first_load_is_not_read(
-        self, registry: Path, alert: AsyncMock
-    ) -> None:
+    def test_a_registry_broken_after_the_first_load_is_not_read(self, registry: Path) -> None:
         write(registry)
-        [first] = await runnable_candidates(EPL, NOW)
+        [first] = select_candidates(EPL, NOW).runnable
 
         (registry / "broken.yaml").write_text("name: [")
 
-        assert await runnable_candidates(EPL, NOW) == [first]
-        alert.assert_not_awaited()
+        assert select_candidates(EPL, NOW).runnable == [first]
 
-    async def test_a_candidate_invalid_at_the_first_load_stays_skipped(
-        self, registry: Path, alert: AsyncMock
-    ) -> None:
+    def test_a_candidate_invalid_at_the_first_load_stays_skipped(self, registry: Path) -> None:
         write(registry, rule_sha256="0" * 64)
-        with structlog.testing.capture_logs() as logs:
-            assert await runnable_candidates(EPL, NOW) == []
-            write(registry)
-            assert await runnable_candidates(EPL, NOW) == []
+        first = select_candidates(EPL, NOW)
+        write(registry)
+        second = select_candidates(EPL, NOW)
 
-        assert [log["event"] for log in logs] == ["candidate_invalid"] * 2
-        assert [call.args[0] for call in alert.await_args_list] == [f"candidate_invalid:{NAME}"] * 2
+        for selection in (first, second):
+            assert selection.runnable == []
+            assert list(selection.invalid) == [NAME]
 
 
 class TestLoadSnapshot:
