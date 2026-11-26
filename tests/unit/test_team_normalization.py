@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from odds_core.league_teams import LEAGUE_TEAMS
 from odds_core.models import Event, EventStatus
 from odds_core.team import normalize_team_name
 from odds_core.vocabulary import Source
@@ -227,6 +228,38 @@ class TestFootballLeagueAliases:
     def test_no_two_clubs_share_a_name(self, sport: str) -> None:
         clubs = FOOTBALL_CLUBS[sport]
         assert len({normalize_team_name(fduk) for fduk, _, _ in clubs}) == len(clubs)
+
+
+# The Odds API's spellings of clubs promoted since 2024-26, from its 2026-27 historical
+# responses on 2026-11-26, by league.
+PROMOTED_ODDS_API_SPELLINGS: dict[str, dict[str, str]] = {
+    "soccer_efl_champ": {
+        "Bolton Wanderers": "Bolton",
+        "Lincoln City": "Lincoln",
+        "West Ham United": "West Ham",
+        "Wolverhampton Wanderers": "Wolves",
+    },
+    "soccer_france_ligue_one": {"Le Mans FC": "Le Mans", "Troyes": "Troyes"},
+    "soccer_germany_bundesliga": {
+        "Elversberg": "Elversberg",
+        "FC Schalke 04": "Schalke",
+        "SC Paderborn": "Paderborn",
+    },
+    "soccer_italy_serie_a": {"Frosinone": "Frosinone"},
+    "soccer_spain_la_liga": {
+        "Deportivo La Coruña": "Deportivo La Coruña",
+        "Málaga": "Málaga",
+        "Real Racing Club de Santander": "Racing Santander",
+    },
+}
+
+
+class TestPromotedClubOddsApiSpellings:
+    @pytest.mark.parametrize("sport", list(PROMOTED_ODDS_API_SPELLINGS))
+    def test_each_spelling_maps_to_a_league_team(self, sport: str) -> None:
+        for spelling, canonical in PROMOTED_ODDS_API_SPELLINGS[sport].items():
+            assert normalize_team_name(spelling) == canonical
+            assert canonical in LEAGUE_TEAMS[sport]
 
 
 class TestEventFieldValidator:

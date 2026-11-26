@@ -14,9 +14,10 @@ from __future__ import annotations
 # ("Atlético Madrid", "Borussia Monchengladbach"), except that a club with an EPL canonical
 # name keeps it in the Championship. Aliases cover the football-data.co.uk and OddsPortal
 # spellings of every club in those leagues' 2024-26 seasons, and the Odds API's own variants
-# ("Girona FC" in its second division). A club promoted since (no Odds API history) takes the
-# OddsPortal spelling ("Bolton", "Schalke"), or in La Liga ESPN's ("Racing Santander"). ESPN's
-# and Betfair's spellings of every club in the 2026-27 seasons are aliases too.
+# ("Girona FC" in its second division). A club promoted since keeps the spelling of the source
+# that first stored it: OddsPortal's ("Bolton", "Schalke"), or in La Liga ESPN's ("Racing
+# Santander"). ESPN's, Betfair's and the Odds API's spellings of every club in the 2026-27
+# seasons are aliases.
 #
 # Pipeline canonical NBA names are The Odds API's full names ("Boston Celtics"). OddsPortal and
 # Betfair already use them, so only the "LA" spellings of the two Los Angeles
@@ -99,6 +100,7 @@ _TEAM_ALIASES: dict[str, str] = {
     "deportivo": "Deportivo La Coruña",
     "la coruna": "Deportivo La Coruña",
     "malaga": "Málaga",
+    "real racing club de santander": "Racing Santander",
     "santander": "Racing Santander",
     # ---- Serie A
     "ac monza": "Monza",
@@ -131,6 +133,8 @@ _TEAM_ALIASES: dict[str, str] = {
     "fc cologne": "1. FC Köln",
     "hamburg sv": "Hamburger SV",
     "mgladbach": "Borussia Monchengladbach",
+    "fc schalke 04": "Schalke",
+    "sc paderborn": "Paderborn",
     "sc paderborn 07": "Paderborn",
     "schalke 04": "Schalke",
     "sv elversberg": "Elversberg",
@@ -144,6 +148,7 @@ _TEAM_ALIASES: dict[str, str] = {
     "aj auxerre": "Auxerre",
     "estac troyes": "Troyes",
     "le havre ac": "Le Havre",
+    "le mans fc": "Le Mans",
     "paris saint-germain": "Paris Saint Germain",
     "paris st-g": "Paris Saint Germain",
     "stade rennais": "Rennes",
