@@ -42,7 +42,6 @@ async def step(connection: AsyncConnection, name: str, direction: str = "upgrade
     await connection.run_sync(run)
 
 
-@pytest.mark.asyncio(loop_scope="session")
 class TestConvertLegacySnapshots:
     async def test_conversion_unblocks_drop_and_preserves_quotes(
         self, converted_input: AsyncConnection

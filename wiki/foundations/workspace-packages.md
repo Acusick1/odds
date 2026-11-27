@@ -73,7 +73,7 @@ Python 3.12+ (`pyproject.toml`), a uv workspace linted by one root ruff configur
 | MCP server | FastMCP | `packages/odds-mcp/pyproject.toml` |
 | Web UI | FastAPI, Jinja2, uvicorn (declared by odds-cli, which serves it), htmx and Observable Plot as vendored files, server-rendered SVG for the portfolio and data-health charts, Plot charts for the candidate page's forward test and stored backtests, each mean EV chart with its dashed estimate line | `packages/odds-web/pyproject.toml`, `packages/odds-web/odds_web/static/charts.js`, `packages/odds-cli/pyproject.toml` |
 | Modelling | XGBoost | `packages/odds-analytics/pyproject.toml` |
-| Tests | pytest, pytest-asyncio, pytest-env, py-pglite ([Test suite](test-suite.md)) | root `pyproject.toml` |
+| Tests | pytest, pytest-asyncio (one event loop per session), pytest-env, py-pglite ([Test suite](test-suite.md)) | root `pyproject.toml` |
 
 ## odds-core
 
