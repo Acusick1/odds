@@ -10,7 +10,7 @@ Repo-wide material that every other area assumes: what the system is and which l
 <!-- pages:start -->
 ### Reference
 
-- [Code conventions and lint gates](code-conventions.md) — The pre-commit hooks and lint workflow, review-only conventions (type hints, async DB, model types, job entry points), and logging setup.
+- [Code conventions and lint gates](code-conventions.md) — The pre-commit hooks and lint workflow, review-only conventions (async DB, model types, job entry points), and logging setup.
 - [Configuration (Settings)](configuration.md) — The Settings sections and env names, the JSON list fields, what is read at import, and the variables read with os.getenv outside Settings.
 - [Databases and environments](databases-and-environments.md) — The session factory and engine (NullPool in Lambda, pool sizes), the test, local, dev and production databases and the Neon archive, which variable points where, and the --db override.
 - [Glossary](glossary.md) — The definition of each domain term, the words to avoid for it, and the page that describes the machinery behind it.

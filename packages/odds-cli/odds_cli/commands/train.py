@@ -185,7 +185,7 @@ def run_training(
         "--sport",
         help="Override sport key filter (e.g. basketball_nba, soccer_epl)",
     ),
-):
+) -> None:
     """
     Train an ML model using a configuration file.
 
@@ -242,7 +242,7 @@ def run_training(
     asyncio.run(_run_training_async(ml_config, verbose))
 
 
-async def _run_training_async(config: MLTrainingConfig, verbose: bool):
+async def _run_training_async(config: MLTrainingConfig, verbose: bool) -> None:
     """Execute training workflow asynchronously."""
     strategy_type = config.training.strategy_type
 
@@ -412,7 +412,7 @@ def validate_config(
     config: str = typer.Option(
         ..., "--config", "-c", help="Path to training configuration file (YAML/JSON)"
     ),
-):
+) -> None:
     """
     Validate a configuration file without executing training.
 
@@ -502,7 +502,7 @@ def list_configs(
     directory: str = typer.Option(
         "experiments", "--directory", "-d", help="Directory to search for config files"
     ),
-):
+) -> None:
     """
     List available configuration files in a directory.
 
@@ -748,7 +748,7 @@ def run_tuning(
         "--sport",
         help="Override sport key filter (e.g. basketball_nba, soccer_epl)",
     ),
-):
+) -> None:
     """
     Run hyperparameter optimization using Optuna.
 
@@ -842,7 +842,7 @@ async def _run_tuning_async(
     config_path: str,
     output_path: str | None,
     train_best: bool,
-):
+) -> None:
     """Execute tuning workflow asynchronously."""
     from odds_analytics.training.tuner import (
         OptunaTuner,
@@ -1099,7 +1099,9 @@ async def _run_tuning_async(
             console.print("\n[bold green]Training complete![/bold green]")
 
 
-def _display_tuning_summary(config: MLTrainingConfig, study_name: str, storage_url: str | None):
+def _display_tuning_summary(
+    config: MLTrainingConfig, study_name: str, storage_url: str | None
+) -> None:
     """Display tuning configuration summary."""
     console.print(
         Panel.fit(
@@ -1148,7 +1150,7 @@ def _display_tuning_summary(config: MLTrainingConfig, study_name: str, storage_u
         console.print(search_table)
 
 
-def _display_best_parameters(best_params: dict[str, Any]):
+def _display_best_parameters(best_params: dict[str, Any]) -> None:
     """Display best parameters in table format."""
     table = Table(title="Best Parameters", show_header=True)
     table.add_column("Parameter", style="cyan")

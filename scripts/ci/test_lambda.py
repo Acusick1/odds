@@ -145,7 +145,7 @@ def check_logs(lambda_name: str, region: str, request_id: str | None) -> bool:
         return True  # Don't fail if logs aren't available yet
 
 
-def main():
+def main() -> None:
     """Run all Lambda tests."""
     parser = argparse.ArgumentParser(description="Test Lambda function")
     parser.add_argument(

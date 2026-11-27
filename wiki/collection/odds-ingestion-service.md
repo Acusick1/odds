@@ -19,7 +19,7 @@ status: stable
 
 # Odds API ingestion service
 
-`odds_lambda.ingestion.OddsIngestionService` is the single path from [the Odds API client](odds-api-client.md) to the database. It has two callers: the fetch-odds job ([fetch-odds-job](fetch-odds-job.md)) and `odds fetch current` (`odds_cli.commands.fetch._fetch_current`).
+`odds_lambda.ingestion.OddsIngestionService` is the single path from [the Odds API client](odds-api-client.md) to the database. It has two callers: the fetch-odds job ([fetch-odds-job](fetch-odds-job.md)) and `odds fetch current` (`odds_cli.commands.fetch._fetch_current`), which passes `odds_lambda.ingestion.OddsIngestionCallbacks` to show progress and print each event that fails.
 
 ## Steps per sport
 

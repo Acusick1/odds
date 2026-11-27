@@ -5,7 +5,7 @@ import sys
 from datetime import UTC, datetime
 
 import typer
-from odds_analytics.quality_metrics import QualityMetrics
+from odds_analytics.quality_metrics import GameCountResult, QualityMetrics
 from odds_core.database import async_session_maker
 from rich.console import Console
 from rich.panel import Panel
@@ -74,7 +74,7 @@ def coverage(
     start: str = typer.Option(..., "--start", "-s", help="Start date (YYYY-MM-DD)"),
     end: str = typer.Option(..., "--end", "-e", help="End date (YYYY-MM-DD)"),
     sport: str = typer.Option(..., "--sport", help="Sport key"),
-):
+) -> None:
     """
     Display comprehensive data quality coverage report.
 
@@ -91,7 +91,7 @@ def coverage(
     asyncio.run(_coverage(start, end, sport))
 
 
-async def _coverage(start_date_str: str, end_date_str: str, sport_key: str):
+async def _coverage(start_date_str: str, end_date_str: str, sport_key: str) -> None:
     """
     Async implementation of coverage command.
 
@@ -148,12 +148,12 @@ async def _coverage(start_date_str: str, end_date_str: str, sport_key: str):
 
 
 def _display_summary(
-    game_counts,
+    game_counts: GameCountResult,
     games_with_odds_count: int,
     games_with_scores_count: int,
     start_date: str,
     end_date: str,
-):
+) -> None:
     """
     Display summary panel with key metrics.
 
@@ -192,7 +192,7 @@ def _display_summary(
     console.print(panel)
 
 
-def _display_tier_coverage(tier_coverage: list):
+def _display_tier_coverage(tier_coverage: list) -> None:
     """
     Display tier coverage table with dynamic rows from FetchTier enum.
 
@@ -253,7 +253,7 @@ def _display_tier_coverage(tier_coverage: list):
     console.print(table)
 
 
-def _display_bookmaker_coverage(bookmaker_coverage: list):
+def _display_bookmaker_coverage(bookmaker_coverage: list) -> None:
     """
     Display bookmaker coverage table sorted by coverage percentage.
 
@@ -308,7 +308,7 @@ def _display_bookmaker_coverage(bookmaker_coverage: list):
 
 def _display_data_quality_issues(
     games_missing_scores: list, games_with_odds_count: int, total_games: int
-):
+) -> None:
     """
     Display data quality issues section.
 

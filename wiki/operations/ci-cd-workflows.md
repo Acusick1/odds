@@ -24,7 +24,7 @@ Workflows live in `.github/workflows/`. Secrets come from the `development` and 
 | Workflow | Trigger | What it does |
 |---|---|---|
 | `test.yml` | push to any branch but main; `workflow_call` | on a push, a `changes` job compares the branch with `origin/main`, renames counted as a deletion and an addition, and skips the test job when the branch changes only wiki pages, ADRs or other Markdown files (the how-to page whose example draft a unit test validates still counts as code); a failed comparison or a `workflow_call` runs the tests. The tests are `deptry` per package under `packages/` (each declares its own imports), then `uv run pytest` (`tests/unit` and `tests/integration` without `live_api`, listing the slowest tests, see [test-suite](../foundations/test-suite.md#configuration)) |
-| `lint.yml` | push to non-main branches, every push | `uvx pre-commit run --all-files` (ruff with all `DTZ` datetime rules, as the root `pyproject.toml` configures; shellcheck, Vale, lychee, wiki-lint, candidate-versions, which compares against the merge-base with `origin/main` and validates the rehash ledger) ([code-conventions](../foundations/code-conventions.md)) |
+| `lint.yml` | push to non-main branches, every push | `uvx pre-commit run --all-files` (ruff with all `DTZ` datetime rules and the `ANN` type-hint rules outside `tests/`, as the root `pyproject.toml` configures; shellcheck, Vale, lychee, wiki-lint, candidate-versions, which compares against the merge-base with `origin/main` and validates the rehash ledger) ([code-conventions](../foundations/code-conventions.md)) |
 | `ci-cd.yml` | manual only | calls `test.yml`, then `deploy-dev.yml` |
 | `deploy-dev.yml` | called by `ci-cd.yml`, or manual | ephemeral dev stack |
 | `deploy-prod.yml` | manual, or a published release; `production` environment approval | AWS stack deploy; disabled while AWS is dormant ([Prod deploy](#prod-deploy)) |
@@ -37,7 +37,7 @@ A new push to a branch cancels that branch's `test.yml` and `lint.yml` runs stil
 
 ## Dev deploy
 
-`deploy-dev.yml` builds the Lambda image (tag `dev-<sha>`), runs `terraform apply` with `terraform.tfvars.example` plus overrides (Betfair on), runs `alembic upgrade head` and all of `pytest tests/migration`, invokes `check-health` and `fetch-betfair-exchange-epl` (a smoke test) through `scripts.ci.test_lambda.main`, runs `scripts.ci.verify_database.verify_database` (events, recent snapshots and fetch logs) and `verify-schedules.sh --jobs check-health`, then always `terraform destroy`s ([howto-database-migration](../foundations/howto-database-migration.md)).
+`deploy-dev.yml` builds the Lambda image (tag `dev-<sha>`), runs `terraform apply` with `terraform.tfvars.example` plus overrides (Betfair on), runs `alembic upgrade head` and all of `pytest tests/migration`, invokes `check-health` and `fetch-betfair-exchange-epl` (a smoke test) in the dev Lambda through `scripts.ci.test_lambda.main`, runs `scripts.ci.verify_database.verify_database` (events, recent snapshots and fetch logs) and `verify-schedules.sh --jobs check-health`, then always `terraform destroy`s ([howto-database-migration](../foundations/howto-database-migration.md)).
 
 ## Prod deploy
 

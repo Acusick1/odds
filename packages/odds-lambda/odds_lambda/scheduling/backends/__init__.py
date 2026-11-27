@@ -22,7 +22,6 @@ def get_scheduler_backend(
     backend_type: str | None = None,
     dry_run: bool = False,
     retry_config: RetryConfig | None = None,
-    **kwargs,
 ) -> SchedulerBackend:
     """
     Create scheduler backend based on configuration.
@@ -32,7 +31,6 @@ def get_scheduler_backend(
                      If None, reads from settings.scheduler.backend
         dry_run: Enable dry-run mode (log operations without executing)
         retry_config: Custom retry configuration (uses defaults if None)
-        **kwargs: Backend-specific configuration options
 
     Returns:
         Configured scheduler backend instance
@@ -54,13 +52,6 @@ def get_scheduler_backend(
         # Custom retry configuration
         retry_config = RetryConfig(max_attempts=5, initial_delay_seconds=2.0)
         backend = get_scheduler_backend(retry_config=retry_config)
-
-        # AWS backend with custom region
-        backend = get_scheduler_backend(
-            backend_type='aws',
-            aws_region='us-west-2',
-            lambda_arn='arn:aws:lambda:...'
-        )
     """
     # Import settings here to avoid circular imports
     from odds_core.config import get_settings
@@ -74,9 +65,9 @@ def get_scheduler_backend(
         return AWSEventBridgeBackend(
             dry_run=dry_run,
             retry_config=retry_config,
-            aws_region=kwargs.get("aws_region") or settings.aws.region,
-            lambda_arn=kwargs.get("lambda_arn") or settings.aws.lambda_arn,
-            rule_prefix=kwargs.get("rule_prefix") or settings.aws.rule_prefix,
+            aws_region=settings.aws.region,
+            lambda_arn=settings.aws.lambda_arn,
+            rule_prefix=settings.aws.rule_prefix,
         )
 
     elif backend == "local":

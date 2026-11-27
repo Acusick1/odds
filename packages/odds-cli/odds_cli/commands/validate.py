@@ -10,7 +10,7 @@ import typer
 from odds_core.database import async_session_maker
 from odds_core.sports import SportKey
 from odds_lambda.fetch_tier import FetchTier
-from odds_lambda.storage.tier_validator import TierCoverageValidator
+from odds_lambda.storage.tier_validator import DailyValidationReport, TierCoverageValidator
 from rich.console import Console
 from rich.table import Table
 
@@ -42,7 +42,7 @@ def validate_daily(
     ),
     output_json: str = typer.Option(None, "--output-json", "-o", help="Save results to JSON file"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed game breakdown"),
-):
+) -> None:
     """
     Validate tier coverage for a sport's games on one day.
 
@@ -78,7 +78,7 @@ async def _validate_daily(
     check_discovery: bool,
     output_json: str | None,
     verbose: bool,
-):
+) -> None:
     """Async implementation of daily validation."""
     # Parse target date (default to yesterday)
     if target_date_str:
@@ -185,7 +185,12 @@ async def _validate_daily(
             sys.exit(0)
 
 
-def _display_summary(report, required_tiers, check_scores=True, check_discovery=False):
+def _display_summary(
+    report: DailyValidationReport,
+    required_tiers: set[FetchTier],
+    check_scores: bool = True,
+    check_discovery: bool = False,
+) -> None:
     """Display validation summary table."""
     table = Table(show_header=False, box=None)
     table.add_column("Metric", style="cyan")
@@ -228,7 +233,7 @@ def _display_summary(report, required_tiers, check_scores=True, check_discovery=
     console.print()
 
 
-def _display_tier_breakdown(report):
+def _display_tier_breakdown(report: DailyValidationReport) -> None:
     """Display tier coverage breakdown."""
     from odds_analytics.utils import create_tier_coverage_table
 
@@ -243,7 +248,7 @@ def _display_tier_breakdown(report):
     console.print()
 
 
-def _display_score_issues(report, verbose):
+def _display_score_issues(report: DailyValidationReport, verbose: bool) -> None:
     """Display games with missing scores."""
     console.print(f"[bold]Games Missing Scores ({report.games_missing_scores}):[/bold]\n")
 
@@ -266,7 +271,7 @@ def _display_score_issues(report, verbose):
         console.print()
 
 
-def _display_missing_games(report):
+def _display_missing_games(report: DailyValidationReport) -> None:
     """Display games from API that aren't in database (ERROR)."""
     console.print(
         f"[bold red]Missing Games from Database - ERROR ({len(report.missing_games)}):[/bold red]\n"
@@ -288,7 +293,7 @@ def _display_missing_games(report):
         console.print()
 
 
-def _display_missing_scores(report):
+def _display_missing_scores(report: DailyValidationReport) -> None:
     """Display games in database without final scores (WARNING)."""
     console.print(
         f"[bold yellow]Games Missing Final Scores - WARNING ({len(report.missing_scores)}):[/bold yellow]\n"
@@ -307,7 +312,7 @@ def _display_missing_scores(report):
         console.print()
 
 
-def _display_incomplete_games(report, verbose):
+def _display_incomplete_games(report: DailyValidationReport, verbose: bool) -> None:
     """Display incomplete games (missing critical tiers)."""
     if report.incomplete_games == 0:
         return
@@ -350,7 +355,7 @@ def _display_incomplete_games(report, verbose):
         console.print()
 
 
-def _display_warning_games(report, verbose):
+def _display_warning_games(report: DailyValidationReport, verbose: bool) -> None:
     """Display games with only warning-level tier issues."""
     if report.games_with_warnings == 0:
         return
@@ -384,7 +389,12 @@ def _display_warning_games(report, verbose):
         console.print()
 
 
-def _save_to_json(report, output_path: str, check_scores=True, check_discovery=False):
+def _save_to_json(
+    report: DailyValidationReport,
+    output_path: str,
+    check_scores: bool = True,
+    check_discovery: bool = False,
+) -> None:
     """Save validation report to JSON file."""
     data = {
         "sport_key": report.sport_key,
@@ -471,7 +481,7 @@ def _save_to_json(report, output_path: str, check_scores=True, check_discovery=F
 def validate_game(
     event_id: int = typer.Argument(..., help="Event ID to validate"),
     show_snapshots: bool = typer.Option(False, "--show-snapshots", help="Show all snapshots"),
-):
+) -> None:
     """
     Validate tier coverage for a specific game.
 
@@ -481,7 +491,7 @@ def validate_game(
     asyncio.run(_validate_game(event_id, show_snapshots))
 
 
-async def _validate_game(event_id: int, show_snapshots: bool):
+async def _validate_game(event_id: int, show_snapshots: bool) -> None:
     """Async implementation of game validation."""
     console.print(f"\n[bold blue]Tier Coverage for Event {event_id}[/bold blue]\n")
 
@@ -538,7 +548,7 @@ def validate_tier_coverage(
     start_date: str = typer.Option(..., "--start", "-s", help="Start date (YYYY-MM-DD)"),
     end_date: str = typer.Option(..., "--end", "-e", help="End date (YYYY-MM-DD)"),
     output_json: str = typer.Option(None, "--output-json", "-o", help="Save results to JSON"),
-):
+) -> None:
     """
     Validate tier coverage for a date range.
 
@@ -550,7 +560,7 @@ def validate_tier_coverage(
 
 async def _validate_tier_coverage(
     sport: SportKey, start_date_str: str, end_date_str: str, output_json: str | None
-):
+) -> None:
     """Async implementation of tier coverage validation."""
     # Parse dates
     try:

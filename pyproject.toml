@@ -79,10 +79,18 @@ select = [
     "C4",  # flake8-comprehensions
     "UP",  # pyupgrade
     "DTZ",  # flake8-datetimez
+    "ANN",  # flake8-annotations
 ]
 ignore = [
     "E501",  # line too long (handled by formatter)
+    "ANN401",  # Any is legitimate at JSON and SQL boundaries
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN"]
+
+[tool.ruff.lint.flake8-annotations]
+mypy-init-return = true
 
 [tool.ruff.format]
 quote-style = "double"

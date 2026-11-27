@@ -66,7 +66,7 @@ class XGBoostLineMovementStrategy:
         sample_weight_train: np.ndarray | None = None,
         sample_weight_val: np.ndarray | None = None,
         margin_feature: str | None = None,
-        **xgb_params,
+        **xgb_params: Any,
     ) -> dict[str, Any]:
         """
         Train XGBoost regressor for line movement prediction.

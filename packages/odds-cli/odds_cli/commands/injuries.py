@@ -17,7 +17,7 @@ console = Console()
 
 
 @app.command("fetch")
-def fetch():
+def fetch() -> None:
     """Fetch the current NBA injury report and store to database."""
     console.print("\n[bold cyan]Fetching Current Injury Report[/bold cyan]\n")
     asyncio.run(_fetch_async())
@@ -81,7 +81,7 @@ def backfill(
         "--dry-run",
         help="Show plan without fetching data",
     ),
-):
+) -> None:
     """Backfill historical injury report data for a season.
 
     Fetches injury reports at specific times relative to each game in the
@@ -258,7 +258,7 @@ async def _backfill_async(
 
 
 @app.command("status")
-def status():
+def status() -> None:
     """Show injury report pipeline health and statistics."""
     asyncio.run(_status_async())
 

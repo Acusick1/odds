@@ -136,7 +136,7 @@ class AlertManager:
                 "alert_manager_initialized", channels=len(self.channels), enabled=self.enabled
             )
 
-    async def alert(self, message: str, severity: str = "info"):
+    async def alert(self, message: str, severity: str = "info") -> None:
         """
         Send alert to all configured channels.
 
@@ -182,7 +182,7 @@ class AlertManager:
 alert_manager = AlertManager()
 
 
-async def send_critical(message: str):
+async def send_critical(message: str) -> None:
     """Send critical alert."""
     await alert_manager.alert(message, "critical")
 

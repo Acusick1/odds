@@ -2,6 +2,7 @@
 
 import time
 from datetime import UTC, datetime, timedelta
+from types import TracebackType
 
 import aiohttp
 import structlog
@@ -52,7 +53,12 @@ class PolymarketClient:
         self.session = aiohttp.ClientSession()
         return self
 
-    async def __aexit__(self, _exc_type, _exc_val, _exc_tb) -> None:
+    async def __aexit__(
+        self,
+        _exc_type: type[BaseException] | None,
+        _exc_val: BaseException | None,
+        _exc_tb: TracebackType | None,
+    ) -> None:
         """Async context manager exit."""
         if self.session:
             await self.session.close()

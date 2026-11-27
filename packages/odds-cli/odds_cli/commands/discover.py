@@ -26,7 +26,7 @@ def games(
     sport: str = typer.Option(
         ..., "--sport", "-s", help="Sport to discover games for (spends its key's units)"
     ),
-):
+) -> None:
     """
     Discover and catalog historical NBA games for backfill planning.
 
@@ -45,7 +45,7 @@ def games(
     asyncio.run(_discover_games(start, end, sport))
 
 
-async def _discover_games(start_date_str: str, end_date_str: str, sport: str):
+async def _discover_games(start_date_str: str, end_date_str: str, sport: str) -> None:
     """Async implementation of discover games."""
     # Validate and parse dates
     try:
@@ -224,7 +224,7 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str):
 @app.command()
 def upcoming(
     sport: str = typer.Option(..., "--sport", "-s", help="Sport to discover games for"),
-):
+) -> None:
     """
     Discover and store upcoming games using the free /events endpoint (0 quota units).
 

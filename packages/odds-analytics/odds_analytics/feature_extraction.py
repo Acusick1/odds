@@ -172,7 +172,6 @@ class FeatureExtractor(ABC):
         event: FeatureEvent,
         quoted: Sequence[Quote],
         outcome: PriceOutcome | None = None,
-        **kwargs,
     ) -> TabularFeatures | dict[str, Any]:
         """
         Extract features from event and one snapshot's quotes.
@@ -181,7 +180,6 @@ class FeatureExtractor(ABC):
             event: Event with final scores
             quoted: One snapshot's quotes of one market
             outcome: Specific outcome to analyze
-            **kwargs: Additional extractor-specific parameters
 
         Returns:
             TabularFeatures instance
@@ -284,7 +282,6 @@ class TabularFeatureExtractor(FeatureExtractor):
         event: FeatureEvent,
         quoted: Sequence[Quote],
         outcome: PriceOutcome | None = None,
-        **kwargs,
     ) -> TabularFeatures:
         """
         Extract ML features from event and one snapshot's quotes.

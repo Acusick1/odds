@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 import structlog
 from odds_core.database import async_session_maker
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.data_fetcher import TheOddsAPIClient
 from odds_lambda.odds_api_events import odds_api_finder, resolve_odds_api_events
@@ -40,7 +41,7 @@ class EventSyncService:
         self,
         client: TheOddsAPIClient,
         *,
-        session_factory=async_session_maker,
+        session_factory: Callable[[], AsyncSession] = async_session_maker,
     ) -> None:
         self._client = client
         self._session_factory = session_factory

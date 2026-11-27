@@ -22,7 +22,7 @@ def copy_from_production(
     ),
     prod_url: str | None = typer.Option(None, "--prod-url", help="Production database URL"),
     local_url: str | None = typer.Option(None, "--local-url", help="Local database URL"),
-):
+) -> None:
     """
     Copy events, snapshots and odds from production to local database.
 

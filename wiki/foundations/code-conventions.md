@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Code conventions and lint gates
-description: The pre-commit hooks and lint workflow, review-only conventions (type hints, async DB, model types, job entry points), and logging setup.
+description: The pre-commit hooks and lint workflow, review-only conventions (async DB, model types, job entry points), and logging setup.
 sources:
   - odds_core.logging_setup.configure_logging
   - odds_lambda.lambda_handler.lambda_handler
@@ -28,7 +28,7 @@ Pre-commit (`.pre-commit-config.yaml`) runs on every commit; the `Lint` workflow
 
 | Hook | Scope | Enforces |
 |---|---|---|
-| ruff `--fix`, ruff-format | all Python | Rules `E W F I B C4 UP DTZ`, line length 100, target py312, `E501` ignored, double quotes and space indents (configured in `[tool.ruff]` of the root `pyproject.toml`). `UP` enforces `str | None` and `list[T]` |
+| ruff `--fix`, ruff-format | all Python | Rules `E W F I B C4 UP DTZ ANN`, line length 100, target py312, `E501` and `ANN401` ignored, double quotes and space indents (configured in `[tool.ruff]` of the root `pyproject.toml`). `UP` enforces `str | None` and `list[T]`; `ANN` enforces type hints on every argument and return outside `tests/` ([type hints](#type-hints)) |
 | shellcheck | shell scripts, detected by shebang or extension (the hook's `types: [shell]`) | Default shellcheck rules; a script disables a rule with a `# shellcheck disable=` directive beside the reason |
 | vale | [README.md](../../README.md), [AGENTS.md](../../AGENTS.md), `wiki/` and the Markdown under docs (hook `files` in `.pre-commit-config.yaml`; rules in `.vale.ini`) | `Temporal.Narration` (error on change narration) and `Temporal.TimeRelative` (warning on moment-in-time words) in `.vale/styles/Temporal/` |
 | wiki-lint | whole repo, every commit (`always_run`; `--no-write --fail-stale`) | Frontmatter, links, machine-specific terms outside fenced blocks and link targets, citations (paths, and dotted symbols in the packages and `scripts/`), unqualified symbols, index blocks, coverage and staleness of cited symbols, re-export imports and files, counting only page edits that survive a squash onto `origin/main` (`scripts.wiki_lint.WikiLinter`; rules in [SCHEMA](../SCHEMA.md)) |
@@ -39,13 +39,16 @@ The `claim-issue` hook (`.githooks/claim-issue.sh`) is a plain `post-checkout` g
 
 Ruff selects the whole `DTZ` family for timezone checks ([Timezones](timezones.md#lint-coverage)).
 
+### Type hints
+
+Ruff's `ANN` rules require an annotation on every argument and return value. `tests/**` is exempt through `[tool.ruff.lint.per-file-ignores]`. `ANN401` is ignored, so `Any` is allowed where a value is genuinely untyped, such as JSON payloads, SQL rows and pass-through library parameters. `mypy-init-return` lets an `__init__` with annotated arguments omit `-> None`. No type checker (mypy, ty, pyright) runs in pre-commit or CI, so ruff checks that hints exist, not that they are correct.
+
 ### Dependency checks
 
 `deptry` runs in the "Check declared dependencies" step of `.github/workflows/test.yml`, before the tests in every run of the test job (a docs-only branch skips it), once per package (`cd "$pkg" && uv run --project ../.. --with deptry deptry .`, for each `packages/*/`) and fails on a module that a package imports without declaring in its own `pyproject.toml`. Deliberate exceptions sit in that package's `[tool.deptry.per_rule_ignores]` ([Workspace packages](workspace-packages.md#dependency-exceptions)).
 
 ## Conventions without tooling
 
-- **Type hints** on every signature. No type checker (mypy, ty, pyright) is configured in pre-commit or CI, so hints are not verified.
 - **Async only** for DB work: `AsyncSession` and `async with async_session_maker() as session`, never a sync `Session`, never a session shared across tasks ([Databases and environments](databases-and-environments.md)). The CLI wraps async code in `asyncio.run()`.
 - **Model types.** SQLModel for tables, Pydantic `BaseModel` for API responses and configs, `dataclass` for simple containers.
 - **Job entry points** are `async def main(ctx: JobContext)` in `odds_lambda/jobs/` ([Job registry](../scheduling/job-registry.md)).

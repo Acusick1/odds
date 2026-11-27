@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 import structlog
 import typer
 from odds_core.config import get_settings
-from odds_lambda.data_fetcher import TheOddsAPIClient
+from odds_lambda.data_fetcher import OddsResponse, TheOddsAPIClient
 from odds_lambda.ingestion import OddsIngestionCallbacks, OddsIngestionService
 from odds_lambda.jobs import fetch_mlb_results, fetch_oddsportal_results
 from odds_lambda.jobs.fetch_scores import update_scores
@@ -24,12 +24,12 @@ def fetch_current(
     sport: str = typer.Option(
         ..., "--sport", "-s", help="Sport to fetch odds for (spends its key's units)"
     ),
-):
+) -> None:
     """Fetch current odds for upcoming games."""
     asyncio.run(_fetch_current(sport))
 
 
-async def _fetch_current(sport: str):
+async def _fetch_current(sport: str) -> None:
     """Async implementation of fetch current."""
     console.print(f"[bold blue]Fetching odds for {sport}...[/bold blue]")
 
@@ -46,7 +46,7 @@ async def _fetch_current(sport: str):
             async with TheOddsAPIClient() as client:
                 ingestion_service = OddsIngestionService(client=client, settings=app_settings)
 
-                def _on_fetch_complete(response):
+                def _on_fetch_complete(response: OddsResponse) -> None:
                     progress.update(
                         task,
                         description=f"Processing {len(response.events)} events...",
@@ -120,7 +120,7 @@ def fetch_scores(
         ..., "--sport", "-s", help="Sport to fetch scores for (spends its key's units)"
     ),
     days: int = typer.Option(3, "--days", "-d", help="Number of days back to fetch scores"),
-):
+) -> None:
     """Fetch scores for completed games."""
     asyncio.run(_fetch_scores(sport, days))
 

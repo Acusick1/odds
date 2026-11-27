@@ -20,7 +20,7 @@ def backfill_odds(
     since: str = typer.Option(..., "--since", help="Earliest kick-off (UTC date)"),
     limit: int | None = typer.Option(None, "--limit", help="Backfill at most this many events"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Fetch and resample without writing"),
-):
+) -> None:
     """Store Polymarket price history as `polymarket` odds snapshots for finished events.
 
     Attaches each Polymarket match to its existing event in DATABASE_URL, recording
@@ -65,12 +65,12 @@ def backfill_odds(
 
 
 @app.command("discover")
-def discover():
+def discover() -> None:
     """List active NBA events currently on Polymarket."""
     asyncio.run(_discover_async())
 
 
-async def _discover_async():
+async def _discover_async() -> None:
     """Async implementation of discover command."""
     from odds_lambda.polymarket_fetcher import PolymarketClient
 
