@@ -45,7 +45,12 @@ from odds_lambda.scheduling.decision import (
     CadenceConfig,
     ScheduleDecision,
 )
-from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
+from odds_lambda.scheduling.jobs import (
+    JobContext,
+    is_job_enabled,
+    make_compound_job_name,
+    require_sport,
+)
 from odds_lambda.storage.event_resolver import attach_events
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, discard_payload, store_payload
 from odds_lambda.storage.writers import OddsWriter
@@ -226,7 +231,7 @@ async def _log_failure(sport_key: SportKey, snapshot_time: datetime, error: str)
 async def main(ctx: JobContext) -> None:
     sport = require_sport(ctx, "fetch-polymarket-odds")
     settings = get_settings()
-    if not settings.polymarket.enabled:
+    if not is_job_enabled("fetch-polymarket-odds", settings):
         logger.info("polymarket_odds_disabled", reason="polymarket.enabled=False")
         return
 

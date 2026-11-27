@@ -7,6 +7,7 @@ from dataclasses import dataclass, fields
 from importlib import import_module
 
 import structlog
+from odds_core.config import Settings
 from odds_core.job_specs import JOB_SPECS, SportMap
 from odds_core.sports import SportKey
 
@@ -189,6 +190,16 @@ def places_candidate_bets(job_name: str) -> bool:
     base_name, _ = resolve_job_name(job_name)
     spec = JOB_SPECS.get(base_name)
     return spec.candidate_bets if spec else False
+
+
+def is_job_enabled(job_name: str, settings: Settings) -> bool:
+    """Whether the job's settings let it run; a job without an enabled predicate always may.
+
+    Accepts a compound (sport-suffixed) or base job name.
+    """
+    base_name, _ = resolve_job_name(job_name)
+    spec = JOB_SPECS.get(base_name)
+    return spec is None or spec.enabled is None or spec.enabled(settings)
 
 
 def is_smoke_unsafe(job_name: str) -> bool:

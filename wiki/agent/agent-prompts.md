@@ -32,7 +32,7 @@ Every [wake-up](../foundations/glossary.md#wake-up) of the [agent](betting-agent
 6. **Brief.** Append a brief per researched event with a decision of `bet`, `skip` or `watching` (`odds_mcp.server.save_match_brief`).
 7. **Decide.** Place bets when there is an edge (`odds_mcp.server.place_bet`); bets can be placed at any time if the edge is clear. Stakes follow the conviction tiers below.
 
-The agent may ask for its next wake-up with `odds_mcp.server.schedule_next_wakeup` ([scheduling tools](mcp-server.md#scrape-and-scheduling-tools)); otherwise the job's cadence applies. The cadence (`odds_lambda.jobs.agent_run.CADENCE`, selected from the `agent-run` `odds_core.job_specs.JobSpec` `cadence` field in `odds_core.job_specs.JOB_SPECS`, [cadence table](../scheduling/decision-engine.md#cadence)) is 1 h within 3 h of kick-off, 4 h from 3 to 24 h out, 12 h from 1 to 3 days out and 24 h beyond, and a requested wake-up overrides it, later or sooner ([wake-up requests](agent-run-job.md#wake-up-requests)).
+The agent may ask for its next wake-up with `odds_mcp.server.schedule_next_wakeup` ([scheduling tools](mcp-server.md#scrape-and-scheduling-tools)); otherwise the job's cadence applies. The cadence (`odds_lambda.jobs.agent_run.CADENCE`, selected from the `cadence` field of the `agent-run` `odds_core.job_specs.JobSpec` in `odds_core.job_specs.JOB_SPECS`, [cadence table](../scheduling/decision-engine.md#cadence)) is 1 h within 3 h of kick-off, 4 h from 3 to 24 h out, 12 h from 1 to 3 days out and 24 h beyond, and a requested wake-up overrides it, later or sooner ([wake-up requests](agent-run-job.md#wake-up-requests)).
 
 ## Edge types
 

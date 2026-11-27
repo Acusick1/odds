@@ -60,7 +60,12 @@ from odds_lambda.scheduling.decision import (
     Lead,
     ScheduleDecision,
 )
-from odds_lambda.scheduling.jobs import JobContext, make_compound_job_name, require_sport
+from odds_lambda.scheduling.jobs import (
+    JobContext,
+    is_job_enabled,
+    make_compound_job_name,
+    require_sport,
+)
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload
 
 logger = structlog.get_logger()
@@ -338,7 +343,7 @@ async def main(ctx: JobContext) -> None:
     settings = get_settings()
     bf = settings.betfair
 
-    if not bf.enabled:
+    if not is_job_enabled("fetch-betfair-exchange", settings):
         logger.info("betfair_job_disabled", reason="betfair.enabled=False")
         return
 

@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import TYPE_CHECKING
 
 from odds_core.sports import SportKey
+
+if TYPE_CHECKING:
+    from odds_core.config import Settings
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +50,7 @@ class JobSpec:
     heartbeats: tuple[Heartbeat, ...] = ()
     cadence: Cadence | None = None
     sport_cadences: tuple[tuple[SportKey, Cadence], ...] = ()
+    enabled: Callable[[Settings], bool] | None = None
 
 
 JOB_SPECS: Mapping[str, JobSpec] = MappingProxyType(
@@ -171,6 +176,7 @@ JOB_SPECS: Mapping[str, JobSpec] = MappingProxyType(
             module="odds_lambda.jobs.fetch_betfair_exchange",
             per_sport=True,
             sports=SportMap("odds_lambda.betfair.constants", "SPORT_CONFIG"),
+            enabled=lambda settings: settings.betfair.enabled,
             heartbeats=(
                 Heartbeat("fetch-betfair-exchange-epl", 10, "soccer_epl"),
                 Heartbeat("fetch-betfair-exchange-mlb", 11, "baseball_mlb"),
@@ -195,6 +201,7 @@ JOB_SPECS: Mapping[str, JobSpec] = MappingProxyType(
             module="odds_lambda.jobs.fetch_polymarket_odds",
             per_sport=True,
             sports=SportMap("odds_lambda.polymarket_sports", "POLYMARKET_SPORTS"),
+            enabled=lambda settings: settings.polymarket.enabled,
             heartbeats=(
                 Heartbeat("fetch-polymarket-odds-epl", 11, "soccer_epl"),
                 Heartbeat("fetch-polymarket-odds-nba", 11, "basketball_nba"),
