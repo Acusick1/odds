@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -18,8 +19,13 @@ from odds_core.models import (
     Price,
 )
 from odds_core.sports import SportKey, game_day_window
+from odds_core.time import season_start
+from odds_core.vocabulary import Source
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from odds_lambda.fetch_tier import FetchTier
+from odds_lambda.tier_utils import tiers_by_event
 
 logger = structlog.get_logger()
 
@@ -77,6 +83,15 @@ def burn_projection(readings: Iterable[tuple[datetime, int]]) -> BurnProjection 
     days = (run[-1][0] - run[0][0]).total_seconds() / 86400
     per_day = (run[0][1] - run[-1][1]) / days
     return BurnProjection(per_day, run[-1][1] / per_day if per_day > 0 else None, run[0][0])
+
+
+@dataclass(frozen=True)
+class SnapshotCoverage:
+    """A sport's events per season, keyed by the year the season starts, and the distinct
+    events each source has a snapshot of in each tier (``snapshot_tiers``) of each season."""
+
+    events_by_season: dict[int, int]
+    events_by_cell: dict[tuple[int, Source | None, FetchTier], int]
 
 
 class OddsReader:
@@ -426,3 +441,43 @@ class OddsReader:
 
         result = await self.session.execute(query)
         return list(result.scalars().all())
+
+    async def get_snapshot_coverage(self, sport_key: str) -> SnapshotCoverage:
+        """Count a sport's events by season, and by season, source and tier covered."""
+        kickoffs = (
+            await self.session.execute(
+                select(Event.id, Event.commence_time).where(Event.sport_key == sport_key)
+            )
+        ).all()
+        season_of = {
+            event_id: season_start(commence_time, sport_key).year
+            for event_id, commence_time in kickoffs
+        }
+
+        snapshots_query = (
+            select(
+                OddsSnapshot.event_id,
+                Event.commence_time,
+                OddsSnapshot.snapshot_time,
+                OddsSnapshot.source,
+                OddsSnapshot.time_basis,
+                OddsSnapshot.market,
+            )
+            .join(Event, Event.id == OddsSnapshot.event_id)
+            .where(Event.sport_key == sport_key)
+        )
+        rows = (await self.session.execute(snapshots_query)).all()
+        cells = {
+            (season_of[event_id], snapshot[1], tier, event_id)
+            for event_id, snapshot, tier in tiers_by_event(
+                (event_id, commence_time, (snapshot_time, source, time_basis, market))
+                for event_id, commence_time, snapshot_time, source, time_basis, market in rows
+            )
+        }
+
+        return SnapshotCoverage(
+            events_by_season=dict(Counter(season_of.values())),
+            events_by_cell=dict(
+                Counter((season, source, tier) for season, source, tier, _ in cells)
+            ),
+        )

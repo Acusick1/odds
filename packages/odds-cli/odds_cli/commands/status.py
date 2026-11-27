@@ -6,7 +6,11 @@ from datetime import UTC, datetime, timedelta
 import typer
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
-from odds_lambda.storage.readers import BurnProjection, KeyQuota, OddsReader
+from odds_core.time import CALENDAR_YEAR_SPORTS, season_label
+from odds_core.vocabulary import Source
+from odds_lambda.fetch_tier import FetchTier
+from odds_lambda.storage.readers import BurnProjection, KeyQuota, OddsReader, SnapshotCoverage
+from odds_lambda.tier_utils import tier_hours_before
 from rich.console import Console
 from rich.table import Table
 
@@ -305,3 +309,100 @@ async def _show_events(days: int, team: str | None):
     except Exception as e:
         console.print(f"\n[bold red]✗ Failed to get events: {str(e)}[/bold red]")
         raise typer.Exit(code=1) from e
+
+
+# Farthest from kick-off first, in-play last.
+_COVERAGE_TIERS = tuple(reversed(FetchTier))
+
+
+def _tier_header(tier: FetchTier) -> str:
+    if tier is FetchTier.IN_PLAY:
+        return f"{tier.value}\nafter KO"
+    lower, upper = tier_hours_before(tier)
+    if upper == float("inf"):
+        return f"{tier.value}\n>{lower:g}h"
+    if lower == 0:
+        return f"{tier.value}\n<={upper:g}h"
+    return f"{tier.value}\n{lower:g}-{upper:g}h"
+
+
+def _season_label(start_year: int, sport_key: str) -> str:
+    return str(start_year) if sport_key in CALENDAR_YEAR_SPORTS else season_label(start_year)
+
+
+def _count(value: int) -> str:
+    return f"{value:,}" if value else "-"
+
+
+def _source_label(source: Source | None) -> str:
+    return source.value if source is not None else "untagged"
+
+
+def coverage_table(coverage: SnapshotCoverage, sport_key: str) -> Table:
+    """Distinct events with a snapshot per season, source and tier, with a total per source;
+    every season lists each source the sport has a snapshot from."""
+    order = list(Source)
+    sources = sorted(
+        {source for _, source, _ in coverage.events_by_cell},
+        key=lambda source: len(order) if source is None else order.index(source),
+    )
+
+    table = Table(title=f"Snapshot coverage: {sport_key} (distinct events)")
+    table.add_column("Season", style="cyan")
+    table.add_column("Source")
+    table.add_column("Events", justify="right")
+    for tier in _COVERAGE_TIERS:
+        table.add_column(_tier_header(tier), justify="right")
+
+    def add_rows(
+        label: str, events: int, cells: dict[tuple[Source | None, FetchTier], int]
+    ) -> None:
+        if not sources:
+            table.add_row(label, "-", _count(events), *("-" for _ in _COVERAGE_TIERS))
+            return
+        for i, source in enumerate(sources):
+            table.add_row(
+                label if i == 0 else "",
+                _source_label(source),
+                _count(events) if i == 0 else "",
+                *(_count(cells.get((source, tier), 0)) for tier in _COVERAGE_TIERS),
+            )
+
+    totals: dict[tuple[Source | None, FetchTier], int] = {}
+    for season in sorted(coverage.events_by_season):
+        cells = {
+            (source, tier): count
+            for (cell_season, source, tier), count in coverage.events_by_cell.items()
+            if cell_season == season
+        }
+        for key, count in cells.items():
+            totals[key] = totals.get(key, 0) + count
+        add_rows(_season_label(season, sport_key), coverage.events_by_season[season], cells)
+
+    table.add_section()
+    add_rows("Total", sum(coverage.events_by_season.values()), totals)
+    return table
+
+
+@app.command("coverage")
+def show_coverage(
+    sport: str = typer.Option("soccer_epl", "--sport", "-s", help="Sport key"),
+):
+    """Show how many of a sport's events each source has a snapshot of, by season and tier."""
+    asyncio.run(_show_coverage(sport))
+
+
+async def _show_coverage(sport_key: str) -> None:
+    try:
+        async with async_session_maker() as session:
+            coverage = await OddsReader(session).get_snapshot_coverage(sport_key)
+    except Exception as e:
+        console.print(f"\n[bold red]✗ Failed to get coverage: {str(e)}[/bold red]")
+        raise typer.Exit(code=1) from e
+
+    if not coverage.events_by_season:
+        console.print(f"[yellow]No {sport_key} events[/yellow]\n")
+        return
+    console.print()
+    console.print(coverage_table(coverage, sport_key))
+    console.print()

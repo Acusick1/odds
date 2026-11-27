@@ -7,12 +7,15 @@ operations to ensure consistent tier classification across all data.
 """
 
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Hashable, Iterable, Iterator, Sequence
 from datetime import datetime
 
 from odds_core.vocabulary import Source, TimeBasis
 
 from odds_lambda.fetch_tier import FetchTier
+
+# A snapshot as the tier rules read it: (snapshot time, source, time basis, market).
+type SnapshotRow = tuple[datetime, Source | None, TimeBasis | None, str | None]
 
 _NEARER_TO_FARTHER = (
     FetchTier.CLOSING,
@@ -123,3 +126,20 @@ def snapshot_tiers(
         return covered
 
     return [tier(*snapshot) for snapshot in snapshots]
+
+
+def tiers_by_event[K: Hashable](
+    rows: Iterable[tuple[K, datetime, SnapshotRow]],
+) -> Iterator[tuple[K, SnapshotRow, FetchTier]]:
+    """Each snapshot, given as (event, kick-off, snapshot), with the tier ``snapshot_tiers``
+    gives it over its event's snapshots."""
+    by_event: dict[K, list[SnapshotRow]] = defaultdict(list)
+    kickoffs: dict[K, datetime] = {}
+    for event, commence_time, snapshot in rows:
+        by_event[event].append(snapshot)
+        kickoffs[event] = commence_time
+    for event, snapshots in by_event.items():
+        for snapshot, tier in zip(
+            snapshots, snapshot_tiers(snapshots, kickoffs[event]), strict=True
+        ):
+            yield event, snapshot, tier

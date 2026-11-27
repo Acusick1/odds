@@ -19,6 +19,11 @@ def season_start_year(commence_time: datetime) -> int:
     )
 
 
+def season_label(start_year: int) -> str:
+    """A season spanning two calendar years, labelled by both: 2024 gives ``"2024-25"``."""
+    return f"{start_year}-{(start_year + 1) % 100:02d}"
+
+
 def season_start(now: datetime, sport_key: str) -> datetime:
     """The start of ``now``'s season: 1 January for a calendar-year sport, else 1 August."""
     if sport_key in CALENDAR_YEAR_SPORTS:
