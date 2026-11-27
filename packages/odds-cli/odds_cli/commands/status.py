@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 import typer
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
-from odds_core.time import CALENDAR_YEAR_SPORTS, season_label
+from odds_core.time import CALENDAR_YEAR_SPORTS
 from odds_core.vocabulary import Source
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.storage.readers import BurnProjection, KeyQuota, OddsReader, SnapshotCoverage
@@ -327,7 +327,9 @@ def _tier_header(tier: FetchTier) -> str:
 
 
 def _season_label(start_year: int, sport_key: str) -> str:
-    return str(start_year) if sport_key in CALENDAR_YEAR_SPORTS else season_label(start_year)
+    if sport_key in CALENDAR_YEAR_SPORTS:
+        return str(start_year)
+    return f"{start_year}-{(start_year + 1) % 100:02d}"
 
 
 def _count(value: int) -> str:

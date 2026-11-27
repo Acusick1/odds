@@ -18,7 +18,6 @@ import httpx
 import structlog
 from odds_core.epl_data_models import EspnFixtureRecord
 from odds_core.team import normalize_team_name
-from odds_core.time import season_label as two_year_season_label
 
 logger = structlog.get_logger()
 
@@ -114,7 +113,7 @@ def season_label(season: int) -> str:
     if season in SEASONS:
         return SEASONS[season]
     # Fall back to deriving the label for seasons beyond the static table.
-    return two_year_season_label(season)
+    return f"{season}-{(season + 1) % 100:02d}"
 
 
 def _extract_score(competitor: dict[str, Any]) -> str:
