@@ -23,7 +23,7 @@ status: stable
 
 ## Registry
 
-- `module` and `function` identify the normal entry point. `odds_lambda.scheduling.jobs.get_job_function` imports it on first use and caches the function. `function` defaults to `main`; `update-status` sets only `module` (`odds_lambda.jobs.update_status`), so it runs once for all leagues, bootstraps by default, and has no static cron, cadence or heartbeat expectation.
+- `module` and `function` identify the normal entry point. `odds_lambda.scheduling.jobs.get_job_function` imports it on first use and caches the function. `function` defaults to `main`; `update-status` sets only `module` (`odds_lambda.jobs.update_status`), so it runs once for all leagues, bootstraps by default, and has no static cron, cadence or heartbeat expectation; its run decision and its status flips share one look-back, `odds_lambda.jobs.update_status.STATUS_WINDOW`.
 - `bootstrap_function` optionally names a different function in the same module. `odds_lambda.scheduling.jobs.get_bootstrap_function` adapts it to `odds_lambda.scheduling.jobs.JobContext`; `agent-run` books its next wake-up through `odds_lambda.jobs.agent_run.schedule_next`.
 - `bootstrap` controls membership in `odds_core.job_specs.default_bootstrap_jobs`. `odds_core.config.SchedulerConfig.bootstrap_jobs` remains the operator override, including an explicitly empty list.
 - `agent_bets`, `candidate_bets` and `paid_api` drive the separate smoke opt-ins `--include-agent`, `--include-candidates` and `--include-paid-api` ([CLI](local-scheduler.md#cli)).

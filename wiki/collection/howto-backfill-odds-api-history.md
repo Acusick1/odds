@@ -79,7 +79,7 @@ Costs a historical purchase before it is bought, buys it, audits what it stored,
    uv run odds nba-stats fetch
    uv run odds backfill scores --start 2025-01-01 --end 2025-01-07 --dry-run
    ```
-   - The scores come from `nba_team_game_logs`, so fetch the game logs first; it updates only events missing scores, and you rerun without `--dry-run` to write them.
+   - The scores come from `nba_team_game_logs`, so fetch the game logs first; rerun without `--dry-run` to write them to the events that have no scores.
 2. Check the result with `uv run odds backfill status`, which also lists the recorded provider gaps.
 
 ## Related

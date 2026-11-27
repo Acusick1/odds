@@ -117,7 +117,7 @@ async def _update_event_statuses() -> None:
         now = datetime.now(UTC)
 
         # Find events that should be live (within last 4 hours)
-        start_range = now - timedelta(hours=4)
+        start_range = now - STATUS_WINDOW
         end_range = now
 
         events = await reader.get_events_by_date_range(

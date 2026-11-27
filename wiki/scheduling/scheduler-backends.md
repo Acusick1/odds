@@ -42,7 +42,7 @@ The constructor takes a dry-run flag and a `odds_lambda.scheduling.backends.base
 
 `odds_lambda.scheduling.backends.base.RetryConfig` is consumed only by the AWS backend, and only `max_attempts`, `initial_delay_seconds` and `max_delay_seconds`; `exponential_base` and `jitter` are read by nothing (#473). Each `odds_lambda.scheduling.helpers.self_schedule` call builds a fresh backend (and boto3 clients on AWS); there is no shared instance.
 
-`odds_lambda.scheduling.backends.get_scheduler_backend` reads `settings.scheduler.backend` (`SCHEDULER_BACKEND`, default `local`) unless `backend_type` is passed, lowercases it, and lazy-imports the class. An unknown value raises `odds_lambda.scheduling.exceptions.ConfigurationError`. The AWS branch takes region, ARN and prefix from its keyword-only `aws_region`, `lambda_arn` and `rule_prefix` arguments, each falling back to `settings.aws` when absent (no caller passes them); the local branch is [the local scheduler](local-scheduler.md).
+`odds_lambda.scheduling.backends.get_scheduler_backend` reads `settings.scheduler.backend` (`SCHEDULER_BACKEND`, default `local`) unless `backend_type` is passed, lowercases it, and lazy-imports the class. An unknown value raises `odds_lambda.scheduling.exceptions.ConfigurationError`. The AWS branch passes region, ARN and prefix from `settings.aws` to the constructor; the local branch is [the local scheduler](local-scheduler.md).
 
 ## Health checks
 
@@ -69,7 +69,7 @@ The Lambda role in `deployment/aws/terraform/lambda.tf` grants only `PutRule`, `
 
 ### Env-var contract
 
-Constructor arguments win, then unprefixed env vars: `AWS_REGION`, `LAMBDA_ARN`, `RULE_PREFIX`. Terraform sets `LAMBDA_ARN` and `RULE_PREFIX` on the function (`deployment/aws/terraform/lambda.tf`), and passes the Odds API keys the client reads, with no state kept between invocations. `odds_lambda.scheduling.backends.get_scheduler_backend` passes `settings.aws.*` unless given its own arguments (`odds_core.config.AWSConfig`, prefix `AWS_`: `AWS_REGION`, `AWS_LAMBDA_ARN`, `AWS_RULE_PREFIX`), which is what a local `list-jobs --backend aws` uses ([Configuration](../foundations/configuration.md#variables-read-outside-settings)). Missing region, ARN or prefix raises `odds_lambda.scheduling.exceptions.ConfigurationError` in the constructor. `odds_lambda.scheduling.backends.aws.AWSEventBridgeBackend.health_check` results are cached for 5 minutes.
+Constructor arguments win, then unprefixed env vars: `AWS_REGION`, `LAMBDA_ARN`, `RULE_PREFIX`. Terraform sets `LAMBDA_ARN` and `RULE_PREFIX` on the function (`deployment/aws/terraform/lambda.tf`), and passes the Odds API keys the client reads, with no state kept between invocations. `odds_lambda.scheduling.backends.get_scheduler_backend` always passes `settings.aws.*` (`odds_core.config.AWSConfig`, prefix `AWS_`: `AWS_REGION`, `AWS_LAMBDA_ARN`, `AWS_RULE_PREFIX`), which is what a local `list-jobs --backend aws` uses ([Configuration](../foundations/configuration.md#variables-read-outside-settings)). Missing region, ARN or prefix raises `odds_lambda.scheduling.exceptions.ConfigurationError` in the constructor. `odds_lambda.scheduling.backends.aws.AWSEventBridgeBackend.health_check` results are cached for 5 minutes.
 
 ## Lambda handler
 

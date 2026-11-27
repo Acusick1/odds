@@ -42,10 +42,10 @@ Four jobs and one command move events to LIVE, FINAL, POSTPONED and CANCELLED ([
 
 1. `odds_lambda.jobs.update_status._status_decision` calls `odds_lambda.scheduling.decision.decide_backward_resilient` with a 4-hour window, 1 h active and 6 h idle intervals, counting only `{EventStatus.SCHEDULED}`.
 2. Pre-schedule under `update-status`, skip if idle.
-3. Inside `job_alert_context("update-status")`, `odds_lambda.jobs.update_status._update_event_statuses` reads SCHEDULED events with `commence_time` in the last four hours and calls `update_event_status(LIVE)` for each that has started, then commits once and logs `event_statuses_updated`.
+3. Inside `job_alert_context("update-status")`, `odds_lambda.jobs.update_status._update_event_statuses` reads SCHEDULED events with `commence_time` within `odds_lambda.jobs.update_status.STATUS_WINDOW` (four hours) and calls `update_event_status(LIVE)` for each that has started, then commits once and logs `event_statuses_updated`.
 4. Re-decide and post-schedule.
 
-`odds_lambda.jobs.update_status._update_event_statuses` does not filter by league while the gate does, so when a per-league schedule fires it flips events of every league. Only events that kicked off within the last 4 hours are eligible, so if the job was down longer, older SCHEDULED events can only reach FINAL through the scores or results jobs.
+`odds_lambda.jobs.update_status._update_event_statuses` does not filter by league while the gate does, so when a per-league schedule fires it flips events of every league. Only events that kicked off within that same `odds_lambda.jobs.update_status.STATUS_WINDOW` are eligible, so if the job was down longer, older SCHEDULED events can only reach FINAL through the scores or results jobs.
 
 ## fetch-scores
 
