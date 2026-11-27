@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-import pytest_asyncio
 import yaml
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -260,7 +259,7 @@ def make_ml_config() -> Callable[..., Any]:
     return _make
 
 
-@pytest_asyncio.fixture(loop_scope="session")
+@pytest.fixture
 async def legacy_connection(legacy_engine: AsyncEngine) -> AsyncIterator[AsyncConnection]:
     from alembic.migration import MigrationContext
     from alembic.operations import Operations
@@ -310,7 +309,7 @@ def legacy_pglite_config() -> PGliteConfig:
     return PGliteConfig(use_tcp=True, cleanup_on_exit=True, timeout=30)
 
 
-@pytest_asyncio.fixture(loop_scope="session")
+@pytest.fixture
 async def converted_input(legacy_connection: AsyncConnection) -> AsyncConnection:
     data: dict[str, Any] = json.loads(
         Path("tests/fixtures/legacy_snapshots/representative.json").read_text()
