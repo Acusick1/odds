@@ -7,18 +7,21 @@ sources:
   - odds_lambda.storage.readers.OddsReader.get_database_stats
   - odds_lambda.storage.readers.OddsReader.get_games_by_date
   - odds_lambda.storage.readers.OddsReader.get_events_by_date_range
+  - odds_lambda.storage.readers.OddsReader.get_snapshot_coverage
 status: stable
 ---
 
 # OddsReader
 
-`odds_lambda.storage.readers.OddsReader` is the read side for events, snapshots and the operational logs: one class, 10 async methods, built on an `AsyncSession`. It reads no prices; price rows are read through `odds_core.quotes.quotes` ([Reading quotes](price-tables.md#reading-prices)). Module map and commit rules are on [Storage layer](storage-layer.md).
+`odds_lambda.storage.readers.OddsReader` is the read side for events, snapshots and the operational logs: one class of async methods, built on an `AsyncSession`. It reads no prices; price rows are read through `odds_core.quotes.quotes` ([Reading quotes](price-tables.md#reading-prices)). Module map and commit rules are on [Storage layer](storage-layer.md).
 
 ## Methods
 
 **Snapshot and event accessors**: `odds_lambda.storage.readers.OddsReader.get_snapshot_count_for_event` (counts distinct snapshot times per event, since a fetch stores one snapshot per market at one time), `odds_lambda.storage.readers.OddsReader.get_snapshots_for_event`, `odds_lambda.storage.readers.OddsReader.get_events_by_date_range` (optional `min_snapshots`, counted in distinct snapshot times; ordered by `commence_time`, then the integer event id, so events with the same kick-off have a fixed order that does not depend on the query plan), `odds_lambda.storage.readers.OddsReader.get_events_by_team`, `odds_lambda.storage.readers.OddsReader.get_event_by_id`. Each takes the event's integer id.
 
-**Operational**: `odds_lambda.storage.readers.OddsReader.get_fetch_logs`, `odds_lambda.storage.readers.OddsReader.get_data_quality_logs`, `odds_lambda.storage.readers.OddsReader.get_database_stats`, `odds_lambda.storage.readers.OddsReader.get_latest_quota_by_key`, `odds_lambda.storage.readers.OddsReader.get_games_by_date`.
+**Operational**: `odds_lambda.storage.readers.OddsReader.get_fetch_logs`, `odds_lambda.storage.readers.OddsReader.get_data_quality_logs`, `odds_lambda.storage.readers.OddsReader.get_database_stats`, `odds_lambda.storage.readers.OddsReader.get_latest_quota_by_key`, `odds_lambda.storage.readers.OddsReader.get_quota_burn`, `odds_lambda.storage.readers.OddsReader.get_games_by_date`.
+
+**Coverage**: `odds_lambda.storage.readers.OddsReader.get_snapshot_coverage(sport_key)`, a sport's events per season and the distinct events each source has a snapshot of in each tier (tiered by `odds_lambda.tier_utils.tiers_by_event`), read by `odds status coverage` ([odds status](../operations/health-monitor.md#odds-status)).
 
 ## Other behaviour
 

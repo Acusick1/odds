@@ -6,10 +6,9 @@ from collections import Counter, defaultdict
 from datetime import UTC, datetime
 
 from odds_core.models import Event, OddsSnapshot, Price
-from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.fetch_tier import FetchTier
 from odds_lambda.results_run import awaiting_result
-from odds_lambda.tier_utils import snapshot_tiers, tier_hours_before
+from odds_lambda.tier_utils import tier_hours_before, tiers_by_event
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -417,26 +416,17 @@ class QualityMetrics:
         if sport_key:
             snapshots_query = snapshots_query.where(Event.sport_key == sport_key)
 
-        by_event: dict[str, list[tuple[datetime, Source | None, TimeBasis | None, str | None]]] = (
-            defaultdict(list)
-        )
-        kickoffs: dict[str, datetime] = {}
-        for event_id, snapshot_time, source, time_basis, market, commence_time in (
-            await self.session.execute(snapshots_query)
-        ).all():
-            by_event[event_id].append((snapshot_time, source, time_basis, market))
-            kickoffs[event_id] = commence_time
-
-        snapshots_per_event: dict[FetchTier, Counter[str]] = defaultdict(Counter)
-        for event_id, snapshots in by_event.items():
-            covered = {
-                (tier, snapshot[0])
-                for snapshot, tier in zip(
-                    snapshots, snapshot_tiers(snapshots, kickoffs[event_id]), strict=True
-                )
-            }
-            for tier, _ in covered:
-                snapshots_per_event[tier][event_id] += 1
+        rows = (await self.session.execute(snapshots_query)).all()
+        covered = {
+            (tier, event_id, snapshot[0])
+            for event_id, snapshot, tier in tiers_by_event(
+                (event_id, commence_time, (snapshot_time, source, time_basis, market))
+                for event_id, snapshot_time, source, time_basis, market, commence_time in rows
+            )
+        }
+        snapshots_per_event: dict[FetchTier, Counter[int]] = defaultdict(Counter)
+        for tier, event_id, _ in covered:
+            snapshots_per_event[tier][event_id] += 1
 
         tier_results = []
         for fetch_tier in FetchTier:

@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Health monitor, check-health job and odds status
-description: HealthMonitor, the check-health job's checks, heartbeat and job-run purges, its own alert path, and what odds status show, quota and events print and read.
+description: HealthMonitor, the check-health job's checks, heartbeat and job-run purges, its own alert path, and what odds status show, quota, coverage and events print and read.
 sources:
   - odds_lambda.health_monitor.HealthMonitor
   - odds_lambda.health_monitor.HealthMonitor.purge_old_heartbeats
@@ -55,11 +55,17 @@ sources:
   - odds_core.models.FetchLog
   - odds_cli.commands.status
   - odds_cli.commands.status._show_quota
+  - odds_cli.commands.status.coverage_table
   - odds_cli.commands.scheduler.health
   - odds_lambda.storage.readers.OddsReader.get_database_stats
   - odds_lambda.storage.readers.OddsReader.get_fetch_logs
   - odds_lambda.storage.readers.OddsReader.get_quota_burn
   - odds_lambda.storage.readers.burn_projection
+  - odds_lambda.storage.readers.OddsReader.get_snapshot_coverage
+  - odds_lambda.storage.readers.SnapshotCoverage
+  - odds_lambda.tier_utils.snapshot_tiers
+  - odds_lambda.tier_utils.tiers_by_event
+  - odds_core.time.season_start
 status: stable
 ---
 
@@ -188,6 +194,7 @@ A job inside [`odds_core.alerts.job_alert_context`](alerts.md#delivery) inserts 
 
 - `odds status show [--verbose]`: latest fetch (minutes ago, tick or cross), event counts by status, price-row and snapshot totals (snapshots counted as distinct event and snapshot-time pairs), one quota row per key from `odds_lambda.storage.readers.OddsReader.get_database_stats`; `--verbose` adds data-quality rows from the last 24 h (limit 10).
 - `odds status quota`: latest quota and plan size per key, its burn projection, and the last 10 `odds_core.models.FetchLog` rows that have a quota (`odds_cli.commands.status._show_quota`). The projection (`odds_lambda.storage.readers.OddsReader.get_quota_burn`) is the spend per day and the days the balance lasts, from the key's readings of the last 7 days after its latest reset (a reading above the one before it); with under a day of such readings it prints `unknown` (`odds_lambda.storage.readers.burn_projection`). The web UI's status strip shows the same projection. Rows with a null quota are skipped ([odds-api-quota](../collection/odds-api-quota.md#where-quota-is-recorded-alerted-and-checked)); when none has a quota it prints `No fetch log records an API quota`.
+- `odds status coverage [--sport KEY]` (default `soccer_epl`): one row per season and price source, giving the season's event count and, per tier from opening to in-play, the distinct events the source has a snapshot of in that tier, with a total per source over all seasons and `-` for an empty cell (`odds_cli.commands.status.coverage_table`). Every season lists each source the sport has any snapshot from, so a source a season lacks has `-` in every tier cell; a sport with no snapshots at all gives each season one row with `-` for source and tiers. `odds_lambda.storage.readers.OddsReader.get_snapshot_coverage` returns the counts as an `odds_lambda.storage.readers.SnapshotCoverage`: it tiers every snapshot of the sport by `odds_lambda.tier_utils.snapshot_tiers` over its event's snapshots (`odds_lambda.tier_utils.tiers_by_event`), so an FDUK opening, stamped at its collection deadline, falls in whichever tier that deadline does ([historical ingest](../collection/historical-ingest-scripts.md)), and keys seasons by the year `odds_core.time.season_start` gives (seasons from 1 August, labelled like `2024-25`, or the calendar year for MLB, labelled by the year). It reads every snapshot row of the sport: on the production database in November 2026 (about 680,000 EPL snapshots) `odds status coverage` took 20 s.
 - `odds scheduler health` (not part of `odds status`): prints a green or red overall status, the backend name, the passed and failed checks and any details from `odds_lambda.scheduling.backends.base.SchedulerBackend.health_check`, and exits 1 when unhealthy or on error.
 - `odds status events --days N --team T` (default 7 days): recent events with integer id, status and scores. It has no league filter.
 - `status show` takes the latest fetch row from all sources, so Betfair rows can distort it. It has no success rate: `fetch_logs` has no source column and a failed Odds API call writes no row, so a rate over it could not show an Odds API outage. Its quota is read as in `status quota` ([odds-api-quota](../collection/odds-api-quota.md#where-quota-is-recorded-alerted-and-checked), [fetch logs](../collection/odds-ingestion-service.md#fetch-logs)).
