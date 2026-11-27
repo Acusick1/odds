@@ -3,7 +3,8 @@
 import time
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import Any
+from types import TracebackType
+from typing import Any, Self
 
 import aiohttp
 import structlog
@@ -98,12 +99,17 @@ class TheOddsAPIClient:
         self._quota_used: int | None = None
         self._units_used: int | None = None
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> Self:
         """Async context manager entry."""
         self.session = aiohttp.ClientSession()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         """Async context manager exit."""
         if self.session:
             await self.session.close()

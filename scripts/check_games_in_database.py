@@ -20,7 +20,7 @@ from odds_lambda.tier_utils import calculate_tier
 from sqlalchemy import and_, select
 
 
-async def check_upcoming_games(limit: int = 10):
+async def check_upcoming_games(limit: int = 10) -> None:
     """
     List upcoming scheduled games with tier information.
 

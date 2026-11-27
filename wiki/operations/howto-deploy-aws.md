@@ -54,6 +54,7 @@ The AWS stack is dormant and production runs on a single local host ([ADR-0008](
    ```bash
    uv run python scripts/ci/test_lambda.py --lambda-name <function> --jobs <csv>
    ```
+   - `--jobs` defaults to `fetch-odds` and `--region` to `eu-west-1`.
    - Rules start `DISABLED` on a `rate(1 day)` placeholder and only become real schedules after a job reschedules itself ([self-scheduling](../scheduling/self-scheduling.md)).
 5. Verify the rules.
    ```bash

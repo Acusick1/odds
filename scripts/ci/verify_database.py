@@ -107,7 +107,7 @@ async def verify_database() -> bool:
         await engine.dispose()
 
 
-def main():
+def main() -> None:
     """Run database verification."""
     try:
         result = asyncio.run(verify_database())

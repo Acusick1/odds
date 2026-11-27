@@ -58,7 +58,7 @@ console = Console()
 
 
 @app.callback()
-def callback():
+def callback() -> None:
     """
     Betting Odds Data Pipeline
 

@@ -392,7 +392,7 @@ class AWSEventBridgeBackend(SchedulerBackend):
 
         # Apply retry decorator and execute
         @retry_decorator
-        async def _execute():
+        async def _execute() -> None:
             rule_name = f"{self.rule_prefix}-{job_name}"
             schedule_expression = _format_aws_schedule(next_time)
 

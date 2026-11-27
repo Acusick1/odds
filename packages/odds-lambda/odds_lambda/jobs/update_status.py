@@ -108,7 +108,7 @@ async def main(ctx: JobContext) -> None:
     )
 
 
-async def _update_event_statuses():
+async def _update_event_statuses() -> None:
     """Core status update logic."""
     async with async_session_maker() as session:
         writer = OddsWriter(session)

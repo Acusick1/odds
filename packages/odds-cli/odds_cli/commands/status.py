@@ -21,12 +21,12 @@ console = Console()
 @app.command("show")
 def show_status(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Show detailed statistics"),
-):
+) -> None:
     """Show system health and statistics."""
     asyncio.run(_show_status(verbose))
 
 
-async def _show_status(verbose: bool):
+async def _show_status(verbose: bool) -> None:
     """Async implementation of show status."""
     console.print("\n[bold blue]Odds Pipeline Status[/bold blue]\n")
 
@@ -191,12 +191,12 @@ def _print_quota(
 
 
 @app.command("quota")
-def show_quota():
+def show_quota() -> None:
     """Show API quota usage."""
     asyncio.run(_show_quota())
 
 
-async def _show_quota():
+async def _show_quota() -> None:
     """Async implementation of show quota."""
     console.print("\n[bold blue]API Quota Status[/bold blue]\n")
     app_settings = get_settings()
@@ -237,12 +237,12 @@ async def _show_quota():
 def show_events(
     days: int = typer.Option(7, "--days", "-d", help="Number of days to look back"),
     team: str = typer.Option(None, "--team", "-t", help="Filter by team name"),
-):
+) -> None:
     """Show recent events."""
     asyncio.run(_show_events(days, team))
 
 
-async def _show_events(days: int, team: str | None):
+async def _show_events(days: int, team: str | None) -> None:
     """Async implementation of show events."""
     console.print(f"\n[bold blue]Events (last {days} days)[/bold blue]\n")
 
@@ -389,7 +389,7 @@ def coverage_table(coverage: SnapshotCoverage, sport_key: str) -> Table:
 @app.command("coverage")
 def show_coverage(
     sport: str = typer.Option("soccer_epl", "--sport", "-s", help="Sport key"),
-):
+) -> None:
     """Show how many of a sport's events each source has a snapshot of, by season and tier."""
     asyncio.run(_show_coverage(sport))
 

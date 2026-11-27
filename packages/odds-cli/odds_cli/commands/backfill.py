@@ -43,7 +43,7 @@ def plan_backfill(
     cost: bool = typer.Option(
         False, "--cost", help="Print calls and units per season and band instead of the calls"
     ),
-):
+) -> None:
     """
     Plan the Odds API historical calls an acquisition manifest needs, from stored FINAL events.
 
@@ -172,7 +172,7 @@ def execute_backfill(
     pause: float = typer.Option(
         0.0, "--pause", min=0.0, help="Seconds to wait after each paid call"
     ),
-):
+) -> None:
     """
     Make the Odds API historical calls an acquisition manifest plans and store what they return.
 
@@ -323,7 +323,7 @@ def probe_backfill(
     pause: float = typer.Option(
         0.0, "--pause", min=0.0, help="Seconds to wait after each paid call"
     ),
-):
+) -> None:
     """
     Request a manifest's probe snapshots and check what comes back against the manifest.
 
@@ -419,7 +419,7 @@ def _precise(delta: timedelta | None) -> str:
 
 
 @app.command("status")
-def backfill_status():
+def backfill_status() -> None:
     """
     Check status of historical data in database.
 
@@ -430,7 +430,7 @@ def backfill_status():
     asyncio.run(_backfill_status_async())
 
 
-async def _backfill_status_async():
+async def _backfill_status_async() -> None:
     """Async implementation of status check."""
     from typing import Any, cast
 
@@ -499,7 +499,7 @@ def backfill_scores(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Show what would be updated without making changes"
     ),
-):
+) -> None:
     """
     Backfill event scores from game log table.
 
@@ -514,7 +514,7 @@ def backfill_scores(
     asyncio.run(_backfill_scores_async(start_date, end_date, dry_run))
 
 
-async def _backfill_scores_async(start_date_str: str, end_date_str: str, dry_run: bool):
+async def _backfill_scores_async(start_date_str: str, end_date_str: str, dry_run: bool) -> None:
     """Async implementation of score backfill using game log table."""
     try:
         start_date = datetime.fromisoformat(start_date_str).replace(tzinfo=UTC)

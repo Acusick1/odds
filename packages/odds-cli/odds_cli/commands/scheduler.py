@@ -157,7 +157,7 @@ def start_local(
         console.print(f"[bold red]Error:[/bold red] Failed to import local backend: {e}")
         raise typer.Exit(1) from e
 
-    async def run_scheduler():
+    async def run_scheduler() -> None:
         """Run scheduler using async context manager."""
         from odds_core.sports import SportKey
         from odds_lambda.scheduling.bootstrap import bootstrap_job
@@ -256,7 +256,7 @@ def run_once(
         ...,
         help="Job name: a per-sport job with its sport suffix (fetch-odds-epl) or a global job (update-status)",
     ),
-):
+) -> None:
     """
     Execute a single job once and exit.
 
@@ -507,7 +507,7 @@ def smoke(
 
 
 @app.command("info")
-def info():
+def info() -> None:
     """
     Display current scheduler configuration.
 
@@ -568,7 +568,7 @@ def list_jobs(
             "and AWS credentials)."
         ),
     ),
-):
+) -> None:
     """
     List all currently scheduled jobs.
 
@@ -589,10 +589,7 @@ def list_jobs(
 
         backend_instance = get_scheduler_backend(backend_type=backend)
 
-        async def get_jobs():
-            return await backend_instance.get_scheduled_jobs()
-
-        jobs = asyncio.run(get_jobs())
+        jobs = asyncio.run(backend_instance.get_scheduled_jobs())
 
         _print_scheduled_jobs(console, jobs)
 
@@ -607,7 +604,7 @@ def list_jobs(
 
 
 @app.command("health")
-def health():
+def health() -> None:
     """
     Run comprehensive health check on scheduler backend.
 
@@ -625,10 +622,7 @@ def health():
 
         backend = get_scheduler_backend()
 
-        async def run_health_check():
-            return await backend.health_check()
-
-        health_result = asyncio.run(run_health_check())
+        health_result = asyncio.run(backend.health_check())
 
         # Overall status
         if health_result.is_healthy:
@@ -667,7 +661,7 @@ def health():
 
 
 @app.command("test-backend")
-def test_backend():
+def test_backend() -> None:
     """
     Test scheduler backend connection and permissions.
 
@@ -707,10 +701,7 @@ def test_backend():
         # Test comprehensive health check
         console.print("\n[bold]Running health checks...[/bold]")
 
-        async def run_health_check():
-            return await backend.health_check()
-
-        health = asyncio.run(run_health_check())
+        health = asyncio.run(backend.health_check())
 
         if health.is_healthy:
             console.print("[green]✓ Backend healthy[/green]")
@@ -735,12 +726,11 @@ def test_backend():
         console.print("\n[bold]Testing database connection...[/bold]")
         from odds_core.database import async_session_maker
 
-        async def test_db():
+        async def test_db() -> None:
             async with async_session_maker() as session:
                 from sqlalchemy import text
 
-                result = await session.execute(text("SELECT 1"))
-                return result.scalar()
+                await session.execute(text("SELECT 1"))
 
         asyncio.run(test_db())
         console.print("[green]✓ Database connection successful[/green]")

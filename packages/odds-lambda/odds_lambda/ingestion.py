@@ -10,6 +10,7 @@ from odds_core.config import Settings, get_settings
 from odds_core.database import async_session_maker
 from odds_core.models import FetchLog
 from odds_core.vocabulary import Source, TimeBasis
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.data_fetcher import OddsResponse, TheOddsAPIClient
 from odds_lambda.live_events import DroppedGame
@@ -104,7 +105,7 @@ class OddsIngestionService:
         client: TheOddsAPIClient,
         *,
         settings: Settings | None = None,
-        session_factory=async_session_maker,
+        session_factory: Callable[[], AsyncSession] = async_session_maker,
     ) -> None:
         self._client = client
         self._settings = settings or get_settings()

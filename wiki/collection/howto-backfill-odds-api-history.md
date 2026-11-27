@@ -69,7 +69,7 @@ Costs a historical purchase before it is bought, buys it, audits what it stored,
    uv run python scripts/audit_backfill.py --manifest backfills/odds-api-bundesliga-2024-26.yaml
    ```
    - It only reads the database and spends no units; add `--season 2024-25` to audit one season. It reads every historical Odds API snapshot and recorded gap of the manifest's league, market and seasons, so runs of other leagues may write meanwhile, and an earlier manifest over the same league and seasons is reported with this one.
-   - It reports FINAL events without a stored snapshot, games in stored responses that attached to no event, each book's event coverage, the share of each band's whole-minute decisions served within the band's max age at the snapshots' actual times, the latest Betfair Exchange price at or before kick-off with its age (a season with a kick-off in a sealed holdout window, `odds_analytics.holdout.intersecting`, gets the counts and ages of any price only, without the vig and back-price checks), the provider gaps and off-phase snapshots, and the planned calls against the stored snapshots, judging each call as the executor's skip does: stored when a event it serves has a snapshot in the call's window, else covered by a recorded gap, else missing ([skip](odds-api-backfill.md#executing-calls)).
+   - It reports FINAL events without a stored snapshot, games in stored responses that attached to no event, each book's event coverage, the share of each band's whole-minute decisions served within the band's max age at the snapshots' actual times, the latest Betfair Exchange price at or before kick-off with its age (a season with a kick-off in a sealed holdout window, `odds_analytics.holdout.intersecting`, gets the counts and ages of any price only, without the vig and back-price checks), the provider gaps and off-phase snapshots, and the planned calls against the stored snapshots, judging each call as the executor's skip does: stored when an event it serves has a snapshot in the call's window, else covered by a recorded gap, else missing ([skip](odds-api-backfill.md#executing-calls)).
    - Its units are distinct stored snapshot times times the manifest's units per call. A call bought twice stores one snapshot time and the database keeps no bill, so take the billed units from `odds backfill execute`'s output: each `fetched` line is one paid call with its units, and each run's summary has its units used.
 
 ## Fill scores
@@ -79,7 +79,7 @@ Costs a historical purchase before it is bought, buys it, audits what it stored,
    uv run odds nba-stats fetch
    uv run odds backfill scores --start 2025-01-01 --end 2025-01-07 --dry-run
    ```
-   - The scores come from `nba_team_game_logs`, so fetch the game logs first; rerun without `--dry-run` to write them.
+   - The scores come from `nba_team_game_logs`, so fetch the game logs first; it updates only events missing scores, and you rerun without `--dry-run` to write them.
 2. Check the result with `uv run odds backfill status`, which also lists the recorded provider gaps.
 
 ## Related

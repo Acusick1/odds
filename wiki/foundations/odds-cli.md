@@ -21,7 +21,7 @@ status: stable
 
 # The odds CLI
 
-`odds_cli.main.app` is a Typer app installed as the `odds` script. Each group is a module in `packages/odds-cli/odds_cli/commands/` registered with `add_typer`. Each command's `--help` is authoritative for flags and defaults. Commands are documented on the page that owns their domain (the `polymarket` group's `backfill-odds` included); none is repeated here. `odds_cli.main.callback` configures human-readable logging ([Code conventions](code-conventions.md#logging)).
+`odds_cli.main.app` is a Typer app installed as the `odds` script. Each group is a module in `packages/odds-cli/odds_cli/commands/` registered with `add_typer`. Each command's `--help` is authoritative for flags and defaults. Commands are documented on the page that owns their domain (the `polymarket` group's `backfill-odds` included); none is repeated here. `odds_cli.main.callback` loads settings, so every command needs a valid configuration, and configures human-readable logging ([Code conventions](code-conventions.md#logging)).
 
 ## Command groups
 

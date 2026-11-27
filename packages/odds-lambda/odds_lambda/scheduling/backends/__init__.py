@@ -22,7 +22,10 @@ def get_scheduler_backend(
     backend_type: str | None = None,
     dry_run: bool = False,
     retry_config: RetryConfig | None = None,
-    **kwargs,
+    *,
+    aws_region: str | None = None,
+    lambda_arn: str | None = None,
+    rule_prefix: str | None = None,
 ) -> SchedulerBackend:
     """
     Create scheduler backend based on configuration.
@@ -32,7 +35,9 @@ def get_scheduler_backend(
                      If None, reads from settings.scheduler.backend
         dry_run: Enable dry-run mode (log operations without executing)
         retry_config: Custom retry configuration (uses defaults if None)
-        **kwargs: Backend-specific configuration options
+        aws_region: AWS backend region (defaults to settings.aws.region)
+        lambda_arn: AWS backend Lambda ARN (defaults to settings.aws.lambda_arn)
+        rule_prefix: AWS backend EventBridge rule prefix (defaults to settings.aws.rule_prefix)
 
     Returns:
         Configured scheduler backend instance
@@ -74,9 +79,9 @@ def get_scheduler_backend(
         return AWSEventBridgeBackend(
             dry_run=dry_run,
             retry_config=retry_config,
-            aws_region=kwargs.get("aws_region") or settings.aws.region,
-            lambda_arn=kwargs.get("lambda_arn") or settings.aws.lambda_arn,
-            rule_prefix=kwargs.get("rule_prefix") or settings.aws.rule_prefix,
+            aws_region=aws_region or settings.aws.region,
+            lambda_arn=lambda_arn or settings.aws.lambda_arn,
+            rule_prefix=rule_prefix or settings.aws.rule_prefix,
         )
 
     elif backend == "local":
