@@ -405,6 +405,18 @@ class LoggingConfig(BaseSettings):
     file: str = Field(default="logs/odds_pipeline.log", description="Log file path")
 
 
+class AgentConfig(BaseSettings):
+    """Betting-agent subprocess configuration."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="AGENT_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
+
+    model: str = Field(
+        default="claude-sonnet-4-6", description="Claude model the agent subprocess runs"
+    )
+
+
 class Settings(BaseSettings):
     """
     Composed application settings loaded from environment variables.
@@ -440,6 +452,7 @@ class Settings(BaseSettings):
     polymarket: PolymarketConfig = Field(default_factory=PolymarketConfig)
     betfair: BetfairConfig = Field(default_factory=BetfairConfig)
     backup: BackupConfig = Field(default_factory=BackupConfig)
+    agent: AgentConfig = Field(default_factory=AgentConfig)
 
     @property
     def alerts_deliverable(self) -> bool:

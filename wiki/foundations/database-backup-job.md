@@ -29,7 +29,7 @@ The job shells out to `rclone` on the scheduler's `PATH` and to `docker compose`
 
 ## Settings
 
-`odds_core.config.BackupConfig`, the `backup` section of `odds_core.config.Settings`:
+`odds_core.config.BackupConfig`, the `odds_core.config.Settings.backup` section:
 
 | Env name | Field | Default | Meaning |
 |---|---|---|---|

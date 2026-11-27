@@ -150,19 +150,19 @@ async def run_claude_agent(sport: SportKey) -> int:
     are tee'd into the main structlog log for live visibility. Timeout after
     ``AGENT_TIMEOUT_SECONDS``; returns -1 on timeout.
     """
+    settings = get_settings()
+
     cmd = [
         "claude",
         "-p",
         f"/agent {sport}",
         "--model",
-        "claude-sonnet-4-6",
+        settings.agent.model,
         "--output-format",
         "stream-json",
         "--verbose",
         "--dangerously-skip-permissions",
     ]
-
-    settings = get_settings()
 
     log_dir = settings.project_root / "logs" / "agent_runs"
     log_dir.mkdir(parents=True, exist_ok=True)
