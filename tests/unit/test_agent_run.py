@@ -514,3 +514,50 @@ class TestRunClaudeAgentCancellation:
                 await task
 
         proc.kill.assert_called_once()
+
+
+class TestRunClaudeAgentModel:
+    @staticmethod
+    async def _built_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+        from odds_core.config import Settings
+        from odds_lambda.jobs.agent_run import run_claude_agent
+
+        class EmptyStdout:
+            def __aiter__(self) -> EmptyStdout:
+                return self
+
+            async def __anext__(self) -> bytes:
+                raise StopAsyncIteration
+
+        monkeypatch.chdir(tmp_path)
+        proc = MagicMock(stdout=EmptyStdout(), returncode=0, wait=AsyncMock(return_value=0))
+        spawn = AsyncMock(return_value=proc)
+        with (
+            patch(
+                "odds_lambda.jobs.agent_run.get_settings",
+                return_value=Settings(project_root=tmp_path),
+            ),
+            patch("odds_lambda.jobs.agent_run.asyncio.create_subprocess_exec", new=spawn),
+        ):
+            await run_claude_agent("soccer_epl")
+        return list(spawn.call_args.args)
+
+    @pytest.mark.asyncio
+    async def test_default_model_is_sonnet(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("AGENT_MODEL", raising=False)
+
+        cmd = await self._built_command(tmp_path, monkeypatch)
+
+        assert cmd[cmd.index("--model") + 1] == "claude-sonnet-4-6"
+
+    @pytest.mark.asyncio
+    async def test_agent_model_env_var_overrides_the_model(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("AGENT_MODEL", "claude-opus-4-7")
+
+        cmd = await self._built_command(tmp_path, monkeypatch)
+
+        assert cmd[cmd.index("--model") + 1] == "claude-opus-4-7"
