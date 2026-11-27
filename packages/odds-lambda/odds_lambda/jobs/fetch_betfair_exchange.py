@@ -344,7 +344,7 @@ async def main(ctx: JobContext) -> None:
     bf = settings.betfair
 
     if not is_job_enabled("fetch-betfair-exchange", settings):
-        logger.info("betfair_job_disabled", reason="betfair.enabled=False")
+        logger.info("betfair_job_disabled")
         return
 
     if sport not in SPORT_CONFIG:

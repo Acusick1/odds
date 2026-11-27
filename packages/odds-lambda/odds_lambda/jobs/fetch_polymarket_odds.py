@@ -232,7 +232,7 @@ async def main(ctx: JobContext) -> None:
     sport = require_sport(ctx, "fetch-polymarket-odds")
     settings = get_settings()
     if not is_job_enabled("fetch-polymarket-odds", settings):
-        logger.info("polymarket_odds_disabled", reason="polymarket.enabled=False")
+        logger.info("polymarket_odds_disabled")
         return
 
     if sport not in POLYMARKET_SPORTS:

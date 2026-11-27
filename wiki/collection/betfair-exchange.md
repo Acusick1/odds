@@ -39,7 +39,7 @@ Package `packages/odds-lambda/odds_lambda/betfair/`, driven by the fetch-betfair
 
 ## The fetch-betfair-exchange job
 
-`odds_lambda.jobs.fetch_betfair_exchange.main(ctx)` logs in, lists the upcoming markets the league collects, converts each book to a `betfair_exchange` book entry, puts an event's entries in one envelope and writes one snapshot per market, keyed by the integer `events.id`,, with its back, lay and traded price rows and its market metadata, via `odds_lambda.storage.writers.OddsWriter.store_envelope`, and a snapshot already stored under its key is skipped ([odds-writer](../storage/odds-writer.md), [Writing price rows](../storage/price-tables.md#writing-price-rows)). It does nothing unless `odds_lambda.scheduling.jobs.is_job_enabled` passes, which for this job means `settings.betfair.enabled` (`BETFAIR_ENABLED`, the `enabled` predicate of its `odds_core.job_specs.JOB_SPECS` record).
+`odds_lambda.jobs.fetch_betfair_exchange.main(ctx)` logs in, lists the upcoming markets the league collects, converts each book to a `betfair_exchange` book entry, puts an event's entries in one envelope and writes one snapshot per market, keyed by the integer `events.id`,, with its back, lay and traded price rows and its market metadata, via `odds_lambda.storage.writers.OddsWriter.store_envelope`, and a snapshot already stored under its key is skipped ([odds-writer](../storage/odds-writer.md), [Writing price rows](../storage/price-tables.md#writing-price-rows)). It logs `betfair_job_disabled` and returns, booking no run, unless `odds_lambda.scheduling.jobs.is_job_enabled` passes, which for this job means `settings.betfair.enabled` (`BETFAIR_ENABLED`, the `enabled` predicate of its `odds_core.job_specs.JOB_SPECS` record).
 
 ### Where it runs
 
