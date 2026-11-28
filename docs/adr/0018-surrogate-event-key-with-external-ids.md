@@ -6,7 +6,7 @@ status: accepted
 
 ## Context
 
-Before the redesign in #658, an event's id was the id of the source that first stored it ([events table](../../wiki/storage/events.md#legacy-string-ids)):
+Before the redesign in #658, an event's id was the id of the source that first stored it ([the re-key migration](../../migrations/versions/75c92251aa25_rekey_events_to_integer_id.py)):
 
 - The Odds API events carried the API's own id.
 - OddsPortal and football-data.co.uk events carried ids built from teams and kick-off (`op_`, `op_live_`, `fduk_`), which the sources never issued.

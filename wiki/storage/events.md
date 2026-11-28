@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Events table
-description: The events columns and statuses, the database-numbered event id, external ids, the legacy string ids kept for the downgrade, team-name normalizers, and the writers that create and update events.
+description: The events columns and statuses, the database-numbered event id, external ids, team-name normalizers, and the writers that create and update events.
 sources:
   - odds_core.models.Event
   - odds_core.models.EventStatus
@@ -14,7 +14,6 @@ sources:
   - odds_lambda.odds_api_events.find_event_by_odds_api_id
   - odds_lambda.event_sync.EventSyncService.sync_sport
   - odds_core.api_models.ApiEvent
-  - migrations/versions/75c92251aa25_rekey_events_to_integer_id.py
 status: stable
 ---
 
@@ -44,10 +43,6 @@ status: stable
 ## An event's source
 
 No events column names a source. Training's `data_source` filter keeps events with a snapshot from the named source (`odds_snapshots.source`) when `odds_analytics.training.data_preparation.prepare_training_data_from_config` calls `odds_analytics.training.data_preparation.filter_events_by_date_range` to select the events it trains on (FINAL ones, or every status for a `retail_ev` target, which then goes to `odds_analytics.retail_ev.prepare_retail_ev_training_data` (which passes its loss weights, scaled by the fixed `odds_analytics.retail_ev.LOSS_WEIGHT_SCALE`, to the model unchanged) through `odds_analytics.feature_groups.prepare_training_data`, which reads the prices of every snapshot attached to the event, whatever its source, Polymarket included, and measures a `raw` row, sampled only of the sources whose last snapshot has a sharp book, against its own source's last snapshot; [Training config](../modelling/training-config.md)).
-
-## Legacy string ids
-
-The table `legacy_event_ids` (`event_id`, `legacy_id`) holds the string key each event stored before `migrations/versions/75c92251aa25_rekey_events_to_integer_id.py` had: the Odds API's id for an event created from an Odds API game, else an id built from teams and kick-off (`op_`, `op_live_` or `fduk_`). It has no model and no foreign key, and only that migration's downgrade reads it, to restore the string keys; the downgrade's alert-context re-key casts an `event_ids` element to bigint only when it is a JSON number, so string elements stay as they are. Every Odds API key in it is also its event's `odds_api` external id, where the resolver finds it; the built ids were never a source's, and nothing matches on them.
 
 ## Team-name normalizer
 
