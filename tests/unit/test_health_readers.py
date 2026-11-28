@@ -16,7 +16,7 @@ SOON = NOW + timedelta(minutes=10)
 @pytest.fixture
 def settings() -> Settings:
     return SimpleNamespace(  # type: ignore[return-value]
-        betfair=SimpleNamespace(enabled=True), polymarket=SimpleNamespace(enabled=False)
+        betfair=SimpleNamespace(enabled=True), polymarket=SimpleNamespace(enabled=True)
     )
 
 
