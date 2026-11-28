@@ -185,8 +185,8 @@ class DelayedFillScore:
     mean_ev: float | None
 
     @property
-    def minutes(self) -> int:
-        return int(self.delay.total_seconds() // 60)
+    def label(self) -> str:
+        return f"+{int(self.delay.total_seconds() // 60)} min"
 
     @property
     def filled(self) -> int:
@@ -537,8 +537,7 @@ def delayed_fill_scores(with_close: Sequence[ScoredBet]) -> tuple[DelayedFillSco
         return ()
     scores: list[DelayedFillScore] = []
     for delay in FILL_DELAYS:
-        fills = [t.fill(delay) for t in with_close]
-        statuses = [None if f is None else f.status for f in fills]
+        statuses = [f.status for t in with_close if (f := t.fill(delay)) is not None]
         filled = [(t, ev) for t in with_close if (ev := t.delayed_ev(delay)) is not None]
         stake = sum(t.stake for t, _ in filled)
         scores.append(

@@ -70,7 +70,7 @@
 <thead><tr><th>Delay</th><th class="r">Bets</th><th class="r">Filled</th><th class="r">Instant EV</th><th class="r">Delayed EV</th><th class="r">Voided</th><th class="r">Void rate</th><th class="r">Unobserved</th></tr></thead>
 <tbody class="num">
 {% for f in c.delayed_fills %}
-<tr><td class="text">+{{ f.minutes }} min</td><td class="r">{{ f.bets }}</td><td class="r">{{ f.filled }}</td>
+<tr><td class="text">{{ f.label }}</td><td class="r">{{ f.bets }}</td><td class="r">{{ f.filled }}</td>
 <td class="r {{ ('pos' if f.instant_ev >= 0 else 'neg') if f.instant_ev is not none }}">{{ f.instant_ev | percent }}</td>
 <td class="r {{ ('pos' if f.mean_ev >= 0 else 'neg') if f.mean_ev is not none }}">{{ f.mean_ev | percent }}</td>
 <td class="r">{{ f.voided }}</td>

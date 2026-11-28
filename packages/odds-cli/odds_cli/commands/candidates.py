@@ -240,7 +240,7 @@ def _delayed_fill_table(summaries: list[CandidateSummary]) -> Table:
     table.add_column("Version", justify="right")
     table.add_column("With close", justify="right")
     for score in next(s.delayed_fills for s in summaries if s.delayed_fills):
-        label = f"+{score.minutes} min"
+        label = score.label
         table.add_column(f"Instant EV {label}", justify="right")
         table.add_column(f"EV {label}", justify="right")
         table.add_column(f"Void {label}", justify="right")
