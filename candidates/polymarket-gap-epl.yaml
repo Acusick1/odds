@@ -9,7 +9,7 @@ issue: 655
 start_date: 2026-11-14
 status: active
 rule: polymarket_gap
-rule_sha256: c6430c96a6bc5fad84c7a199eb0c12056111d54a8d1fb0e2d9aa47393e3f25ba
+rule_sha256: 6836cd24f5420dd3ab3fa0ea7ac5afb91f03a20f0237c8df1088361218bd28b2
 params:
   threshold: 0.01
   minutes_before_kickoff: [60, 30]
