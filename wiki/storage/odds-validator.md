@@ -17,7 +17,7 @@ status: stable
 
 # Odds validation
 
-`odds_lambda.storage.validators.OddsValidator` checks one payload for plausibility as it is written and logs findings to `data_quality_logs` (`odds_core.models.DataQualityLog`); it never blocks a write. It is called by [OddsWriter](odds-writer.md#store_envelope) inside `odds_lambda.storage.writers.OddsWriter.store_envelope`, after the event is loaded and before the snapshots (one per market) and their price rows are added; a price no price row can take is logged separately, as an `invalid_price` row ([Writing price rows](price-tables.md#reading-an-envelope)). The completeness checks that share the word "quality" are separate ([Coverage and completeness checks](coverage-checks.md)).
+`odds_lambda.storage.validators.OddsValidator` checks one payload for plausibility as it is written and logs findings to `data_quality_logs` (`odds_core.models.DataQualityLog`); it never blocks a write. It is called by [OddsWriter](odds-writer.md#store_envelope) inside `odds_lambda.storage.writers.OddsWriter.store_envelope`, after the event is loaded and before the snapshots (one per market) and their price rows are added; a price no price row can take is logged separately, as an `invalid_price` row ([Writing price rows](price-tables.md#reading-an-envelope)). The completeness checks that share the word "quality" are separate ([Coverage and completeness checks](coverage-checks.md)). So is the quarantine of a corrupt long retail price, which keeps the price out of `prices` rather than logging it ([Quarantined prices](price-tables.md#quarantined-prices)).
 
 ## Checks
 

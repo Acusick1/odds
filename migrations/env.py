@@ -33,6 +33,7 @@ from odds_core.models import (  # noqa: F401
     SnapshotPayload,
 )
 from odds_core.player_stats_models import NbaPlayerSeasonStats  # noqa: F401
+from odds_core.quarantined_price_models import QuarantinedPrice  # noqa: F401
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config

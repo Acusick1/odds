@@ -1,4 +1,5 @@
-"""Store a snapshot and its prices under the snapshot key, keeping the first on a conflict."""
+"""Store a snapshot and its prices under the snapshot key, keeping the first on a conflict, with
+its corrupt prices quarantined."""
 
 from __future__ import annotations
 
@@ -8,7 +9,9 @@ from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
 
+import structlog
 from odds_core.models import OddsSnapshot, Price
+from odds_core.quarantined_price_models import QuarantinedPrice, QuarantineReason
 from odds_core.time import ensure_utc
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -16,6 +19,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from odds_lambda.price_rows import RowIssueType
 from odds_lambda.storage.data_quality import record_issue
+from odds_lambda.storage.retail_outliers import long_retail_outliers
+
+logger = structlog.get_logger()
 
 
 @dataclass(frozen=True)
@@ -64,6 +70,10 @@ async def store_snapshot(
     market, snapshot time). The stored one is kept: an identical incoming snapshot is skipped,
     and a differing one is logged to ``data_quality_logs``. Flushes; the caller commits.
 
+    Each of ``prices`` that ``odds_lambda.storage.retail_outliers.long_retail_outliers`` finds is
+    stored in ``quarantined_prices`` instead of ``prices``. A snapshot's content is its prices
+    and its quarantined prices together.
+
     Raises:
         ValueError: when the snapshot's ``source`` or ``market`` is unset.
     """
@@ -77,9 +87,10 @@ async def store_snapshot(
             async with session.begin_nested():
                 session.add(snapshot)
                 await session.flush()
-                for price in prices:
-                    price.snapshot_id = snapshot.id
-                session.add_all(prices)
+                kept, quarantined = _split(snapshot, prices)
+                for row in [*kept, *quarantined]:
+                    row.snapshot_id = snapshot.id
+                session.add_all([*kept, *quarantined])
                 await session.flush()
             return SnapshotWrite(SnapshotWriteOutcome.INSERTED, snapshot)
         except IntegrityError:
@@ -104,6 +115,43 @@ async def _holder(session: AsyncSession, snapshot: OddsSnapshot) -> OddsSnapshot
     return result.scalar_one_or_none()
 
 
+def _split(
+    snapshot: OddsSnapshot, prices: Sequence[Price]
+) -> tuple[list[Price], list[QuarantinedPrice]]:
+    outliers = set(long_retail_outliers(snapshot.market, prices))
+    quarantined = [
+        quarantine(prices[i], QuarantineReason.LONG_RETAIL_OUTLIER) for i in sorted(outliers)
+    ]
+    for row in quarantined:
+        logger.warning(
+            "price_quarantined",
+            event_id=snapshot.event_id,
+            source=str(snapshot.source),
+            market=str(snapshot.market),
+            snapshot_time=ensure_utc(snapshot.snapshot_time).isoformat(),
+            bookmaker=row.bookmaker,
+            outcome=str(row.outcome),
+            price=str(row.price),
+            reason=str(row.reason),
+        )
+    return [p for i, p in enumerate(prices) if i not in outliers], quarantined
+
+
+def quarantine(price: Price, reason: QuarantineReason) -> QuarantinedPrice:
+    return QuarantinedPrice(
+        snapshot_id=price.snapshot_id,
+        bookmaker=price.bookmaker,
+        outcome=price.outcome,
+        line=price.line,
+        side=price.side,
+        price=price.price,
+        size=price.size,
+        matched=price.matched,
+        changed_at=price.changed_at,
+        reason=reason,
+    )
+
+
 def _decimal(value: Decimal | float | None) -> Decimal | None:
     return None if value is None else Decimal(str(value))
 
@@ -116,7 +164,7 @@ def _optional_utc(value: datetime | None) -> datetime | None:
     return None if value is None else ensure_utc(value)
 
 
-def price_row(price: Price) -> PriceRow:
+def price_row(price: Price | QuarantinedPrice) -> PriceRow:
     amount = _decimal(price.price)
     assert amount is not None
     return PriceRow(
@@ -146,8 +194,21 @@ async def _same_content(
 ) -> bool:
     if _market_state(held) != _market_state(snapshot):
         return False
-    stored = (await session.execute(select(Price).where(Price.snapshot_id == held.id))).scalars()
-    return {price_row(p) for p in stored} == {price_row(p) for p in prices}
+    assert held.id is not None
+    return await stored_price_rows(session, held.id) == {price_row(p) for p in prices}
+
+
+async def stored_price_rows(session: AsyncSession, snapshot_id: int) -> frozenset[PriceRow]:
+    """The content of a stored snapshot's prices and quarantined prices together."""
+    stored = (
+        await session.execute(select(Price).where(Price.snapshot_id == snapshot_id))
+    ).scalars()
+    quarantined = (
+        await session.execute(
+            select(QuarantinedPrice).where(QuarantinedPrice.snapshot_id == snapshot_id)  # type: ignore[arg-type]
+        )
+    ).scalars()
+    return frozenset({price_row(p) for p in stored} | {price_row(p) for p in quarantined})
 
 
 def _log_conflict(session: AsyncSession, held: OddsSnapshot, snapshot: OddsSnapshot) -> None:

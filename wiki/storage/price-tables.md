@@ -1,9 +1,12 @@
 ---
 type: reference
 title: Prices and snapshot payloads tables
-description: The prices and snapshot_payloads tables, the closed sets their text columns take, how writers fill them from each source's envelope and what each archives, how readers query them, and the policy store_snapshot applies when a snapshot's key is already stored.
+description: The prices, quarantined_prices and snapshot_payloads tables, the closed sets their text columns take, how writers fill them from each source's envelope and what each archives, which prices are quarantined, how readers query them, and the policy store_snapshot applies when a snapshot's key is already stored.
 sources:
   - odds_core.models.Price
+  - odds_core.quarantined_price_models
+  - odds_lambda.storage.retail_outliers.long_retail_outliers
+  - migrations/versions/d4b7e2a9c1f3_quarantine_long_retail_outliers.py
   - odds_core.models.SnapshotPayload
   - odds_core.vocabulary
   - odds_lambda.storage.snapshot_store
@@ -20,7 +23,7 @@ status: stable
 
 # Prices and snapshot payloads tables
 
-`prices` holds one row per [price](../foundations/glossary.md#price) in a snapshot, and `snapshot_payloads` holds the envelopes the writers built from what a source returned. Every snapshot writer fills both ([Writing price rows](#writing-price-rows)), and every price reader reads `prices` ([Reading prices](#reading-prices)). The snapshot columns they rely on (`source`, `market`, `time_basis` and the market metadata) are on [odds_snapshots](odds-tables.md#odds_snapshots); why prices are stored this way is on [How odds are stored](odds-storage-model.md).
+`prices` holds one row per [price](../foundations/glossary.md#price) in a snapshot, `quarantined_prices` the prices a writer kept out of it as corrupt ([Quarantined prices](#quarantined-prices)), and `snapshot_payloads` holds the envelopes the writers built from what a source returned. Every snapshot writer fills both ([Writing price rows](#writing-price-rows)), and every price reader reads `prices` ([Reading prices](#reading-prices)). The snapshot columns they rely on (`source`, `market`, `time_basis` and the market metadata) are on [odds_snapshots](odds-tables.md#odds_snapshots); why prices are stored this way is on [How odds are stored](odds-storage-model.md).
 
 ## prices
 
@@ -41,6 +44,17 @@ status: stable
 
 `uq_prices_snapshot_book_outcome_line_side` makes (`snapshot_id`, `bookmaker`, `outcome`, `line`, `side`) unique with `NULLS NOT DISTINCT`, so two rows with no line for the same book, outcome and side collide.
 
+## quarantined_prices
+
+`odds_core.quarantined_price_models.QuarantinedPrice` has the columns of `prices`, with their constraints under its own names, and two more:
+
+| Column | Type | Meaning |
+|---|---|---|
+| `reason` | text, closed set | `odds_core.quarantined_price_models.QuarantineReason`: `long_retail_outlier` |
+| `quarantined_at` | timestamptz | when the row was quarantined |
+
+`snapshot_id` is indexed and cascades on delete like a price's, so a deleted snapshot takes its quarantined prices with it and a merged event's snapshots keep theirs. The model lives outside `odds_core.models`, so it is outside every rule's import closure ([rule pinning](../evaluation/candidate-rules.md#rule-pinning)).
+
 ## snapshot_payloads
 
 `odds_core.models.SnapshotPayload`: `id` (bigint identity), `payload` (JSONB) and `received_at`. A snapshot points at its payload through `odds_snapshots.payload_id`, and several snapshots can share one. `odds_core.models.OddsSnapshot` maps no relationship to it, so code that has a snapshot reaches a payload only by querying the table. A payload is the envelopes as the writer stored them ([envelope format](odds-tables.md#envelope-format)), so `odds_lambda.price_rows.expand_envelope` reads it again:
@@ -60,7 +74,7 @@ status: stable
 
 ## Closed sets
 
-The closed sets are `StrEnum`s in `odds_core.vocabulary`, stored as their values in TEXT columns (`odds_core.vocabulary.StrEnumText`) with a CHECK constraint listing the allowed values (`odds_core.vocabulary.closed_set_check`). A new value needs a migration that replaces the CHECK.
+The closed sets are `StrEnum`s in `odds_core.vocabulary`, and `odds_core.quarantined_price_models.QuarantineReason` beside its table, stored as their values in TEXT columns (`odds_core.vocabulary.StrEnumText`) with a CHECK constraint listing the allowed values (`odds_core.vocabulary.closed_set_check`). A new value needs a migration that replaces the CHECK.
 
 | Set | Values | Columns |
 |---|---|---|
@@ -68,9 +82,10 @@ The closed sets are `StrEnum`s in `odds_core.vocabulary`, stored as their values
 | `odds_core.vocabulary.Market` | 1x2, h2h, spreads, totals | `odds_snapshots.market` |
 | `odds_core.vocabulary.TimeBasis` | observed, source_stamped, upper_bound, close | `odds_snapshots.time_basis` |
 | `odds_core.vocabulary.MarketStatus` | inactive, open, suspended, closed (Betfair's statuses, lower-cased) | `odds_snapshots.market_status` |
-| `odds_core.vocabulary.PriceOutcome` | home, draw, away, over, under | `prices.outcome` |
-| `odds_core.vocabulary.Side` | back, lay, mid, traded | `prices.side` |
+| `odds_core.vocabulary.PriceOutcome` | home, draw, away, over, under | `prices.outcome`, `quarantined_prices.outcome` |
+| `odds_core.vocabulary.Side` | back, lay, mid, traded | `prices.side`, `quarantined_prices.side` |
 | `odds_core.vocabulary.HealthCheck` | missing_mlb_game_pk | `health_check_acknowledgements.check_name` |
+| `odds_core.quarantined_price_models.QuarantineReason` | long_retail_outlier | `quarantined_prices.reason` |
 
 ## Writing price rows
 
@@ -91,7 +106,20 @@ A writer builds one envelope per event ([envelope format](odds-tables.md#envelop
 
 - **Outcomes** are matched once, here: a name equal to the event's home or away team after `odds_core.team.normalize_team_name`, `Draw` on 1x2, `Over` and `Under` on totals. Spreads and totals carry the outcome's `point` in `line`. An unmatched name is logged as `unmatched_outcome`; the payload keeps it for a re-parse, and a name a source leaves unmatched in two scrapes in a row is a health-check warning ([unmatched-outcome check](../operations/health-monitor.md#unmatched-outcome-check)).
 - **Books** are canonicalised through the source's alias map, `odds_core.bookmakers.BOOKMAKER_ALIASES_BY_SOURCE` (`odds_core.bookmakers.canonical_bookmaker`): every source takes `odds_core.bookmakers.BOOKMAKER_ALIASES`, and the Odds API also `odds_core.bookmakers.ODDS_API_BOOKMAKER_KEY_MAP` (its regional Betfair keys and the legacy `betfair` of early history, which the fetch already rewrites to the exchange; OddsPortal's `betfair` stays the sportsbook) and `odds_core.bookmakers.ODDS_API_KEY_ALIASES` (US BetMGM is `betmgm_us`). When two entries of one envelope name one book in a market (`7bet` and `7betuk`), the first is kept and the second logged as `bookmaker_alias_collision`. A second price for the same book, outcome, line and side is logged as `duplicate_price`.
+- **Corrupt long prices** are quarantined, not stored in `prices` ([Quarantined prices](#quarantined-prices)).
 - **Invalid prices**, a decimal price that fails `odds_core.odds_math.is_valid_decimal_price` (not a finite number above 1.0) or a probability not strictly between 0 and 1, are not stored and are logged as `invalid_price`. An unknown market key is logged as `unknown_market`.
+
+### Quarantined prices
+
+`odds_lambda.storage.snapshot_store.store_snapshot` stores in `quarantined_prices`, with reason `long_retail_outlier`, each price of a new snapshot that `odds_lambda.storage.retail_outliers.long_retail_outliers` finds, and logs a `price_quarantined` warning for it. Every writer stores through it, so every collector is guarded. A price is found when, in a `1x2`, `h2h` or `totals` snapshot (`odds_lambda.storage.retail_outliers.GUARDED_MARKETS`):
+
+- it is a back price of a book in the `uk_retail` book set (`odds_core.bookmakers.UK_RETAIL_BOOKMAKERS`);
+- it is at least `odds_lambda.storage.retail_outliers.MIN_RATIO_TO_NEXT_LONGEST` times the next-longest such price on the same outcome and line, so a lone retail price or one tied with another is never found;
+- its EV against the same line's exchange fair probability is above `odds_lambda.storage.retail_outliers.MIN_EV`. That probability is the snapshot's Betfair Exchange back prices devigged, when they price every outcome of the line with an overround of at most `odds_core.exchange_price.MAX_EXCHANGE_OVERROUND`; a snapshot without one has nothing found.
+
+The rule is the one #731 quarantined five Odds API quotes by. It does not look at kick-off, so a stale retail quote in an in-play snapshot is found too. Migration `d4b7e2a9c1f3` applied it to the prices stored before it: it moved every price it finds into `quarantined_prices` and its downgrade moves them back.
+
+No reader of `prices` sees a quarantined price, so neither the decision-time quotes, the market state of a rule nor any report or backtest reads one. `odds copy from-prod` copies `prices` only, so a copied database has none ([copying production data](../foundations/databases-and-environments.md#copying-production-data)).
 
 ### Spreads line sign
 
@@ -109,8 +137,8 @@ A spread's `line` is stored signed on each outcome: the home outcome carries the
 
 | Outcome | When | Effect |
 |---|---|---|
-| `inserted` | no snapshot holds the key | the snapshot and its prices are added |
-| `identical` | the stored snapshot has the same time basis, market metadata and set of prices | nothing is written |
+| `inserted` | no snapshot holds the key | the snapshot and its prices are added, its corrupt ones to `quarantined_prices` ([Quarantined prices](#quarantined-prices)) |
+| `identical` | the stored snapshot has the same time basis, market metadata and set of prices, its prices and quarantined prices together (`odds_lambda.storage.snapshot_store.stored_price_rows`) | nothing is written |
 | `conflicting` | anything differs | nothing is written; `odds_lambda.storage.data_quality.record_issue` logs `snapshot_key_conflict` (`odds_lambda.price_rows.RowIssueType.SNAPSHOT_KEY_CONFLICT`) and adds a `data_quality_logs` row naming the kept snapshot |
 
 Prices compare by value (`odds_lambda.storage.snapshot_store.PriceRow`, `odds_lambda.storage.snapshot_store.SnapshotMarketState`), so a float price equal to a stored decimal is the same price. The insert runs in a savepoint: when a concurrent writer stores the key first, the unique violation rolls back only this insert and the snapshot is compared with the stored one. It flushes and never commits.
