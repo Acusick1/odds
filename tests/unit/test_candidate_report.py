@@ -6,14 +6,21 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from odds_analytics.candidate_report import (
+    FILL_DELAYS,
     KILL_LEVEL,
     DecisionStart,
+    DelayedFill,
+    FillStatus,
+    RetailStamp,
     ScoredBet,
     Verdict,
     candidate_report,
     checkpoint_at,
     checkpoint_progress,
     checkpoints_through_next,
+    delayed_fill,
+    delayed_fill_scores,
+    delayed_snapshots,
     estimates_of,
     family_size_at,
     family_starts,
@@ -948,6 +955,39 @@ class TestLoadScoredBets:
         assert draw.ev == pytest.approx(0.25 * 4.5 - 1)
 
     @pytest.mark.asyncio
+    async def test_each_bet_is_filled_from_the_first_retail_snapshot_after_each_delay(
+        self, test_session: AsyncSession
+    ) -> None:
+        from odds_analytics.candidate_report import load_scored_bets
+
+        session = test_session
+        e1 = make_epl_event(1, KICKOFF, status=EventStatus.FINAL)
+        session.add(e1)
+        await session.flush()
+        await _store_close(session, e1)
+        placed = KICKOFF - timedelta(minutes=30)
+        for minutes, home in ((2, 2.2), (6, 2.1), (11, 2.0), (16, 1.9)):
+            await store_tagged(
+                session,
+                make_tagged_snapshot(
+                    1,
+                    placed + timedelta(minutes=minutes),
+                    [three_way_bookmaker("bet365", (home, 3.5, 4.0))],
+                    "oddsportal_live",
+                ),
+            )
+        session.add(_bet(1, 0, placed_at=placed))
+        # Placed 20 minutes before kick-off with no snapshot after +10 minutes.
+        session.add(_bet(1, 0, placed_at=KICKOFF - timedelta(minutes=20), selection="draw"))
+        await session.flush()
+
+        home, draw = await load_scored_bets(session)
+
+        assert home.delayed == (filled(FIVE, 2.1), filled(TEN, 2.0))
+        assert home.delayed_ev(FIVE) == pytest.approx(0.5 * 2.1 - 1)
+        assert draw.delayed == (filled(FIVE, 3.5), DelayedFill(TEN, FillStatus.UNOBSERVED))
+
+    @pytest.mark.asyncio
     async def test_each_bet_carries_its_stored_estimate(self, test_session: AsyncSession) -> None:
         from odds_analytics.candidate_report import load_scored_bets
 
@@ -1103,6 +1143,166 @@ class TestLoadScoredBets:
             assert event_close(kept, KICKOFF, "soccer_epl", "1x2") == expected
 
 
+FIVE, TEN = FILL_DELAYS
+
+
+def filled(delay: timedelta, price: float) -> DelayedFill:
+    return DelayedFill(delay, FillStatus.FILLED, price)
+
+
+def with_fills(scored: ScoredBet, *fills: DelayedFill) -> ScoredBet:
+    from dataclasses import replace
+
+    return replace(scored, delayed=fills)
+
+
+class TestDelayedFillScores:
+    def test_an_unchanged_price_scores_the_instant_ev(self) -> None:
+        sequence = [
+            with_fills(bet(i, ev), filled(FIVE, 3.0), filled(TEN, 3.0))
+            for i, ev in enumerate((0.2, -0.1, 0.05))
+        ]
+
+        five, ten = delayed_fill_scores(sequence)
+
+        instant = summary_of(sequence).instant_ev
+        assert instant == pytest.approx((0.2 - 0.1 + 0.05) / 3)
+        assert five.mean_ev == pytest.approx(instant) and ten.mean_ev == pytest.approx(instant)
+        assert (five.voided, five.unobserved, five.void_rate) == (0, 0, 0.0)
+
+    def test_scores_the_delayed_price_against_the_same_close(self) -> None:
+        # p_close is 0.4 at EV +0.2 and price 3.0; shortened to 2.5 the EV is 0.
+        [five, _] = delayed_fill_scores(
+            [with_fills(bet(0, 0.2), filled(FIVE, 2.5), filled(TEN, 2.0))]
+        )
+
+        assert five.mean_ev == pytest.approx(0.4 * 2.5 - 1)
+
+    def test_a_voided_bet_is_not_scored_and_counts_towards_the_void_rate(self) -> None:
+        sequence = [
+            with_fills(bet(0, 0.2), filled(FIVE, 3.0), DelayedFill(TEN, FillStatus.VOIDED)),
+            with_fills(bet(1, -0.4), filled(FIVE, 3.0), filled(TEN, 3.0)),
+            with_fills(bet(2, 0.9), filled(FIVE, 3.0), DelayedFill(TEN, FillStatus.UNOBSERVED)),
+        ]
+
+        _, ten = delayed_fill_scores(sequence)
+
+        assert (ten.bets, ten.voided, ten.unobserved) == (3, 1, 1)
+        assert ten.mean_ev == pytest.approx(-0.4)
+        assert ten.void_rate == pytest.approx(0.5)
+
+    def test_every_bet_voided_has_no_mean(self) -> None:
+        [five, _] = delayed_fill_scores(
+            [
+                with_fills(
+                    bet(0),
+                    DelayedFill(FIVE, FillStatus.VOIDED),
+                    DelayedFill(TEN, FillStatus.VOIDED),
+                )
+            ]
+        )
+
+        assert five.mean_ev is None and five.void_rate == 1.0
+
+    def test_none_without_fills(self) -> None:
+        assert delayed_fill_scores([]) == ()
+        assert delayed_fill_scores([bet(0)]) == ()
+        assert summary_of([bet(0)]).delayed_fills == ()
+
+
+DECIDED = datetime(2026, 4, 15, 14, 0, tzinfo=UTC)
+
+
+def stamp(snapshot_id: int, source: Source, minutes: int) -> RetailStamp:
+    return RetailStamp(snapshot_id, source, DECIDED + timedelta(minutes=minutes))
+
+
+def price_row(
+    snapshot_id: int,
+    outcome: PriceOutcome,
+    price: float,
+    bookmaker: str = "bet365",
+    line: float | None = None,
+) -> Quote:
+    return Quote(
+        snapshot_id=snapshot_id,
+        event_id=1,
+        snapshot_time=DECIDED,
+        created_at=DECIDED,
+        source=Source.ODDSPORTAL,
+        market=Market.ONE_X_TWO,
+        time_basis=TimeBasis.OBSERVED,
+        in_play=None,
+        market_status=None,
+        total_matched=None,
+        market_start_time=None,
+        bookmaker=bookmaker,
+        outcome=outcome,
+        line=line,
+        side=Side.BACK,
+        price=price,
+        size=None,
+        matched=None,
+        changed_at=None,
+    )
+
+
+class TestDelayedSnapshots:
+    def test_takes_each_sources_first_snapshot_at_or_after_the_delay(self) -> None:
+        stamps = [
+            stamp(1, Source.ODDSPORTAL, 2),
+            stamp(2, Source.ODDSPORTAL, 5),
+            stamp(3, Source.ODDS_API, 7),
+            stamp(4, Source.ODDSPORTAL, 9),
+            stamp(5, Source.ODDS_API, 12),
+        ]
+
+        picked = delayed_snapshots(stamps, DECIDED + FIVE, DECIDED + timedelta(hours=1))
+
+        assert [s.snapshot_id for s in picked] == [2, 3]
+
+    def test_ignores_snapshots_after_kick_off(self) -> None:
+        stamps = [stamp(1, Source.ODDSPORTAL, 20)]
+
+        assert delayed_snapshots(stamps, DECIDED + TEN, DECIDED + timedelta(minutes=15)) == []
+
+
+class TestDelayedFill:
+    def test_fills_at_the_earliest_snapshot_quoting_the_selection(self) -> None:
+        snapshots = [stamp(2, Source.ODDSPORTAL, 5), stamp(3, Source.ODDS_API, 7)]
+        prices = [price_row(2, PriceOutcome.HOME, 2.1), price_row(3, PriceOutcome.HOME, 2.0)]
+
+        fill = delayed_fill(FIVE, snapshots, prices, "bet365", "home", None)
+
+        assert fill == DelayedFill(FIVE, FillStatus.FILLED, 2.1)
+
+    def test_another_source_fills_where_the_first_lacks_the_book(self) -> None:
+        snapshots = [stamp(2, Source.ODDSPORTAL, 5), stamp(3, Source.ODDS_API, 7)]
+        prices = [
+            price_row(2, PriceOutcome.HOME, 2.1, "skybet"),
+            price_row(3, PriceOutcome.HOME, 2.0),
+        ]
+
+        assert delayed_fill(FIVE, snapshots, prices, "bet365", "home", None).price_decimal == 2.0
+
+    def test_a_book_quoted_without_the_selection_voids_the_bet(self) -> None:
+        snapshots = [stamp(2, Source.ODDSPORTAL, 5)]
+        prices = [price_row(2, PriceOutcome.OVER, 1.9, line=3.5)]
+
+        fill = delayed_fill(FIVE, snapshots, prices, "bet365", "over", 2.5)
+
+        assert fill == DelayedFill(FIVE, FillStatus.VOIDED)
+
+    def test_no_snapshot_quoting_the_book_is_unobserved(self) -> None:
+        snapshots = [stamp(2, Source.ODDSPORTAL, 5)]
+        prices = [price_row(2, PriceOutcome.HOME, 2.1, "skybet")]
+
+        assert delayed_fill(FIVE, snapshots, prices, "bet365", "home", None).status is (
+            FillStatus.UNOBSERVED
+        )
+        assert delayed_fill(FIVE, [], [], "bet365", "home", None).status is FillStatus.UNOBSERVED
+
+
 # The first 100 bets reach the k=100 checkpoint at EV +0.5; the 20 after it pull the current
 # estimate down to +0.33, which the command never shows.
 COHORT = (
@@ -1146,6 +1346,33 @@ class TestReportCommand:
 
         assert result.exit_code == 0, result.stdout
         assert result.stdout == EXPECTED_REPORT
+
+    def test_prints_the_delayed_fills_beside_the_instant_ev(
+        self, registry, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        cohort = [
+            with_fills(bet(0, 0.2), filled(FIVE, 2.5), DelayedFill(TEN, FillStatus.VOIDED)),
+            with_fills(bet(1, 0.2), filled(FIVE, 3.0), DelayedFill(TEN, FillStatus.UNOBSERVED)),
+            with_fills(bet(2, 0.2), filled(FIVE, 3.0), filled(TEN, 3.0)),
+        ]
+
+        async def fake_report(registry):
+            return summarize_candidates(cohort, registry, NOW, n_boot=N_BOOT)
+
+        monkeypatch.setattr("odds_cli.commands.candidates._report", fake_report)
+
+        result = CliRunner(env={"COLUMNS": "250"}).invoke(app, ["candidates", "report"])
+
+        assert result.exit_code == 0, result.stdout
+        delayed = result.stdout[result.stdout.index("Delayed fill") :]
+        [row] = [line for line in delayed.splitlines() if "cand" in line]
+        cells = [c.strip() for c in row.strip("│ ").split("│")]
+        # Instant +0.2; at +5 min one bet shortened to 2.5 (EV 0); at +10 one voided of two observed.
+        assert cells == [
+            "cand", "1", "3", "+0.2000",
+            "+0.1333", "0% (0)", "0",
+            "+0.2000", "50% (1)", "1",
+        ]  # fmt: skip
 
 
 @pytest.fixture

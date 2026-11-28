@@ -17,6 +17,7 @@ from odds_analytics.candidate_report import (
     CandidateSummary,
     Checkpoint,
     CheckpointProgress,
+    DelayedFillScore,
     EstimateGap,
     Estimates,
     LeagueBreakdown,
@@ -184,6 +185,10 @@ class CandidatePage:
     estimate_gap: EstimateGap | None
     # Shown only for a version that bet in more than one league; it never changes the verdict.
     leagues: tuple[LeagueBreakdown, ...]
+    # The instant-fill EV and the same bets filled later; shown only for live bets with a close,
+    # and never changes the verdict.
+    instant_ev: float | None
+    delayed_fills: tuple[DelayedFillScore, ...]
     # Shown only when the report holds replays of the version's decisions; it never changes the
     # verdict.
     book_replay: BookReplayView | None
@@ -298,6 +303,8 @@ def build_candidate_page(
         series=series,
         estimate_gap=None if series is None or summary.estimates is None else summary.estimates.gap,
         leagues=summary.leagues if len(summary.leagues) > 1 else (),
+        instant_ev=summary.instant_ev,
+        delayed_fills=summary.delayed_fills,
         book_replay=build_book_replay(book_replay),
         decisions=shown_decisions(entry, decisions),
         ledger=ledger,

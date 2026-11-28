@@ -5,7 +5,7 @@ import dataclasses
 import json
 import subprocess
 from collections.abc import Collection
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any, cast
 
@@ -21,6 +21,7 @@ from odds_analytics.candidate_backtest import BacktestResult, Coverage, HashStat
 from odds_analytics.candidate_parity import ParityReport, ParityStatus, check_parity
 from odds_analytics.candidate_rehash import rehash as record_rehash
 from odds_analytics.candidate_report import (
+    FILL_DELAYS,
     CandidateSummary,
     Checkpoint,
     LeagueBreakdown,
@@ -174,6 +175,8 @@ def report() -> None:
         console.print("[yellow]No candidates registered and no candidate bets[/yellow]")
         return
     console.print(_report_table(summaries))
+    if any(s.delayed_fills for s in summaries):
+        console.print(_delayed_fill_table(summaries))
     for s in summaries:
         if len(s.leagues) > 1:
             console.print(_league_table(f"{s.name} v{s.version}", s.leagues))
@@ -224,6 +227,38 @@ def _report_table(summaries: list[CandidateSummary]) -> Table:
             f"[{style}]{s.verdict}[/{style}]",
         )
     return table
+
+
+def _minutes(delay: timedelta) -> str:
+    return f"+{delay.total_seconds() / 60:g} min"
+
+
+def _delayed_fill_table(summaries: list[CandidateSummary]) -> Table:
+    table = Table(
+        title="Delayed fill, for information: the verdict is the instant fill's",
+        caption="Void: bets whose book no longer quoted the selection, of those observed",
+    )
+    table.add_column("Candidate", style="cyan")
+    table.add_column("Version", justify="right")
+    table.add_column("With close", justify="right")
+    table.add_column("Instant EV", justify="right")
+    for delay in FILL_DELAYS:
+        table.add_column(f"EV {_minutes(delay)}", justify="right")
+        table.add_column(f"Void {_minutes(delay)}", justify="right")
+        table.add_column(f"Unobserved {_minutes(delay)}", justify="right")
+    for s in summaries:
+        if not s.delayed_fills:
+            continue
+        cells = [s.name, str(s.version), str(s.bets_with_close), _ev(s.instant_ev)]
+        for f in s.delayed_fills:
+            rate = "-" if f.void_rate is None else f"{f.void_rate:.0%}"
+            cells += [_ev(f.mean_ev), f"{rate} ({f.voided})", str(f.unobserved)]
+        table.add_row(*cells)
+    return table
+
+
+def _ev(value: float | None) -> str:
+    return "-" if value is None else f"{value:+.4f}"
 
 
 def _league_table(
