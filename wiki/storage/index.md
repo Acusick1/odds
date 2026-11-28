@@ -1,6 +1,6 @@
 ---
 title: Storage
-description: The events, odds_snapshots, prices and snapshot_payloads tables, event external ids and the event resolver, the OddsWriter/OddsReader storage layer, odds validation and coverage checks, and fetch tiers.
+description: The events, odds_snapshots, prices, quarantined_prices and snapshot_payloads tables, event external ids and the event resolver, the OddsWriter/OddsReader storage layer, odds validation and coverage checks, and fetch tiers.
 ---
 
 # Storage
@@ -16,6 +16,7 @@ Every table is a SQLModel class in `packages/odds-core/odds_core/`; migrations a
 | `events` | `odds_core.models.Event` | [Events](events.md) |
 | `odds_snapshots` | `odds_core.models.OddsSnapshot` | [Odds snapshots table](odds-tables.md) |
 | `prices` | `odds_core.models.Price` | [Prices and snapshot payloads tables](price-tables.md) |
+| `quarantined_prices` | `odds_core.quarantined_price_models.QuarantinedPrice` | [Prices and snapshot payloads tables](price-tables.md#quarantined-prices) |
 | `snapshot_payloads` | `odds_core.models.SnapshotPayload` | [Prices and snapshot payloads tables](price-tables.md) |
 | `event_external_ids` | `odds_core.models.EventExternalId` | [Events](events.md#external-ids) |
 | `health_check_acknowledgements` | `odds_core.models.HealthCheckAcknowledgement` | [Events](events.md#health-check-acknowledgements) |
@@ -51,7 +52,7 @@ Every table is a SQLModel class in `packages/odds-core/odds_core/`; migrations a
 - [Odds validation](odds-validator.md) — OddsValidator checks, the data_quality_logs rows it produces, and DataQualityConfig.
 - [OddsReader](odds-reader.md) — Every OddsReader query and its time-window semantics.
 - [OddsWriter](odds-writer.md) — store_envelope (validation, one snapshot per market with its price rows), event status updates, logging helpers, and their edge cases.
-- [Prices and snapshot payloads tables](price-tables.md) — The prices and snapshot_payloads tables, the closed sets their text columns take, how writers fill them from each source's envelope and what each archives, how readers query them, and the policy store_snapshot applies when a snapshot's key is already stored.
+- [Prices and snapshot payloads tables](price-tables.md) — The prices, quarantined_prices and snapshot_payloads tables, the closed sets their text columns take, how writers fill them from each source's envelope and what each archives, which prices are quarantined, how readers query them, and the policy store_snapshot applies when a snapshot's key is already stored.
 - [Storage layer](storage-layer.md) — The odds_lambda.storage module map, the commit and flush contract, and the upsert/insert/store verbs.
 
 ### Explanation

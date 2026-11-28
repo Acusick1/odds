@@ -48,7 +48,7 @@ Merging happens in three places only:
 | `odds events merge-twins --apply` | `odds_lambda.storage.event_merge.EventMerger.merge_group` for every twin group, keeping the event `odds_lambda.storage.event_merge.kept_event` picks |
 | `odds events assign-game-pks --apply`, `odds events set-game-pk --merge --apply` | `odds_lambda.storage.game_pk_backfill.apply_assignment`: the events of one MLB `gamePk` ([Assigning gamePks](#assigning-gamepks)) |
 
-The production copier does not merge. It replaces the rows of the one local event it matched (by external id or by teams and start; a match by teams and start holding a different id from one of the production event's sources is refused, [copying](../foundations/databases-and-environments.md#copying-production-data)), so merging a local twin into that event first would delete the twin's own rows (football-data.co.uk, Polymarket, Betfair history) with the replaced ones, and a scraper event could absorb an Odds API event. It leaves local twins in place and reports how many games have them.
+The production copier does not merge. It replaces the snapshots (with their prices and quarantined prices) of the one local event it matched (by external id or by teams and start; a match by teams and start holding a different id from one of the production event's sources is refused, [copying](../foundations/databases-and-environments.md#copying-production-data)), so merging a local twin into that event first would delete the twin's own rows (football-data.co.uk, Polymarket, Betfair history) with the replaced ones, and a scraper event could absorb an Odds API event. It leaves local twins in place and reports how many games have them.
 
 ## Merging
 

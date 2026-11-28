@@ -44,7 +44,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from odds_core.bet_models import CandidateDecision
 from odds_core.database import async_session_maker
-from odds_core.models import Event, EventStatus, OddsSnapshot, Price, SnapshotPayload
+from odds_core.models import Event, EventStatus, OddsSnapshot, SnapshotPayload
 from odds_core.odds_math import PRICE_DECIMAL_KEY
 from odds_core.vocabulary import Source, TimeBasis
 from odds_lambda.oddsportal_common import IngestionStats
@@ -58,7 +58,7 @@ from odds_lambda.storage.event_resolver import (
     resolve_event,
 )
 from odds_lambda.storage.shaped_snapshots import SnapshotShape, store_payload, store_shaped_snapshot
-from odds_lambda.storage.snapshot_store import PriceRow, SnapshotWriteOutcome, price_row
+from odds_lambda.storage.snapshot_store import PriceRow, SnapshotWriteOutcome, stored_price_rows
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from team_names import normalize_team as _normalize_team_central
@@ -672,12 +672,12 @@ SnapshotContent = tuple[TimeBasis | None, datetime, str | None, frozenset[PriceR
 
 
 async def _stored_content(session: AsyncSession, snap: OddsSnapshot) -> SnapshotContent:
-    prices = (await session.execute(select(Price).where(Price.snapshot_id == snap.id))).scalars()
+    assert snap.id is not None
     return (
         snap.time_basis,
         snap.snapshot_time,
         snap.market,
-        frozenset(price_row(p) for p in prices),
+        await stored_price_rows(session, snap.id),
     )
 
 

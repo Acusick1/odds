@@ -20,6 +20,7 @@ from odds_core.models import (
     OddsSnapshot,
     Price,
 )
+from odds_core.quarantined_price_models import QuarantinedPrice
 from rich.console import Console
 from rich.progress import (
     BarColumn,
@@ -177,11 +178,23 @@ class ProductionDataCopier:
                 )
                 return
 
+            prod_snapshot_ids = [s.id for s in prod_snapshots]
             prod_prices = list(
                 (
                     await prod_session.execute(
                         select(Price).where(
-                            Price.snapshot_id.in_([s.id for s in prod_snapshots])  # type: ignore[union-attr]
+                            Price.snapshot_id.in_(prod_snapshot_ids)  # type: ignore[union-attr]
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            prod_quarantined = list(
+                (
+                    await prod_session.execute(
+                        select(QuarantinedPrice).where(
+                            QuarantinedPrice.snapshot_id.in_(prod_snapshot_ids)  # type: ignore[union-attr]
                         )
                     )
                 )
@@ -229,16 +242,18 @@ class ProductionDataCopier:
                 prod.id: local.id
                 for prod, local in zip(prod_snapshots, local_snapshots, strict=True)
             }
-            if prod_prices:
-                await local_session.execute(
-                    insert(Price),
-                    [
-                        row.model_dump(exclude={"id"})
-                        | {"snapshot_id": local_snapshot_ids[row.snapshot_id]}
-                        for row in prod_prices
-                        if row.snapshot_id is not None
-                    ],
-                )
+            # A snapshot's quarantined prices are part of its content, so they are copied too.
+            for model, rows in ((Price, prod_prices), (QuarantinedPrice, prod_quarantined)):
+                if rows:
+                    await local_session.execute(
+                        insert(model),
+                        [
+                            row.model_dump(exclude={"id"})
+                            | {"snapshot_id": local_snapshot_ids[row.snapshot_id]}
+                            for row in rows
+                            if row.snapshot_id is not None
+                        ],
+                    )
 
             await local_session.commit()
 

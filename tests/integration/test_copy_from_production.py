@@ -17,6 +17,7 @@ from odds_core.models import (
     OddsSnapshot,
     Price,
 )
+from odds_core.quarantined_price_models import QuarantinedPrice, QuarantineReason
 from odds_core.vocabulary import HealthCheck, Market, PriceOutcome, Side, Source, TimeBasis
 from odds_lambda.copy_from_production import CopyStats, ProductionDataCopier
 from sqlalchemy import select, text
@@ -393,6 +394,14 @@ async def _seed_new_shape(
                     side=Side.BACK,
                     price=Decimal("2.5"),
                 ),
+                QuarantinedPrice(
+                    snapshot_id=snapshot_id,
+                    bookmaker="williamhill",
+                    outcome=PriceOutcome.HOME,
+                    side=Side.BACK,
+                    price=Decimal("20"),
+                    reason=QuarantineReason.LONG_RETAIL_OUTLIER,
+                ),
                 EventExternalId(
                     source=Source.ODDSPORTAL, external_id="Kl1AOZN9", event_id=event.id
                 ),
@@ -408,7 +417,7 @@ async def _seed_new_shape(
 
 class TestCopyNewShape:
     @pytest.mark.asyncio
-    async def test_prices_external_ids_and_acknowledgements_follow_the_local_keys(
+    async def test_prices_quarantined_prices_ids_and_acknowledgements_follow_the_local_keys(
         self,
         prod_session_maker: async_sessionmaker[AsyncSession],
         local_session_maker: async_sessionmaker[AsyncSession],
@@ -433,6 +442,8 @@ class TestCopyNewShape:
             snapshot = await session.get(OddsSnapshot, price.snapshot_id)
             assert snapshot is not None and snapshot.event_id == event.id
             assert snapshot.snapshot_time == KICKOFF - timedelta(hours=1)
+            [quarantined] = (await session.execute(select(QuarantinedPrice))).scalars().all()
+            assert (quarantined.snapshot_id, quarantined.price) == (snapshot.id, Decimal("20"))
             [external] = (await session.execute(select(EventExternalId))).scalars().all()
             assert (external.external_id, external.event_id) == ("Kl1AOZN9", event.id)
             [ack] = (await session.execute(select(HealthCheckAcknowledgement))).scalars().all()
