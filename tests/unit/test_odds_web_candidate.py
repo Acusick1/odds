@@ -641,9 +641,8 @@ class TestDelayedFills:
         cells = {fill: re.findall(r">([^<]*)</td>", rest) for fill, rest in rows}
         # +5: one bet shortened to 2.5 (EV 0), so (0 + 3 * 0.2) / 4; +10: one voided of four.
         assert cells == {
-            "instant": ["4", "+20.0%", "—", "—", "—"],
-            "+5 min": ["4", "+15.0%", "0", "0%", "0"],
-            "+10 min": ["4", "+20.0%", "1", "25%", "0"],
+            "+5 min": ["4", "4", "+20.0%", "+15.0%", "0", "0%", "0"],
+            "+10 min": ["4", "3", "+20.0%", "+20.0%", "1", "25%", "0"],
         }
         assert "The verdict is the instant fill's" in body
 

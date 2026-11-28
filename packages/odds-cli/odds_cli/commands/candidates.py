@@ -5,7 +5,7 @@ import dataclasses
 import json
 import subprocess
 from collections.abc import Collection
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Annotated, Any, cast
 
@@ -21,7 +21,6 @@ from odds_analytics.candidate_backtest import BacktestResult, Coverage, HashStat
 from odds_analytics.candidate_parity import ParityReport, ParityStatus, check_parity
 from odds_analytics.candidate_rehash import rehash as record_rehash
 from odds_analytics.candidate_report import (
-    FILL_DELAYS,
     CandidateSummary,
     Checkpoint,
     LeagueBreakdown,
@@ -229,30 +228,30 @@ def _report_table(summaries: list[CandidateSummary]) -> Table:
     return table
 
 
-def _minutes(delay: timedelta) -> str:
-    return f"+{delay.total_seconds() / 60:g} min"
-
-
 def _delayed_fill_table(summaries: list[CandidateSummary]) -> Table:
     table = Table(
         title="Delayed fill, for information: the verdict is the instant fill's",
-        caption="Void: bets whose book no longer quoted the selection, of those observed",
+        caption=(
+            "Instant and delayed EV over the bets filled at that delay; void: bets whose book "
+            "did not quote the selection then, of those observed"
+        ),
     )
     table.add_column("Candidate", style="cyan")
     table.add_column("Version", justify="right")
     table.add_column("With close", justify="right")
-    table.add_column("Instant EV", justify="right")
-    for delay in FILL_DELAYS:
-        table.add_column(f"EV {_minutes(delay)}", justify="right")
-        table.add_column(f"Void {_minutes(delay)}", justify="right")
-        table.add_column(f"Unobserved {_minutes(delay)}", justify="right")
+    for score in next(s.delayed_fills for s in summaries if s.delayed_fills):
+        label = f"+{score.minutes} min"
+        table.add_column(f"Instant EV {label}", justify="right")
+        table.add_column(f"EV {label}", justify="right")
+        table.add_column(f"Void {label}", justify="right")
+        table.add_column(f"Unobserved {label}", justify="right")
     for s in summaries:
         if not s.delayed_fills:
             continue
-        cells = [s.name, str(s.version), str(s.bets_with_close), _ev(s.instant_ev)]
+        cells = [s.name, str(s.version), str(s.bets_with_close)]
         for f in s.delayed_fills:
             rate = "-" if f.void_rate is None else f"{f.void_rate:.0%}"
-            cells += [_ev(f.mean_ev), f"{rate} ({f.voided})", str(f.unobserved)]
+            cells += [_ev(f.instant_ev), _ev(f.mean_ev), f"{rate} ({f.voided})", str(f.unobserved)]
         table.add_row(*cells)
     return table
 

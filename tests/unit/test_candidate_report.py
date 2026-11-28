@@ -1165,8 +1165,10 @@ class TestDelayedFillScores:
 
         five, ten = delayed_fill_scores(sequence)
 
-        instant = summary_of(sequence).instant_ev
-        assert instant == pytest.approx((0.2 - 0.1 + 0.05) / 3)
+        instant = (0.2 - 0.1 + 0.05) / 3
+        assert five.instant_ev == pytest.approx(instant) and ten.instant_ev == pytest.approx(
+            instant
+        )
         assert five.mean_ev == pytest.approx(instant) and ten.mean_ev == pytest.approx(instant)
         assert (five.voided, five.unobserved, five.void_rate) == (0, 0, 0.0)
 
@@ -1187,8 +1189,9 @@ class TestDelayedFillScores:
 
         _, ten = delayed_fill_scores(sequence)
 
-        assert (ten.bets, ten.voided, ten.unobserved) == (3, 1, 1)
-        assert ten.mean_ev == pytest.approx(-0.4)
+        assert (ten.bets, ten.filled, ten.voided, ten.unobserved) == (3, 1, 1, 1)
+        # Both means are over the one filled bet, so neither is moved by the dropped ones.
+        assert ten.instant_ev == pytest.approx(-0.4) and ten.mean_ev == pytest.approx(-0.4)
         assert ten.void_rate == pytest.approx(0.5)
 
     def test_every_bet_voided_has_no_mean(self) -> None:
@@ -1202,12 +1205,13 @@ class TestDelayedFillScores:
             ]
         )
 
-        assert five.mean_ev is None and five.void_rate == 1.0
+        assert five.mean_ev is None and five.instant_ev is None and five.void_rate == 1.0
 
     def test_none_without_fills(self) -> None:
         assert delayed_fill_scores([]) == ()
         assert delayed_fill_scores([bet(0)]) == ()
         assert summary_of([bet(0)]).delayed_fills == ()
+        assert bet(0).fill(FIVE) is None and bet(0).delayed_ev(FIVE) is None
 
 
 DECIDED = datetime(2026, 4, 15, 14, 0, tzinfo=UTC)
@@ -1265,6 +1269,11 @@ class TestDelayedSnapshots:
         stamps = [stamp(1, Source.ODDSPORTAL, 20)]
 
         assert delayed_snapshots(stamps, DECIDED + TEN, DECIDED + timedelta(minutes=15)) == []
+
+    def test_a_delay_past_kick_off_takes_none(self) -> None:
+        stamps = [stamp(1, Source.ODDSPORTAL, 2), stamp(2, Source.ODDSPORTAL, 4)]
+
+        assert delayed_snapshots(stamps, DECIDED + FIVE, DECIDED + timedelta(minutes=4)) == []
 
 
 class TestDelayedFill:
@@ -1367,11 +1376,11 @@ class TestReportCommand:
         delayed = result.stdout[result.stdout.index("Delayed fill") :]
         [row] = [line for line in delayed.splitlines() if "cand" in line]
         cells = [c.strip() for c in row.strip("│ ").split("│")]
-        # Instant +0.2; at +5 min one bet shortened to 2.5 (EV 0); at +10 one voided of two observed.
+        # At +5 min one bet shortened to 2.5 (EV 0); at +10 one voided of two observed.
         assert cells == [
-            "cand", "1", "3", "+0.2000",
-            "+0.1333", "0% (0)", "0",
-            "+0.2000", "50% (1)", "1",
+            "cand", "1", "3",
+            "+0.2000", "+0.1333", "0% (0)", "0",
+            "+0.2000", "+0.2000", "50% (1)", "1",
         ]  # fmt: skip
 
 
