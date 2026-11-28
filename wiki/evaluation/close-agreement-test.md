@@ -1,7 +1,7 @@
 ---
 type: reference
 title: Close agreement test
-description: The test that decides whether a candidate close agrees with a reference close (its per-outcome and per-band statistics, the pass thresholds pre-set on #730 and the verdicts), and the freshness and price-age figures reported with it.
+description: The test that decides whether a candidate close agrees with a reference close (its per-outcome and per-band statistics, the pass thresholds pre-set on issue 730 and the verdicts), and the freshness and price-age figures reported with it.
 sources:
   - odds_analytics.close_agreement.Delta
   - odds_analytics.close_agreement.stat

@@ -32,7 +32,7 @@ The league is EPL. `--from` and `--to` are inclusive UTC days of kick-off. `--fr
 
 ## What is compared
 
-`scripts.compare_live_close_alternatives.PAIRINGS` names each alternative source with a market and line: OddsPortal on `1x2` and totals 2.5, and the Odds API on `1x2`. The Odds API has no Betfair Exchange totals price (#707).
+`scripts.compare_live_close_alternatives.PAIRINGS` names each alternative source with a market and line: OddsPortal on `1x2` and on totals at `scripts.compare_live_close_alternatives.TOTALS_LINE`, and the Odds API on `1x2`. The Odds API has no Betfair Exchange totals price (#707).
 
 `scripts.compare_live_close_alternatives.load_comparisons` takes each `FINAL` EPL event in the range. For each pairing it reads the event's prices through `odds_core.quotes.quotes`:
 

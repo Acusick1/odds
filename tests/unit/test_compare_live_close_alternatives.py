@@ -22,7 +22,7 @@ NARROW = (2.0, 3.6, 4.2)
 LATER = (1.9, 3.8, 4.4)
 WIDE = (2.0, 3.0, 2.0)
 ONE_X_TWO = cmp.Pairing(Source.ODDSPORTAL, Market.ONE_X_TWO, None)
-TOTALS = cmp.Pairing(Source.ODDSPORTAL, Market.TOTALS, 2.5)
+TOTALS = cmp.Pairing(Source.ODDSPORTAL, Market.TOTALS, cmp.TOTALS_LINE)
 ODDS_API = cmp.Pairing(Source.ODDS_API, Market.ONE_X_TWO, None)
 
 

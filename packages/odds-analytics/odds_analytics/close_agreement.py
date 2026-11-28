@@ -10,6 +10,7 @@ from enum import StrEnum
 from typing import Any
 
 import numpy as np
+from odds_core.market_prices import Outcome
 
 # Pre-set on issue 730, in percentage points.
 OUTCOME_MAX_ABS_MEAN_PP = 0.3
@@ -84,7 +85,7 @@ class Delta:
     """One outcome of one compared event: its reference and candidate probabilities."""
 
     event_id: int
-    outcome: str
+    outcome: Outcome
     p_reference: float
     p_candidate: float
 
@@ -93,14 +94,14 @@ class Delta:
         return (self.p_candidate - self.p_reference) * 100
 
 
-def agreement(rows: Sequence[Delta], outcomes: Sequence[str]) -> dict[str, Any]:
+def agreement(rows: Sequence[Delta], outcomes: Sequence[Outcome]) -> dict[str, Any]:
     """The overall verdict and, per outcome and per band of the reference probability, n, mean
     and sd in pp with a verdict."""
 
     def of(selected: Iterable[Delta]) -> Stat:
         return stat([d.dp_pp for d in selected])
 
-    by_outcome = {str(o): of(d for d in rows if d.outcome == o) for o in outcomes}
+    by_outcome = {o.value: of(d for d in rows if d.outcome is o) for o in outcomes}
     by_band = {b: of(d for d in rows if band_of(d.p_reference) == b) for b in BAND_LABELS}
     outcome_verdicts = {k: outcome_verdict(s) for k, s in by_outcome.items()}
     band_verdicts = {k: band_verdict(s) for k, s in by_band.items()}

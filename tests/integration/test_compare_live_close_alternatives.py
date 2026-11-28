@@ -55,7 +55,7 @@ async def load(
 
 
 ODDSPORTAL_1X2 = cmp.Pairing(Source.ODDSPORTAL, Market.ONE_X_TWO, None)
-ODDSPORTAL_TOTALS = cmp.Pairing(Source.ODDSPORTAL, Market.TOTALS, 2.5)
+ODDSPORTAL_TOTALS = cmp.Pairing(Source.ODDSPORTAL, Market.TOTALS, cmp.TOTALS_LINE)
 ODDS_API_1X2 = cmp.Pairing(Source.ODDS_API, Market.ONE_X_TWO, None)
 
 

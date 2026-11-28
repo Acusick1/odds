@@ -29,7 +29,7 @@ The Betfair Exchange price is also collected two other ways:
   - Its home and away sd are 1.5 to 2.7 pp under every age cap, against the 1.0 pp limit.
   - Within 10 minutes of kick-off, 10 of its 37 matches differ from the live close by more than 2 pp on some outcome. Its price is observed about 1 minute after the live close in those matches. So the gap is not price movement; OddsPortal's Betfair row lags the exchange (inferred).
 - **OddsPortal's Betfair row as the totals close.** Totals have no fallback at all, so a looser bar could be argued for. But its mean is −0.56 pp on over and +0.56 pp on under, outside the 0.3 pp limit, with sd 1.47 pp, on 30 matches. Both bands are inconclusive, under 50 rows.
-- **The Odds API's `betfair_exchange` price on `1x2`.** `fetch-odds` runs every 2 hours within 3 hours of an EPL kick-off (`odds_lambda.jobs.fetch_odds.CADENCE`), so it rarely fetches near kick-off. None of 149 matches has a price within 10 minutes and 6 within 30 minutes. Its last price is a median 70 minutes out, and its home and away sd exceed 1.6 pp.
+- **The Odds API's `betfair_exchange` price on `1x2`.** `fetch-odds` runs every 2 hours within 3 hours of an EPL kick-off (`odds_lambda.jobs.fetch_odds.CADENCE`), so it rarely fetches near kick-off. None of 149 matches has a price within 10 minutes and 6 within 30 minutes. Its last price is a median 70 minutes out. With no age cap, its home and away sd exceed 1.6 pp; within 30 minutes, 6 matches are too few to pass.
 - **A fallback that passes only on trimmed data.** Dropping matches more than 2 pp apart brings OddsPortal's `1x2` sd under 1.0 pp. The trim was chosen after seeing the data, so it cannot decide the test.
 
 ## Consequences
@@ -50,6 +50,7 @@ The Betfair Exchange price is also collected two other ways:
   | OddsPortal `1x2`, none | −0.16 / 2.68, fail | +0.10 / 1.10, fail | +0.06 / 2.33, fail | +0.63 (93), fail | −0.05 (137), pass | −1.13 (46), inconclusive | 92 of 149 |
   | OddsPortal `1x2`, 30 min | −0.33 / 1.66, fail | +0.14 / 0.70, pass | +0.18 / 1.58, fail | +0.34 (65), pass | −0.04 (103), pass | −0.53 (33), inconclusive | 67 of 149 |
   | OddsPortal `1x2`, 10 min | −0.27 / 1.82, fail | +0.22 / 0.64, pass | +0.04 / 1.69, fail | +0.41 (32), inconclusive | −0.06 (64), pass | −0.64 (15), inconclusive | 37 of 149 |
+  | OddsPortal totals 2.5, none | −0.53 / 1.46, fail | | +0.53 / 1.46, fail | none | +0.66 (31), inconclusive | −0.66 (31), inconclusive | 31 of 31 |
   | OddsPortal totals 2.5, 10 or 30 min | −0.56 / 1.47, fail | | +0.56 / 1.47, fail | none | +0.70 (30), inconclusive | −0.70 (30), inconclusive | 30 of 31 |
   | Odds API `1x2`, none | −0.41 / 1.73, fail | +0.41 / 0.75, fail | −0.00 / 1.64, fail | +0.49 (40), inconclusive | −0.06 (68), pass | −0.89 (18), inconclusive | 42 of 149 |
   | Odds API `1x2`, 30 min | −0.45 / 1.13, fail | +0.30 / 0.37, fail | +0.14 / 0.96, pass | +0.32 (10), inconclusive | −0.00 (3), inconclusive | −0.64 (5), inconclusive | 6 of 149 |
@@ -59,3 +60,4 @@ The Betfair Exchange price is also collected two other ways:
   - OddsPortal totals: median 4.4 minutes. 30 of 31 are within 10 minutes.
   - Odds API: median 70.0 minutes, none within 10 minutes.
 - With a 10-minute cap, the Odds API has no price for any match.
+- The outlier figures under "Considered options" (10 of 37 matches more than 2 pp apart, observed about 1 minute after the live close, and the trimmed sd) come from a one-off read-only query over the script's comparisons with a 10-minute cap, not from the script's report.
