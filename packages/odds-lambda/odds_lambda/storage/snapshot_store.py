@@ -119,9 +119,7 @@ def _split(
     snapshot: OddsSnapshot, prices: Sequence[Price]
 ) -> tuple[list[Price], list[QuarantinedPrice]]:
     outliers = set(long_retail_outliers(snapshot.market, prices))
-    quarantined = [
-        quarantine(prices[i], QuarantineReason.LONG_RETAIL_OUTLIER) for i in sorted(outliers)
-    ]
+    quarantined = [_quarantine(prices[i]) for i in sorted(outliers)]
     for row in quarantined:
         logger.warning(
             "price_quarantined",
@@ -137,9 +135,8 @@ def _split(
     return [p for i, p in enumerate(prices) if i not in outliers], quarantined
 
 
-def quarantine(price: Price, reason: QuarantineReason) -> QuarantinedPrice:
+def _quarantine(price: Price) -> QuarantinedPrice:
     return QuarantinedPrice(
-        snapshot_id=price.snapshot_id,
         bookmaker=price.bookmaker,
         outcome=price.outcome,
         line=price.line,
@@ -148,7 +145,7 @@ def quarantine(price: Price, reason: QuarantineReason) -> QuarantinedPrice:
         size=price.size,
         matched=price.matched,
         changed_at=price.changed_at,
-        reason=reason,
+        reason=QuarantineReason.LONG_RETAIL_OUTLIER,
     )
 
 

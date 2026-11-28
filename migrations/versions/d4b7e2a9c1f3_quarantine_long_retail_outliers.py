@@ -18,7 +18,8 @@ import sqlalchemy as sa
 from alembic import op
 from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS
 from odds_core.models import Price
-from odds_core.vocabulary import PriceOutcome, Side
+from odds_core.quarantined_price_models import QuarantineReason
+from odds_core.vocabulary import Market, PriceOutcome, Side
 from odds_lambda.storage.retail_outliers import (
     GUARDED_MARKETS,
     MIN_RATIO_TO_NEXT_LONGEST,
@@ -31,7 +32,7 @@ branch_labels = None
 depends_on = None
 
 PRICE_COLUMNS = "snapshot_id, bookmaker, outcome, line, side, price, size, matched, changed_at"
-REASON = "long_retail_outlier"
+REASON = QuarantineReason.LONG_RETAIL_OUTLIER.value
 BATCH = 1000
 
 # The snapshots with an exchange back price in which a UK retail back price is at least
@@ -90,7 +91,7 @@ def _outlier_ids(bind: sa.Connection, snapshot_ids: Sequence[int]) -> list[int]:
             )
             for r in snapshot_rows
         ]
-        market = snapshot_rows[0]["market"]
+        market = Market(snapshot_rows[0]["market"])
         ids.extend(snapshot_rows[i]["id"] for i in long_retail_outliers(market, prices))
     return ids
 

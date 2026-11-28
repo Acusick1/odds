@@ -26,8 +26,7 @@ from odds_core.vocabulary import PriceOutcome, Side, StrEnumText, closed_set_che
 
 
 class QuarantineReason(StrEnum):
-    # A UK retail back price at least twice the next-longest and above +50% EV against the
-    # snapshot's exchange price.
+    # Found by odds_lambda.storage.retail_outliers.long_retail_outliers.
     LONG_RETAIL_OUTLIER = "long_retail_outlier"
 
 

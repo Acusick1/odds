@@ -119,7 +119,7 @@ A writer builds one envelope per event ([envelope format](odds-tables.md#envelop
 
 The rule is the one #731 quarantined five Odds API quotes by. It does not look at kick-off, so a stale retail quote in an in-play snapshot is found too. Migration `d4b7e2a9c1f3` applied it to the prices stored before it: it moved every price it finds into `quarantined_prices` and its downgrade moves them back.
 
-No reader of `prices` sees a quarantined price, so neither the decision-time quotes, the market state of a rule nor any report or backtest reads one. `odds copy from-prod` copies `prices` only, so a copied database has none ([copying production data](../foundations/databases-and-environments.md#copying-production-data)).
+No reader of `prices` sees a quarantined price, so neither the decision-time quotes, the market state of a rule nor any report or backtest reads one. `odds copy from-prod` copies a snapshot's quarantined prices with its prices ([copying production data](../foundations/databases-and-environments.md#copying-production-data)).
 
 ### Spreads line sign
 

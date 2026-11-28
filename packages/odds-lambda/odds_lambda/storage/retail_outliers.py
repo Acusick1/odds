@@ -23,7 +23,7 @@ def _line(price: Price) -> float | None:
     return None if price.line is None else float(price.line)
 
 
-def long_retail_outliers(market: Market | str | None, prices: Sequence[Price]) -> list[int]:
+def long_retail_outliers(market: Market | None, prices: Sequence[Price]) -> list[int]:
     """The indexes in ``prices`` of the UK retail back prices that are at least
     ``MIN_RATIO_TO_NEXT_LONGEST`` times the next-longest UK retail back price on the same
     outcome and line, and whose EV against the same line's exchange fair probability is above
@@ -33,7 +33,7 @@ def long_retail_outliers(market: Market | str | None, prices: Sequence[Price]) -
     every outcome with an overround of at most ``MAX_EXCHANGE_OVERROUND``; a line without one,
     and a market outside ``GUARDED_MARKETS``, has no outliers.
     """
-    if market is None or Market(market) not in GUARDED_MARKETS:
+    if market is None or market not in GUARDED_MARKETS:
         return []
     outcomes = market_outcomes(market)
     exchange: dict[float | None, dict[Outcome, float]] = defaultdict(dict)

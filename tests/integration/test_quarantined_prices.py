@@ -10,7 +10,7 @@ from types import ModuleType
 
 import pytest
 from odds_core.bookmakers import UK_RETAIL_BOOKMAKERS
-from odds_core.models import OddsSnapshot, Price
+from odds_core.models import Event, OddsSnapshot, Price
 from odds_core.quarantined_price_models import QuarantinedPrice, QuarantineReason
 from odds_core.quotes import quotes
 from odds_core.vocabulary import Market, PriceOutcome, Side, Source, TimeBasis
@@ -69,7 +69,7 @@ async def _williamhill_home(session: AsyncSession) -> list[Price]:
 
 
 @pytest.fixture
-async def event(pglite_async_session: AsyncSession):
+async def event(pglite_async_session: AsyncSession) -> Event:
     event = make_epl_event(1, KICKOFF)
     pglite_async_session.add(event)
     await store_tagged(
@@ -82,7 +82,7 @@ async def event(pglite_async_session: AsyncSession):
 
 class TestQuarantineOnWrite:
     async def test_the_outlier_is_stored_apart_with_its_reason(
-        self, pglite_async_session: AsyncSession, event
+        self, pglite_async_session: AsyncSession, event: Event
     ) -> None:
         [row] = await _quarantined(pglite_async_session)
 
@@ -92,7 +92,7 @@ class TestQuarantineOnWrite:
         assert await _williamhill_home(pglite_async_session) == []
 
     async def test_the_rest_of_the_snapshot_is_stored(
-        self, pglite_async_session: AsyncSession, event
+        self, pglite_async_session: AsyncSession, event: Event
     ) -> None:
         stored = (await pglite_async_session.execute(select(Price))).scalars().all()
 
@@ -100,7 +100,7 @@ class TestQuarantineOnWrite:
         assert len(stored) == 8
 
     async def test_storing_the_same_snapshot_again_is_identical(
-        self, pglite_async_session: AsyncSession, event
+        self, pglite_async_session: AsyncSession, event: Event
     ) -> None:
         again = make_tagged_snapshot(event.id, SNAPSHOT_TIME, BOOKS, "oddsportal_live")
         write = await store_shaped_snapshot(
@@ -118,14 +118,16 @@ class TestQuarantineOnWrite:
 
 class TestReadersSkipTheOutlier:
     async def test_decision_time_quotes_omit_it(
-        self, pglite_async_session: AsyncSession, event
+        self, pglite_async_session: AsyncSession, event: Event
     ) -> None:
         read = await quotes(pglite_async_session, [event.id], Market.ONE_X_TWO, until=T)
 
         assert read
         assert not any(q.bookmaker == "williamhill" and q.outcome == "home" for q in read)
 
-    async def test_market_state_omits_it(self, pglite_async_session: AsyncSession, event) -> None:
+    async def test_market_state_omits_it(
+        self, pglite_async_session: AsyncSession, event: Event
+    ) -> None:
         state = await load_market_state(
             pglite_async_session,
             event,
