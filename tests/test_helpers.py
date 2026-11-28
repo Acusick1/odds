@@ -93,7 +93,7 @@ class FakeMlbStatsFetcher:
 
 
 @dataclass(frozen=True)
-class LeagueFixture:
+class LeagueGame:
     """One 2024-25 match as football-data.co.uk and the Odds API spell it."""
 
     sport: SportKey
@@ -106,8 +106,8 @@ class LeagueFixture:
 
 
 # Kick-offs are the FDUK files' UK times in UTC.
-LEAGUE_FIXTURES = [
-    LeagueFixture(
+LEAGUE_GAMES = [
+    LeagueGame(
         "soccer_efl_champ",
         "Championship",
         "Sheffield Weds",
@@ -116,7 +116,7 @@ LEAGUE_FIXTURES = [
         "Queens Park Rangers",
         datetime(2024, 9, 14, 14, 0, tzinfo=UTC),
     ),
-    LeagueFixture(
+    LeagueGame(
         "soccer_spain_la_liga",
         "La Liga - Spain",
         "Ath Madrid",
@@ -125,7 +125,7 @@ LEAGUE_FIXTURES = [
         "Real Betis",
         datetime(2025, 5, 18, 17, 0, tzinfo=UTC),
     ),
-    LeagueFixture(
+    LeagueGame(
         "soccer_italy_serie_a",
         "Serie A - Italy",
         "Inter",
@@ -134,7 +134,7 @@ LEAGUE_FIXTURES = [
         "AC Milan",
         datetime(2024, 9, 22, 18, 45, tzinfo=UTC),
     ),
-    LeagueFixture(
+    LeagueGame(
         "soccer_germany_bundesliga",
         "Bundesliga - Germany",
         "M'gladbach",
@@ -143,7 +143,7 @@ LEAGUE_FIXTURES = [
         "Eintracht Frankfurt",
         datetime(2025, 2, 8, 17, 30, tzinfo=UTC),
     ),
-    LeagueFixture(
+    LeagueGame(
         "soccer_france_ligue_one",
         "Ligue 1 - France",
         "Paris SG",
@@ -152,7 +152,7 @@ LEAGUE_FIXTURES = [
         "Saint Etienne",
         datetime(2025, 1, 12, 19, 45, tzinfo=UTC),
     ),
-    LeagueFixture(
+    LeagueGame(
         "soccer_epl",
         "EPL",
         "Man United",
@@ -164,24 +164,24 @@ LEAGUE_FIXTURES = [
 ]
 
 
-async def load_fduk_fixture(session: AsyncSession, fixture: LeagueFixture) -> Event:
-    """The fixture as the football-data.co.uk loader stores a played match: FINAL with scores."""
+async def load_fduk_game(session: AsyncSession, game: LeagueGame) -> Event:
+    """The game as the football-data.co.uk loader stores a played match: FINAL with scores."""
     resolved = await resolve_event(
         session,
         ListedGame(
             source=Source.FOOTBALL_DATA_UK,
-            sport_key=fixture.sport,
-            sport_title=fixture.sport_title,
-            home_team=fixture.fduk_home,
-            away_team=fixture.fduk_away,
-            commence_time=fixture.kickoff,
+            sport_key=game.sport,
+            sport_title=game.sport_title,
+            home_team=game.fduk_home,
+            away_team=game.fduk_away,
+            commence_time=game.kickoff,
             match_window=MatchWindow.HISTORICAL,
         ),
     )
     event = resolved.event
     event.status = EventStatus.FINAL
     event.home_score, event.away_score = 1, 1
-    event.completed_at = fixture.kickoff + timedelta(hours=2)
+    event.completed_at = game.kickoff + timedelta(hours=2)
     await session.flush()
     return event
 

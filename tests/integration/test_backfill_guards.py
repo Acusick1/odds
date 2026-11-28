@@ -1,5 +1,5 @@
 """The probe and the run guards, on recorded historical responses replayed through the real
-executor under the MLB manifest (10 units per call, Pinnacle required on h2h, fixtures needed
+executor under the MLB manifest (10 units per call, Pinnacle required on h2h, games needed
 9 h ahead)."""
 
 from __future__ import annotations
@@ -204,7 +204,7 @@ class TestRunGuards:
             )
 
         assert len(replay.requests) == 1
-        assert e.value.result.fixtures_stored == len(games)
+        assert e.value.result.games_stored == len(games)
         assert await count(session, OddsSnapshot) > 0
 
     @pytest.mark.parametrize(
@@ -291,7 +291,7 @@ class TestRunGuards:
 
         assert len(replay.requests) == 3
 
-    async def test_books_are_not_judged_on_a_call_serving_only_distant_fixtures(
+    async def test_books_are_not_judged_on_a_call_serving_only_distant_games(
         self,
         pglite_async_session: AsyncSession,
         replay: BackfillReplay,
@@ -309,7 +309,7 @@ class TestRunGuards:
 
         assert result.calls_made == 3
 
-    async def test_a_call_storing_none_of_its_fixtures_counts_toward_the_streak(
+    async def test_a_call_storing_none_of_its_games_counts_toward_the_streak(
         self,
         pglite_async_session: AsyncSession,
         replay: BackfillReplay,
@@ -322,11 +322,11 @@ class TestRunGuards:
             replay.record(at, [far_game(at, "betfair_ex_uk")])
             calls.append(replay.call(manifest, at, games[0].event))
 
-        with pytest.raises(BackfillStopped, match="stored none of the 1 fixtures it serves") as e:
+        with pytest.raises(BackfillStopped, match="stored none of the 1 games it serves") as e:
             await replay.run(manifest, calls, skip_existing=False, max_consecutive_gaps=2)
 
         assert len(replay.requests) == 2
-        assert e.value.result.fixtures_stored == 0
+        assert e.value.result.games_stored == 0
 
     async def test_an_empty_response_bills_nothing_and_counts_as_sparse(
         self,
@@ -1062,7 +1062,7 @@ class TestResponseCheck:
         ("sport", "hours"),
         [("soccer_epl", 24), ("soccer_efl_champ", 24), (MLB, 9), ("basketball_nba", 9)],
     )
-    def test_books_are_judged_as_far_ahead_as_the_manifest_needs_fixtures_up_to_a_day(
+    def test_books_are_judged_as_far_ahead_as_the_manifest_needs_games_up_to_a_day(
         self, sport: SportKey, hours: int
     ) -> None:
         assert book_judged_lead(history_manifest(sport)) == timedelta(hours=hours)

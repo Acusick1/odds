@@ -320,7 +320,7 @@ async def test_job_self_scheduling_chain(test_session, mock_session_factory):
                 "odds_lambda.jobs.fetch_odds.build_event_sync_service", return_value=mock_event_sync
             ),
             patch("odds_core.database.async_session_maker", mock_session_factory),
-            patch("odds_lambda.jobs.fetch_odds.require_rows_for_fixtures", new_callable=AsyncMock),
+            patch("odds_lambda.jobs.fetch_odds.require_rows_for_games", new_callable=AsyncMock),
             patch("odds_lambda.scheduling.helpers.get_scheduler_backend") as mock_backend_getter,
         ):
             mock_backend = AsyncMock()
@@ -331,7 +331,7 @@ async def test_job_self_scheduling_chain(test_session, mock_session_factory):
             await fetch_odds.main(JobContext(sport="soccer_epl"))
 
         # fetch_odds pre-schedules then post-reschedules; both land on the same
-        # proximity-derived time under frozen clock + unchanged fixtures.
+        # proximity-derived time under frozen clock + unchanged games.
         assert len(scheduled_calls) == 2, f"Expected 2 schedule calls for {tier_name}"
 
         expected_next_time = test_time + timedelta(hours=expected_hours)

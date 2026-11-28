@@ -28,7 +28,7 @@ from sqlmodel import col
 
 from odds_analytics.candidate_parity import (
     load_decisions,
-    load_recorded_fixture,
+    load_recorded_game,
     recorded_intents,
     recorded_quotes,
 )
@@ -110,7 +110,7 @@ async def _version_backfill(
     spec, params = resolve_rule(candidate)
     assert not isinstance(spec, ModelRuleSpec)  # noqa: S101
     decisions = await load_decisions(session, candidate.name, version)
-    fixtures = await load_recorded_fixture(session, decisions) if spec.fixture_inputs else {}
+    games = await load_recorded_game(session, decisions) if spec.game_inputs else {}
     bets: dict[int, list[Bet]] = defaultdict(list)
     if decisions:
         rows = await session.scalars(
@@ -139,7 +139,7 @@ async def _version_backfill(
             decision,
             quoted,
             BOOK_SETS[candidate.books],
-            fixtures.get(decision.id, ([], None)),
+            games.get(decision.id, ([], None)),
             live_selections[decision.event_id],
         )
         replayed = {

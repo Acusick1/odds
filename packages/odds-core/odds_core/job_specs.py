@@ -149,8 +149,8 @@ JOB_SPECS: Mapping[str, JobSpec] = MappingProxyType(
                 closing=1.0, pregame=4.0, day_before=4.0, early=12.0, opening=24.0, no_game=12.0
             ),
         ),
-        "fetch-espn-fixtures": JobSpec(
-            module="odds_lambda.jobs.fetch_espn_fixtures",
+        "fetch-espn-games": JobSpec(
+            module="odds_lambda.jobs.fetch_espn_games",
             per_sport=True,
             sports=(
                 "soccer_epl",
@@ -163,13 +163,13 @@ JOB_SPECS: Mapping[str, JobSpec] = MappingProxyType(
             ),
             cron="0 6 * * *",
             heartbeats=(
-                Heartbeat("fetch-espn-fixtures", 26, "soccer_epl"),
-                Heartbeat("fetch-espn-fixtures-nba", 26, "basketball_nba"),
-                Heartbeat("fetch-espn-fixtures-championship", 26, "soccer_efl_champ"),
-                Heartbeat("fetch-espn-fixtures-laliga", 26, "soccer_spain_la_liga"),
-                Heartbeat("fetch-espn-fixtures-seriea", 26, "soccer_italy_serie_a"),
-                Heartbeat("fetch-espn-fixtures-bundesliga", 26, "soccer_germany_bundesliga"),
-                Heartbeat("fetch-espn-fixtures-ligue1", 26, "soccer_france_ligue_one"),
+                Heartbeat("fetch-espn-games", 26, "soccer_epl"),
+                Heartbeat("fetch-espn-games-nba", 26, "basketball_nba"),
+                Heartbeat("fetch-espn-games-championship", 26, "soccer_efl_champ"),
+                Heartbeat("fetch-espn-games-laliga", 26, "soccer_spain_la_liga"),
+                Heartbeat("fetch-espn-games-seriea", 26, "soccer_italy_serie_a"),
+                Heartbeat("fetch-espn-games-bundesliga", 26, "soccer_germany_bundesliga"),
+                Heartbeat("fetch-espn-games-ligue1", 26, "soccer_france_ligue_one"),
             ),
         ),
         "fetch-betfair-exchange": JobSpec(

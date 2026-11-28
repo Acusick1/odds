@@ -31,7 +31,7 @@ from sqlmodel import col
 
 from odds_analytics.candidate_parity import (
     load_decisions,
-    load_recorded_fixture,
+    load_recorded_game,
     recorded_intents,
     recorded_quotes,
 )
@@ -126,7 +126,7 @@ async def replay_variants(session: AsyncSession, candidate: RuleCandidate) -> Re
     if isinstance(spec, ModelRuleSpec):
         return None
     decisions = await load_decisions(session, candidate.name, candidate.version)
-    fixtures = await load_recorded_fixture(session, decisions) if spec.fixture_inputs else {}
+    games = await load_recorded_game(session, decisions) if spec.game_inputs else {}
     events = {
         e.id: e
         for e in (
@@ -154,7 +154,7 @@ async def replay_variants(session: AsyncSession, candidate: RuleCandidate) -> Re
                 decision,
                 quoted,
                 books,
-                fixtures.get(decision.id, ([], None)),
+                games.get(decision.id, ([], None)),
                 chains[i][decision.event_id],
             )
             chains[i][decision.event_id].update(intent.selection for intent in intents)

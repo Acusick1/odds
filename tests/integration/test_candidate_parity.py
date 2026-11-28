@@ -94,10 +94,10 @@ async def add_decision(
     kickoff: datetime = KICKOFF,
     known_at: datetime | None = None,
     event_ids: list[int] | None = None,
-    fixture: dict[str, Any] | None = None,
+    game: dict[str, Any] | None = None,
 ) -> None:
     """A decision of ``gap`` on ``e1`` with the given (selection, book, price) unit-stake bets
-    and recorded fixture event ids."""
+    and recorded game event ids."""
     bets = bets or []
     decision = CandidateDecision(
         candidate_name="gap",
@@ -110,7 +110,7 @@ async def add_decision(
         known_at=known_at or decision_time + timedelta(minutes=1),
         input_snapshot_ids=input_ids,
         input_event_ids=event_ids or [],
-        input_fixture=fixture,
+        input_fixture=game,
         bets_placed=len(bets),
         missed=missed,
     )

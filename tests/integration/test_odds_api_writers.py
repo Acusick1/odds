@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 from odds_analytics.backfill_executor import BackfillExecutor
-from odds_analytics.backfill_plan import Call, Fixture, Manifest, Target
+from odds_analytics.backfill_plan import Call, Game, Manifest, Target
 from odds_core.api_models import (
     ApiEvent,
     EventsResponse,
@@ -690,7 +690,7 @@ def _manifest() -> Manifest:
             "snapshot_grid": [{"start": "2022-09-01T00:00:00Z", "step_minutes": 5}],
             "probe": {
                 "snapshots": ["2026-04-18T09:55:00Z"],
-                "min_fixture_lead_hours": 12,
+                "min_game_lead_hours": 12,
                 "required_bookmakers": {},
             },
         }
@@ -700,7 +700,7 @@ def _manifest() -> Manifest:
 @pytest.mark.asyncio
 class TestBackfill:
     @pytest.mark.parametrize("reverse", [False, True], ids=["listed", "reversed"])
-    async def test_one_call_stores_every_fixture_it_returns_at_the_snapshot_time(
+    async def test_one_call_stores_every_game_it_returns_at_the_snapshot_time(
         self, pglite_async_session: AsyncSession, reverse: bool
     ) -> None:
         session = pglite_async_session
@@ -718,11 +718,11 @@ class TestBackfill:
         call = Call(
             requested,
             tuple(
-                Target(Fixture(event_id, kickoff), band, requested, requested)
+                Target(Game(event_id, kickoff), band, requested, requested)
                 for event_id, kickoff in ((1, kickoffs[0]), (2, kickoffs[1]))
             ),
         )
-        # The fixtures' lock order must not depend on the order the API lists them in.
+        # The games' lock order must not depend on the order the API lists them in.
         served = recorded | {"data": recorded["data"][::-1] if reverse else recorded["data"]}
         http = RecordedHttpSession(
             served,
@@ -757,7 +757,7 @@ class TestBackfill:
             (log.sport_key, log.events_count, log.api_quota_remaining, log.api_quota_used)
             for log in logs
         ] == [("soccer_epl", 2, None, None)]
-        assert (result.calls_made, result.units_used, result.fixtures_stored) == (1, 20, 2)
+        assert (result.calls_made, result.units_used, result.games_stored) == (1, 20, 2)
         assert result.quota_remaining == 12345
 
         async with BackfillExecutor(

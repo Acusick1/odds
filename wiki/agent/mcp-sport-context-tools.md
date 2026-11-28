@@ -1,7 +1,7 @@
 ---
 type: reference
 title: MCP sport context tools
-description: EPL get_team_context (form, fixtures, standings from ESPN fixtures) and MLB get_probable_pitchers (live read-through with cached fallback), and their data dependencies.
+description: EPL get_team_context (form, games, standings from ESPN games) and MLB get_probable_pitchers (live read-through with cached fallback), and their data dependencies.
 sources:
   - odds_mcp.tools.epl.get_team_context
   - odds_mcp.tools.epl._derive_standings
@@ -23,12 +23,12 @@ Two tools in `packages/odds-mcp/odds_mcp/tools/`, each on its own `FastMCP` sub-
 
 ## Team context (EPL)
 
-`get_team_context(team, as_of=None, last_n=5, next_n=5, include_standings=True)` reads the `espn_fixtures` table (rows per team, refreshed daily by `fetch-espn-fixtures`, see [EPL context data](../collection/epl-context-data.md)). That job runs on a daily fixed cron (`0 6 * * *` UTC, the `cron` field of its `odds_core.job_specs.JOB_SPECS` record, one run per league; the football leagues beyond EPL [create events](../collection/espn-football-schedule.md)) on the production host's scheduler, so the tool goes stale whenever the job fails. `team` goes through `odds_core.team.normalize_team_name`; `as_of` defaults to now (a naive value is taken as UTC); `last_n` and `next_n` are floored at 1.
+`get_team_context(team, as_of=None, last_n=5, next_n=5, include_standings=True)` reads the `espn_games` table (rows per team, refreshed daily by `fetch-espn-games`, see [EPL context data](../collection/epl-context-data.md)). That job runs on a daily fixed cron (`0 6 * * *` UTC, the `cron` field of its `odds_core.job_specs.JOB_SPECS` record, one run per league; the football leagues beyond EPL [create events](../collection/espn-football-schedule.md)) on the production host's scheduler, so the tool goes stale whenever the job fails. `team` goes through `odds_core.team.normalize_team_name`; `as_of` defaults to now (a naive value is taken as UTC); `last_n` and `next_n` are floored at 1.
 
 | Field | Content |
 |---|---|
-| `last_results` | Up to `last_n` completed Premier League fixtures before `as_of`, newest first, with scores, W/D/L and home/away. Cup results are excluded so form stays league-only |
-| `upcoming_fixtures` | Next `next_n` fixtures after `as_of` in all competitions with `days_until_ko`: the rotation-risk signal |
+| `last_results` | Up to `last_n` completed Premier League games before `as_of`, newest first, with scores, W/D/L and home/away. Cup results are excluded so form stays league-only |
+| `upcoming_games` | Next `next_n` games after `as_of` in all competitions with `days_until_ko`: the rotation-risk signal |
 | `standings` | `team_row` and the full `table`, derived on the fly from the season's completed Premier League rows |
 
 Rows with ESPN `state` `in` (live) are skipped from both lists. A row counts as final when `state == "post"`, or, for older rows with no `state`, when its status text is in a short fallback set. Rows with unparseable scores are dropped from results.
@@ -43,7 +43,7 @@ Each event carries `home_pitcher_name`/`id` and `away_pitcher_name`/`id`, nullab
 
 - Standings use a simplified tiebreak (points, goal difference, goals for, team name) without the official head-to-head step, so tied positions are approximate. `odds_mcp.tools.epl._derive_standings` tallies each ESPN row into an `odds_analytics.standings_features.TeamRecord` and orders them with `odds_analytics.standings_features.rank_table`, the same records and order the standings features build from `odds_core.models.Event` rows with status FINAL (one per event) ([EPL context features](../modelling/epl-context-features.md)).
 - `odds_core.team.normalize_team_name` returns an unknown name unchanged, so a misspelt team yields empty lists and `team_row: null`, not an error.
-- The `team` fixture query is not season-scoped; only standings filter by season label.
+- The `team` game query is not season-scoped; only standings filter by season label.
 - `odds_mcp.tools.epl.get_team_context` exists only for the EPL; MLB has no equivalent form or schedule tool.
 
 ## Related

@@ -1,7 +1,7 @@
-"""Async fetcher for ESPN all-competition EPL fixture schedules.
+"""Async fetcher for ESPN all-competition EPL game schedules.
 
 Wraps the ESPN Site API. Given a season start year, returns a list of
-``EspnFixtureRecord`` with deduplicated fixtures across Premier League,
+``EspnGameRecord`` with deduplicated games across Premier League,
 FA Cup, League Cup, and European competitions.
 
 The ESPN Site API is free and unauthenticated.
@@ -16,7 +16,7 @@ from typing import Any
 
 import httpx
 import structlog
-from odds_core.epl_data_models import EspnFixtureRecord
+from odds_core.epl_data_models import EspnGameRecord
 from odds_core.team import normalize_team_name
 
 logger = structlog.get_logger()
@@ -69,7 +69,7 @@ PRIMARY_LEAGUE_SLUG = "eng.1"
 
 
 class EspnUpcomingFetchError(RuntimeError):
-    """The Premier League's upcoming-fixture request to ESPN failed."""
+    """The Premier League's upcoming-game request to ESPN failed."""
 
 
 class EspnSeasonFetchError(RuntimeError):
@@ -77,10 +77,10 @@ class EspnSeasonFetchError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
-class UpcomingFixtures:
+class UpcomingGames:
     """Upcoming records plus the competitions whose request failed."""
 
-    records: list[EspnFixtureRecord]
+    records: list[EspnGameRecord]
     failed_leagues: list[str]
 
 
@@ -126,12 +126,12 @@ def _extract_score(competitor: dict[str, Any]) -> str:
     return str(score)
 
 
-class EspnFixtureFetcher:
-    """Async fetcher for ESPN all-competition EPL fixture schedules.
+class EspnGameFetcher:
+    """Async fetcher for ESPN all-competition EPL game schedules.
 
     Usage::
 
-        async with EspnFixtureFetcher() as fetcher:
+        async with EspnGameFetcher() as fetcher:
             records = await fetcher.fetch_season(2025)
     """
 
@@ -145,7 +145,7 @@ class EspnFixtureFetcher:
         self._client = client
         self.request_delay_seconds = request_delay_seconds
 
-    async def __aenter__(self) -> EspnFixtureFetcher:
+    async def __aenter__(self) -> EspnGameFetcher:
         if self._client is None:
             self._client = httpx.AsyncClient()
         return self
@@ -158,8 +158,8 @@ class EspnFixtureFetcher:
     def _require_client(self) -> httpx.AsyncClient:
         if self._client is None:
             raise RuntimeError(
-                "EspnFixtureFetcher used outside async context manager; "
-                "wrap calls in `async with EspnFixtureFetcher()`."
+                "EspnGameFetcher used outside async context manager; "
+                "wrap calls in `async with EspnGameFetcher()`."
             )
         return self._client
 
@@ -193,10 +193,10 @@ class EspnFixtureFetcher:
         league_slug: str,
         team_id: str,
         season: int,
-    ) -> list[EspnFixtureRecord]:
+    ) -> list[EspnGameRecord]:
         """Fetch a team's schedule for one competition/season.
 
-        Returns a list of ``EspnFixtureRecord`` entries. ``season`` is stored as
+        Returns a list of ``EspnGameRecord`` entries. ``season`` is stored as
         the display label (e.g. ``"2025-26"``) on each record.
         """
         url = f"{BASE_URL}/{league_slug}/teams/{team_id}/schedule?season={season}"
@@ -204,7 +204,7 @@ class EspnFixtureFetcher:
         events = data.get("events", [])
         competition = LEAGUE_SLUGS[league_slug]
         label = season_label(season)
-        records: list[EspnFixtureRecord] = []
+        records: list[EspnGameRecord] = []
 
         for event in events:
             date_str = event.get("date", "")
@@ -244,12 +244,12 @@ class EspnFixtureFetcher:
                 dt = dt.replace(tzinfo=UTC)
 
             records.append(
-                EspnFixtureRecord(
+                EspnGameRecord(
                     date=dt,
                     team=team_name,
                     opponent=opponent_name,
                     competition=competition,
-                    match_round=round_name,
+                    game_round=round_name,
                     home_away=team_entry["homeAway"],
                     score_team=_extract_score(team_entry),
                     score_opponent=_extract_score(opponent_entry),
@@ -275,7 +275,7 @@ class EspnFixtureFetcher:
         league_slug: str,
         year: int,
         month: int,
-    ) -> list[EspnFixtureRecord]:
+    ) -> list[EspnGameRecord]:
         """Fetch one calendar month's scoreboard for one competition.
 
         The scoreboard endpoint returns one event per match (rather than one
@@ -291,7 +291,7 @@ class EspnFixtureFetcher:
         data = await self.fetch_month_scoreboard_json(league_slug, year, month)
 
         events = data.get("events", [])
-        records: list[EspnFixtureRecord] = []
+        records: list[EspnGameRecord] = []
         for event in events:
             date_str = event.get("date", "")
             if not date_str:
@@ -332,12 +332,12 @@ class EspnFixtureFetcher:
 
             # Home-anchored row
             records.append(
-                EspnFixtureRecord(
+                EspnGameRecord(
                     date=dt,
                     team=home_name,
                     opponent=away_name,
                     competition=competition,
-                    match_round=round_name,
+                    game_round=round_name,
                     home_away="home",
                     score_team=home_score,
                     score_opponent=away_score,
@@ -348,12 +348,12 @@ class EspnFixtureFetcher:
             )
             # Away-anchored row (mirror)
             records.append(
-                EspnFixtureRecord(
+                EspnGameRecord(
                     date=dt,
                     team=away_name,
                     opponent=home_name,
                     competition=competition,
-                    match_round=round_name,
+                    game_round=round_name,
                     home_away="away",
                     score_team=away_score,
                     score_opponent=home_score,
@@ -367,11 +367,11 @@ class EspnFixtureFetcher:
 
     async def fetch_upcoming(
         self, days_ahead: int = 30, *, now: datetime | None = None
-    ) -> UpcomingFixtures:
-        """Fetch near-future fixtures across all configured competitions.
+    ) -> UpcomingGames:
+        """Fetch near-future games across all configured competitions.
 
         The ``teams/{id}/schedule`` endpoint only returns completed matches,
-        so upcoming fixtures come from the scoreboard endpoint. One request
+        so upcoming games come from the scoreboard endpoint. One request
         per competition per calendar month covers the window; records are
         filtered to ``start of today → today+days_ahead`` and deduplicated on
         ``(date, team, opponent)``.
@@ -384,7 +384,7 @@ class EspnFixtureFetcher:
         now = now or datetime.now(UTC)
         start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         end = now + timedelta(days=days_ahead)
-        all_records: list[EspnFixtureRecord] = []
+        all_records: list[EspnGameRecord] = []
         seen: set[tuple[str, str, str]] = set()
         failed_leagues: list[str] = []
 
@@ -394,8 +394,8 @@ class EspnFixtureFetcher:
                 for year, month in _months_between(start, end):
                     if self.request_delay_seconds > 0:
                         await asyncio.sleep(self.request_delay_seconds)
-                    fixtures = await self.fetch_month_scoreboard(league_slug, year, month)
-                    for record in fixtures:
+                    games = await self.fetch_month_scoreboard(league_slug, year, month)
+                    for record in games:
                         if not start <= record.date <= end:
                             continue
                         key = (record.date.isoformat(), record.team, record.opponent)
@@ -411,7 +411,7 @@ class EspnFixtureFetcher:
             logger.info(
                 "espn_scoreboard_loaded",
                 league=league_slug,
-                new_fixtures=new_count,
+                new_games=new_count,
             )
 
         if PRIMARY_LEAGUE_SLUG in failed_leagues:
@@ -420,10 +420,10 @@ class EspnFixtureFetcher:
             )
 
         all_records.sort(key=lambda r: r.date)
-        return UpcomingFixtures(records=all_records, failed_leagues=failed_leagues)
+        return UpcomingGames(records=all_records, failed_leagues=failed_leagues)
 
-    async def fetch_season(self, season: int) -> list[EspnFixtureRecord]:
-        """Fetch all fixtures for all EPL teams in a season across all competitions.
+    async def fetch_season(self, season: int) -> list[EspnGameRecord]:
+        """Fetch all games for all EPL teams in a season across all competitions.
 
         Each match is represented once per team; duplicates that would otherwise
         appear (because a match shows up on both teams' schedules) are collapsed
@@ -432,7 +432,7 @@ class EspnFixtureFetcher:
         teams = await self.fetch_teams(season)
         logger.info("espn_teams_loaded", season=season, count=len(teams))
 
-        all_records: list[EspnFixtureRecord] = []
+        all_records: list[EspnGameRecord] = []
         seen: set[tuple[str, str, str]] = set()
         primary_failures = 0
 
@@ -445,7 +445,7 @@ class EspnFixtureFetcher:
                 if self.request_delay_seconds > 0:
                     await asyncio.sleep(self.request_delay_seconds)
                 try:
-                    fixtures = await self.fetch_team_schedule(league_slug, team_id, season)
+                    games = await self.fetch_team_schedule(league_slug, team_id, season)
                 except httpx.HTTPError as e:
                     if league_slug == PRIMARY_LEAGUE_SLUG:
                         primary_failures += 1
@@ -457,7 +457,7 @@ class EspnFixtureFetcher:
                     )
                     continue
 
-                for record in fixtures:
+                for record in games:
                     key = (record.date.isoformat(), record.team, record.opponent)
                     if key in seen:
                         continue
@@ -469,7 +469,7 @@ class EspnFixtureFetcher:
                 "espn_team_schedule_loaded",
                 season=season,
                 team=team_name,
-                new_fixtures=team_records,
+                new_games=team_records,
                 index=idx + 1,
                 total=len(teams),
             )

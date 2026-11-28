@@ -5,7 +5,7 @@ exactly the snapshots the decision recorded (``input_snapshot_ids``), with its d
 and kick-off, runs the rule and compares the replayed bets with the decision's recorded bets; any difference
 is a mismatch. Decisions are replayed in the order the live runs took them, and each outcome
 of a match is bet once: the parity comparison drops the outcomes the match's earlier
-decisions placed bets on, as the live run did. A rule that reads fixture inputs gets them
+decisions placed bets on, as the live run did. A rule that reads game inputs gets them
 from the events the decision recorded (``input_event_ids``), as known at its ``known_at``. The
 data comparison replays from the database as it is now, with
 ``known_at`` the decision's, dropping the outcomes its own replays of the earlier decisions
@@ -31,7 +31,7 @@ from odds_core.quotes import Quote
 from odds_core.vocabulary import Market
 from odds_lambda.candidate_rules import (
     BetIntent,
-    FixtureContext,
+    GameContext,
     ModelRuleSpec,
     RuleParams,
     RuleSpec,
@@ -151,14 +151,14 @@ def recorded_intents(
     decision: CandidateDecision,
     quoted: Sequence[Quote],
     books: frozenset[str],
-    fixture: tuple[list[int], dict[str, Any] | None],
+    game: tuple[list[int], dict[str, Any] | None],
     bet_selections: Collection[Selection],
 ) -> list[BetIntent]:
     """The bets on the state built from the decision's recorded ``quoted`` under ``books``, with
-    its recorded fixture values and kick-off, dropping the selections ``bet_selections``. A
-    rule's fixture context is the recorded one, not read again: events' scores and kick-offs
+    its recorded game values and kick-off, dropping the selections ``bet_selections``. A
+    rule's game context is the recorded one, not read again: events' scores and kick-offs
     change, and a merge changes their ids."""
-    event_ids, values = fixture
+    event_ids, values = game
     state = build_market_state(
         event,
         market,
@@ -170,8 +170,8 @@ def recorded_intents(
         spec.also_markets,
         lookback_points(params),
     )
-    if spec.fixture_inputs and state.has_input:
-        state = replace(state, fixture=FixtureContext.from_record(values, event_ids))
+    if spec.game_inputs and state.has_input:
+        state = replace(state, game=GameContext.from_record(values, event_ids))
     return apply_rule(spec, params, state, decision.kickoff_at_decision, bet_selections)[1]
 
 
@@ -183,10 +183,10 @@ async def _recorded_inputs(
     event: Event,
     market: Market,
     decision: CandidateDecision,
-    fixture: tuple[list[int], dict[str, Any] | None],
+    game: tuple[list[int], dict[str, Any] | None],
     bet_selections: set[Selection],
 ) -> tuple[list[BetIntent], tuple[int, ...], tuple[int, ...]]:
-    """The bets from the decision's recorded snapshots and fixture values, and the recorded
+    """The bets from the decision's recorded snapshots and game values, and the recorded
     snapshot ids and event ids not found."""
     ids = list(decision.input_snapshot_ids)
     found: set[int] = set()
@@ -205,10 +205,10 @@ async def _recorded_inputs(
         decision,
         quoted,
         BOOK_SETS[candidate.books],
-        fixture,
+        game,
         bet_selections,
     )
-    return intents, missing, await _absent_events(session, fixture[0])
+    return intents, missing, await _absent_events(session, game[0])
 
 
 async def _db_replayed(
@@ -232,7 +232,7 @@ async def _db_replayed(
         BOOK_SETS[candidate.books],
         kickoff=decision.kickoff_at_decision,
         bet_selections=bet_selections,
-        fixture_leagues=candidate_leagues(candidate),
+        game_leagues=candidate_leagues(candidate),
     )
     return intents
 
@@ -240,8 +240,8 @@ async def _db_replayed(
 async def load_decisions(session: AsyncSession, name: str, version: int) -> list[CandidateDecision]:
     """The non-missed decisions of a candidate version in the order the live runs took them."""
     rows = await session.execute(
-        # The recorded fixture is read only for a rule with fixture inputs
-        # (``load_recorded_fixture``), so a database not yet migrated to hold it can still be
+        # The recorded game is read only for a rule with game inputs
+        # (``load_recorded_game``), so a database not yet migrated to hold it can still be
         # checked for other rules. The league set is never read: parity replays the candidate
         # file's rule.
         select(CandidateDecision)
@@ -262,10 +262,10 @@ async def load_decisions(session: AsyncSession, name: str, version: int) -> list
     return list(rows.scalars().all())
 
 
-async def load_recorded_fixture(
+async def load_recorded_game(
     session: AsyncSession, decisions: Sequence[CandidateDecision]
 ) -> dict[int, tuple[list[int], dict[str, Any] | None]]:
-    """Each decision's recorded fixture event ids and values, by decision id."""
+    """Each decision's recorded game event ids and values, by decision id."""
     if not decisions:
         return {}
     rows = await session.execute(
@@ -304,9 +304,7 @@ async def check_parity(
         )
 
     decisions = await load_decisions(session, candidate.name, version)
-    recorded_fixture = (
-        await load_recorded_fixture(session, decisions) if spec.fixture_inputs else {}
-    )
+    recorded_game = await load_recorded_game(session, decisions) if spec.game_inputs else {}
     bets: dict[int, list[Bet]] = defaultdict(list)
     if decisions:
         rows = await session.execute(
@@ -341,7 +339,7 @@ async def check_parity(
             event,
             candidate.market,
             decision,
-            recorded_fixture.get(decision.id, ([], None)),
+            recorded_game.get(decision.id, ([], None)),
             live_selections[decision.event_id],
         )
         db_replayed_bets = await _db_replayed(

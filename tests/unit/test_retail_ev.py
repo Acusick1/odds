@@ -596,7 +596,7 @@ def season(event: Event) -> list[Event]:
 
 
 @pytest.fixture
-def fixtures() -> pd.DataFrame:
+def games() -> pd.DataFrame:
     rows = [
         ("2025-09-27T14:00:00Z", "Arsenal", "Fulham", "Premier League", "Full Time"),
         ("2025-09-28T14:00:00Z", "Chelsea", "Everton", "Premier League", "Full Time"),
@@ -611,28 +611,28 @@ def fixtures() -> pd.DataFrame:
     return df
 
 
-def _history(events: list[Event], fixtures: pd.DataFrame) -> TeamHistory:
+def _history(events: list[Event], games: pd.DataFrame) -> TeamHistory:
     cache: dict[str, list[Event]] = {}
     for e in sorted(events, key=lambda e: e.commence_time):
         cache.setdefault(epl_season_key(e.commence_time), []).append(e)
-    return TeamHistory(season_results=cache, fixtures=fixtures, form_window=5)
+    return TeamHistory(season_results=cache, games=games, form_window=5)
 
 
 def _known_at(
-    t: datetime, season: list[Event], fixtures: pd.DataFrame
+    t: datetime, season: list[Event], games: pd.DataFrame
 ) -> tuple[list[Event], pd.DataFrame]:
     """Only matches that have finished by t, as a database written at t would hold."""
     finished = [e for e in season if e.commence_time + MATCH_LENGTH <= t]
-    return finished, fixtures.loc[fixtures["date"] + MATCH_LENGTH <= t]
+    return finished, games.loc[games["date"] + MATCH_LENGTH <= t]
 
 
 class TestTeamFeaturesAsOfT:
     def test_rebuilt_from_matches_finished_by_t(
-        self, event: Event, season: list[Event], fixtures: pd.DataFrame
+        self, event: Event, season: list[Event], games: pd.DataFrame
     ) -> None:
-        full = _history(season, fixtures)
+        full = _history(season, games)
         for t in TEAM_T:
-            truncated = _history(*_known_at(t, season, fixtures))
+            truncated = _history(*_known_at(t, season, games))
             np.testing.assert_array_equal(
                 full.schedule_at(event, t).to_array(), truncated.schedule_at(event, t).to_array()
             )
@@ -641,9 +641,9 @@ class TestTeamFeaturesAsOfT:
             )
 
     def test_midweek_match_counts_only_once_its_result_is_known(
-        self, event: Event, season: list[Event], fixtures: pd.DataFrame
+        self, event: Event, season: list[Event], games: pd.DataFrame
     ) -> None:
-        history = _history(season, fixtures)
+        history = _history(season, games)
         in_play, after = TEAM_T[2], TEAM_T[5]
         assert history.schedule_at(event, in_play).home_rest_days == pytest.approx(7.0)
         assert history.schedule_at(event, after).home_rest_days == pytest.approx(
@@ -657,17 +657,17 @@ class TestTeamFeaturesAsOfT:
     def test_result_known_three_hours_after_kick_off(self) -> None:
         assert results_known_before(KICKOFF) == KICKOFF - timedelta(hours=3)
 
-    def test_unplayed_fixture_rows_do_not_count(
-        self, event: Event, season: list[Event], fixtures: pd.DataFrame
+    def test_unplayed_game_rows_do_not_count(
+        self, event: Event, season: list[Event], games: pd.DataFrame
     ) -> None:
-        features = _history(season, fixtures).schedule_at(event, TEAM_T[-1])
+        features = _history(season, games).schedule_at(event, TEAM_T[-1])
         assert features.away_matches_last_14d == 2.0
 
-    def test_team_without_played_fixtures_has_no_congestion(
-        self, season: list[Event], fixtures: pd.DataFrame
+    def test_team_without_played_games_has_no_congestion(
+        self, season: list[Event], games: pd.DataFrame
     ) -> None:
         newcomer = make_epl_event(999, KICKOFF, "Brentford", "Chelsea")
-        features = _history(season, fixtures).schedule_at(newcomer, TEAM_T[-1])
+        features = _history(season, games).schedule_at(newcomer, TEAM_T[-1])
         assert features.home_matches_last_14d is None
         assert features.home_european_last_7d is None
         assert features.away_matches_last_14d == 2.0
@@ -677,13 +677,13 @@ class TestTeamFeaturesAsOfT:
         event: Event,
         snapshots: list[Snap],
         season: list[Event],
-        fixtures: pd.DataFrame,
+        games: pd.DataFrame,
     ) -> None:
         rows, _ = _build(event, snapshots)
         features = RetailEvFeatures(
             OUTCOMES,
             ("standings_as_of_t", "schedule_as_of_t"),
-            teams=_history(season, fixtures),
+            teams=_history(season, games),
             events={event.id: event},
         )
         values = dict(zip(features.names, features.row(rows[-1]), strict=True))
@@ -799,7 +799,7 @@ class TestUpperBoundDecisionTime:
         event: Event,
         snapshots: list[Snap],
         season: list[Event],
-        fixtures: pd.DataFrame,
+        games: pd.DataFrame,
     ) -> None:
         rows, _ = _build(event, snapshots)
         fduk = _row(rows, 48 * 60, "bet365", Outcome.HOME)
@@ -807,7 +807,7 @@ class TestUpperBoundDecisionTime:
         features = RetailEvFeatures(
             OUTCOMES,
             ("schedule_as_of_t", "standings_as_of_t"),
-            teams=_history(season, fixtures),
+            teams=_history(season, games),
             events={event.id: event},
         )
         team_columns = slice(len(features.names) - 19, None)

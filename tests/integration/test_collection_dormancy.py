@@ -6,14 +6,14 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
-from odds_core.epl_data_models import EspnFixture
+from odds_core.epl_data_models import EspnGame
 from odds_core.mlb_data_models import MlbProbablePitchers
 from odds_core.models import Event, EventStatus
 from odds_core.vocabulary import Market
 from odds_lambda import collection_calendar
 from odds_lambda.betfair.constants import SPORT_CONFIG
 from odds_lambda.betfair.kickoff import next_betfair_kickoff
-from odds_lambda.collection_calendar import decide_collection_run, next_fixture_kickoff
+from odds_lambda.collection_calendar import decide_collection_run, next_game_kickoff
 from odds_lambda.jobs import fetch_betfair_exchange
 from odds_lambda.jobs.fetch_oddsportal import CADENCE
 from odds_lambda.scheduling.decision import DORMANCY_HORIZON_DAYS
@@ -61,13 +61,13 @@ def _event(
 
 def _espn(
     kickoff: datetime, *, status: str = "Scheduled", competition: str = "Premier League"
-) -> EspnFixture:
-    return EspnFixture(
+) -> EspnGame:
+    return EspnGame(
         date=kickoff,
         team="Home",
         opponent="Away",
         competition=competition,
-        match_round="1",
+        game_round="1",
         home_away="home",
         score_team="",
         score_opponent="",
@@ -91,15 +91,15 @@ def _mlb_game(
     )
 
 
-class TestNextFixtureKickoff:
-    async def test_an_empty_database_has_no_fixture(self) -> None:
-        assert await next_fixture_kickoff("soccer_epl", now=NOW) is None
+class TestNextGameKickoff:
+    async def test_an_empty_database_has_no_game(self) -> None:
+        assert await next_game_kickoff("soccer_epl", now=NOW) is None
 
-    async def test_the_published_epl_schedule_is_a_fixture(self, pglite_async_session: Any) -> None:
+    async def test_the_published_epl_schedule_is_a_game(self, pglite_async_session: Any) -> None:
         pglite_async_session.add(_espn(OPENER))
         await pglite_async_session.commit()
 
-        assert await next_fixture_kickoff("soccer_epl", now=NOW) == OPENER
+        assert await next_game_kickoff("soccer_epl", now=NOW) == OPENER
 
     async def test_the_earlier_of_stored_events_and_published_schedule_wins(
         self, pglite_async_session: Any
@@ -108,10 +108,10 @@ class TestNextFixtureKickoff:
         pglite_async_session.add_all([_espn(OPENER), _event(stored, sport_key="soccer_epl")])
         await pglite_async_session.commit()
 
-        assert await next_fixture_kickoff("soccer_epl", now=NOW) == stored
+        assert await next_game_kickoff("soccer_epl", now=NOW) == stored
 
     @pytest.mark.parametrize(
-        "fixture",
+        "game",
         [
             _espn(OPENER, status="Postponed"),
             _espn(OPENER, competition="FA Cup"),
@@ -119,32 +119,32 @@ class TestNextFixtureKickoff:
         ],
         ids=["postponed", "other-competition", "past"],
     )
-    async def test_these_espn_rows_are_not_fixtures(
-        self, pglite_async_session: Any, fixture: EspnFixture
+    async def test_these_espn_rows_are_not_games(
+        self, pglite_async_session: Any, game: EspnGame
     ) -> None:
-        pglite_async_session.add(fixture)
+        pglite_async_session.add(game)
         await pglite_async_session.commit()
 
-        assert await next_fixture_kickoff("soccer_epl", now=NOW) is None
+        assert await next_game_kickoff("soccer_epl", now=NOW) is None
 
-    async def test_the_epl_schedule_is_not_an_mlb_fixture(self, pglite_async_session: Any) -> None:
+    async def test_the_epl_schedule_is_not_an_mlb_game(self, pglite_async_session: Any) -> None:
         pglite_async_session.add(_espn(OPENER))
         await pglite_async_session.commit()
 
-        assert await next_fixture_kickoff("baseball_mlb", now=NOW) is None
+        assert await next_game_kickoff("baseball_mlb", now=NOW) is None
 
-    async def test_the_mlb_stats_api_schedule_is_a_fixture(self, pglite_async_session: Any) -> None:
+    async def test_the_mlb_stats_api_schedule_is_a_game(self, pglite_async_session: Any) -> None:
         first_pitch = NOW + timedelta(days=2)
         pglite_async_session.add(_mlb_game(1, first_pitch, NOW - timedelta(hours=3)))
         await pglite_async_session.commit()
 
-        assert await next_fixture_kickoff("baseball_mlb", now=NOW) == first_pitch
+        assert await next_game_kickoff("baseball_mlb", now=NOW) == first_pitch
 
-    async def test_a_stale_mlb_schedule_is_not_a_fixture(self, pglite_async_session: Any) -> None:
+    async def test_a_stale_mlb_schedule_is_not_a_game(self, pglite_async_session: Any) -> None:
         pglite_async_session.add(_mlb_game(1, NOW + timedelta(days=2), NOW - timedelta(hours=50)))
         await pglite_async_session.commit()
 
-        assert await next_fixture_kickoff("baseball_mlb", now=NOW) is None
+        assert await next_game_kickoff("baseball_mlb", now=NOW) is None
 
 
 class TestSeasonCycle:

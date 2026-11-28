@@ -17,7 +17,7 @@ sources:
   - odds_lambda.scheduling.decision.next_lead_run
   - odds_lambda.scheduling.decision.MIN_LEAD_RUN_GAP
   - odds_lambda.collection_calendar.decide_collection_run
-  - odds_lambda.collection_calendar.next_fixture_kickoff
+  - odds_lambda.collection_calendar.next_game_kickoff
   - odds_lambda.collection_calendar.published_schedule_kickoff
   - odds_lambda.scheduling.helpers.self_schedule
   - odds_lambda.scheduling.helpers.get_next_kickoff
@@ -62,11 +62,11 @@ Used by odds, scrapes, Betfair and the agent.
 
 ## Dormancy
 
-A collector that creates its own events cannot be gated on stored events alone: stopped, it would never see the next season. `odds_lambda.collection_calendar.decide_collection_run` is `odds_lambda.scheduling.decision.decide_forward_resilient` with `lookahead_days` set to `odds_lambda.scheduling.decision.DORMANCY_HORIZON_DAYS` (28, longer than the roughly 20-day gaps between two Premier League games) and `odds_lambda.collection_calendar.next_fixture_kickoff` as the lookup. Its `stored_kickoff` argument replaces the stored events' `commence_time` in that lookup and in the lead runs; only `fetch-betfair-exchange` passes one ([lead runs](#lead-runs)). That is the earlier of the stored SCHEDULED events and the league's published schedule (`odds_lambda.collection_calendar.published_schedule_kickoff`):
+A collector that creates its own events cannot be gated on stored events alone: stopped, it would never see the next season. `odds_lambda.collection_calendar.decide_collection_run` is `odds_lambda.scheduling.decision.decide_forward_resilient` with `lookahead_days` set to `odds_lambda.scheduling.decision.DORMANCY_HORIZON_DAYS` (28, longer than the roughly 20-day gaps between two Premier League games) and `odds_lambda.collection_calendar.next_game_kickoff` as the lookup. Its `stored_kickoff` argument replaces the stored events' `commence_time` in that lookup and in the lead runs; only `fetch-betfair-exchange` passes one ([lead runs](#lead-runs)). That is the earlier of the stored SCHEDULED events and the league's published schedule (`odds_lambda.collection_calendar.published_schedule_kickoff`):
 
-- EPL: the ESPN Premier League games that are not postponed, written by the daily `fetch-espn-fixtures` cron.
+- EPL: the ESPN Premier League games that are not postponed, written by the daily `fetch-espn-games` cron.
 - MLB: the MLB Stats API games of the latest `fetch-mlb-probables` fetch, under the same freshness and game-type rules as the [stale-data calendar](../operations/health-monitor.md#stale-data-check). The feed covers about four days, so MLB wakes that far ahead.
-- NBA: no table of its own. The daily `fetch-espn-fixtures` run for NBA creates the next weeks' events from ESPN's scoreboard, so the stored SCHEDULED events are the published schedule and wake the dormant collectors ([NBA schedule](../collection/polymarket-odds-snapshots.md#nba-schedule-from-espn)).
+- NBA: no table of its own. The daily `fetch-espn-games` run for NBA creates the next weeks' events from ESPN's scoreboard, so the stored SCHEDULED events are the published schedule and wake the dormant collectors ([NBA schedule](../collection/polymarket-odds-snapshots.md#nba-schedule-from-espn)).
 
 `fetch-oddsportal`, `fetch-betfair-exchange` and `fetch-polymarket-odds` pre-schedule from this decision. When `should_execute` is false they write their heartbeat and return without scraping, so the [heartbeat check](../operations/health-monitor.md#heartbeats) sees a live chain; their `no_game` check-in is 6 h, inside every heartbeat expectation. `fetch-polymarket-odds` pairs Gamma markets with stored events, so it passes `stored_only` to `odds_lambda.collection_calendar.decide_collection_run`. The published-schedule crons never go dormant, and a cron or the chain keeps its place across a scheduler restart ([bootstrap](local-scheduler.md#bootstrap-jobs-and-cron-table)). `fetch-odds` is gated on stored events and syncs the free `/events` listing before it decides, so it discovers events without any other job.
 

@@ -4,12 +4,12 @@ This package's ``__init__`` is in every rule's hash, so it exports only the fram
 rule's closure contains: never the registry (``registry``) or a rule module.
 """
 
-from odds_lambda.candidate_rules.fixture_context import (
-    FixtureContext,
-    FixtureInput,
+from odds_lambda.candidate_rules.game_context import (
+    GameContext,
+    GameInput,
     PreviousResult,
     TeamResult,
-    load_fixture_context,
+    load_game_context,
 )
 from odds_lambda.candidate_rules.inputs import SharpInput
 from odds_lambda.candidate_rules.market_state import (
@@ -31,7 +31,7 @@ from odds_lambda.candidate_rules.rules import (
     RuleParams,
     RuleSpec,
     Selection,
-    add_fixture_context,
+    add_game_context,
     apply_rule,
     best_bet,
     candidate_leagues,
@@ -46,8 +46,8 @@ __all__ = [
     "BetIntent",
     "EstimateBasis",
     "EvPredictor",
-    "FixtureContext",
-    "FixtureInput",
+    "GameContext",
+    "GameInput",
     "LookbackParams",
     "Line",
     "Lookback",
@@ -60,7 +60,7 @@ __all__ = [
     "Selection",
     "SharpInput",
     "TeamResult",
-    "add_fixture_context",
+    "add_game_context",
     "apply_rule",
     "best_bet",
     "candidate_leagues",
@@ -69,7 +69,7 @@ __all__ = [
     "gap_bets",
     "input_window",
     "is_bettable_line",
-    "load_fixture_context",
+    "load_game_context",
     "load_market_state",
     "lookback_points",
     "max_input_age",

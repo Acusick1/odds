@@ -1,4 +1,4 @@
-"""Fixture context: each team's previous result and the concurrent kick-offs, read from stored
+"""Game context: each team's previous result and the concurrent kick-offs, read from stored
 events by one loader the runner, the replay backtest and the parity check share."""
 
 from __future__ import annotations
@@ -20,14 +20,14 @@ from odds_core.candidates import load_candidate_file
 from odds_core.market_prices import Outcome
 from odds_core.models import Event, EventStatus
 from odds_lambda.candidate_rules import (
-    FixtureContext,
-    FixtureInput,
+    GameContext,
+    GameInput,
     PreviousResult,
     TeamResult,
-    load_fixture_context,
+    load_game_context,
     run_rule,
 )
-from odds_lambda.candidate_rules.fixture_context import RESULT_STORE_LAG
+from odds_lambda.candidate_rules.game_context import RESULT_STORE_LAG
 from odds_lambda.candidate_rules.registry import RULES, resolve_rule
 from odds_lambda.jobs.run_candidates import candidate_events, run_decisions, select_candidates
 from odds_lambda.storage.event_merge import EventMerger
@@ -50,9 +50,9 @@ from tests.integration.test_candidate_parity import add_decision
 
 pytestmark = pytest.mark.integration
 
-BOTH = frozenset({FixtureInput.PREVIOUS_RESULT, FixtureInput.CONCURRENT_KICKOFFS})
-PREVIOUS = frozenset({FixtureInput.PREVIOUS_RESULT})
-CONCURRENT = frozenset({FixtureInput.CONCURRENT_KICKOFFS})
+BOTH = frozenset({GameInput.PREVIOUS_RESULT, GameInput.CONCURRENT_KICKOFFS})
+PREVIOUS = frozenset({GameInput.PREVIOUS_RESULT})
+CONCURRENT = frozenset({GameInput.CONCURRENT_KICKOFFS})
 EPL = ("soccer_epl",)
 SIX_DAYS_BEFORE = KICKOFF - timedelta(days=6)
 FIVE_DAYS_BEFORE = KICKOFF - timedelta(days=5)
@@ -60,16 +60,16 @@ FIVE_DAYS_BEFORE = KICKOFF - timedelta(days=5)
 
 async def load(
     session: AsyncSession,
-    inputs: frozenset[FixtureInput] = BOTH,
+    inputs: frozenset[GameInput] = BOTH,
     *,
     leagues: Collection[str] = EPL,
     known_at: datetime | None = None,
     kickoff: datetime = KICKOFF,
     at: datetime = T,
-) -> FixtureContext:
+) -> GameContext:
     event = await session.get(Event, 1)
     assert event is not None
-    return await load_fixture_context(session, event, kickoff, at, inputs, leagues, known_at)
+    return await load_game_context(session, event, kickoff, at, inputs, leagues, known_at)
 
 
 @pytest.fixture
@@ -85,15 +85,15 @@ class TestPreviousResult:
         await add_match(2, SIX_DAYS_BEFORE, "Arsenal", "Everton", score=(3, 0))
         await add_match(3, FIVE_DAYS_BEFORE, "Brentford", "Chelsea", score=(2, 1))
 
-        fixture = await load(pglite_async_session, PREVIOUS)
+        game = await load(pglite_async_session, PREVIOUS)
 
-        assert fixture.previous[Outcome.HOME] == PreviousResult(2, SIX_DAYS_BEFORE, 3, 0)
-        assert fixture.previous[Outcome.AWAY] == PreviousResult(3, FIVE_DAYS_BEFORE, 1, 2)
-        home, away = fixture.previous[Outcome.HOME], fixture.previous[Outcome.AWAY]
+        assert game.previous[Outcome.HOME] == PreviousResult(2, SIX_DAYS_BEFORE, 3, 0)
+        assert game.previous[Outcome.AWAY] == PreviousResult(3, FIVE_DAYS_BEFORE, 1, 2)
+        home, away = game.previous[Outcome.HOME], game.previous[Outcome.AWAY]
         assert home is not None and away is not None
         assert (home.goal_difference, home.result) == (3, TeamResult.WIN)
         assert (away.goal_difference, away.result) == (-1, TeamResult.LOSS)
-        assert fixture.unknown_results == () and fixture.event_ids == (2, 3)
+        assert game.unknown_results == () and game.event_ids == (2, 3)
 
     async def test_the_latest_earlier_match_is_the_previous_one(
         self, add_match: AddMatch, match: Event, pglite_async_session: AsyncSession
@@ -136,10 +136,10 @@ class TestFirstMatchOfTheSeason:
     ) -> None:
         await add_match(2, SIX_DAYS_BEFORE, "Arsenal", "Everton", score=(3, 0))
 
-        fixture = await load(pglite_async_session, PREVIOUS)
+        game = await load(pglite_async_session, PREVIOUS)
 
-        assert fixture.previous[Outcome.AWAY] is None
-        assert fixture.unknown_results == ()
+        assert game.previous[Outcome.AWAY] is None
+        assert game.unknown_results == ()
 
     async def test_last_seasons_final_match_is_not_the_previous_result(
         self, add_match: AddMatch, pglite_async_session: AsyncSession
@@ -148,10 +148,10 @@ class TestFirstMatchOfTheSeason:
         await add_match(1, opener)
         await add_match(2, datetime(2025, 5, 25, 15, 0, tzinfo=UTC), score=(2, 2))
 
-        fixture = await load(pglite_async_session, PREVIOUS, kickoff=opener, at=opener)
+        game = await load(pglite_async_session, PREVIOUS, kickoff=opener, at=opener)
 
-        assert dict(fixture.previous) == {Outcome.HOME: None, Outcome.AWAY: None}
-        assert fixture.unknown_results == () and fixture.event_ids == ()
+        assert dict(game.previous) == {Outcome.HOME: None, Outcome.AWAY: None}
+        assert game.unknown_results == () and game.event_ids == ()
 
     async def test_the_season_opens_on_the_first_of_august(
         self, add_match: AddMatch, pglite_async_session: AsyncSession
@@ -161,9 +161,9 @@ class TestFirstMatchOfTheSeason:
         await add_match(2, datetime(2025, 7, 31, 15, 0, tzinfo=UTC), score=(1, 0))
         await add_match(3, datetime(2025, 8, 1, 15, 0, tzinfo=UTC), score=(0, 0))
 
-        fixture = await load(pglite_async_session, PREVIOUS, kickoff=kickoff, at=kickoff)
+        game = await load(pglite_async_session, PREVIOUS, kickoff=kickoff, at=kickoff)
 
-        previous = fixture.previous[Outcome.HOME]
+        previous = game.previous[Outcome.HOME]
         assert previous is not None and previous.event_id == 3
 
 
@@ -175,10 +175,10 @@ class TestUnknownResult:
         await add_match(3, FIVE_DAYS_BEFORE, "Arsenal", "Spurs")
         await add_match(4, FIVE_DAYS_BEFORE, "Brentford", "Chelsea", score=(2, 1))
 
-        fixture = await load(pglite_async_session, PREVIOUS)
+        game = await load(pglite_async_session, PREVIOUS)
 
-        assert fixture.unknown_results == (Outcome.HOME,)
-        assert fixture.previous[Outcome.HOME] is None and fixture.previous[Outcome.AWAY] is not None
+        assert game.unknown_results == (Outcome.HOME,)
+        assert game.previous[Outcome.HOME] is None and game.previous[Outcome.AWAY] is not None
 
     async def test_a_final_match_without_scores_is_unknown(
         self, add_match: AddMatch, match: Event, pglite_async_session: AsyncSession
@@ -194,9 +194,9 @@ class TestPendingOrOverdue:
     ) -> None:
         await add_match(2, KICKOFF - timedelta(minutes=30), "Arsenal", "Everton")
 
-        fixture = await load(pglite_async_session, PREVIOUS)
+        game = await load(pglite_async_session, PREVIOUS)
 
-        assert fixture.pending_results == (Outcome.HOME,) and fixture.overdue_results == ()
+        assert game.pending_results == (Outcome.HOME,) and game.overdue_results == ()
 
     async def test_a_result_not_stored_within_the_store_lag_is_overdue(
         self, add_match: AddMatch, match: Event, pglite_async_session: AsyncSession
@@ -204,10 +204,10 @@ class TestPendingOrOverdue:
         await add_match(2, T - RESULT_STORE_LAG, "Arsenal", "Everton")
         await add_match(3, T - RESULT_STORE_LAG + timedelta(minutes=1), "Chelsea", "Spurs")
 
-        fixture = await load(pglite_async_session, PREVIOUS)
+        game = await load(pglite_async_session, PREVIOUS)
 
-        assert fixture.overdue_results == (Outcome.HOME,)
-        assert fixture.pending_results == (Outcome.AWAY,)
+        assert game.overdue_results == (Outcome.HOME,)
+        assert game.pending_results == (Outcome.AWAY,)
 
 
 class TestNoLookAhead:
@@ -286,12 +286,12 @@ class TestNoLookAhead:
         await add_match(2, T - timedelta(hours=3), "Arsenal", "Everton", score=(3, 0))
         await add_match(3, T - timedelta(hours=3, minutes=-1), "Chelsea", "Spurs", score=(3, 0))
 
-        fixture = await load(pglite_async_session, PREVIOUS)
+        game = await load(pglite_async_session, PREVIOUS)
 
-        assert fixture.unknown_results == (Outcome.AWAY,)
-        assert fixture.previous[Outcome.HOME] is not None
+        assert game.unknown_results == (Outcome.AWAY,)
+        assert game.previous[Outcome.HOME] is not None
 
-    async def test_an_event_stored_after_the_run_is_not_a_fixture(
+    async def test_an_event_stored_after_the_run_is_not_a_game(
         self, add_match: AddMatch, match: Event, pglite_async_session: AsyncSession
     ) -> None:
         await add_match(2, SIX_DAYS_BEFORE, "Arsenal", "Everton", score=(3, 0))
@@ -304,11 +304,11 @@ class TestNoLookAhead:
             stored_at=T + timedelta(minutes=5),
         )
 
-        fixture = await load(pglite_async_session, known_at=T + timedelta(minutes=1))
+        game = await load(pglite_async_session, known_at=T + timedelta(minutes=1))
 
-        previous = fixture.previous[Outcome.HOME]
+        previous = game.previous[Outcome.HOME]
         assert previous is not None and previous.event_id == 2
-        assert fixture.event_ids == (2,)
+        assert game.event_ids == (2,)
 
 
 class TestConcurrentKickoffs:
@@ -337,10 +337,10 @@ class TestConcurrentKickoffs:
     ) -> None:
         await add_match(2, KICKOFF + offset, "Villa", "Everton")
 
-        fixture = await load(pglite_async_session, CONCURRENT)
+        game = await load(pglite_async_session, CONCURRENT)
 
-        assert fixture.concurrent_kickoffs == (2 if counted else 1)
-        assert fixture.event_ids == ((2,) if counted else ())
+        assert game.concurrent_kickoffs == (2 if counted else 1)
+        assert game.event_ids == ((2,) if counted else ())
 
     async def test_the_league_set_is_a_parameter(
         self, add_match: AddMatch, match: Event, pglite_async_session: AsyncSession
@@ -373,9 +373,9 @@ class TestConcurrentKickoffs:
         later = KICKOFF + timedelta(hours=2)
         await add_match(2, later, "Villa", "Everton")
 
-        fixture = await load(pglite_async_session, CONCURRENT, kickoff=later)
+        game = await load(pglite_async_session, CONCURRENT, kickoff=later)
 
-        assert fixture.concurrent_kickoffs == 2
+        assert game.concurrent_kickoffs == 2
 
 
 class TestReadOnly:
@@ -383,13 +383,13 @@ class TestReadOnly:
         self, add_match: AddMatch, match: Event, pglite_async_session: AsyncSession
     ) -> None:
         await add_match(2, SIX_DAYS_BEFORE, "Arsenal", "Everton", score=(3, 0))
-        fixture = await load(pglite_async_session)
+        game = await load(pglite_async_session)
 
         with pytest.raises(FrozenInstanceError):
-            fixture.concurrent_kickoffs = 9  # type: ignore[misc]
+            game.concurrent_kickoffs = 9  # type: ignore[misc]
         with pytest.raises(TypeError):
-            fixture.previous[Outcome.HOME] = None  # type: ignore[index]
-        home = fixture.previous[Outcome.HOME]
+            game.previous[Outcome.HOME] = None  # type: ignore[index]
+        home = game.previous[Outcome.HOME]
         assert home is not None
         with pytest.raises(FrozenInstanceError):
             home.goals_for = 9  # type: ignore[misc]
@@ -410,12 +410,12 @@ class TestReadOnly:
 
 
 @pytest.fixture
-def declares_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(RULES, "exchange_gap", replace(RULES["exchange_gap"], fixture_inputs=BOTH))
+def declares_game(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(RULES, "exchange_gap", replace(RULES["exchange_gap"], game_inputs=BOTH))
 
 
 @pytest.fixture
-def registry(registry: Path, declares_fixture: None) -> Path:
+def registry(registry: Path, declares_game: None) -> Path:
     (registry / "gap.yaml").write_text(yaml.safe_dump(candidate().model_dump(mode="json")))
     assert load_candidate_file(registry / "gap.yaml").name == "gap"
     return registry
@@ -461,8 +461,8 @@ class TestDecidingRule:
         )
 
         assert state.has_input and len(intents) == 1
-        assert state.fixture.concurrent_kickoffs == 2
-        assert state.fixture.previous[Outcome.HOME] is not None
+        assert state.game.concurrent_kickoffs == 2
+        assert state.game.previous[Outcome.HOME] is not None
         assert state.input_event_ids == [2, 3, 4]
 
     async def test_a_rule_declaring_nothing_gets_an_empty_context(
@@ -487,7 +487,7 @@ class TestDecidingRule:
         )
 
         assert state.has_input and len(intents) == 1
-        assert state.fixture == FixtureContext() and state.input_event_ids == []
+        assert state.game == GameContext() and state.input_event_ids == []
 
     async def test_the_runner_records_the_events_it_read(
         self, pglite_async_session: AsyncSession, add_match: AddMatch, registry: Path
@@ -546,8 +546,8 @@ class TestDecidingRule:
         assert decision.missed and decision.bets_placed == 0
         assert decision.input_event_ids == [] and decision.input_snapshot_ids == []
         assert decision.input_fixture is None
-        assert [c.args[0] for c in alert.await_args_list if "fixture" in c.args[0]] == [
-            "candidate_no_fixture_context:gap:60"
+        assert [c.args[0] for c in alert.await_args_list if "game" in c.args[0]] == [
+            "candidate_no_game_context:gap:60"
         ]
 
     async def test_a_pending_result_misses_the_decision_without_an_alert(
@@ -564,7 +564,7 @@ class TestDecidingRule:
 
         [decision] = await decisions_of_event_one(pglite_async_session)
         assert decision.missed and decision.bets_placed == 0
-        assert not [c for c in alert.await_args_list if "fixture" in c.args[0]]
+        assert not [c for c in alert.await_args_list if "game" in c.args[0]]
 
     async def test_a_first_match_of_the_season_is_decided(
         self, pglite_async_session: AsyncSession, add_match: AddMatch, registry: Path
@@ -605,14 +605,14 @@ class TestReplayAndParity:
         )
 
     async def test_the_replay_decides_through_the_same_loader(
-        self, pglite_async_session: AsyncSession, add_match: AddMatch, declares_fixture: None
+        self, pglite_async_session: AsyncSession, add_match: AddMatch, declares_game: None
     ) -> None:
         result = await self._replay_event_one(pglite_async_session, add_match, arsenal_result=True)
 
         assert (result.coverage.decisions, result.coverage.with_input) == (1, 1)
 
     async def test_the_replay_misses_a_decision_whose_previous_result_is_unknown(
-        self, pglite_async_session: AsyncSession, add_match: AddMatch, declares_fixture: None
+        self, pglite_async_session: AsyncSession, add_match: AddMatch, declares_game: None
     ) -> None:
         result = await self._replay_event_one(pglite_async_session, add_match, arsenal_result=False)
 
@@ -639,7 +639,7 @@ class TestReplayAndParity:
         await seed_matches(add_match)
         await pglite_async_session.commit()
         await decide(pglite_async_session)
-        # A fixture stored later, which the data replay reads and the recorded one does not.
+        # A game stored later, which the data replay reads and the recorded one does not.
         await add_match(9, KICKOFF - timedelta(days=1), "Arsenal", "Spurs", score=(0, 4))
         await pglite_async_session.commit()
 
@@ -678,21 +678,21 @@ def home_won_big(monkeypatch: pytest.MonkeyPatch) -> None:
     from odds_lambda.candidate_rules.gap import GapParams, exchange_gap
 
     def rule(state: Any, params: GapParams) -> Any:
-        previous = state.fixture.previous[Outcome.HOME]
+        previous = state.game.previous[Outcome.HOME]
         if previous is None or previous.goal_difference != 3:
             return []
-        return exchange_gap(state, params) if state.fixture.concurrent_kickoffs == 2 else []
+        return exchange_gap(state, params) if state.game.concurrent_kickoffs == 2 else []
 
     monkeypatch.setitem(
         RULES,
         "exchange_gap",
-        replace(RULES["exchange_gap"], function=rule, fixture_inputs=BOTH),
+        replace(RULES["exchange_gap"], function=rule, game_inputs=BOTH),
     )
     # The rule lives in this module, which the code hash cannot follow.
     monkeypatch.setattr("tests.integration.test_candidate_backtest.rule_sha256", lambda _: "a" * 64)
 
 
-RECORDED_FIXTURE = {
+RECORDED_GAME = {
     "previous": {
         "home": {
             "event_id": 2,
@@ -707,7 +707,7 @@ RECORDED_FIXTURE = {
 
 
 class TestParityReplaysRecordedValues:
-    async def _decision(self, session: AsyncSession, add_match: AddMatch, **fixture: Any) -> Any:
+    async def _decision(self, session: AsyncSession, add_match: AddMatch, **game: Any) -> Any:
         from tests.integration.test_candidate_parity import add_event
 
         ids = await add_event(session)
@@ -718,7 +718,7 @@ class TestParityReplaysRecordedValues:
             ids,
             [("home", "bet365", 2.2)],
             event_ids=[2, 4],
-            fixture=fixture.get("record", RECORDED_FIXTURE),
+            game=game.get("record", RECORDED_GAME),
         )
         await session.commit()
 
@@ -775,7 +775,7 @@ class TestParityReplaysRecordedValues:
     async def test_a_different_record_replays_different_bets(
         self, pglite_async_session: AsyncSession, add_match: AddMatch, home_won_big: None
     ) -> None:
-        record = {**RECORDED_FIXTURE, "concurrent_kickoffs": 1}
+        record = {**RECORDED_GAME, "concurrent_kickoffs": 1}
         await self._decision(pglite_async_session, add_match, record=record)
 
         d = await self._parity(pglite_async_session)
@@ -785,11 +785,11 @@ class TestParityReplaysRecordedValues:
 
 class TestRecordRoundTrip:
     async def test_a_context_survives_its_record(self) -> None:
-        record = FixtureContext.from_record(RECORDED_FIXTURE, [4, 2])
+        record = GameContext.from_record(RECORDED_GAME, [4, 2])
         previous = record.previous[Outcome.HOME]
         assert previous == PreviousResult(2, SIX_DAYS_BEFORE, 3, 0)
         assert record.previous[Outcome.AWAY] is None and record.concurrent_kickoffs == 2
-        assert record.event_ids == (2, 4) and record.to_record() == RECORDED_FIXTURE
+        assert record.event_ids == (2, 4) and record.to_record() == RECORDED_GAME
 
     async def test_nothing_declared_records_nothing(self) -> None:
-        assert FixtureContext().to_record() is None
+        assert GameContext().to_record() is None

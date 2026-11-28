@@ -39,10 +39,10 @@ from odds_lambda.betfair.constants import BetfairMarketSpec
 from odds_lambda.betfair.kickoff import next_betfair_kickoff
 from odds_lambda.collection_calendar import (
     CollectionSource,
-    FixtureKey,
+    GameKey,
     SportCollection,
     decide_collection_run,
-    require_rows_for_fixtures,
+    require_rows_for_games,
 )
 from odds_lambda.live_events import (
     DroppedGame,
@@ -85,7 +85,7 @@ LOOKBACK_HOURS = 12
 
 
 def betfair_collection(config: SportBetfairConfig) -> SportCollection:
-    return SportCollection(config.fixture_horizon, tuple(spec.market for spec in config.markets))
+    return SportCollection(config.game_horizon, tuple(spec.market for spec in config.markets))
 
 
 def collection_source() -> CollectionSource:
@@ -112,7 +112,7 @@ class IngestionStats:
     events_seen: int = 0
     books_fetched: int = 0
     books_in_play: int = 0
-    accounted_fixtures: set[FixtureKey] = field(default_factory=set)
+    accounted_games: set[GameKey] = field(default_factory=set)
     books_suspended: int = 0
     books_pre_play_past_start: int = 0
     snapshots_stored: int = 0
@@ -167,7 +167,7 @@ def _account_for(
     """Note the game of a book the run saw but did not price (in play, skipped after its Betfair
     start, or suspended with no prices).
 
-    A book with no start time or unparseable teams identifies no fixture, so it accounts for none.
+    A book with no start time or unparseable teams identifies no game, so it accounts for none.
     """
     teams = resolve_teams(book, sport_cfg)
     if teams is None or book.market_start_time is None:
@@ -300,9 +300,9 @@ async def ingest_sport(
         stats.dropped_games.extend(writes.dropped.values())
 
         for game in accounted:
-            key = await finder.fixture_key(session, game)
+            key = await finder.game_key(session, game)
             if key is not None:
-                stats.accounted_fixtures.add(key)
+                stats.accounted_games.add(key)
 
         # FetchLog for observability — sport-level summary.
         if stats.snapshots_stored or stats.events_seen:
@@ -404,17 +404,17 @@ async def main(ctx: JobContext) -> None:
         finally:
             await asyncio.to_thread(client.logout)
         await alert_dropped_games(compound_job_name, stats.dropped_games)
-        if stats.accounted_fixtures and not stats.snapshots_stored:
+        if stats.accounted_games and not stats.snapshots_stored:
             logger.warning(
                 "betfair_empty_run_check_discounts_unpriced",
                 sport=stats.sport,
-                accounted_fixtures=sorted(map(str, stats.accounted_fixtures)),
+                accounted_games=sorted(map(str, stats.accounted_games)),
             )
-        await require_rows_for_fixtures(
+        await require_rows_for_games(
             SOURCE,
             {stats.sport: stats.snapshots_stored},
             errors_by_sport={stats.sport: stats.errors},
-            accounted_by_sport={stats.sport: stats.accounted_fixtures},
+            accounted_by_sport={stats.sport: stats.accounted_games},
             now=snapshot_time,
         )
 

@@ -1,4 +1,4 @@
-"""Unit tests for EspnFixtureFetcher and the current_season helper."""
+"""Unit tests for EspnGameFetcher and the current_season helper."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ from typing import Any
 
 import httpx
 import pytest
-from odds_lambda.espn_fixture_fetcher import (
+from odds_lambda.espn_game_fetcher import (
     LEAGUE_SLUGS,
-    EspnFixtureFetcher,
+    EspnGameFetcher,
     EspnSeasonFetchError,
     EspnUpcomingFetchError,
     _months_between,
@@ -113,8 +113,8 @@ def _schedule_payload(
     }
 
 
-class TestEspnFixtureFetcher:
-    """End-to-end tests for EspnFixtureFetcher with a mock httpx client."""
+class TestEspnGameFetcher:
+    """End-to-end tests for EspnGameFetcher with a mock httpx client."""
 
     @pytest.fixture
     def transport_responses(self) -> dict[str, dict[str, Any]]:
@@ -145,7 +145,7 @@ class TestEspnFixtureFetcher:
         mock_client: httpx.AsyncClient,
         transport_responses: dict[str, dict[str, Any]],
     ) -> None:
-        # Arrange: 2 EPL teams, each with one PL fixture; other competitions empty.
+        # Arrange: 2 EPL teams, each with one PL game; other competitions empty.
         transport_responses["http://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/teams"] = (
             _team_list_payload([("1", "Arsenal"), ("2", "Wolverhampton Wanderers")])
         )
@@ -196,7 +196,7 @@ class TestEspnFixtureFetcher:
                 ] = {"events": []}
 
         # Act
-        async with EspnFixtureFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
+        async with EspnGameFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
             records = await fetcher.fetch_season(2025)
 
         # Assert: two distinct rows (one per team) for the same match.
@@ -258,10 +258,10 @@ class TestEspnFixtureFetcher:
         )
         # Remaining competitions have no schedule registered → handler returns 404.
 
-        async with EspnFixtureFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
+        async with EspnGameFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
             records = await fetcher.fetch_season(2025)
 
-        # PL fixture still ingested even though the other endpoints 404'd.
+        # PL game still ingested even though the other endpoints 404'd.
         assert len(records) == 1
         assert records[0].team == "Arsenal"
         assert records[0].opponent == "Chelsea"
@@ -360,7 +360,7 @@ class TestFetchUpcoming:
 
     @pytest.fixture(autouse=True)
     def no_retry_sleep(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("odds_lambda.espn_fixture_fetcher._RETRY_BACKOFF_SECONDS", 0.0)
+        monkeypatch.setattr("odds_lambda.espn_game_fetcher._RETRY_BACKOFF_SECONDS", 0.0)
 
     @staticmethod
     def _kickoff(days: int) -> str:
@@ -386,7 +386,7 @@ class TestFetchUpcoming:
             status="Scheduled",
         )
 
-        async with EspnFixtureFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
+        async with EspnGameFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
             records = (await fetcher.fetch_upcoming(days_ahead=7)).records
 
         assert len(records) == 2
@@ -413,7 +413,7 @@ class TestFetchUpcoming:
         mock_client: httpx.AsyncClient,
         requested_urls: list[str],
     ) -> None:
-        async with EspnFixtureFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
+        async with EspnGameFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
             await fetcher.fetch_upcoming(days_ahead=30)
 
         dates = {url.split("dates=")[1].split("&")[0] for url in requested_urls}
@@ -437,7 +437,7 @@ class TestFetchUpcoming:
             date=self._kickoff(20),
         )
 
-        async with EspnFixtureFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
+        async with EspnGameFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
             records = (await fetcher.fetch_upcoming(days_ahead=7)).records
 
         assert records == []
@@ -448,7 +448,7 @@ class TestFetchUpcoming:
         mock_client: httpx.AsyncClient,
     ) -> None:
         """All-empty scoreboards produce an empty result without raising."""
-        async with EspnFixtureFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
+        async with EspnGameFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
             records = (await fetcher.fetch_upcoming(days_ahead=7)).records
 
         assert records == []
@@ -471,7 +471,7 @@ class TestFetchUpcoming:
             date=self._kickoff(2),
         )
 
-        async with EspnFixtureFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
+        async with EspnGameFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
             records = (await fetcher.fetch_upcoming(days_ahead=7)).records
 
         assert len(records) == 2
@@ -484,7 +484,7 @@ class TestFetchUpcoming:
     ) -> None:
         failing_leagues.update(LEAGUE_SLUGS)
 
-        async with EspnFixtureFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
+        async with EspnGameFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
             with pytest.raises(EspnUpcomingFetchError, match="uefa.europa.conf"):
                 await fetcher.fetch_upcoming(days_ahead=7)
 
@@ -496,7 +496,7 @@ class TestFetchUpcoming:
     ) -> None:
         failing_leagues.add("eng.1")
 
-        async with EspnFixtureFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
+        async with EspnGameFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
             with pytest.raises(EspnUpcomingFetchError, match="eng.1"):
                 await fetcher.fetch_upcoming(days_ahead=7)
 
@@ -508,7 +508,7 @@ class TestFetchUpcoming:
     ) -> None:
         failing_leagues.update({"eng.fa", "uefa.europa"})
 
-        async with EspnFixtureFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
+        async with EspnGameFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
             result = await fetcher.fetch_upcoming(days_ahead=7)
 
         assert result.failed_leagues == ["eng.fa", "uefa.europa"]
@@ -546,7 +546,7 @@ class TestFetchUpcoming:
             return httpx.Response(200, json={"events": []})
 
         client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-        async with EspnFixtureFetcher(client=client, request_delay_seconds=0.0) as fetcher:
+        async with EspnGameFetcher(client=client, request_delay_seconds=0.0) as fetcher:
             records = (await fetcher.fetch_upcoming(days_ahead=30, now=now)).records
 
         assert {r.team for r in records} == {"Arsenal", "Chelsea", "Liverpool", "Everton"}
@@ -575,7 +575,7 @@ class TestFetchUpcoming:
             "http://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/scoreboard"
         ] = {"events": events}
 
-        async with EspnFixtureFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
+        async with EspnGameFetcher(client=mock_client, request_delay_seconds=0.0) as fetcher:
             records = (await fetcher.fetch_upcoming(days_ahead=30, now=now)).records
 
         assert {r.team for r in records if r.home_away == "home"} == {"Arsenal", "Fulham"}
@@ -598,11 +598,11 @@ class TestFetchSeasonFailures:
 
     @pytest.fixture(autouse=True)
     def no_retry_sleep(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr("odds_lambda.espn_fixture_fetcher._RETRY_BACKOFF_SECONDS", 0.0)
+        monkeypatch.setattr("odds_lambda.espn_game_fetcher._RETRY_BACKOFF_SECONDS", 0.0)
 
     @pytest.mark.asyncio
     async def test_all_teams_failing_raises(self) -> None:
-        async with EspnFixtureFetcher(
+        async with EspnGameFetcher(
             client=self._client(failing=True), request_delay_seconds=0.0
         ) as fetcher:
             with pytest.raises(EspnSeasonFetchError, match="all 2 teams"):
@@ -612,7 +612,7 @@ class TestFetchSeasonFailures:
     async def test_premier_league_failing_for_all_teams_raises_although_cups_succeed(
         self,
     ) -> None:
-        async with EspnFixtureFetcher(
+        async with EspnGameFetcher(
             client=self._client(failing=False, failing_slug="eng.1"), request_delay_seconds=0.0
         ) as fetcher:
             with pytest.raises(EspnSeasonFetchError, match="Premier League"):
@@ -620,7 +620,7 @@ class TestFetchSeasonFailures:
 
     @pytest.mark.asyncio
     async def test_empty_schedules_do_not_raise(self) -> None:
-        async with EspnFixtureFetcher(
+        async with EspnGameFetcher(
             client=self._client(failing=False), request_delay_seconds=0.0
         ) as fetcher:
             assert await fetcher.fetch_season(2026) == []

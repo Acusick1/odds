@@ -394,10 +394,10 @@ class TestGetScrapeStatus:
         assert response["result"]["state"] == "unknown"
 
 
-class TestGetUpcomingFixtures:
+class TestGetUpcomingGames:
     @pytest.mark.asyncio
-    async def test_returns_fixtures(self) -> None:
-        from odds_mcp.server import get_upcoming_fixtures
+    async def test_returns_games(self) -> None:
+        from odds_mcp.server import get_upcoming_games
 
         mock_event = MagicMock(spec=Event)
         mock_event.id = 1
@@ -421,7 +421,7 @@ class TestGetUpcomingFixtures:
             mock_session_maker.return_value.__aenter__ = AsyncMock()
             mock_session_maker.return_value.__aexit__ = AsyncMock()
 
-            result = await get_upcoming_fixtures()
+            result = await get_upcoming_games()
             assert len(result) == 1
             assert result[0]["id"] == 1
 
@@ -702,7 +702,7 @@ class TestFindRetailEdges:
         self,
         prices: dict[str | tuple[str, float | None], dict[str, object]] | None = None,
     ) -> MagicMock:
-        from odds_core.match_brief_models import SharpPriceMeta
+        from odds_core.brief_models import SharpPriceMeta
 
         default_prices = {
             "Arsenal": {"bookmaker": "pinnacle", "price": -110, "implied_prob": 0.524},

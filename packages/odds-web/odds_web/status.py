@@ -40,7 +40,7 @@ class ChipState(StrEnum):
     STALE = "stale"
     # Not enough history to judge.
     UNKNOWN = "unknown"
-    # A source with no fixture inside its horizon, so nothing is due.
+    # A source with no game inside its horizon, so nothing is due.
     IDLE = "idle"
 
 

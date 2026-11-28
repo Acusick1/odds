@@ -3,7 +3,7 @@ sport's events.
 
 Each run takes every decision that is due, then settles bets, and books the next
 run at the earliest future decision time (at most ``MAX_WAIT`` away, to pick up new
-fixtures). A candidate version bets each selection of a match at most once,
+games). A candidate version bets each selection of a match at most once,
 at the first of its decision times that qualifies.
 """
 
@@ -71,8 +71,8 @@ class RunnableCandidate:
 class MissReason(StrEnum):
     LATE = "late"
     NO_INPUT = "no_input"
-    FIXTURE_CONTEXT = "fixture_context"
-    FIXTURE_PENDING = "fixture_pending"
+    GAME_CONTEXT = "game_context"
+    GAME_PENDING = "game_pending"
 
 
 @dataclass
@@ -214,10 +214,10 @@ async def _alert_no_input(decision: CandidateDecision) -> None:
     )
 
 
-async def _alert_no_fixture_context(decision: CandidateDecision) -> None:
+async def _alert_no_game_context(decision: CandidateDecision) -> None:
     lead = decision.minutes_before_kickoff
     await send_recorded_alert(
-        f"candidate_no_fixture_context:{decision.candidate_name}:{lead}",
+        f"candidate_no_game_context:{decision.candidate_name}:{lead}",
         "warning",
         f"⚠️ Candidate {decision.candidate_name} missed the decision on {decision.event_id} at "
         f"{decision.decision_time:%Y-%m-%d %H:%M} UTC ({lead} minutes before kick-off): a "
@@ -273,11 +273,11 @@ async def _decide(
         known_at=now,
         books=BOOK_SETS[candidate.books],
         bet_selections=await _bet_selections(session, candidate, event.id),
-        fixture_leagues=candidate_leagues(candidate),
+        game_leagues=candidate_leagues(candidate),
     )
-    if state.missing_fixture:
+    if state.missing_game:
         decision.missed = True
-        reason = MissReason.FIXTURE_CONTEXT if state.fixture_overdue else MissReason.FIXTURE_PENDING
+        reason = MissReason.GAME_CONTEXT if state.game_overdue else MissReason.GAME_PENDING
         _log_missed(decision, reason, now)
         return decision, reason
     if not state.has_input:
@@ -303,7 +303,7 @@ async def _decide(
     decision.bets_placed = len(intents)
     decision.input_snapshot_ids = state.input_snapshot_ids
     decision.input_event_ids = state.input_event_ids
-    decision.input_fixture = state.fixture.to_record()
+    decision.input_fixture = state.game.to_record()
     return decision, None
 
 
@@ -411,8 +411,8 @@ async def run_decisions(
                 continue
             if miss is MissReason.NO_INPUT:
                 await _alert_no_input(decision)
-            elif miss is MissReason.FIXTURE_CONTEXT:
-                await _alert_no_fixture_context(decision)
+            elif miss is MissReason.GAME_CONTEXT:
+                await _alert_no_game_context(decision)
             if decision.missed:
                 summary.missed += 1
             elif decision.bets_placed:

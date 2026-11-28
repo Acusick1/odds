@@ -26,7 +26,7 @@ probe:
   snapshots:
     - 2024-07-20T15:55:38Z
   # The MLB probes found games listed 584 to 612 minutes ahead (#787).
-  min_fixture_lead_hours: 1
+  min_game_lead_hours: 1
   # Betfair Exchange is the scoring reference and close (ADR-0012); no current candidate or
   # model uses Pinnacle.
   required_bookmakers:

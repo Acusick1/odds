@@ -785,7 +785,7 @@ async def prepare_retail_ev_training_data(
             session,
             sport_keys.pop(),
             config.form_window,
-            with_fixtures="schedule_as_of_t" in groups,
+            with_games="schedule_as_of_t" in groups,
         )
     features = RetailEvFeatures(
         outcomes, groups, teams=teams, events={e.id: e for e in valid_events}

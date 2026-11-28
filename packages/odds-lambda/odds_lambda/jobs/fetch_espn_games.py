@@ -1,18 +1,18 @@
-"""Fetch ESPN fixtures job — refresh current-season all-competition schedules.
+"""Fetch ESPN games job — refresh current-season all-competition schedules.
 
 For NBA the job instead syncs ESPN's scoreboard into events (``odds_lambda.espn_nba_schedule``),
 and for each league of ``odds_lambda.espn_football_schedule.LEAGUES`` (every football league
 but the EPL) it does the same with that league's football scoreboard.
 
 Flow:
-1. Fetch current-season fixtures across EPL + FA Cup + League Cup + European
+1. Fetch current-season games across EPL + FA Cup + League Cup + European
    competitions from the ESPN Site API (free, unauthenticated).
-2. Upsert into ``espn_fixtures`` via ``EspnFixtureWriter`` (idempotent on
+2. Upsert into ``espn_games`` via ``EspnGameWriter`` (idempotent on
    ``(date, team, competition)``).
 3. Marks events of postponed Premier League matches POSTPONED.
 4. Alerts on failure via ``job_alert_context``; the run fails when the Premier
    League upcoming request failed (or every one did), the Premier League
-   schedule request failed for every team, or ESPN lists no upcoming Premier League fixture while EPL
+   schedule request failed for every team, or ESPN lists no upcoming Premier League game while EPL
    events are scheduled. Rows fetched before a failure are upserted first.
 
 Scheduler cadence is a fixed daily cron (06:00 UTC, pre-matchday) in
@@ -29,37 +29,37 @@ import structlog
 from odds_core.alerts import send_job_warning
 from odds_core.config import get_settings
 from odds_core.database import async_session_maker
-from odds_core.epl_data_models import EspnFixtureRecord
+from odds_core.epl_data_models import EspnGameRecord
 from odds_core.job_specs import heartbeat_name
 from odds_core.models import Event, EventStatus
 from odds_core.sports import SportKey
 
 from odds_lambda.collection_calendar import EmptyCollectionError, event_calendar
-from odds_lambda.espn_fixture_fetcher import (
+from odds_lambda.espn_football_schedule import LEAGUES, FootballLeague
+from odds_lambda.espn_game_fetcher import (
     LEAGUE_SLUGS,
     PRIMARY_LEAGUE_SLUG,
-    EspnFixtureFetcher,
+    EspnGameFetcher,
     EspnSeasonFetchError,
     EspnUpcomingFetchError,
     current_season,
 )
-from odds_lambda.espn_football_schedule import LEAGUES, FootballLeague
 from odds_lambda.live_events import alert_dropped_games
 from odds_lambda.scheduling.jobs import JobContext, require_sport
-from odds_lambda.storage.espn_fixture_reader import EspnFixtureReader
-from odds_lambda.storage.espn_fixture_writer import EspnFixtureWriter
+from odds_lambda.storage.espn_game_reader import EspnGameReader
+from odds_lambda.storage.espn_game_writer import EspnGameWriter
 from odds_lambda.storage.event_merge import EVENT_MATCH_WINDOW, find_match_id
 from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
 
-# EPL keeps its fixtures in ``espn_fixtures``; NBA's schedule is written as events directly.
+# EPL keeps its games in ``espn_games``; NBA's schedule is written as events directly.
 SPORT_KEY = "soccer_epl"
 NBA_SPORT_KEY: SportKey = "basketball_nba"
 
 
 async def main(ctx: JobContext) -> None:
-    """Fetch ESPN fixtures for the current season.
+    """Fetch ESPN games for the current season.
 
     Raises:
         ValueError: If ``ctx.sport`` is unset or does not match the sport
@@ -67,7 +67,7 @@ async def main(ctx: JobContext) -> None:
     """
     from odds_core.alerts import job_alert_context
 
-    sport = require_sport(ctx, "fetch-espn-fixtures")
+    sport = require_sport(ctx, "fetch-espn-games")
     if sport == NBA_SPORT_KEY:
         await _sync_nba_schedule()
         return
@@ -76,7 +76,7 @@ async def main(ctx: JobContext) -> None:
         return
     if sport != SPORT_KEY:
         raise ValueError(
-            f"fetch-espn-fixtures supports {SPORT_KEY}, {NBA_SPORT_KEY} and "
+            f"fetch-espn-games supports {SPORT_KEY}, {NBA_SPORT_KEY} and "
             f"{', '.join(LEAGUES)}, got sport={sport!r}"
         )
 
@@ -84,23 +84,23 @@ async def main(ctx: JobContext) -> None:
     season = current_season()
 
     logger.info(
-        "fetch_espn_fixtures_started",
+        "fetch_espn_games_started",
         backend=app_settings.scheduler.backend,
         season=season,
         sport=SPORT_KEY,
     )
 
-    async with job_alert_context(heartbeat_name("fetch-espn-fixtures", sport)):
+    async with job_alert_context(heartbeat_name("fetch-espn-games", sport)):
         past_count, upcoming_count, total = await _fetch_and_upsert(season)
         logger.info(
-            "fetch_espn_fixtures_completed",
+            "fetch_espn_games_completed",
             season=season,
             past_count=past_count,
             upcoming_count=upcoming_count,
             total_upserted=total,
         )
         postponed = await _mark_postponed_events()
-        logger.info("fetch_espn_fixtures_postponed_marked", events=postponed)
+        logger.info("fetch_espn_games_postponed_marked", events=postponed)
 
 
 async def _warn_if_listing_unexpectedly_empty(sport_key: SportKey, days: int) -> None:
@@ -111,7 +111,7 @@ async def _warn_if_listing_unexpectedly_empty(sport_key: SportKey, days: int) ->
             session, sport_key, now=datetime.now(UTC), horizon=timedelta(days=days)
         )
     if calendar.kickoffs_in_horizon:
-        job = heartbeat_name("fetch-espn-fixtures", sport_key)
+        job = heartbeat_name("fetch-espn-games", sport_key)
         await send_job_warning(
             f"espn_empty:{job}",
             f"{job}: ESPN listed no {sport_key} game with "
@@ -127,7 +127,7 @@ async def _sync_nba_schedule() -> None:
     from odds_lambda.espn_nba_schedule import UPCOMING_DAYS, sync_upcoming
     from odds_lambda.scheduling.jobs import make_compound_job_name
 
-    async with job_alert_context(make_compound_job_name("fetch-espn-fixtures", NBA_SPORT_KEY)):
+    async with job_alert_context(make_compound_job_name("fetch-espn-games", NBA_SPORT_KEY)):
         report = await sync_upcoming(datetime.now(UTC))
         logger.info(
             "fetch_espn_nba_schedule_completed",
@@ -154,7 +154,7 @@ async def _sync_football_schedule(league: FootballLeague) -> None:
     from odds_lambda.espn_football_schedule import UPCOMING_DAYS, sync_upcoming
     from odds_lambda.scheduling.jobs import make_compound_job_name
 
-    job_name = make_compound_job_name("fetch-espn-fixtures", league.sport_key)
+    job_name = make_compound_job_name("fetch-espn-games", league.sport_key)
     async with job_alert_context(job_name):
         report = await sync_upcoming(league, datetime.now(UTC))
         logger.info(
@@ -179,7 +179,7 @@ async def _sync_football_schedule(league: FootballLeague) -> None:
 
 
 # How many days ahead the upcoming fetch reaches. 30 days covers the agent's
-# rotation-risk window (next ~5 PL rounds plus any midweek cup fixtures).
+# rotation-risk window (next ~5 PL rounds plus any midweek cup games).
 _UPCOMING_DAYS_AHEAD = 30
 
 
@@ -190,7 +190,7 @@ async def _raise_if_upcoming_unexpectedly_empty() -> None:
         calendar = await event_calendar(session, SPORT_KEY, now=datetime.now(UTC), horizon=horizon)
     if calendar.kickoffs_in_horizon:
         raise EmptyCollectionError(
-            f"ESPN returned no upcoming Premier League fixtures with "
+            f"ESPN returned no upcoming Premier League games with "
             f"{calendar.kickoffs_in_horizon} {SPORT_KEY} event(s) scheduled within {horizon} "
             f"(next kickoff {calendar.next_kickoff})"
         )
@@ -200,23 +200,21 @@ async def _mark_postponed_events() -> int:
     """Set the event of each ESPN-postponed Premier League match POSTPONED; returns how many."""
     marked = 0
     async with async_session_maker() as session:
-        postponed = await EspnFixtureReader(session).get_postponed_home_fixtures(
+        postponed = await EspnGameReader(session).get_postponed_home_games(
             LEAGUE_SLUGS[PRIMARY_LEAGUE_SLUG]
         )
         writer = OddsWriter(session)
-        reader = EspnFixtureReader(session)
-        for fixture in postponed:
-            if await reader.has_unpostponed_fixture(
+        reader = EspnGameReader(session)
+        for game in postponed:
+            if await reader.has_unpostponed_game(
                 LEAGUE_SLUGS[PRIMARY_LEAGUE_SLUG],
-                fixture.team,
-                fixture.opponent,
-                fixture.date,
+                game.team,
+                game.opponent,
+                game.date,
                 EVENT_MATCH_WINDOW,
             ):
                 continue
-            event_id = await find_match_id(
-                session, fixture.team, fixture.opponent, fixture.date, SPORT_KEY
-            )
+            event_id = await find_match_id(session, game.team, game.opponent, game.date, SPORT_KEY)
             event = await session.get(Event, event_id) if event_id is not None else None
             if event is None or event.status not in (EventStatus.SCHEDULED, EventStatus.LIVE):
                 continue
@@ -226,22 +224,22 @@ async def _mark_postponed_events() -> int:
     return marked
 
 
-async def _upsert(records: list[EspnFixtureRecord]) -> int:
+async def _upsert(records: list[EspnGameRecord]) -> int:
     if not records:
         return 0
     async with async_session_maker() as session:
-        total = await EspnFixtureWriter(session).upsert_fixtures(records)
+        total = await EspnGameWriter(session).upsert_games(records)
         await session.commit()
     return total
 
 
 async def _fetch_and_upsert(season: int) -> tuple[int, int, int]:
-    """Fetch past + upcoming fixtures from ESPN and upsert into the database.
+    """Fetch past + upcoming games from ESPN and upsert into the database.
 
     Fetched rows are upserted before any failure is raised. Returns
     ``(past_count, upcoming_count, total_upserted)``.
     """
-    async with EspnFixtureFetcher() as fetcher:
+    async with EspnGameFetcher() as fetcher:
         try:
             past_records = await fetcher.fetch_season(season)
             season_error: EspnSeasonFetchError | None = None
@@ -259,8 +257,8 @@ async def _fetch_and_upsert(season: int) -> tuple[int, int, int]:
 
     if upcoming.failed_leagues:
         await send_job_warning(
-            "espn_upcoming_partial:fetch-espn-fixtures",
-            f"fetch-espn-fixtures: upcoming request failed for {', '.join(upcoming.failed_leagues)}",
+            "espn_upcoming_partial:fetch-espn-games",
+            f"fetch-espn-games: upcoming request failed for {', '.join(upcoming.failed_leagues)}",
         )
 
     # Dedup across past + upcoming on (date, team, opponent). The team-schedule
@@ -269,7 +267,7 @@ async def _fetch_and_upsert(season: int) -> tuple[int, int, int]:
     # team-schedule can lag for matches that just kicked off, while the scoreboard
     # has the freshest ``state``, which is the reason this job fetches both.
     seen: set[tuple[str, str, str]] = set()
-    combined: list[EspnFixtureRecord] = []
+    combined: list[EspnGameRecord] = []
     for record in (*upcoming.records, *past_records):
         key = (record.date.isoformat(), record.team, record.opponent)
         if key in seen:
@@ -278,7 +276,7 @@ async def _fetch_and_upsert(season: int) -> tuple[int, int, int]:
         combined.append(record)
 
     if not combined:
-        logger.warning("fetch_espn_fixtures_empty", season=season)
+        logger.warning("fetch_espn_games_empty", season=season)
     total = await _upsert(combined)
 
     if not any(r.competition == LEAGUE_SLUGS[PRIMARY_LEAGUE_SLUG] for r in upcoming.records):

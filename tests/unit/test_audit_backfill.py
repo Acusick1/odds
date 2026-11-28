@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from odds_analytics.backfill_plan import Band, Call, Fixture, Manifest, Target
+from odds_analytics.backfill_plan import Band, Call, Game, Manifest, Target
 from odds_core.quotes import Quote
 from odds_core.vocabulary import Market, PriceOutcome, Side, Source, TimeBasis
 
@@ -115,18 +115,18 @@ class TestOffPhase:
 
 
 def call(time: datetime, *event_ids: int) -> Call:
-    return Call(time, tuple(Target(Fixture(e, KICKOFF), NEAR, time, time) for e in event_ids))
+    return Call(time, tuple(Target(Game(e, KICKOFF), NEAR, time, time) for e in event_ids))
 
 
 class TestReconcileCalls:
-    def test_a_served_fixture_stored_in_the_call_window_stores_the_call(self) -> None:
+    def test_a_served_game_stored_in_the_call_window_stores_the_call(self) -> None:
         rec = audit.reconcile_calls(
             MANIFEST, [call(GRID, 1)], {1: [GRID + timedelta(seconds=2)]}, []
         )
         assert (rec.stored, rec.gap, rec.missing, rec.unplanned) == (1, 0, (), ())
 
-    def test_a_snapshot_of_a_fixture_the_call_does_not_serve_does_not_store_it(self) -> None:
-        # The executor's skip looks only at the fixtures the call serves.
+    def test_a_snapshot_of_a_game_the_call_does_not_serve_does_not_store_it(self) -> None:
+        # The executor's skip looks only at the games the call serves.
         rec = audit.reconcile_calls(MANIFEST, [call(GRID, 1)], {2: [GRID]}, [])
         assert rec.stored == 0
         assert rec.missing == (GRID,)
@@ -148,7 +148,7 @@ class TestReconcileCalls:
         rec = audit.reconcile_calls(MANIFEST, [call(GRID, 1)], {1: [previous_request]}, [])
         assert rec.missing == (GRID,)
 
-    def test_a_call_serving_no_fixture_counts_as_stored(self) -> None:
+    def test_a_call_serving_no_game_counts_as_stored(self) -> None:
         assert audit.reconcile_calls(MANIFEST, [call(GRID)], {}, []).stored == 1
 
     def test_a_gap_covers_its_call_and_calls_inside_its_hole(self) -> None:
@@ -173,15 +173,15 @@ class TestReconcileCalls:
 
 
 class TestCallsBeforeListing:
-    def test_a_call_serving_only_unlisted_fixtures_is_reported(self) -> None:
+    def test_a_call_serving_only_unlisted_games_is_reported(self) -> None:
         listed = {1: GRID + timedelta(hours=1), 2: GRID + timedelta(hours=2)}
         assert audit.calls_before_listing([call(GRID, 1, 2)], listed) == [GRID]
 
-    def test_one_listed_fixture_is_enough(self) -> None:
+    def test_one_listed_game_is_enough(self) -> None:
         listed = {1: GRID + timedelta(seconds=3), 2: GRID + timedelta(hours=2)}
         assert audit.calls_before_listing([call(GRID, 1, 2)], listed) == []
 
-    def test_a_fixture_never_stored_counts_as_unlisted(self) -> None:
+    def test_a_game_never_stored_counts_as_unlisted(self) -> None:
         assert audit.calls_before_listing([call(GRID, 1)], {}) == [GRID]
 
 

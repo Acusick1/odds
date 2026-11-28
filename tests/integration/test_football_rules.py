@@ -1,5 +1,5 @@
 """The crowded-kick-off and last-result rules decided from stored events: the replay, the live
-runner and the parity check read the same fixture context, across a pooled candidate's leagues."""
+runner and the parity check read the same game context, across a pooled candidate's leagues."""
 
 from __future__ import annotations
 

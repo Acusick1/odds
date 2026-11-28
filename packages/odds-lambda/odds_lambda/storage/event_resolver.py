@@ -99,7 +99,7 @@ class RefusedId:
 
 
 class AmbiguousHistoricalMatch(ValueError):
-    """A historical row has several same-fixture events within ±24 h and none within ±2 h, so
+    """A historical row has several same-game events within ±24 h and none within ±2 h, so
     it could be any of them or a game of its own."""
 
 
@@ -108,15 +108,15 @@ class StaleListing(ValueError):
 
 
 class LockOrderError(RuntimeError):
-    """A transaction asked for a fixture lock below one it holds, which can deadlock."""
+    """A transaction asked for a game lock below one it holds, which can deadlock."""
 
 
-# The highest fixture lock each open transaction holds, keyed on the session.
+# The highest game lock each open transaction holds, keyed on the session.
 _HELD_LOCK = "event_resolver_held_lock"
 
 
 def event_lock_key(sport_key: str, home_team: str, away_team: str) -> int:
-    """The advisory-lock key of a fixture. Kick-off is left out: two sources can place one game
+    """The advisory-lock key of a game. Kick-off is left out: two sources can place one game
     on different UTC dates, and both must wait on the same lock."""
     digest = hashlib.blake2b(
         f"{sport_key}\x1f{home_team}\x1f{away_team}".encode(), digest_size=8
@@ -137,9 +137,9 @@ async def resolve_events(session: AsyncSession, games: Sequence[ListedGame]) -> 
 async def resolve_event(session: AsyncSession, game: ListedGame) -> ResolvedEvent:
     """The event of ``game``, recording the source's id on it. Flushes; the caller commits.
 
-    Holds a transaction advisory lock on the fixture until the caller's transaction ends, so
+    Holds a transaction advisory lock on the game until the caller's transaction ends, so
     writers resolving the same teams concurrently see each other's events. One transaction
-    takes fixture locks in ascending key order (``resolve_events`` sorts a batch) or raises
+    takes game locks in ascending key order (``resolve_events`` sorts a batch) or raises
     ``LockOrderError``. Looks an MLB game up by ``gamePk``, then any game by the source's id;
     else matches the sport and teams within the game's ``match_window`` (±2 h, or for a
     historical listing ±24 h, see ``_match_historical``; for MLB, only events holding no
@@ -231,7 +231,7 @@ async def find_event(session: AsyncSession, game: ListedGame) -> ResolvedEvent |
 async def attach_events(
     session: AsyncSession, games: Sequence[ListedGame]
 ) -> list[ResolvedEvent | None]:
-    """``attach_event`` for each game, in lock-key order so that a batch holds fixture locks in
+    """``attach_event`` for each game, in lock-key order so that a batch holds game locks in
     ascending order; results come back in the order of ``games``."""
     order = sorted(range(len(games)), key=lambda i: _lock_key(games[i]))
     attached: dict[int, ResolvedEvent | None] = {}
@@ -250,7 +250,7 @@ async def resolve_unscheduled_mlb_event(
     external_id: str | None,
 ) -> ResolvedEvent | None:
     """The MLB event of a game listed while the MLB schedule is unavailable, recording the
-    source's id on it under the fixture lock; ``None`` when it matches none. Never creates.
+    source's id on it under the game lock; ``None`` when it matches none. Never creates.
 
     Only the one event of the pair within ±2 h matches, and only for a row with no doubleheader
     game number: without the schedule either game could be another. Flushes; the caller commits.
@@ -270,9 +270,9 @@ async def resolve_unscheduled_mlb_event(
     return ResolvedEvent(event, Resolution.MATCHED)
 
 
-async def lock_fixture(session: AsyncSession, event: Event) -> None:
-    """Take the stored event's fixture lock until the transaction ends, as the resolver does
-    before reading or changing a fixture's events. Raises ``LockOrderError`` as
+async def lock_game(session: AsyncSession, event: Event) -> None:
+    """Take the stored event's game lock until the transaction ends, as the resolver does
+    before reading or changing a game's events. Raises ``LockOrderError`` as
     ``resolve_event``."""
     await _lock(session, event_lock_key(event.sport_key, event.home_team, event.away_team))
 
@@ -281,7 +281,7 @@ async def record_external_id(
     session: AsyncSession, event: Event, source: Source, external_id: str
 ) -> bool:
     """Record an id ``source`` issued for a stored event; whether the event now holds it. The
-    caller holds the event's fixture lock (``lock_fixture``). Refusals follow ``resolve_event``
+    caller holds the event's game lock (``lock_game``). Refusals follow ``resolve_event``
     and are logged once per event and id. Flushes; the caller commits."""
     return await _record_external_id(session, event, source, external_id, log_repeats=False)
 
@@ -315,8 +315,8 @@ async def _lock(session: AsyncSession, key: int) -> None:
     # Re-taking a held lock cannot wait; a new one below a held one could deadlock.
     if key not in held.keys and held.keys and key < max(held.keys):
         raise LockOrderError(
-            "fixture locks must be taken in ascending key order within one transaction; "
-            "resolve a batch with resolve_events or commit between fixtures"
+            "game locks must be taken in ascending key order within one transaction; "
+            "resolve a batch with resolve_events or commit between games"
         )
     await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": key})
     held.keys.add(key)
@@ -356,7 +356,7 @@ async def _by_external_id(session: AsyncSession, source: Source, external_id: st
 async def _match(
     session: AsyncSession, game: ListedGame, home_team: str, away_team: str
 ) -> Event | None:
-    """The nearest same-fixture event within ±2 h. For MLB only an event holding no ``gamePk``
+    """The nearest same-game event within ±2 h. For MLB only an event holding no ``gamePk``
     counts, and only when no other game of the pair that day is scheduled nearer to it."""
     if game.match_window is MatchWindow.HISTORICAL:
         return await _match_historical(session, game, home_team, away_team)
@@ -386,10 +386,10 @@ async def _match(
 async def _match_historical(
     session: AsyncSession, game: ListedGame, home_team: str, away_team: str
 ) -> Event | None:
-    """The event of a historical row: a lone same-fixture event within ±24 h, else (several)
+    """The event of a historical row: a lone same-game event within ±24 h, else (several)
     the nearest of those within ±2 h. When several lie within ±24 h and none within ±2 h the
     row is ambiguous: it raises ``AmbiguousHistoricalMatch`` rather than create another event of
-    the fixture, and neighbouring fixtures of the same teams (an NBA back-to-back) are never
+    the game, and neighbouring games of the same teams (an NBA back-to-back) are never
     conflated."""
     anchor = ensure_utc(game.commence_time)
     candidates = await find_historical_candidates(

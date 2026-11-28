@@ -6,8 +6,8 @@ import pytest
 from odds_core import (  # noqa: F401  (every table of the allowlist, and some outside it, must exist)
     agent_wakeup_models,
     bet_models,
+    brief_models,
     candidate_backtest_models,
-    match_brief_models,
     mlb_data_models,
     models,
 )

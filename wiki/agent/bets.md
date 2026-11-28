@@ -73,6 +73,6 @@ The sharp market's reading of the selection when the bet was placed, null when n
 
 ## Related
 
-- [Briefs](match-briefs.md)
+- [Briefs](briefs.md)
 - [Agent prompts](agent-prompts.md)
 - [Parity check](../evaluation/candidate-parity.md), which compares a candidate decision's bets with a replay

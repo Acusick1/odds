@@ -482,7 +482,7 @@ class TestCopyNewShape:
         assert stats.failed_event_ids == [1]
 
     @pytest.mark.asyncio
-    async def test_an_event_without_local_ids_is_matched_by_its_fixture(
+    async def test_an_event_without_local_ids_is_matched_by_its_game(
         self,
         prod_session_maker: async_sessionmaker[AsyncSession],
         local_session_maker: async_sessionmaker[AsyncSession],
@@ -555,7 +555,7 @@ class TestCopyMatchesAnEarlierCopy:
         assert event.commence_time == moved
 
     @pytest.mark.asyncio
-    async def test_a_fixture_holding_another_id_of_the_same_source_is_not_matched(
+    async def test_a_game_holding_another_id_of_the_same_source_is_not_matched(
         self,
         prod_session_maker: async_sessionmaker[AsyncSession],
         local_session_maker: async_sessionmaker[AsyncSession],

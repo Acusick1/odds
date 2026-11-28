@@ -2,7 +2,7 @@
 
 Reads the newest published report (``odds_lambda.injury_fetcher.fetch_latest_injury_report``) and
 stores it through ``InjuryWriter``, which links each ``(team, game_date)`` to its event.
-Self-schedules from the stored NBA events (``odds_lambda.jobs.fetch_espn_fixtures`` creates them):
+Self-schedules from the stored NBA events (``odds_lambda.jobs.fetch_espn_games`` creates them):
 a run every ``CADENCE`` hours while games are ahead, plus runs ``LEADS`` before each kickoff, so
 every tip-off cluster gets a report from about two hours and half an hour out. With no game in
 the stored events within ``DORMANCY_HORIZON_DAYS`` the run only books its next check-in.

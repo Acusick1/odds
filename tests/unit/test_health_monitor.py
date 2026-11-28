@@ -345,7 +345,7 @@ class TestCheckScheduleChains:
     @pytest.fixture
     def chain_settings(self, mock_settings):
         mock_settings.scheduler = SchedulerConfig(
-            bootstrap_jobs=["fetch-betfair-exchange", "fetch-oddsportal", "fetch-espn-fixtures"]
+            bootstrap_jobs=["fetch-betfair-exchange", "fetch-oddsportal", "fetch-espn-games"]
         )
         mock_settings.data_collection = SimpleNamespace(sports=["soccer_epl"])
         mock_settings.betfair = SimpleNamespace(enabled=True)

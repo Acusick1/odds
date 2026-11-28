@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 # ESPN statuses of a match that was played; rows left behind by a rescheduled match carry others.
-FINISHED_FIXTURE_STATUSES: frozenset[str] = frozenset(
+FINISHED_GAME_STATUSES: frozenset[str] = frozenset(
     {
         "Full Time",
         "Final Score - After Extra Time",
@@ -43,35 +43,35 @@ def results_known_before(t: datetime) -> datetime:
 
 @dataclass
 class TeamHistory:
-    """Completed EPL matches and all-competition fixtures, read as of any decision time."""
+    """Completed EPL matches and all-competition games, read as of any decision time."""
 
     season_results: StandingsCache
-    fixtures: pd.DataFrame | None
+    games: pd.DataFrame | None
     form_window: int
-    _fixtures_by_event: dict[int, pd.DataFrame | None] = field(default_factory=dict, repr=False)
+    _games_by_event: dict[int, pd.DataFrame | None] = field(default_factory=dict, repr=False)
 
-    def _event_fixtures(self, event: Event) -> pd.DataFrame | None:
-        if event.id not in self._fixtures_by_event:
-            df = self.fixtures
+    def _event_games(self, event: Event) -> pd.DataFrame | None:
+        if event.id not in self._games_by_event:
+            df = self.games
             if df is not None:
                 teams = {event.home_team, event.away_team}
                 df = df.loc[
                     (df["team"].isin(teams) | df["opponent"].isin(teams))
-                    & df["status"].isin(FINISHED_FIXTURE_STATUSES)
+                    & df["status"].isin(FINISHED_GAME_STATUSES)
                 ]
-            self._fixtures_by_event[event.id] = df
-        return self._fixtures_by_event[event.id]
+            self._games_by_event[event.id] = df
+        return self._games_by_event[event.id]
 
     def schedule_at(self, event: Event, t: datetime) -> EplScheduleFeatures:
         """Schedule features from played matches known at t; NaN congestion for a team with none."""
         known = results_known_before(t)
         prior = get_prior_events_from_cache(self.season_results, event, before=known)
-        fixtures = self._event_fixtures(event)
-        if fixtures is None:
+        games = self._event_games(event)
+        if games is None:
             return extract_epl_schedule_features(prior, event, known_at=known)
-        fixtures = fixtures.loc[fixtures["date"] < known]
-        features = extract_epl_schedule_features(prior, event, fixtures_df=fixtures, known_at=known)
-        played = set(fixtures["team"]) | set(fixtures["opponent"])
+        games = games.loc[games["date"] < known]
+        features = extract_epl_schedule_features(prior, event, games_df=games, known_at=known)
+        played = set(games["team"]) | set(games["opponent"])
         if event.home_team not in played:
             features.home_matches_last_14d = None
             features.home_european_last_7d = None
@@ -91,14 +91,14 @@ async def load_team_history(
     session: AsyncSession,
     sport_key: str,
     form_window: int,
-    with_fixtures: bool,
+    with_games: bool,
     until: datetime | None = None,
 ) -> TeamHistory:
     """Team history from matches up to ``until`` when it is given, else from every match."""
-    from odds_analytics.feature_groups import load_fixtures_df
+    from odds_analytics.feature_groups import load_games_df
 
     return TeamHistory(
         season_results=await load_season_events_cache(session, sport_key, until),
-        fixtures=await load_fixtures_df(session, until) if with_fixtures else None,
+        games=await load_games_df(session, until) if with_games else None,
         form_window=form_window,
     )

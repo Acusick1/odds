@@ -6,7 +6,7 @@ and stores via OddsWriter. Self-schedules based on proximity to next kickoff.
 Scheduling strategy: look up the next kickoff, compute interval from game
 proximity, pre-schedule before scraping so the chain survives Lambda
 timeouts. After a successful scrape, re-query (scrape may have created new
-events) and reschedule at the updated interval. With no fixture in the stored
+events) and reschedule at the updated interval. With no game in the stored
 events or the published schedule within ``DORMANCY_HORIZON_DAYS`` the run only
 books its next check-in.
 
@@ -14,7 +14,7 @@ Interval table:
   < 3h  (CLOSING)   → 30 min
   3–12h (PREGAME)   → 1h
   12h+              → 2h
-  no fixture in 28d → 6h check-in, no scrape
+  no game in 28d → 6h check-in, no scrape
   DB unreachable    → 1h (fallback)
 
 A run is also added ``SCRAPE_LEAD`` before each active rule candidate's
@@ -38,7 +38,7 @@ from odds_lambda.collection_calendar import (
     CollectionSource,
     SportCollection,
     decide_collection_run,
-    require_rows_for_fixtures,
+    require_rows_for_games,
 )
 from odds_lambda.live_events import (
     DroppedGame,
@@ -84,8 +84,8 @@ class LeagueSpec:
     listing_path: str  # OddsPortal listing page (e.g. "/football/england/premier-league/")
     sport_key: str  # Pipeline sport key (e.g. "soccer_epl")
     sport_title: str  # Display name (e.g. "EPL")
-    # How far ahead a scheduled fixture must be before a run is expected to price it.
-    fixture_horizon: timedelta
+    # How far ahead a scheduled game must be before a run is expected to price it.
+    game_horizon: timedelta
     markets: list[str] = field(default_factory=lambda: ["1x2"])
     primary_market: str = "1x2"
     num_outcomes: int = 3
@@ -97,7 +97,7 @@ LEAGUE_SPECS: list[LeagueSpec] = [
         listing_path="/football/england/premier-league/",
         sport_key="soccer_epl",
         sport_title="EPL",
-        fixture_horizon=timedelta(hours=48),
+        game_horizon=timedelta(hours=48),
         markets=["1x2", "over_under_2_5"],
     ),
     LeagueSpec(
@@ -105,7 +105,7 @@ LEAGUE_SPECS: list[LeagueSpec] = [
         listing_path="/football/england/championship/",
         sport_key="soccer_efl_champ",
         sport_title="Championship",
-        fixture_horizon=timedelta(hours=48),
+        game_horizon=timedelta(hours=48),
         markets=["1x2", "over_under_2_5"],
     ),
     LeagueSpec(
@@ -113,7 +113,7 @@ LEAGUE_SPECS: list[LeagueSpec] = [
         listing_path="/football/spain/laliga/",
         sport_key="soccer_spain_la_liga",
         sport_title="La Liga",
-        fixture_horizon=timedelta(hours=48),
+        game_horizon=timedelta(hours=48),
         markets=["1x2", "over_under_2_5"],
     ),
     LeagueSpec(
@@ -121,7 +121,7 @@ LEAGUE_SPECS: list[LeagueSpec] = [
         listing_path="/football/italy/serie-a/",
         sport_key="soccer_italy_serie_a",
         sport_title="Serie A",
-        fixture_horizon=timedelta(hours=48),
+        game_horizon=timedelta(hours=48),
         markets=["1x2", "over_under_2_5"],
     ),
     LeagueSpec(
@@ -129,7 +129,7 @@ LEAGUE_SPECS: list[LeagueSpec] = [
         listing_path="/football/germany/bundesliga/",
         sport_key="soccer_germany_bundesliga",
         sport_title="Bundesliga",
-        fixture_horizon=timedelta(hours=48),
+        game_horizon=timedelta(hours=48),
         markets=["1x2", "over_under_2_5"],
     ),
     LeagueSpec(
@@ -137,7 +137,7 @@ LEAGUE_SPECS: list[LeagueSpec] = [
         listing_path="/football/france/ligue-1/",
         sport_key="soccer_france_ligue_one",
         sport_title="Ligue 1",
-        fixture_horizon=timedelta(hours=48),
+        game_horizon=timedelta(hours=48),
         markets=["1x2", "over_under_2_5"],
     ),
     LeagueSpec(
@@ -145,7 +145,7 @@ LEAGUE_SPECS: list[LeagueSpec] = [
         listing_path="/baseball/usa/mlb/",
         sport_key="baseball_mlb",
         sport_title="MLB",
-        fixture_horizon=timedelta(hours=48),
+        game_horizon=timedelta(hours=48),
         markets=["home_away"],
         primary_market="home_away",
         num_outcomes=2,
@@ -155,7 +155,7 @@ LEAGUE_SPECS: list[LeagueSpec] = [
         listing_path="/basketball/usa/nba/",
         sport_key="basketball_nba",
         sport_title="NBA",
-        fixture_horizon=timedelta(hours=48),
+        game_horizon=timedelta(hours=48),
         markets=["home_away", "totals_ladder", "spreads_ladder"],
         primary_market="home_away",
         num_outcomes=2,
@@ -171,7 +171,7 @@ LEAGUE_SPEC_BY_NAME: dict[str, LeagueSpec] = {spec.league: spec for spec in LEAG
 
 def league_collection(spec: LeagueSpec) -> SportCollection:
     return SportCollection(
-        spec.fixture_horizon,
+        spec.game_horizon,
         tuple(Market(FEED_MARKETS[key].pipeline_key) for key in spec.markets),
     )
 
@@ -460,7 +460,7 @@ async def main(ctx: JobContext) -> None:
                 latest_listed_start=stats.latest_listed_start,
             )
         else:
-            await require_rows_for_fixtures(
+            await require_rows_for_games(
                 SOURCE,
                 {spec.sport_key: stats.snapshots_stored},
                 errors_by_sport={spec.sport_key: stats.errors},

@@ -182,7 +182,7 @@ class TestDecideForward:
     async def test_sport_scoping_queries_own_sport(
         self, test_session, mock_session_factory
     ) -> None:
-        """EPL gate must ignore an imminent MLB fixture (the all-sports bug)."""
+        """EPL gate must ignore an imminent MLB game (the all-sports bug)."""
         # Imminent MLB game, distant EPL game.
         await add_event(
             test_session,
@@ -260,7 +260,7 @@ class TestDecideForwardResilient:
         assert _hours_after(NOW, decision.next_execution) == CADENCE.db_fallback
 
     @pytest.mark.asyncio
-    async def test_an_injected_fixture_source_replaces_the_stored_events(self, monkeypatch) -> None:
+    async def test_an_injected_game_source_replaces_the_stored_events(self, monkeypatch) -> None:
         async def stored(sport_key: str, *, now: datetime) -> None:
             return None
 

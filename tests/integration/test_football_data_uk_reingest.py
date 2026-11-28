@@ -287,7 +287,7 @@ class TestMatchedAndAmbiguousEvents:
         assert stats.kickoff_mismatches == 1
 
     @pytest.mark.asyncio
-    async def test_back_to_back_fixture_is_not_conflated(
+    async def test_back_to_back_game_is_not_conflated(
         self, pglite_async_session, fduk_epl: FdukLeague
     ) -> None:
         session = pglite_async_session

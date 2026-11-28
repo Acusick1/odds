@@ -23,7 +23,7 @@ from odds_analytics.backfill_plan import Manifest, ceil_minute, floor_minute
 # The provider stamps snapshots to the second, so a neighbour is one grid step away to within
 # this.
 TIMESTAMP_TOLERANCE = timedelta(seconds=60)
-# A call's required books are judged on fixtures at most this far from kick-off, so a call that
+# A call's required books are judged on games at most this far from kick-off, so a call that
 # lists only games days ahead, as across a break, is not judged on books that are not posted
 # that early (inferred).
 MAX_BOOK_JUDGED_LEAD = timedelta(hours=24)
@@ -121,10 +121,10 @@ def stored_call_window(manifest: Manifest, modelled: datetime) -> tuple[datetime
 
 def book_judged_lead(manifest: Manifest) -> timedelta:
     """How far from kick-off a call's required books are judged: at most
-    ``MAX_BOOK_JUDGED_LEAD``, and no farther than the manifest needs fixtures listed, for a
-    sport whose fixtures are listed only hours ahead. The probe checks that each required book
+    ``MAX_BOOK_JUDGED_LEAD``, and no farther than the manifest needs games listed, for a
+    sport whose games are listed only hours ahead. The probe checks that each required book
     appears this far ahead."""
-    return min(MAX_BOOK_JUDGED_LEAD, timedelta(hours=manifest.probe.min_fixture_lead_hours))
+    return min(MAX_BOOK_JUDGED_LEAD, timedelta(hours=manifest.probe.min_game_lead_hours))
 
 
 def stored_market(manifest: Manifest, market: Market) -> Market:
@@ -142,7 +142,7 @@ class ResponseCheck:
 
     ``book_events`` counts, for each required (market, bookmaker), the events judged that carry
     it; it is empty when no event was judged. ``book_leads`` is the farthest lead, kick-off less
-    snapshot, of an event carrying each. ``served`` fixtures were planned for the call and
+    snapshot, of an event carrying each. ``served`` games were planned for the call and
     ``served_stored`` of them were stored.
     """
 
@@ -202,7 +202,7 @@ class ResponseCheck:
     @property
     def lead_ok(self) -> bool:
         return self.farthest_lead is not None and self.farthest_lead >= timedelta(
-            hours=self.manifest.probe.min_fixture_lead_hours
+            hours=self.manifest.probe.min_game_lead_hours
         )
 
     @property
@@ -227,7 +227,7 @@ class ResponseCheck:
         if not self.events:
             return "no events"
         if self.served and not self.served_stored:
-            return f"stored none of the {self.served} fixtures it serves"
+            return f"stored none of the {self.served} games it serves"
         if self.missing_books:
             return "lacks " + ", ".join(
                 f"{book} on {market}" for market, book in self.missing_books

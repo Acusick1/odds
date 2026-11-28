@@ -23,7 +23,7 @@ sources:
   - odds_cli.commands.pbpstats
   - odds_cli.commands.nba_stats
   - odds_analytics.injury_features.date_to_nba_season
-  - odds_lambda.espn_fixture_fetcher
+  - odds_lambda.espn_game_fetcher
   - odds_lambda.mlb_stats_fetcher
   - pyproject.toml
 status: stable
@@ -47,10 +47,10 @@ Helpers in `odds_core.time`:
 | `odds_core.time.parse_api_datetime` | Parses The Odds API strings, rewriting a trailing `Z`, then `odds_core.time.ensure_utc` |
 | `odds_core.time.to_eastern`, `odds_core.time.EASTERN` | America/New_York for NBA game days, injury reports and MLB schedule dates (`odds_lambda.mlb_game_resolver.mlb_date`) |
 | `odds_core.time.utc_isoformat` | ISO 8601 with a trailing `Z` |
-| `odds_core.time.season_start`, `odds_core.time.season_start_year` | The start of the season a kick-off falls in, 1 August (`odds_core.time.SEASON_START_MONTH`) or, for MLB, 1 January: used by the unsettled-events check, event merge, `odds status coverage` and a rule's [fixture context](../evaluation/candidate-rules.md#fixture-context) |
+| `odds_core.time.season_start`, `odds_core.time.season_start_year` | The start of the season a kick-off falls in, 1 August (`odds_core.time.SEASON_START_MONTH`) or, for MLB, 1 January: used by the unsettled-events check, event merge, `odds status coverage` and a rule's [game context](../evaluation/candidate-rules.md#game-context) |
 | `odds_core.time.parse_date` | Parses a calendar date in a `strptime` format into a `date`, without a naive datetime in between |
 
-`Z`-suffix ISO parsing is inlined in `odds_lambda.espn_fixture_fetcher` (team-schedule and month-scoreboard events, whose status text is stored as ESPN gives it; `odds_lambda.espn_fixture_fetcher.EspnFixtureFetcher.fetch_month_scoreboard_json` returns a month's scoreboard unparsed), `odds_lambda.mlb_stats_fetcher` (MLB event start times and first pitches, for probables, results and single-event lookups; an event with `startTimeTBD` carries a placeholder time, and its `gameInfo.firstPitch` the time it began), and the MCP EPL tools instead of calling `odds_core.time.parse_api_datetime`. Time-window correctness for historical analysis is a separate rule: [Decision time and look-ahead bias](../modelling/look-ahead-bias.md).
+`Z`-suffix ISO parsing is inlined in `odds_lambda.espn_game_fetcher` (team-schedule and month-scoreboard events, whose status text is stored as ESPN gives it; `odds_lambda.espn_game_fetcher.EspnGameFetcher.fetch_month_scoreboard_json` returns a month's scoreboard unparsed), `odds_lambda.mlb_stats_fetcher` (MLB event start times and first pitches, for probables, results and single-event lookups; an event with `startTimeTBD` carries a placeholder time, and its `gameInfo.firstPitch` the time it began), and the MCP EPL tools instead of calling `odds_core.time.parse_api_datetime`. Time-window correctness for historical analysis is a separate rule: [Decision time and look-ahead bias](../modelling/look-ahead-bias.md).
 
 `odds_core.sports.LEAGUE_TIMEZONES` holds each league's timezone (Europe/London for the EPL and the Championship, Europe/Madrid, Europe/Rome, Europe/Berlin and Europe/Paris for La Liga, Serie A, the Bundesliga and Ligue 1, America/New_York for MLB and NBA), and `odds_core.sports.game_day_window` gives a calendar day's bounds in it; `odds validate` counts a league's events by that league-local day ([coverage checks](../storage/coverage-checks.md#tiercoveragevalidator)).
 

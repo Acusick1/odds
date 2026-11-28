@@ -7,17 +7,17 @@ from alembic import context
 from odds_core.agent_wakeup_models import AgentWakeup  # noqa: F401
 from odds_core.backfill_models import OddsApiSnapshotGap  # noqa: F401
 from odds_core.bet_models import Bet  # noqa: F401
+from odds_core.brief_models import Brief  # noqa: F401
 from odds_core.candidate_backtest_models import (  # noqa: F401
     CandidateBacktest,
     CandidateBacktestBet,
 )
 from odds_core.candidate_registry_models import CandidateRegistryCheck  # noqa: F401
 from odds_core.config import get_settings
-from odds_core.epl_data_models import EspnFixture, EspnLineup, FplAvailability  # noqa: F401
+from odds_core.epl_data_models import EspnGame, EspnLineup, FplAvailability  # noqa: F401
 from odds_core.game_log_models import NbaTeamGameLog  # noqa: F401
 from odds_core.injury_models import InjuryReport, InjuryStatus  # noqa: F401
 from odds_core.job_run_models import JobRun  # noqa: F401
-from odds_core.match_brief_models import MatchBrief  # noqa: F401
 from odds_core.mlb_data_models import MlbProbablePitchers  # noqa: F401
 
 # Import all models to ensure they're registered with SQLModel.metadata

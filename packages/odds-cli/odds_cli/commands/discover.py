@@ -176,7 +176,7 @@ async def _discover_games(start_date_str: str, end_date_str: str, sport: str) ->
             finder = await odds_api_finder(sport, unique_events)
             async with async_session_maker() as session:
                 # Batches of 100, each committed, so one transaction never holds thousands of
-                # fixture locks.
+                # game locks.
                 batch_size = 100
                 total_inserted = 0
                 total_updated = 0

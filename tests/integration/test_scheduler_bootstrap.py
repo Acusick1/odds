@@ -154,14 +154,14 @@ class TestBootstrapCronJob:
         self, recorded_bootstraps: list[JobContext]
     ) -> None:
         async with LocalSchedulerBackend() as backend:
-            await backend.schedule_cron("fetch-espn-fixtures-epl", "0 9 * * *")
+            await backend.schedule_cron("fetch-espn-games-epl", "0 9 * * *")
 
-            result = await bootstrap_job(backend, "fetch-espn-fixtures", "soccer_epl")
+            result = await bootstrap_job(backend, "fetch-espn-games", "soccer_epl")
 
             assert result.action == BootstrapAction.CRON_APPLIED
             assert result.cron_expr == "0 6 * * *"
             assert backend._scheduler is not None
-            schedule = await backend._scheduler.get_schedule("fetch-espn-fixtures-epl")
+            schedule = await backend._scheduler.get_schedule("fetch-espn-games-epl")
             assert isinstance(schedule.trigger, CronTrigger)
             assert schedule.next_fire_time is not None
             assert schedule.next_fire_time.astimezone(UTC).hour == 6
@@ -174,7 +174,7 @@ class TestBootstrapCronJob:
         async with LocalSchedulerBackend() as backend:
             with pytest.raises(SchedulingFailedError, match="cron job"):
                 await backend.schedule_next_execution(
-                    "fetch-espn-fixtures-epl", datetime.now(UTC) + timedelta(hours=1)
+                    "fetch-espn-games-epl", datetime.now(UTC) + timedelta(hours=1)
                 )
 
 
@@ -201,9 +201,9 @@ class TestUtcCronTrigger:
         self, recorded_bootstraps: list[JobContext]
     ) -> None:
         async with LocalSchedulerBackend() as backend:
-            await backend.schedule_cron("fetch-espn-fixtures-epl", "*/30 * * * *")
+            await backend.schedule_cron("fetch-espn-games-epl", "*/30 * * * *")
 
             assert backend._scheduler is not None
-            schedule = await backend._scheduler.get_schedule("fetch-espn-fixtures-epl")
+            schedule = await backend._scheduler.get_schedule("fetch-espn-games-epl")
             assert schedule.next_fire_time is not None
             assert schedule.next_fire_time - datetime.now(UTC) <= timedelta(minutes=30)

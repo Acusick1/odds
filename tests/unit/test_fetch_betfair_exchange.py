@@ -98,7 +98,7 @@ class TestBetfairPreparation:
         )
         decision = ScheduleDecision(
             should_execute=True,
-            reason="scheduled fixture",
+            reason="scheduled game",
             next_execution=datetime.now(UTC) + timedelta(hours=1),
             tier=FetchTier.CLOSING,
         )
