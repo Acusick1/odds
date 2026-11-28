@@ -9,7 +9,7 @@ sources:
   - odds_core.models.Event
   - odds_core.models.OddsSnapshot
   - odds_core.bet_models.Bet
-  - odds_core.match_brief_models.MatchBrief
+  - odds_core.brief_models.Brief
   - odds_core.agent_wakeup_models.AgentWakeup
   - packages/odds-mcp/agents/common.md
   - packages/odds-mcp/agents/epl/base.md
@@ -26,11 +26,11 @@ The runtime is a `claude` subprocess; everything it touches goes through one of 
 
 | Channel | Used for |
 |---|---|
-| `odds` MCP server (`odds_mcp.server.mcp`) | fixtures, odds, retail edges (vig-inclusive, against the sharp price at the same line), briefs, bets, portfolio |
+| `odds` MCP server (`odds_mcp.server.mcp`) | games, odds, retail edges (vig-inclusive, against the sharp price at the same line), briefs, bets, portfolio |
 | Web search | press conferences, injury news |
 | Playwright MCP (not in `.mcp.json`, so supplied by the user's Claude configuration) | club sites, lineup pages, BBC and ESPN |
 
-The MCP server reads and writes these PostgreSQL tables: `events`, `odds_snapshots`, `prices`, `bets`, `match_briefs` and `agent_wakeups` (`odds_core.models.Event` (its kick-off), `odds_core.models.OddsSnapshot` (one source's prices for one market of an event at one time; [columns and constraints](../storage/odds-tables.md#odds_snapshots)), `odds_core.bet_models.Bet` (the agent's bets, with the sharp market's reading at placement, and the flat-stake bets of rule candidates, with their rule's estimated EV and, on totals, their line, [bets](bets.md#candidate-fields)), `odds_core.match_brief_models.MatchBrief`, `odds_core.agent_wakeup_models.AgentWakeup`). See [odds-mcp server](mcp-server.md) for the tools. The market tools resolve sharp and retail prices from a shared market window over the `prices` table and the snapshot's `source`, `market` and `time_basis` ([market tools](mcp-market-tools.md)); no tool reads `snapshot_payloads` or `event_external_ids`. Every table that refers to an event does so by its integer `events.id`. Merging duplicate events moves their bets and briefs to the kept event ([Event merge](../storage/event-merge.md#merging)).
+The MCP server reads and writes these PostgreSQL tables: `events`, `odds_snapshots`, `prices`, `bets`, `briefs` and `agent_wakeups` (`odds_core.models.Event` (its kick-off), `odds_core.models.OddsSnapshot` (one source's prices for one market of an event at one time; [columns and constraints](../storage/odds-tables.md#odds_snapshots)), `odds_core.bet_models.Bet` (the agent's bets, with the sharp market's reading at placement, and the flat-stake bets of rule candidates, with their rule's estimated EV and, on totals, their line, [bets](bets.md#candidate-fields)), `odds_core.brief_models.Brief`, `odds_core.agent_wakeup_models.AgentWakeup`). See [odds-mcp server](mcp-server.md) for the tools. The market tools resolve sharp and retail prices from a shared market window over the `prices` table and the snapshot's `source`, `market` and `time_basis` ([market tools](mcp-market-tools.md)); no tool reads `snapshot_payloads` or `event_external_ids`. Every table that refers to an event does so by its integer `events.id`. Merging duplicate events moves their bets and briefs to the kept event ([Event merge](../storage/event-merge.md#merging)).
 
 ## Prompts
 
@@ -57,12 +57,12 @@ Recorded without a decision record, so the reasons are `(inferred)` (the sharp-p
 
 ## Supporting code
 
-The agent's supporting code is the [odds-mcp server](mcp-server.md), [briefs](match-briefs.md), [bets](bets.md) and the [agent data sources](agent-data-sources.md). The thesis has no measured result (see the opening section).
+The agent's supporting code is the [odds-mcp server](mcp-server.md), [briefs](briefs.md), [bets](bets.md) and the [agent data sources](agent-data-sources.md). The thesis has no measured result (see the opening section).
 
 ## Related
 
 - [Agent runtime and the agent-run job](agent-run-job.md)
 - [Agent prompts](agent-prompts.md)
 - [Agent data sources and rejected sources](agent-data-sources.md)
-- [Briefs](match-briefs.md) and [bets](bets.md), what the agent writes
+- [Briefs](briefs.md) and [bets](bets.md), what the agent writes
 - [About the system and its pivots](../foundations/project-overview.md)

@@ -9,14 +9,14 @@ sources:
   - odds_lambda.jobs.agent_run.AGENT_RUN_LOG_KEEP
   - odds_lambda.jobs.agent_run.AGENT_STREAM_LINE_LIMIT
   - odds_lambda.jobs.agent_run.AGENT_TIMEOUT_SECONDS
-  - odds_core.match_brief_models.MatchBrief
+  - odds_core.brief_models.Brief
   - experiments/scripts/show_agent_summaries.py
 status: stable
 ---
 
 # Agent run traces
 
-Each [wake-up](../foundations/glossary.md#wake-up) of the [agent runtime](agent-run-job.md#runtime) writes its full `stream-json` output to a file. The file is the only durable record of the wake-up's reasoning and has no database component: `odds_lambda.jobs.agent_run.run_claude_agent` writes the file only (its first `system` line names the model the run used, `AGENT_MODEL`), and the agent's persistent memory is `odds_core.match_brief_models.MatchBrief`, one row per researched event keyed by its integer id ([briefs](match-briefs.md)). Deleting `logs/agent_runs/` loses the traces.
+Each [wake-up](../foundations/glossary.md#wake-up) of the [agent runtime](agent-run-job.md#runtime) writes its full `stream-json` output to a file. The file is the only durable record of the wake-up's reasoning and has no database component: `odds_lambda.jobs.agent_run.run_claude_agent` writes the file only (its first `system` line names the model the run used, `AGENT_MODEL`), and the agent's persistent memory is `odds_core.brief_models.Brief`, one row per researched event keyed by its integer id ([briefs](briefs.md)). Deleting `logs/agent_runs/` loses the traces.
 
 ## Files
 

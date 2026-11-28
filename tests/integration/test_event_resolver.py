@@ -182,7 +182,7 @@ class TestResolveEvent:
         }
 
     @pytest.mark.asyncio
-    async def test_takes_the_fixture_advisory_lock(
+    async def test_takes_the_game_advisory_lock(
         self, pglite_async_session, stored_epl_event
     ) -> None:
         await resolve_event(pglite_async_session, epl_listing())
@@ -388,7 +388,7 @@ class TestLockOrder:
 
 
 class TestEventLockKey:
-    def test_ignores_kick_off_and_separates_fixtures(self) -> None:
+    def test_ignores_kick_off_and_separates_games(self) -> None:
         key = event_lock_key("soccer_epl", "Arsenal", "Chelsea")
 
         assert key == event_lock_key("soccer_epl", "Arsenal", "Chelsea")
@@ -604,7 +604,7 @@ class TestAttachEvent:
         assert len(await refusals(pglite_async_session)) == 1
 
     @pytest.mark.asyncio
-    async def test_a_held_id_wins_over_a_nearer_event_of_the_fixture(
+    async def test_a_held_id_wins_over_a_nearer_event_of_the_game(
         self, pglite_async_session
     ) -> None:
         pglite_async_session.add(make_epl_event(1, TWIN_KICKOFF, "Arsenal", "Chelsea"))
@@ -687,16 +687,15 @@ class TestAttachEvents:
     async def test_a_mixed_batch_attaches_in_key_order_and_answers_in_input_order(
         self, pglite_async_session
     ) -> None:
-        fixtures = [("Arsenal", "Chelsea"), ("Liverpool", "Everton"), ("Fulham", "Brentford")]
-        for i, (home, away) in enumerate(fixtures):
+        games = [("Arsenal", "Chelsea"), ("Liverpool", "Everton"), ("Fulham", "Brentford")]
+        for i, (home, away) in enumerate(games):
             pglite_async_session.add(make_epl_event(i + 1, TWIN_KICKOFF, home, away))
         pglite_async_session.add(
             make_epl_event(4, TWIN_KICKOFF + timedelta(days=9), "Spurs", "Wolves")
         )
         await pglite_async_session.commit()
         games = [
-            polymarket_listing(str(i), home=home, away=away)
-            for i, (home, away) in enumerate(fixtures)
+            polymarket_listing(str(i), home=home, away=away) for i, (home, away) in enumerate(games)
         ]
         games.append(polymarket_listing("99", home="Spurs", away="Wolves"))
         keys = [event_lock_key(g.sport_key, g.home_team, g.away_team) for g in games]
@@ -783,7 +782,7 @@ class TestHistoricalWindow:
         assert resolved.event.id == first.id
 
     @pytest.mark.asyncio
-    async def test_back_to_back_fixtures_with_none_within_two_hours_are_refused(
+    async def test_back_to_back_games_with_none_within_two_hours_are_refused(
         self, pglite_async_session
     ) -> None:
         session = pglite_async_session

@@ -1,4 +1,4 @@
-"""EPL supplementary data tables: ESPN fixtures, ESPN lineups, FPL availability."""
+"""EPL supplementary data tables: ESPN games, ESPN lineups, FPL availability."""
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -16,14 +16,14 @@ ESPN_STATUS_POSTPONED = "Postponed"
 
 
 @dataclass(slots=True)
-class EspnFixtureRecord:
-    """Parsed ESPN fixture record ready for database storage."""
+class EspnGameRecord:
+    """Parsed ESPN game record ready for database storage."""
 
     date: datetime
     team: str
     opponent: str
     competition: str
-    match_round: str
+    game_round: str
     home_away: str
     score_team: str
     score_opponent: str
@@ -64,14 +64,14 @@ class FplAvailabilityRecord:
     news: str | None
 
 
-class EspnFixture(SQLModel, table=True):
-    """Single team fixture row from ESPN all-competition schedule.
+class EspnGame(SQLModel, table=True):
+    """Single team game row from ESPN all-competition schedule.
 
     One row per (team, date, competition) — each match appears twice (once per team).
     Covers Premier League, FA Cup, League Cup, and European competitions.
     """
 
-    __tablename__ = "espn_fixtures"
+    __tablename__ = "espn_games"
 
     id: int | None = Field(default=None, primary_key=True)
 
@@ -81,7 +81,7 @@ class EspnFixture(SQLModel, table=True):
     team: str = Field(index=True)
     opponent: str = Field()
     competition: str = Field()
-    match_round: str = Field(default="")
+    game_round: str = Field(default="")
     home_away: str = Field()
     score_team: str = Field(default="")
     score_opponent: str = Field(default="")
@@ -95,8 +95,8 @@ class EspnFixture(SQLModel, table=True):
     )
 
     __table_args__ = (
-        UniqueConstraint("date", "team", "competition", name="uq_espn_fixture_date_team_comp"),
-        Index("ix_espn_fixture_team_season", "team", "season"),
+        UniqueConstraint("date", "team", "competition", name="uq_espn_game_date_team_comp"),
+        Index("ix_espn_game_team_season", "team", "season"),
     )
 
 

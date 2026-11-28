@@ -113,7 +113,7 @@ async def _external_ids(session: AsyncSession) -> set[tuple[str, str]]:
     return {(row.source.value, row.external_id) for row in await _all(session, EventExternalId)}
 
 
-def _fixture(home: str, away: str, scraped: datetime) -> MatchOdds:
+def _game(home: str, away: str, scraped: datetime) -> MatchOdds:
     match = _op_match("1x2", [_book_entry("bet365", (2.0, 3.3, 3.5))], scraped)
     raw = {
         **match.envelope,
@@ -146,7 +146,7 @@ def _fixture(home: str, away: str, scraped: datetime) -> MatchOdds:
     )
 
 
-FIXTURES = [
+GAMES = [
     ("Arsenal", "Chelsea"),
     ("Liverpool", "Everton"),
     ("Brighton", "Fulham"),
@@ -163,20 +163,20 @@ class TestOddsPortalLiveRun:
         self, job_session: AsyncSession
     ) -> None:
         scraped = datetime.now(UTC)
-        keys = [event_lock_key(EPL, h, a) for h, a in FIXTURES]
+        keys = [event_lock_key(EPL, h, a) for h, a in GAMES]
         assert keys != sorted(keys), "the listing order must not already be lock order"
 
         stats = await ingest_league(
             LEAGUE_SPEC_BY_NAME["england-premier-league"],
             scraped=LeagueScrape(
-                matches=[_fixture(h, a, scraped) for h, a in FIXTURES],
-                events_listed=len(FIXTURES),
-                upcoming_listed=len(FIXTURES),
+                matches=[_game(h, a, scraped) for h, a in GAMES],
+                events_listed=len(GAMES),
+                upcoming_listed=len(GAMES),
             ),
         )
 
         assert stats.errors == []
-        assert (stats.events_created, stats.snapshots_stored) == (len(FIXTURES), len(FIXTURES))
+        assert (stats.events_created, stats.snapshots_stored) == (len(GAMES), len(GAMES))
 
     async def test_a_failing_game_rolls_back_alone(
         self, job_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
@@ -195,7 +195,7 @@ class TestOddsPortalLiveRun:
         stats = await ingest_league(
             LEAGUE_SPEC_BY_NAME["england-premier-league"],
             scraped=LeagueScrape(
-                matches=[_fixture(h, a, scraped) for h, a in FIXTURES[:3]],
+                matches=[_game(h, a, scraped) for h, a in GAMES[:3]],
                 events_listed=3,
                 upcoming_listed=3,
             ),

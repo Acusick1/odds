@@ -46,7 +46,7 @@ from odds_lambda.storage.writers import OddsWriter
 
 logger = structlog.get_logger()
 
-READ_ONLY_TABLES = frozenset({"bets", "match_briefs", "candidate_decisions"})
+READ_ONLY_TABLES = frozenset({"bets", "briefs", "candidate_decisions"})
 
 _PairDate = tuple[tuple[str, str], date]
 

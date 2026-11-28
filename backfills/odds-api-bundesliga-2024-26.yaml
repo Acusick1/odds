@@ -1,5 +1,5 @@
 # Odds API historical backfill of Bundesliga, the 2024-25 and 2025-26 seasons (#785, map #774).
-# A top-up is a new manifest. Snapshot grid, billing, books and fixture horizon follow the
+# A top-up is a new manifest. Snapshot grid, billing, books and game horizon follow the
 # probe (#729, #787).
 sport: soccer_germany_bundesliga
 seasons:
@@ -23,8 +23,8 @@ probe:
   snapshots:
     - 2024-09-14T09:55:38Z
     - 2025-09-13T09:55:38Z
-  # Call sharing needs fixtures as far ahead as the earliest coverage, 7 d plus its 6 h max age.
-  min_fixture_lead_hours: 174
+  # Call sharing needs games as far ahead as the earliest coverage, 7 d plus its 6 h max age.
+  min_game_lead_hours: 174
   # Betfair Exchange is the scoring reference and close (ADR-0012); no current candidate or
   # model uses Pinnacle.
   required_bookmakers:

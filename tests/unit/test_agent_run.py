@@ -285,8 +285,8 @@ class TestScheduleNext:
         sched.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_schedules_off_season_checkin_when_no_fixtures(self) -> None:
-        """With no fixtures, schedule_next still schedules an off-season check-in."""
+    async def test_schedules_off_season_checkin_when_no_games(self) -> None:
+        """With no games, schedule_next still schedules an off-season check-in."""
         with (
             patch(_KICKOFF_PATCH, new_callable=AsyncMock) as mk,
             patch("odds_lambda.jobs.agent_run.self_schedule", new_callable=AsyncMock) as sched,

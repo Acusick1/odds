@@ -37,7 +37,7 @@ LEAGUE = LeagueSpec(
     listing_path="/football/spain/laliga/",
     sport_key=SPORT,
     sport_title="La Liga",
-    fixture_horizon=timedelta(hours=48),
+    game_horizon=timedelta(hours=48),
     markets=["1x2", "over_under_2_5"],
 )
 BETFAIR = SportBetfairConfig(
@@ -46,7 +46,7 @@ BETFAIR = SportBetfairConfig(
     event_type_id=EVENT_TYPE_SOCCER,
     match_odds=BetfairMarketSpec("MATCH_ODDS", Market.ONE_X_TWO),
     competition_id=None,
-    fixture_horizon=timedelta(hours=72),
+    game_horizon=timedelta(hours=72),
     competition_name_hints=("Spanish La Liga",),
 )
 

@@ -13,7 +13,7 @@ from unittest.mock import patch
 from odds_analytics import backfill_executor
 from odds_analytics.backfill_checks import ResponseCheck
 from odds_analytics.backfill_executor import BackfillExecutor, BackfillResult, CallProgress
-from odds_analytics.backfill_plan import Call, Fixture, Manifest, Target
+from odds_analytics.backfill_plan import Call, Game, Manifest, Target
 from odds_core.config import APIConfig, Settings
 from odds_core.models import Event, EventStatus
 from odds_core.sports import SportKey
@@ -26,11 +26,11 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from tests.test_helpers import (
     FakeMlbStatsFetcher,
-    LeagueFixture,
+    LeagueGame,
     ReplayHttpSession,
     add_event,
     hold_game_pks,
-    load_fduk_fixture,
+    load_fduk_game,
     make_nba_event,
     mlb_game,
     odds_api_game,
@@ -104,7 +104,7 @@ class BackfillReplay:
         return Call(
             at,
             tuple(
-                Target(Fixture(event.id, event.commence_time), band, at, at)
+                Target(Game(event.id, event.commence_time), band, at, at)
                 for event in serves
                 if event.id is not None
             ),
@@ -258,9 +258,9 @@ def final_event(
 
 
 async def load_football(
-    session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher], league: LeagueFixture
+    session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher], league: LeagueGame
 ) -> list[Listed]:
-    event = await load_fduk_fixture(session, league)
+    event = await load_fduk_game(session, league)
     await session.commit()
     return [
         Listed(event, "api-1", league.api_home, league.api_away, league.kickoff, league.sport_title)

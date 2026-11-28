@@ -14,7 +14,7 @@ sources:
   - odds_lambda.scheduling.decision.OVERNIGHT_WINDOWS
   - odds_core.job_specs.JOB_SPECS
   - odds_core.agent_wakeup_models.AgentWakeup
-  - odds_core.match_brief_models.MatchBrief
+  - odds_core.brief_models.Brief
   - odds_cli.commands.agent.run
   - odds_mcp.server.schedule_next_wakeup
   - odds_mcp.server.refresh_scrape
@@ -79,4 +79,4 @@ Each wake-up writes its `stream-json` output to a JSONL file under `logs/agent_r
 - [The betting agent](betting-agent.md)
 - [Agent prompts](agent-prompts.md)
 - [Agent run traces](agent-run-traces.md)
-- [Briefs](match-briefs.md) and [bets](bets.md), what the agent writes, each row keyed to an event by its integer id
+- [Briefs](briefs.md) and [bets](bets.md), what the agent writes, each row keyed to an event by its integer id

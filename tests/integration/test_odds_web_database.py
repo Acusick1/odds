@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from odds_core import (  # noqa: F401  (tables the role must not read)
     agent_wakeup_models,
-    match_brief_models,
+    brief_models,
 )
 from odds_core.bet_models import Bet, BetResult
 from odds_core.models import EventStatus
@@ -98,7 +98,7 @@ class TestGrants:
             for listed in ("bets", "schedules", "odds_snapshots"):
                 async with engine.connect() as conn:
                     await conn.execute(text(f"SELECT count(*) FROM {listed}"))
-            for unlisted in ("agent_wakeups", "match_briefs", "snapshot_payloads"):
+            for unlisted in ("agent_wakeups", "briefs", "snapshot_payloads"):
                 async with engine.connect() as conn:
                     with pytest.raises(ProgrammingError, match="permission denied"):
                         await conn.execute(text(f"SELECT count(*) FROM {unlisted}"))

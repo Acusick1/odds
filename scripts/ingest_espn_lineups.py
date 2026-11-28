@@ -37,7 +37,7 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data" / "espn_lineups"
 
 BASE_URL = "https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1"
 
-FIXTURES_DIR = Path(__file__).resolve().parent.parent / "data" / "espn_fixtures"
+GAMES_DIR = Path(__file__).resolve().parent.parent / "data" / "espn_games"
 
 SEASONS: dict[int, str] = {
     2020: "2020-21",
@@ -101,13 +101,13 @@ def _fetch_json(client: httpx.Client, url: str) -> dict[str, Any]:
     raise RuntimeError("unreachable")
 
 
-def _load_match_dates_from_fixtures(season: int) -> list[str] | None:
-    """Load unique match dates from the ESPN fixtures CSV for a season.
+def _load_match_dates_from_games(season: int) -> list[str] | None:
+    """Load unique match dates from the ESPN games CSV for a season.
 
     Returns sorted list of YYYYMMDD strings, or None if the CSV doesn't exist.
     """
     label = SEASONS[season]
-    csv_path = FIXTURES_DIR / f"fixtures_{label}.csv"
+    csv_path = GAMES_DIR / f"games_{label}.csv"
     if not csv_path.exists():
         return None
 
@@ -115,7 +115,7 @@ def _load_match_dates_from_fixtures(season: int) -> list[str] | None:
     with open(csv_path) as fh:
         reader = csv.DictReader(fh)
         for row in reader:
-            # Only EPL matches (fixture CSV includes cups/European competitions)
+            # Only EPL matches (game CSV includes cups/European competitions)
             if row.get("competition") != "Premier League":
                 continue
             date_str = row.get("date", "")
@@ -131,17 +131,17 @@ def _load_match_dates_from_fixtures(season: int) -> list[str] | None:
 def _discover_game_ids(client: httpx.Client, season: int) -> list[tuple[str, str]]:
     """Discover EPL game IDs for a season via the scoreboard endpoint.
 
-    If the ESPN fixtures CSV exists for this season, only query match dates
+    If the ESPN games CSV exists for this season, only query match dates
     (~38 requests) instead of every calendar day (~270 requests).
 
     Returns list of (game_id, date_iso) tuples.
     """
-    match_dates = _load_match_dates_from_fixtures(season)
+    match_dates = _load_match_dates_from_games(season)
     if match_dates is not None:
-        log.info(f"  Using {len(match_dates)} match dates from fixtures CSV")
+        log.info(f"  Using {len(match_dates)} match dates from games CSV")
         dates_to_query = match_dates
     else:
-        log.info("  Fixtures CSV not found, scanning all season dates")
+        log.info("  Games CSV not found, scanning all season dates")
         start_date, end_date = SEASON_DATE_RANGES[season]
         dates_to_query = []
         current = start_date

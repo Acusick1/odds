@@ -1,4 +1,4 @@
-"""fetch-espn-fixtures marks events of ESPN-postponed Premier League matches POSTPONED."""
+"""fetch-espn-games marks events of ESPN-postponed Premier League matches POSTPONED."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
-from odds_core.epl_data_models import EspnFixture
+from odds_core.epl_data_models import EspnGame
 from odds_core.models import Event, EventStatus
-from odds_lambda.jobs import fetch_espn_fixtures
+from odds_lambda.jobs import fetch_espn_games
 from sqlalchemy.ext.asyncio import AsyncSession
 
 KICKOFF = datetime(2026, 5, 17, 14, 0, tzinfo=UTC)
@@ -28,19 +28,19 @@ def _event(event_id: int, status: EventStatus, commence_time: datetime = KICKOFF
     )
 
 
-def _fixture(
+def _game(
     team: str,
     opponent: str,
     home_away: str,
     status: str = "Postponed",
     competition: str = "Premier League",
-) -> EspnFixture:
-    return EspnFixture(
+) -> EspnGame:
+    return EspnGame(
         date=KICKOFF,
         team=team,
         opponent=opponent,
         competition=competition,
-        match_round="",
+        game_round="",
         home_away=home_away,
         score_team="0",
         score_opponent="0",
@@ -50,10 +50,10 @@ def _fixture(
     )
 
 
-def _postponed_pair(**kwargs: str) -> list[EspnFixture]:
+def _postponed_pair(**kwargs: str) -> list[EspnGame]:
     return [
-        _fixture("Bournemouth", "Manchester City", "home", **kwargs),
-        _fixture("Manchester City", "Bournemouth", "away", **kwargs),
+        _game("Bournemouth", "Manchester City", "home", **kwargs),
+        _game("Manchester City", "Bournemouth", "away", **kwargs),
     ]
 
 
@@ -62,7 +62,7 @@ def session_maker(test_session: AsyncSession):
     maker = MagicMock()
     maker.return_value.__aenter__.return_value = test_session
     maker.return_value.__aexit__.return_value = None
-    with patch.object(fetch_espn_fixtures, "async_session_maker", maker):
+    with patch.object(fetch_espn_games, "async_session_maker", maker):
         yield maker
 
 
@@ -75,7 +75,7 @@ class TestMarkPostponedEvents:
         test_session.add_all(_postponed_pair())
         await test_session.commit()
 
-        assert await fetch_espn_fixtures._mark_postponed_events() == 1
+        assert await fetch_espn_games._mark_postponed_events() == 1
 
         test_session.expire_all()
         event = await test_session.get(Event, 1)
@@ -90,8 +90,8 @@ class TestMarkPostponedEvents:
         test_session.add_all(_postponed_pair())
         await test_session.commit()
 
-        assert await fetch_espn_fixtures._mark_postponed_events() == 0
-        assert await fetch_espn_fixtures._mark_postponed_events() == 0
+        assert await fetch_espn_games._mark_postponed_events() == 0
+        assert await fetch_espn_games._mark_postponed_events() == 0
 
         test_session.expire_all()
         statuses = {
@@ -105,12 +105,12 @@ class TestMarkPostponedEvents:
     ) -> None:
         test_session.add(_event(1, EventStatus.SCHEDULED))
         test_session.add_all(_postponed_pair())
-        relisted = _fixture("Bournemouth", "Manchester City", "home", status="Scheduled")
+        relisted = _game("Bournemouth", "Manchester City", "home", status="Scheduled")
         relisted.date = KICKOFF + timedelta(hours=1)
         test_session.add(relisted)
         await test_session.commit()
 
-        assert await fetch_espn_fixtures._mark_postponed_events() == 0
+        assert await fetch_espn_games._mark_postponed_events() == 0
 
     async def test_event_at_a_different_kickoff_is_not_marked(
         self, test_session: AsyncSession, session_maker: MagicMock
@@ -119,16 +119,14 @@ class TestMarkPostponedEvents:
         test_session.add_all(_postponed_pair())
         await test_session.commit()
 
-        assert await fetch_espn_fixtures._mark_postponed_events() == 0
+        assert await fetch_espn_games._mark_postponed_events() == 0
 
     async def test_other_competitions_and_statuses_are_ignored(
         self, test_session: AsyncSession, session_maker: MagicMock
     ) -> None:
         test_session.add(_event(1, EventStatus.SCHEDULED))
         test_session.add_all(_postponed_pair(competition="FA Cup"))
-        test_session.add_all(
-            [_fixture("Bournemouth", "Manchester City", "home", status="Scheduled")]
-        )
+        test_session.add_all([_game("Bournemouth", "Manchester City", "home", status="Scheduled")])
         await test_session.commit()
 
-        assert await fetch_espn_fixtures._mark_postponed_events() == 0
+        assert await fetch_espn_games._mark_postponed_events() == 0

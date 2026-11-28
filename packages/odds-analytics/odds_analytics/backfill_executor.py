@@ -54,7 +54,7 @@ CallStatus = Literal["fetched", "skipped", "would_fetch", "failed"]
 
 @dataclass
 class BackfillResult:
-    """What a run did: ``calls_made`` paid calls, ``calls_skipped`` calls whose fixtures were
+    """What a run did: ``calls_made`` paid calls, ``calls_skipped`` calls whose games were
     already stored or that a recorded provider gap covers, ``would_fetch`` calls a dry run did
     not make, ``provider_gaps`` paid calls that returned a snapshot earlier than the planned
     grid step, ``off_phase_snapshots`` paid calls that returned the provider's snapshot for the
@@ -66,7 +66,7 @@ class BackfillResult:
     would_fetch: int = 0
     units_used: int = 0
     snapshots_stored: int = 0
-    fixtures_stored: int = 0
+    games_stored: int = 0
     provider_gaps: int = 0
     off_phase_snapshots: int = 0
     quota_remaining: int | None = None
@@ -79,7 +79,7 @@ class CallProgress:
 
     time: datetime
     status: CallStatus
-    fixtures_stored: int = 0
+    games_stored: int = 0
     units_used: int | None = None
     quota_remaining: int | None = None
     message: str | None = None
@@ -115,7 +115,7 @@ class BackfillExecutor:
                 up to ``RATE_LIMIT_ATTEMPTS`` times is created and closed with the executor if
                 not given, except in a dry run, which needs none)
             session_factory: Creates database sessions (defaults to ``async_session_maker``)
-            skip_existing: Skip a call when any fixture it serves already has the snapshot it
+            skip_existing: Skip a call when any game it serves already has the snapshot it
                 would return
             dry_run: Make no API call and write nothing
             pause_seconds: Pause after each paid call
@@ -317,12 +317,12 @@ class BackfillExecutor:
             writer = OddsWriter(session)
             finder = await odds_api_finder(manifest.sport, response.events)
             payload_id: int | None = None
-            # The resolver takes fixture locks, which must be acquired in ascending order.
-            fixtures = sorted(
+            # The resolver takes game locks, which must be acquired in ascending order.
+            games = sorted(
                 zip(response.events, response.raw_events_data, strict=True),
                 key=lambda pair: lock_order(manifest.sport, game_row(pair[0])),
             )
-            for event, raw in fixtures:
+            for event, raw in games:
                 found = await attach_historical_odds_api_event(finder, session, event)
                 if isinstance(found, DroppedGame):
                     result.dropped_games[found] = result.dropped_games.get(found, 0) + 1
@@ -362,17 +362,17 @@ class BackfillExecutor:
                     session, call.time, response.snapshot_time, response.next_snapshot_time
                 )
             await session.commit()
-        result.fixtures_stored += stored
+        result.games_stored += stored
         if gap:
             result.provider_gaps += 1
         elif returned is ReturnedSnapshot.OFF_PHASE:
             result.off_phase_snapshots += 1
-        served = {target.fixture.event_id for target in call.serves}
+        served = {target.game.event_id for target in call.serves}
         horizon = book_judged_lead(manifest)
         near = {
-            target.fixture.event_id
+            target.game.event_id
             for target in call.serves
-            if target.fixture.kickoff - response.snapshot_time <= horizon
+            if target.game.kickoff - response.snapshot_time <= horizon
         }
         judged = (
             response.raw_events_data
@@ -390,7 +390,7 @@ class BackfillExecutor:
         progress = CallProgress(
             call.time,
             "fetched",
-            fixtures_stored=stored,
+            games_stored=stored,
             units_used=response.units_used,
             quota_remaining=response.quota_remaining,
             message=_returned_message(returned, response.snapshot_time),
@@ -482,11 +482,11 @@ class BackfillExecutor:
         )
 
     async def _already_stored(self, call: Call) -> bool:
-        """Whether any fixture the call serves already has a historical Odds API snapshot
+        """Whether any game the call serves already has a historical Odds API snapshot
         (``source_stamped``, never a live fetch) of a requested market in the call's stored
-        window (``stored_call_window``). A served fixture the response does not list is one the
+        window (``stored_call_window``). A served game the response does not list is one the
         API did not list at that time, and fetching again will not change that."""
-        wanted = {target.fixture.event_id for target in call.serves}
+        wanted = {target.game.event_id for target in call.serves}
         if not wanted:
             return True
         markets = {stored_market(self.manifest, market) for market in self.manifest.markets}

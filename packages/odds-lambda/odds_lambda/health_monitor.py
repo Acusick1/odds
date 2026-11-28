@@ -273,7 +273,7 @@ class HealthMonitor:
         return alerted is not None and alerted > now - 2 * reminder
 
     async def check_stale_sources(self, now: datetime | None = None) -> list[StaleSource]:
-        """Find sources that stopped writing a market while fixtures they should price are
+        """Find sources that stopped writing a market while games they should price are
         scheduled: the ``Freshness.STALE`` markets of ``odds_lambda.health_readers.source_freshness``.
 
         International breaks, off-seasons and jobs that were never enabled raise nothing. A
@@ -636,15 +636,15 @@ class HealthMonitor:
             )
 
         for sport in LEAGUE_SPORTS:
-            repeated = len(await merger.find_repeated_fixtures(sport))
+            repeated = len(await merger.find_repeated_games(sport))
             if repeated:
-                issues.append(f"{repeated} {sport} fixtures stored twice in one season")
+                issues.append(f"{repeated} {sport} games stored twice in one season")
                 await self._send_alert(
-                    alert_type=f"repeated_fixtures:{sport}",
+                    alert_type=f"repeated_games:{sport}",
                     severity="warning",
-                    message=f"⚠️ {repeated} {sport} fixtures stored twice in one season "
+                    message=f"⚠️ {repeated} {sport} games stored twice in one season "
                     "(a rescheduled match under a second id)",
-                    context={"sport_key": sport, "repeated_fixtures": repeated},
+                    context={"sport_key": sport, "repeated_games": repeated},
                 )
 
         missing = await self.find_mlb_events_without_game_pk(moment)
@@ -811,12 +811,12 @@ class HealthMonitor:
         Perform comprehensive system health check.
 
         Checks:
-        1. Stale data per source (no rows within the source's cadence while fixtures are scheduled),
+        1. Stale data per source (no rows within the source's cadence while games are scheduled),
            and football events with no live Betfair close
         2. API quota levels
         3. Data quality issues
         4. Job heartbeats (missing completions)
-        5. Event identity: twins, repeated fixtures, MLB events without a gamePk
+        5. Event identity: twins, repeated games, MLB events without a gamePk
         6. Self-scheduling chains with no run booked or an overdue run
         7. League events unsettled long after kick-off
         8. Candidates the latest run-candidates run of a league skipped as invalid

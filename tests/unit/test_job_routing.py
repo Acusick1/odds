@@ -211,18 +211,18 @@ class TestJobCronRegistry:
         assert get_job_cron("fetch-odds") is None
 
     def test_get_job_cron_returns_expression_for_mapped_job(self) -> None:
-        assert get_job_cron("fetch-espn-fixtures") == "0 6 * * *"
+        assert get_job_cron("fetch-espn-games") == "0 6 * * *"
 
     def test_get_job_cron_returns_none_for_unknown_job(self) -> None:
         assert get_job_cron("totally-made-up") is None
 
     def test_get_job_sports_returns_allowlist_when_restricted(self) -> None:
-        # fetch-espn-fixtures covers EPL, NBA and the leagues ESPN schedules — the sport
+        # fetch-espn-games covers EPL, NBA and the leagues ESPN schedules — the sport
         # allowlist is load-bearing (its main() raises for the other configured sports, MLB
         # included).
         from odds_lambda.espn_football_schedule import LEAGUES
 
-        sports = get_job_sports("fetch-espn-fixtures")
+        sports = get_job_sports("fetch-espn-games")
         assert sports is not None
         assert set(sports) == {"soccer_epl", "basketball_nba", *LEAGUES}
 
@@ -256,8 +256,8 @@ class TestResolveTargetSports:
         ]
 
     def test_cron_job_with_allowlist_ignores_unlisted_sports(self) -> None:
-        # fetch-espn-fixtures is restricted to EPL even when MLB is configured.
-        assert resolve_target_sports("fetch-espn-fixtures", ["soccer_epl", "baseball_mlb"]) == [
+        # fetch-espn-games is restricted to EPL even when MLB is configured.
+        assert resolve_target_sports("fetch-espn-games", ["soccer_epl", "baseball_mlb"]) == [
             "soccer_epl"
         ]
 
@@ -277,13 +277,13 @@ class TestExpectedCompoundJobNames:
 
     def test_expands_per_sport_and_keeps_global_jobs(self) -> None:
         expected = expected_compound_job_names(
-            ["fetch-oddsportal", "fetch-espn-fixtures", "check-health"],
+            ["fetch-oddsportal", "fetch-espn-games", "check-health"],
             ["soccer_epl", "baseball_mlb"],
         )
         assert expected == {
             "fetch-oddsportal-epl",
             "fetch-oddsportal-mlb",
-            "fetch-espn-fixtures-epl",  # sport allowlist drops MLB
+            "fetch-espn-games-epl",  # sport allowlist drops MLB
             "check-health",  # global job kept as-is
         }
 
@@ -312,14 +312,14 @@ class TestExpectedCompoundJobNames:
             "fetch-polymarket-odds-epl",
             "fetch-polymarket-odds-nba",
         }
-        assert {n for n in expected if n.startswith("fetch-espn-fixtures")} == {
-            "fetch-espn-fixtures-epl",
-            "fetch-espn-fixtures-nba",
+        assert {n for n in expected if n.startswith("fetch-espn-games")} == {
+            "fetch-espn-games-epl",
+            "fetch-espn-games-nba",
         }
         heartbeats = AlertConfig().heartbeat_expectations
         assert "fetch-polymarket-odds-epl" in heartbeats
         assert heartbeats["fetch-polymarket-odds-nba"] == 11
-        assert "fetch-espn-fixtures-nba" in heartbeats
+        assert "fetch-espn-games-nba" in heartbeats
 
 
 class TestRequireSport:
@@ -365,11 +365,9 @@ class TestJobSpecConsumers:
             make_compound_job_name("fetch-mlb-probables", "baseball_mlb")
             == "fetch-mlb-probables-mlb"
         )
-        assert heartbeat_name("fetch-espn-fixtures", "soccer_epl") == "fetch-espn-fixtures"
-        assert (
-            make_compound_job_name("fetch-espn-fixtures", "soccer_epl") == "fetch-espn-fixtures-epl"
-        )
-        assert heartbeat_name("fetch-espn-fixtures", "basketball_nba") == "fetch-espn-fixtures-nba"
+        assert heartbeat_name("fetch-espn-games", "soccer_epl") == "fetch-espn-games"
+        assert make_compound_job_name("fetch-espn-games", "soccer_epl") == "fetch-espn-games-epl"
+        assert heartbeat_name("fetch-espn-games", "basketball_nba") == "fetch-espn-games-nba"
 
     def test_adapters_support_exactly_the_registered_sports(self) -> None:
         from odds_lambda.betfair.constants import SPORT_CONFIG

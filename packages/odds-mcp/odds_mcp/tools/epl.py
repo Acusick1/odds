@@ -10,21 +10,21 @@ from typing import Any
 from fastmcp import FastMCP
 from odds_analytics.standings_features import TeamRecord, rank_table
 from odds_core.database import async_session_maker
-from odds_core.epl_data_models import EspnFixture
+from odds_core.epl_data_models import EspnGame
 from odds_core.team import normalize_team_name
-from odds_lambda.espn_fixture_fetcher import current_season, season_label
+from odds_lambda.espn_game_fetcher import current_season, season_label
 from sqlalchemy import select
 
 epl_mcp = FastMCP("odds-mcp-epl")
 
 
 # ---------------------------------------------------------------------------
-# ESPN fixture context helpers (used by ``get_team_context``)
+# ESPN game context helpers (used by ``get_team_context``)
 # ---------------------------------------------------------------------------
 
 
 # ESPN's canonical match-state enum (``status.type.state``). Used for
-# categorising fixtures as past/live/upcoming.
+# categorising games as past/live/upcoming.
 _ESPN_STATE_POST = "post"  # completed match (any kind: FT, AET, after pens)
 _ESPN_STATE_IN = "in"  # live match (any in-play status)
 
@@ -45,7 +45,7 @@ _ESPN_FINAL_STATUS_FALLBACK: frozenset[str] = frozenset(
 _PREMIER_LEAGUE = "Premier League"
 
 
-def _is_final(row: EspnFixture) -> bool:
+def _is_final(row: EspnGame) -> bool:
     """Return True if ``row`` represents a completed match.
 
     Prefers ``state == "post"`` when available; falls back to a curated set of
@@ -56,7 +56,7 @@ def _is_final(row: EspnFixture) -> bool:
     return row.status in _ESPN_FINAL_STATUS_FALLBACK
 
 
-def _is_in_progress(row: EspnFixture) -> bool:
+def _is_in_progress(row: EspnGame) -> bool:
     """Return True if ``row`` is currently live.
 
     Only the ``state`` column can distinguish "in" vs "pre" reliably, so rows
@@ -90,61 +90,61 @@ def _outcome_for_score(score_team: int, score_opponent: int) -> str:
     return "D"
 
 
-def _fixture_to_dict(fixture: EspnFixture, *, as_of: datetime) -> dict[str, Any]:
-    """Serialise an EspnFixture for the upcoming-fixtures view."""
-    days_until = (fixture.date - as_of).total_seconds() / 86400.0
+def _game_to_dict(game: EspnGame, *, as_of: datetime) -> dict[str, Any]:
+    """Serialise an EspnGame for the upcoming-games view."""
+    days_until = (game.date - as_of).total_seconds() / 86400.0
     return {
-        "date": fixture.date.isoformat(),
-        "opponent": fixture.opponent,
-        "home_away": fixture.home_away,
-        "competition": fixture.competition,
-        "status": fixture.status,
+        "date": game.date.isoformat(),
+        "opponent": game.opponent,
+        "home_away": game.home_away,
+        "competition": game.competition,
+        "status": game.status,
         "days_until_ko": round(days_until, 3),
     }
 
 
-def _result_to_dict(fixture: EspnFixture) -> dict[str, Any] | None:
-    """Serialise an EspnFixture into a last-results entry.
+def _result_to_dict(game: EspnGame) -> dict[str, Any] | None:
+    """Serialise an EspnGame into a last-results entry.
 
     Returns ``None`` when the row does not have parseable integer scores (e.g.
     status is Final but scores are blank/malformed — an ESPN quirk).
     """
-    score_team = _parse_score(fixture.score_team)
-    score_opponent = _parse_score(fixture.score_opponent)
+    score_team = _parse_score(game.score_team)
+    score_opponent = _parse_score(game.score_opponent)
     if score_team is None or score_opponent is None:
         return None
     return {
-        "date": fixture.date.isoformat(),
-        "opponent": fixture.opponent,
-        "home_away": fixture.home_away,
+        "date": game.date.isoformat(),
+        "opponent": game.opponent,
+        "home_away": game.home_away,
         "score_team": score_team,
         "score_opponent": score_opponent,
         "outcome": _outcome_for_score(score_team, score_opponent),
-        "competition": fixture.competition,
+        "competition": game.competition,
     }
 
 
-def _derive_standings(fixtures: list[EspnFixture]) -> dict[str, dict[str, Any]]:
+def _derive_standings(games: list[EspnGame]) -> dict[str, dict[str, Any]]:
     """Build a points table keyed by team from a season's Premier League rows.
 
-    The input is the set of EspnFixture rows for the target season. Only rows
+    The input is the set of EspnGame rows for the target season. Only rows
     where ``competition == "Premier League"`` and state is ``"post"`` (or, for
     legacy rows with no state, a matching fallback status) with parseable
     scores count. Each match contributes to both teams' rows (rows are per team
-    in ``espn_fixtures``). Positions follow ``rank_table``.
+    in ``espn_games``). Positions follow ``rank_table``.
     """
     records: dict[str, TeamRecord] = {}
 
-    for fixture in fixtures:
-        if fixture.competition != _PREMIER_LEAGUE:
+    for game in games:
+        if game.competition != _PREMIER_LEAGUE:
             continue
-        if not _is_final(fixture):
+        if not _is_final(game):
             continue
-        score_team = _parse_score(fixture.score_team)
-        score_opponent = _parse_score(fixture.score_opponent)
+        score_team = _parse_score(game.score_team)
+        score_opponent = _parse_score(game.score_opponent)
         if score_team is None or score_opponent is None:
             continue
-        records.setdefault(fixture.team, TeamRecord(team=fixture.team)).record_result(
+        records.setdefault(game.team, TeamRecord(team=game.team)).record_result(
             score_team, score_opponent
         )
 
@@ -173,16 +173,16 @@ async def get_team_context(
     next_n: int = 5,
     include_standings: bool = True,
 ) -> dict[str, Any]:
-    """Fetch form, upcoming fixtures, and league table position for an EPL team.
+    """Fetch form, upcoming games, and league table position for an EPL team.
 
-    Draws from the ``espn_fixtures`` table (refreshed daily by the
-    ``fetch-espn-fixtures`` job). Returns:
+    Draws from the ``espn_games`` table (refreshed daily by the
+    ``fetch-espn-games`` job). Returns:
 
     - ``last_results``: up to ``last_n`` most recent Premier-League-only
-      completed fixtures before ``as_of``, each with score, outcome (W/D/L),
+      completed games before ``as_of``, each with score, outcome (W/D/L),
       home/away. PL-only to keep "form" meaningful — cup results sit in
-      upcoming_fixtures via rotation risk, not form.
-    - ``upcoming_fixtures``: next ``next_n`` fixtures after ``as_of`` across
+      upcoming_games via rotation risk, not form.
+    - ``upcoming_games``: next ``next_n`` games after ``as_of`` across
       all competitions (PL, FA Cup, League Cup, European) with
       ``days_until_ko``. This is the rotation-risk signal.
     - ``standings`` (when ``include_standings=True``): derived on the fly from
@@ -192,23 +192,23 @@ async def get_team_context(
       tight 3-way tie at the threshold is approximate — do not over-trust it.
 
     Live (``state="in"``) rows are skipped from both last_results and
-    upcoming_fixtures; they neither count as form nor as upcoming rotation.
+    upcoming_games; they neither count as form nor as upcoming rotation.
 
     Args:
         team: Canonical team name (matches the output of
             ``odds_core.team.normalize_team_name`` — e.g. "Manchester Utd",
             "Tottenham", "Wolves"). Common variants are also accepted.
-        as_of: ISO datetime cutoff. Defaults to now. Used to split fixtures
+        as_of: ISO datetime cutoff. Defaults to now. Used to split games
             into past vs upcoming; also used to compute ``days_until_ko``.
         last_n: Max last-results entries to return. Clamped to >= 1.
-        next_n: Max upcoming-fixtures entries to return. Clamped to >= 1.
+        next_n: Max upcoming-games entries to return. Clamped to >= 1.
         include_standings: When True, include the derived table. The returned
             ``standings.team_row`` is the target team's row; ``standings.table``
             is the full 20-team ordering.
 
     Returns:
         Dict with ``team``, ``as_of``, ``season``, ``last_results``,
-        ``upcoming_fixtures``, and (optionally) ``standings``.
+        ``upcoming_games``, and (optionally) ``standings``.
     """
     canonical_team = normalize_team_name(team)
 
@@ -227,20 +227,16 @@ async def get_team_context(
     season_lbl = season_label(season)
 
     async with async_session_maker() as session:
-        # Team-scoped rows: drive last_results + upcoming_fixtures.
-        team_query = (
-            select(EspnFixture).where(EspnFixture.team == canonical_team).order_by(EspnFixture.date)
-        )
+        # Team-scoped rows: drive last_results + upcoming_games.
+        team_query = select(EspnGame).where(EspnGame.team == canonical_team).order_by(EspnGame.date)
         team_result = await session.execute(team_query)
         team_rows = list(team_result.scalars().all())
 
         # Season-scoped rows for all teams: drive standings derivation.
-        standings_rows: list[EspnFixture] = []
+        standings_rows: list[EspnGame] = []
         if include_standings:
             standings_query = (
-                select(EspnFixture)
-                .where(EspnFixture.season == season_lbl)
-                .order_by(EspnFixture.date)
+                select(EspnGame).where(EspnGame.season == season_lbl).order_by(EspnGame.date)
             )
             standings_result = await session.execute(standings_query)
             standings_rows = list(standings_result.scalars().all())
@@ -262,19 +258,19 @@ async def get_team_context(
                 last_results.append(entry)
         elif row.date >= resolved_as_of:
             # "pre" rows and unknown-state future-dated rows.
-            upcoming.append(_fixture_to_dict(row, as_of=resolved_as_of))
+            upcoming.append(_game_to_dict(row, as_of=resolved_as_of))
 
     # Newest-first on last_results; already date-asc on upcoming.
     last_results.reverse()
     last_results = last_results[:last_n]
-    upcoming_fixtures = upcoming[:next_n]
+    upcoming_games = upcoming[:next_n]
 
     response: dict[str, Any] = {
         "team": canonical_team,
         "as_of": resolved_as_of.isoformat(),
         "season": season_lbl,
         "last_results": last_results,
-        "upcoming_fixtures": upcoming_fixtures,
+        "upcoming_games": upcoming_games,
     }
 
     if include_standings:

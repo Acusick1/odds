@@ -56,9 +56,9 @@ from tests.integration.backfill_replay_helpers import (
     load_nba,
 )
 from tests.test_helpers import (
-    LEAGUE_FIXTURES,
+    LEAGUE_GAMES,
     FakeMlbStatsFetcher,
-    LeagueFixture,
+    LeagueGame,
     add_event,
     hold_game_pks,
     mlb_game,
@@ -66,7 +66,7 @@ from tests.test_helpers import (
 )
 
 
-def football_loader(league: LeagueFixture) -> Loader:
+def football_loader(league: LeagueGame) -> Loader:
     async def load(session: AsyncSession, mlb_schedule: type[FakeMlbStatsFetcher]) -> list[Listed]:
         return await load_football(session, mlb_schedule, league)
 
@@ -74,7 +74,7 @@ def football_loader(league: LeagueFixture) -> Loader:
 
 
 LOADERS: dict[SportKey, Loader] = {
-    **{f.sport: football_loader(f) for f in LEAGUE_FIXTURES},
+    **{f.sport: football_loader(f) for f in LEAGUE_GAMES},
     NBA: load_nba,
     MLB: load_mlb,
 }
@@ -153,7 +153,7 @@ class TestReplayPerManifest:
 
         result = await replay.run(manifest, calls)
 
-        assert (result.calls_made, result.fixtures_stored, result.dropped_games) == (
+        assert (result.calls_made, result.games_stored, result.dropped_games) == (
             2,
             2 * len(games),
             {},
@@ -199,7 +199,7 @@ class TestReplayPerManifest:
         assert len(replay.requests) == 2
 
         refetched = await replay.run(manifest, calls, skip_existing=False)
-        assert (refetched.calls_made, refetched.fixtures_stored, refetched.snapshots_stored) == (
+        assert (refetched.calls_made, refetched.games_stored, refetched.snapshots_stored) == (
             2,
             2 * len(games),
             0,
@@ -236,7 +236,7 @@ class TestMlbReplay:
 
         result = await replay.run(manifest, [replay.call(manifest, at, game_one.event)])
 
-        assert (result.fixtures_stored, result.dropped_games) == (3, {})
+        assert (result.games_stored, result.dropped_games) == (3, {})
         assert mlb_schedule.requests == 1
         for game in (game_one, game_two, other):
             assert await odds_api_ids(session, game.event) == [game.api_id]
@@ -272,7 +272,7 @@ class TestMlbReplay:
             [replay.call(manifest, at, played) for at in (at_before, at_after)],
         )
 
-        assert (result.fixtures_stored, result.dropped_games) == (2, {})
+        assert (result.games_stored, result.dropped_games) == (2, {})
         assert [e.id for e in await session_events(session, MLB)] == [1]
         assert await odds_api_ids(session, played) == ["mlb-813001"]
         assert {r[0] for r in await stored_rows(session, played)} == {at_before, at_after}
@@ -296,7 +296,7 @@ class TestMlbReplay:
 
         result = await replay.run(manifest, [replay.call(manifest, at, game_one.event)])
 
-        assert result.fixtures_stored == 1
+        assert result.games_stored == 1
         [dropped] = result.dropped_games
         assert dropped.game.home_team == "Seattle Mariners"
         assert dropped.reason is SkipReason.UNRESOLVED
@@ -327,7 +327,7 @@ class TestNbaReplay:
 
         result = await replay.run(manifest, [replay.call(manifest, at, regular.event)])
 
-        assert result.fixtures_stored == 1
+        assert result.games_stored == 1
         assert [(d.game.away_team, d.reason) for d in result.dropped_games] == [
             ("Charlotte Hornets", SkipReason.NO_EVENT)
         ]
@@ -373,13 +373,13 @@ class TestRerunSemantics:
 
         rerun = await replay.run(manifest, [call])
 
-        assert (rerun.calls_made, rerun.calls_skipped, rerun.fixtures_stored) == (1, 0, 2)
+        assert (rerun.calls_made, rerun.calls_skipped, rerun.games_stored) == (1, 0, 2)
         assert len(replay.requests) == 2
         for game in games:
             assert await odds_api_ids(session, game.event) == [game.api_id]
             assert len(await stored_rows(session, game.event)) > 0
 
-    async def test_a_call_is_skipped_when_any_fixture_it_serves_is_stored(
+    async def test_a_call_is_skipped_when_any_game_it_serves_is_stored(
         self,
         pglite_async_session: AsyncSession,
         replay: BackfillReplay,
@@ -395,7 +395,7 @@ class TestRerunSemantics:
         first = await replay.run(manifest, [call])
         rerun = await replay.run(manifest, [call])
 
-        assert (first.calls_made, first.fixtures_stored) == (1, 1)
+        assert (first.calls_made, first.games_stored) == (1, 1)
         assert (rerun.calls_made, rerun.calls_skipped) == (0, 1)
         assert len(replay.requests) == 1
         assert await stored_rows(session, late.event) == set()

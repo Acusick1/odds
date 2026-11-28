@@ -35,8 +35,8 @@ def _make_event(
     )
 
 
-def _make_fixtures_df(rows: list[dict[str, str]]) -> pd.DataFrame:
-    """Build a small fixtures DataFrame from dicts."""
+def _make_games_df(rows: list[dict[str, str]]) -> pd.DataFrame:
+    """Build a small games DataFrame from dicts."""
     df = pd.DataFrame(rows)
     df["date"] = pd.to_datetime(df["date"], utc=True)
     return df
@@ -340,8 +340,8 @@ class TestExtractEplScheduleFeatures:
         assert abs(features.home_rest_days - expected) < 0.001
 
 
-class TestFixturesDfIntegration:
-    """Tests for fixtures_df parameter on extract_epl_schedule_features."""
+class TestGamesDfIntegration:
+    """Tests for games_df parameter on extract_epl_schedule_features."""
 
     def test_cl_midweek_reduces_rest_days(self) -> None:
         """EPL Sat -> CL Wed -> EPL Sun: without df=8d, with df=4d."""
@@ -365,15 +365,15 @@ class TestFixturesDfIntegration:
             commence_time=next_sunday,
         )
 
-        # Without fixtures_df: 8 days rest (Sat to Sun)
+        # Without games_df: 8 days rest (Sat to Sun)
         features_no_df = extract_epl_schedule_features(
             prior_events, event, known_at=event.commence_time
         )
         assert features_no_df.home_rest_days is not None
         assert features_no_df.home_rest_days > 7.5
 
-        # With fixtures_df showing CL on Wednesday: ~4 days rest (Wed to Sun)
-        df = _make_fixtures_df(
+        # With games_df showing CL on Wednesday: ~4 days rest (Wed to Sun)
+        df = _make_games_df(
             [
                 {
                     "date": "2025-01-04T15:00Z",
@@ -390,12 +390,12 @@ class TestFixturesDfIntegration:
             ]
         )
         features_with_df = extract_epl_schedule_features(
-            prior_events, event, known_at=event.commence_time, fixtures_df=df
+            prior_events, event, known_at=event.commence_time, games_df=df
         )
         assert features_with_df.home_rest_days is not None
         assert features_with_df.home_rest_days < 4.0
 
-    def test_fixtures_df_no_effect_when_epl_is_more_recent(self) -> None:
+    def test_games_df_no_effect_when_epl_is_more_recent(self) -> None:
         """When EPL match is more recent than any cup match, rest stays the same."""
         wednesday_epl = datetime(2025, 1, 8, 19, 45, tzinfo=UTC)
         saturday = datetime(2025, 1, 11, 15, 0, tzinfo=UTC)
@@ -417,7 +417,7 @@ class TestFixturesDfIntegration:
             commence_time=saturday,
         )
 
-        df = _make_fixtures_df(
+        df = _make_games_df(
             [
                 {
                     "date": "2025-01-01T15:00Z",
@@ -436,11 +436,11 @@ class TestFixturesDfIntegration:
 
         no_df = extract_epl_schedule_features(prior_events, event, known_at=event.commence_time)
         with_df = extract_epl_schedule_features(
-            prior_events, event, known_at=event.commence_time, fixtures_df=df
+            prior_events, event, known_at=event.commence_time, games_df=df
         )
         assert no_df.home_rest_days == with_df.home_rest_days
 
-    def test_fixtures_df_only_no_prior_events(self) -> None:
+    def test_games_df_only_no_prior_events(self) -> None:
         """DataFrame provides rest data even when prior_events is empty."""
         saturday = datetime(2025, 1, 11, 15, 0, tzinfo=UTC)
 
@@ -451,7 +451,7 @@ class TestFixturesDfIntegration:
             commence_time=saturday,
         )
 
-        df = _make_fixtures_df(
+        df = _make_games_df(
             [
                 {
                     "date": "2025-01-08T20:00Z",
@@ -463,7 +463,7 @@ class TestFixturesDfIntegration:
         )
 
         features = extract_epl_schedule_features(
-            [], event, known_at=event.commence_time, fixtures_df=df
+            [], event, known_at=event.commence_time, games_df=df
         )
         assert features.home_rest_days is not None
         assert abs(features.home_rest_days - 2.791666666666) < 0.01
@@ -471,7 +471,7 @@ class TestFixturesDfIntegration:
         assert features.away_rest_days is None
         assert features.rest_advantage is None
 
-    def test_rest_advantage_with_fixtures_df(self) -> None:
+    def test_rest_advantage_with_games_df(self) -> None:
         """Home team plays CL midweek, away doesn't -> negative rest advantage."""
         saturday_epl = datetime(2025, 1, 4, 15, 0, tzinfo=UTC)
         next_saturday = datetime(2025, 1, 11, 15, 0, tzinfo=UTC)
@@ -493,7 +493,7 @@ class TestFixturesDfIntegration:
             commence_time=next_saturday,
         )
 
-        df = _make_fixtures_df(
+        df = _make_games_df(
             [
                 {
                     "date": "2025-01-04T15:00Z",
@@ -517,7 +517,7 @@ class TestFixturesDfIntegration:
         )
 
         features = extract_epl_schedule_features(
-            prior_events, event, known_at=event.commence_time, fixtures_df=df
+            prior_events, event, known_at=event.commence_time, games_df=df
         )
         assert features.home_rest_days is not None
         assert features.away_rest_days is not None
@@ -528,7 +528,7 @@ class TestFixturesDfIntegration:
         assert features.rest_advantage < 0  # Home team has less rest
 
     def test_backward_compatible_with_none_df(self) -> None:
-        """fixtures_df=None gives identical results to no-argument call."""
+        """games_df=None gives identical results to no-argument call."""
         base = datetime(2025, 1, 11, 15, 0, tzinfo=UTC)
         prior = [
             _make_event(
@@ -549,7 +549,7 @@ class TestFixturesDfIntegration:
 
         default = extract_epl_schedule_features(prior, event, known_at=event.commence_time)
         explicit_none = extract_epl_schedule_features(
-            prior, event, known_at=event.commence_time, fixtures_df=None
+            prior, event, known_at=event.commence_time, games_df=None
         )
         assert default.home_rest_days == explicit_none.home_rest_days
         assert default.away_rest_days == explicit_none.away_rest_days
@@ -557,7 +557,7 @@ class TestFixturesDfIntegration:
         assert default.is_midweek == explicit_none.is_midweek
 
     def test_opponent_column_indexes_team(self) -> None:
-        """Teams appearing only as opponents are still found in fixture lookups."""
+        """Teams appearing only as opponents are still found in game lookups."""
         saturday = datetime(2025, 1, 11, 15, 0, tzinfo=UTC)
         event = _make_event(
             event_id=1,
@@ -567,7 +567,7 @@ class TestFixturesDfIntegration:
         )
 
         # Ipswich only appears in the opponent column
-        df = _make_fixtures_df(
+        df = _make_games_df(
             [
                 {
                     "date": "2025-01-04T15:00Z",
@@ -585,7 +585,7 @@ class TestFixturesDfIntegration:
         )
 
         features = extract_epl_schedule_features(
-            [], event, known_at=event.commence_time, fixtures_df=df
+            [], event, known_at=event.commence_time, games_df=df
         )
         # Ipswich's most recent: Jan 7 Liverpool LC match (found via opponent column)
         assert features.away_rest_days is not None
@@ -600,7 +600,7 @@ class TestCongestionFeatures:
         event = _make_event(
             commence_time=datetime(2025, 1, 18, 15, 0, tzinfo=UTC),
         )
-        df = _make_fixtures_df(
+        df = _make_games_df(
             [
                 # Arsenal: 3 matches in last 14d, 1 outside window
                 {
@@ -638,7 +638,7 @@ class TestCongestionFeatures:
         )
 
         features = extract_epl_schedule_features(
-            [], event, known_at=event.commence_time, fixtures_df=df
+            [], event, known_at=event.commence_time, games_df=df
         )
         # 14d window starts Jan 4 15:00. Arsenal matches on Jan 5, Jan 8, Jan 11 = 3
         assert features.home_matches_last_14d == 3.0
@@ -649,7 +649,7 @@ class TestCongestionFeatures:
         event = _make_event(
             commence_time=datetime(2025, 1, 11, 15, 0, tzinfo=UTC),
         )
-        df = _make_fixtures_df(
+        df = _make_games_df(
             [
                 # Arsenal played CL on Wednesday (3 days ago)
                 {
@@ -669,7 +669,7 @@ class TestCongestionFeatures:
         )
 
         features = extract_epl_schedule_features(
-            [], event, known_at=event.commence_time, fixtures_df=df
+            [], event, known_at=event.commence_time, games_df=df
         )
         assert features.home_european_last_7d == 1.0
         assert features.away_european_last_7d == 0.0
@@ -679,7 +679,7 @@ class TestCongestionFeatures:
         event = _make_event(
             commence_time=datetime(2025, 1, 11, 15, 0, tzinfo=UTC),
         )
-        df = _make_fixtures_df(
+        df = _make_games_df(
             [
                 {
                     "date": "2025-01-09T20:00Z",
@@ -697,7 +697,7 @@ class TestCongestionFeatures:
         )
 
         features = extract_epl_schedule_features(
-            [], event, known_at=event.commence_time, fixtures_df=df
+            [], event, known_at=event.commence_time, games_df=df
         )
         assert features.home_european_last_7d == 1.0
         assert features.away_european_last_7d == 1.0
@@ -707,7 +707,7 @@ class TestCongestionFeatures:
         event = _make_event(
             commence_time=datetime(2025, 1, 18, 15, 0, tzinfo=UTC),
         )
-        df = _make_fixtures_df(
+        df = _make_games_df(
             [
                 # CL match 10 days ago
                 {
@@ -720,12 +720,12 @@ class TestCongestionFeatures:
         )
 
         features = extract_epl_schedule_features(
-            [], event, known_at=event.commence_time, fixtures_df=df
+            [], event, known_at=event.commence_time, games_df=df
         )
         assert features.home_european_last_7d == 0.0
 
     def test_congestion_none_without_df(self) -> None:
-        """Without fixtures_df, congestion features are None."""
+        """Without games_df, congestion features are None."""
         event = _make_event(commence_time=datetime(2025, 1, 11, 15, 0, tzinfo=UTC))
         features = extract_epl_schedule_features([], event, known_at=event.commence_time)
         assert features.home_matches_last_14d is None
@@ -735,7 +735,7 @@ class TestCongestionFeatures:
 
     def test_congestion_without_rows_before_kickoff_is_nan(self) -> None:
         event = _make_event(commence_time=datetime(2025, 1, 11, 15, 0, tzinfo=UTC))
-        df = _make_fixtures_df(
+        df = _make_games_df(
             [
                 {
                     "date": "2025-01-20T15:00Z",
@@ -746,7 +746,7 @@ class TestCongestionFeatures:
             ]
         )
         features = extract_epl_schedule_features(
-            [], event, known_at=event.commence_time, fixtures_df=df.iloc[0:0]
+            [], event, known_at=event.commence_time, games_df=df.iloc[0:0]
         )
         assert features.home_matches_last_14d is None
         assert features.away_european_last_7d is None
@@ -754,7 +754,7 @@ class TestCongestionFeatures:
     def test_congestion_with_empty_df(self) -> None:
         """Empty DataFrame produces zero counts (not None)."""
         event = _make_event(commence_time=datetime(2025, 1, 11, 15, 0, tzinfo=UTC))
-        df = _make_fixtures_df(
+        df = _make_games_df(
             [
                 {
                     "date": "2025-06-01T15:00Z",
@@ -765,7 +765,7 @@ class TestCongestionFeatures:
             ]
         )
         features = extract_epl_schedule_features(
-            [], event, known_at=event.commence_time, fixtures_df=df
+            [], event, known_at=event.commence_time, games_df=df
         )
         assert features.home_matches_last_14d == 0.0
         assert features.away_matches_last_14d == 0.0

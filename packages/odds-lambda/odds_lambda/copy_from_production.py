@@ -275,7 +275,7 @@ class ProductionDataCopier:
             )
         if keys:
             return (await session.execute(select(Event).where(Event.id == keys.pop()))).scalar_one()
-        fixture = (
+        game = (
             await session.execute(
                 select(Event)
                 .where(
@@ -288,7 +288,7 @@ class ProductionDataCopier:
             )
         ).scalars()
         ids = {row.source: row.external_id for row in external_ids}
-        for candidate in fixture:
+        for candidate in game:
             held = (
                 await session.execute(
                     select(EventExternalId).where(EventExternalId.event_id == candidate.id)

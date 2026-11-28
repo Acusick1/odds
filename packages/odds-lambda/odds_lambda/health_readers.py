@@ -22,7 +22,7 @@ from sqlmodel import col
 from odds_lambda.collection_calendar import (
     CollectionSource,
     active_hours_between,
-    fixture_calendar,
+    game_calendar,
     latest_snapshot_time,
 )
 from odds_lambda.scheduling.jobs import (
@@ -57,7 +57,7 @@ def collection_sources() -> tuple[CollectionSource, ...]:
 class Freshness(StrEnum):
     FRESH = "fresh"
     STALE = "stale"
-    # No scheduled fixture inside the source's horizon, so no snapshot is due.
+    # No scheduled game inside the source's horizon, so no snapshot is due.
     IDLE = "idle"
     # The source has never written the market, so there is no gap to measure.
     UNKNOWN = "unknown"
@@ -67,7 +67,7 @@ class Freshness(StrEnum):
 class SourceFreshness:
     """One market of one sport a bootstrapped collection source writes.
 
-    ``active_hours`` and ``threshold_hours`` are set when a fixture is due and the market has
+    ``active_hours`` and ``threshold_hours`` are set when a game is due and the market has
     history: the gap without the overnight window, and the most it may be.
     """
 
@@ -86,9 +86,9 @@ async def source_freshness(
 ) -> list[SourceFreshness]:
     """Each market a bootstrapped source writes for each of its sports, and whether it is stale.
 
-    A market is checked only when a scheduled fixture lies inside the source's horizon for
+    A market is checked only when a scheduled game lies inside the source's horizon for
     that sport (else ``IDLE``) and the source has written it before (else ``UNKNOWN``). The gap
-    is the time since the later of the market's last snapshot and the moment the next fixture
+    is the time since the later of the market's last snapshot and the moment the next game
     entered the horizon, counted without the sport's overnight window. It is ``STALE`` past the
     largest of ``stale_data_hours``, ``stale_cadence_multiplier`` polling intervals at the tier
     of the next kickoff, and ``stale_last_interval_multiplier`` intervals at the tier the next
@@ -105,9 +105,9 @@ async def source_freshness(
             if collection is None:
                 continue
             job_name = make_compound_job_name(source.job_name, sport_key)
-            horizon = collection.fixture_horizon
-            calendar = await fixture_calendar(session, sport_key, now=now, horizon=horizon)
-            # The next kick-off, when a fixture inside the horizon makes a snapshot due.
+            horizon = collection.game_horizon
+            calendar = await game_calendar(session, sport_key, now=now, horizon=horizon)
+            # The next kick-off, when a game inside the horizon makes a snapshot due.
             due = calendar.next_kickoff if calendar.kickoffs_in_horizon else None
             for market in collection.markets:
                 last = await latest_snapshot_time(session, sport_key, source.source, market)

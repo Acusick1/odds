@@ -9,10 +9,10 @@ from typing import Any
 
 import pytest
 from odds_analytics.backfill_plan import (
-    Fixture,
+    Game,
     Manifest,
     Season,
-    load_fixtures,
+    load_games,
     plan,
     targets,
 )
@@ -62,7 +62,7 @@ def manifest_data(**overrides: Any) -> dict[str, Any]:
         ],
         "probe": {
             "snapshots": ["2022-09-17T09:55:38Z"],
-            "min_fixture_lead_hours": 12,
+            "min_game_lead_hours": 12,
             "required_bookmakers": {"h2h": ["book0"]},
         },
     }
@@ -74,19 +74,19 @@ def manifest() -> Manifest:
     return Manifest.model_validate(manifest_data())
 
 
-def random_fixtures(seed: int, n: int) -> list[Fixture]:
+def random_games(seed: int, n: int) -> list[Game]:
     """Kick-offs on any minute either side of the grid change, many sharing a slot."""
     rng = random.Random(seed)
     base = datetime(2022, 9, 1, tzinfo=UTC) - timedelta(days=20)
     slots = [base + timedelta(minutes=rng.randrange(40 * 24 * 60)) for _ in range(n // 3)]
-    return [Fixture(i, rng.choice(slots)) for i in range(n)]
+    return [Game(i, rng.choice(slots)) for i in range(n)]
 
 
-def decisions(fixtures: list[Fixture], manifest: Manifest) -> list[tuple[datetime, timedelta]]:
-    """Every whole-minute decision time of every fixture's bands, with its max age."""
+def decisions(games: list[Game], manifest: Manifest) -> list[tuple[datetime, timedelta]]:
+    """Every whole-minute decision time of every game's bands, with its max age."""
     return [
         (f.kickoff - timedelta(minutes=lead), b.max_age)
-        for f in fixtures
+        for f in games
         for b in manifest.coverage
         for lead in range(b.min_lead_minutes, b.max_lead_minutes + 1)
     ]
@@ -97,10 +97,10 @@ class TestPlan:
     def test_every_decision_minute_has_a_fresh_enough_call(
         self, manifest: Manifest, seed: int
     ) -> None:
-        fixtures = random_fixtures(seed, 30)
-        times = [call.time for call in plan(manifest, fixtures)]
+        games = random_games(seed, 30)
+        times = [call.time for call in plan(manifest, games)]
 
-        for decision, age in decisions(fixtures, manifest):
+        for decision, age in decisions(games, manifest):
             latest = times[bisect.bisect_right(times, decision) - 1]
             assert decision - age <= latest <= decision, (decision, age, latest)
 
@@ -108,22 +108,22 @@ class TestPlan:
     def test_every_call_lies_inside_each_band_it_serves(
         self, manifest: Manifest, seed: int
     ) -> None:
-        fixtures = random_fixtures(seed, 30)
-        calls = plan(manifest, fixtures)
+        games = random_games(seed, 30)
+        calls = plan(manifest, games)
 
         for call in calls:
             for target in call.serves:
                 assert target.contains(call.time), (call.time, target)
         served = {target for call in calls for target in call.serves}
-        assert served == set(targets(manifest, fixtures))
+        assert served == set(targets(manifest, games))
 
     @pytest.mark.parametrize("seed", range(20))
     def test_no_fewer_grid_calls_cover_every_decision(self, seed: int) -> None:
         small = Manifest.model_validate(manifest_data(coverage=[band(1, 20, 10), band(21, 40, 20)]))
         rng = random.Random(seed)
         base = datetime(2022, 9, 1, tzinfo=UTC) - timedelta(minutes=45)
-        fixtures = [Fixture(i, base + timedelta(minutes=rng.randrange(30))) for i in range(2)]
-        needs = decisions(fixtures, small)
+        games = [Game(i, base + timedelta(minutes=rng.randrange(30))) for i in range(2)]
+        needs = decisions(games, small)
         lo = min(d - age for d, age in needs)
         hi = max(d for d, _ in needs)
         points = sorted(
@@ -141,10 +141,10 @@ class TestPlan:
             k for k in range(1, len(points) + 1) if any(map(covers, combinations(points, k)))
         )
 
-        assert len(plan(small, fixtures)) == fewest
+        assert len(plan(small, games)) == fewest
 
     def test_calls_fall_on_the_phased_snapshot_grid(self, manifest: Manifest) -> None:
-        for call in plan(manifest, random_fixtures(0, 30)):
+        for call in plan(manifest, random_games(0, 30)):
             if call.time >= FIVE_MINUTES_FROM:
                 assert (call.time.minute % 5, call.time.second) == (0, 38)
             else:
@@ -154,10 +154,10 @@ class TestPlan:
     def test_no_call_is_after_a_decision_it_is_the_input_to(
         self, manifest: Manifest, seed: int
     ) -> None:
-        fixtures = random_fixtures(seed, 30)
-        times = [call.time for call in plan(manifest, fixtures)]
+        games = random_games(seed, 30)
+        times = [call.time for call in plan(manifest, games)]
 
-        for decision, _ in decisions(fixtures, manifest):
+        for decision, _ in decisions(games, manifest):
             index = bisect.bisect_right(times, decision) - 1
             assert index >= 0 and times[index] <= decision
 
@@ -165,34 +165,34 @@ class TestPlan:
         single = Manifest.model_validate(manifest_data(coverage=[band(1, 10, 10)]))
         kickoff = datetime(2022, 10, 1, 14, 0, tzinfo=UTC)
 
-        calls = plan(single, [Fixture(1, kickoff)])
+        calls = plan(single, [Game(1, kickoff)])
 
         assert [c.time for c in calls] == [
             datetime(2022, 10, 1, 13, 45, 38, tzinfo=UTC),
             datetime(2022, 10, 1, 13, 55, 38, tzinfo=UTC),
         ]
 
-    def test_fixtures_sharing_a_kickoff_share_calls(self, manifest: Manifest) -> None:
+    def test_games_sharing_a_kickoff_share_calls(self, manifest: Manifest) -> None:
         kickoff = datetime(2022, 10, 1, 14, 0, tzinfo=UTC)
 
-        calls = plan(manifest, [Fixture(1, kickoff), Fixture(2, kickoff)])
+        calls = plan(manifest, [Game(1, kickoff), Game(2, kickoff)])
 
-        assert len(calls) == len(plan(manifest, [Fixture(1, kickoff)]))
-        assert all({t.fixture.event_id for t in call.serves} == {1, 2} for call in calls)
+        assert len(calls) == len(plan(manifest, [Game(1, kickoff)]))
+        assert all({t.game.event_id for t in call.serves} == {1, 2} for call in calls)
 
     def test_a_max_age_shorter_than_the_grid_raises(self) -> None:
         narrow = Manifest.model_validate(manifest_data(coverage=[band(1, 30, 3)]))
 
         with pytest.raises(ValueError, match="no snapshot"):
-            plan(narrow, [Fixture(1, datetime(2021, 10, 1, 19, 45, tzinfo=UTC))])
+            plan(narrow, [Game(1, datetime(2021, 10, 1, 19, 45, tzinfo=UTC))])
 
     def test_a_kickoff_between_minutes_is_rejected(self) -> None:
         with pytest.raises(ValueError, match="not on a whole minute"):
-            Fixture(1, datetime(2022, 10, 1, 15, 50, 30, tzinfo=UTC))
+            Game(1, datetime(2022, 10, 1, 15, 50, 30, tzinfo=UTC))
 
     def test_a_decision_before_the_first_snapshot_raises(self, manifest: Manifest) -> None:
         with pytest.raises(ValueError, match="before the first snapshot"):
-            plan(manifest, [Fixture(1, datetime(2020, 6, 6, 1, 0, tzinfo=UTC))])
+            plan(manifest, [Game(1, datetime(2020, 6, 6, 1, 0, tzinfo=UTC))])
 
 
 class TestManifest:
@@ -202,7 +202,7 @@ class TestManifest:
         season = next(iter(committed.seasons.values()))
         kickoff = season.start + timedelta(days=60, hours=14)
 
-        assert plan(committed, [Fixture(1, kickoff)])
+        assert plan(committed, [Game(1, kickoff)])
 
     @pytest.mark.parametrize("path", COMMITTED, ids=lambda p: p.stem)
     def test_every_committed_manifest_requests_the_same_prices(self, path: Path) -> None:
@@ -281,7 +281,7 @@ class TestManifest:
     @pytest.mark.parametrize(
         ("markets", "probe", "message"),
         [
-            (None, {"min_fixture_lead_hours": 11}, "fixture lead"),
+            (None, {"min_game_lead_hours": 11}, "game lead"),
             (None, {"required_bookmakers": {"h2h": ["pinnacle"]}}, "unrequested books"),
             (
                 ["h2h"],
@@ -355,7 +355,7 @@ class TestManifest:
         assert [rest for _, rest in single.band_cuts()] == [None]
 
 
-class TestLoadFixtures:
+class TestLoadGames:
     async def test_loads_the_seasons_final_events_of_the_sport(self, test_session) -> None:
         season = Season(
             start=datetime(2022, 7, 1, tzinfo=UTC), end=datetime(2023, 7, 1, tzinfo=UTC)
@@ -382,6 +382,6 @@ class TestLoadFixtures:
                 ),
             )
 
-        fixtures = await load_fixtures(test_session, "soccer_epl", season)
+        games = await load_games(test_session, "soccer_epl", season)
 
-        assert [f.event_id for f in fixtures] == [6, 2, 1]
+        assert [f.event_id for f in games] == [6, 2, 1]

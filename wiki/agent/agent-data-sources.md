@@ -15,7 +15,7 @@ The [betting agent](betting-agent.md) draws on two kinds of source. The split de
 
 ## Scheduled collection
 
-Every odds feed, and what each supplies, is on [data sources](../collection/data-sources.md); the agent reads them through the [MCP tools](mcp-server.md). Beside the odds feeds, the agent's tools read ESPN fixtures (the all-competition EPL schedule, [EPL context](../collection/epl-context-data.md)) and the MLB Stats API's probable pitchers ([MLB pitchers](../collection/mlb-probable-pitchers.md)). Every scheduled collector runs on the production host ([job deployment matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). ESPN lineups are loaded only by a manual script (`scripts.ingest_espn_lineups`); the lineup rejection below applies to lineup timing for the agent, not to ESPN fixtures.
+Every odds feed, and what each supplies, is on [data sources](../collection/data-sources.md); the agent reads them through the [MCP tools](mcp-server.md). Beside the odds feeds, the agent's tools read ESPN games (the all-competition EPL schedule, [EPL context](../collection/epl-context-data.md)) and the MLB Stats API's probable pitchers ([MLB pitchers](../collection/mlb-probable-pitchers.md)). Every scheduled collector runs on the production host ([job deployment matrix](../scheduling/job-deployment-matrix.md#where-each-job-runs)). ESPN lineups are loaded only by a manual script (`scripts.ingest_espn_lineups`); the lineup rejection below applies to lineup timing for the agent, not to ESPN games.
 
 ## On-demand research
 

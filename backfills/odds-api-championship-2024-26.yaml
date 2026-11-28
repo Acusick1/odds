@@ -1,8 +1,8 @@
 # Odds API historical backfill of the Championship 2024-25 and 2025-26 (#785, map #774).
-# A top-up is a new manifest. Snapshot grid, billing, books and fixture horizon follow the
+# A top-up is a new manifest. Snapshot grid, billing, books and game horizon follow the
 # probe (#729, #787).
 sport: soccer_efl_champ
-# League seasons only: the stored fixtures exclude the play-offs (#789), and the planner costs only stored fixtures.
+# League seasons only: the stored games exclude the play-offs (#789), and the planner costs only stored games.
 seasons:
   2024-25: {start: 2024-07-01T00:00:00Z, end: 2025-07-01T00:00:00Z}
   2025-26: {start: 2025-07-01T00:00:00Z, end: 2026-07-01T00:00:00Z}
@@ -12,7 +12,7 @@ markets: [h2h]
 # sport, Pinnacle not among them (wiki/collection/odds-api-facts.md#coverage).
 regions: [uk]
 # A decision at any whole minute in a band finds a snapshot at most its max age old.
-# Chosen in #740, the far band ending at 4 d since the API lists Championship fixtures only
+# Chosen in #740, the far band ending at 4 d since the API lists Championship games only
 # 125-172 h ahead (#787).
 coverage:
   - {min_lead_minutes: 1, max_lead_minutes: 120, max_input_age_minutes: 10}
@@ -25,8 +25,8 @@ probe:
   snapshots:
     - 2024-09-14T09:55:38Z
     - 2025-09-13T09:55:38Z
-  # Call sharing needs fixtures as far ahead as the earliest coverage, 4 d plus its 6 h max age.
-  min_fixture_lead_hours: 102
+  # Call sharing needs games as far ahead as the earliest coverage, 4 d plus its 6 h max age.
+  min_game_lead_hours: 102
   # Betfair Exchange is the scoring reference and close (ADR-0012); no current candidate or
   # model uses Pinnacle.
   required_bookmakers:

@@ -76,7 +76,7 @@ SOURCE = CollectionSource(
 
 
 class EmptyListingError(RuntimeError):
-    """Gamma lists no upcoming match for a sport that has fixtures in the database."""
+    """Gamma lists no upcoming match for a sport that has games in the database."""
 
 
 @dataclass

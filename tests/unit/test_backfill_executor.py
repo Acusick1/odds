@@ -11,7 +11,7 @@ from unittest.mock import patch
 import pytest
 from odds_analytics import backfill_executor
 from odds_analytics.backfill_executor import BackfillExecutor, CallProgress
-from odds_analytics.backfill_plan import Call, Fixture, Manifest, Target
+from odds_analytics.backfill_plan import Call, Game, Manifest, Target
 from odds_core.api_models import HistoricalOddsResponse, parse_api_event
 from odds_core.config import APIConfig, Settings
 from odds_core.models import OddsSnapshot
@@ -36,7 +36,7 @@ def manifest(**overrides: Any) -> Manifest:
         "snapshot_grid": [{"start": "2022-09-01T00:00:38Z", "step_minutes": 5}],
         "probe": {
             "snapshots": ["2026-04-18T09:55:38Z"],
-            "min_fixture_lead_hours": 12,
+            "min_game_lead_hours": 12,
             "required_bookmakers": {},
         },
     }
@@ -46,7 +46,7 @@ def manifest(**overrides: Any) -> Manifest:
 def call(at: datetime, *event_ids: int) -> Call:
     m = manifest()
     band = m.coverage[0]
-    return Call(at, tuple(Target(Fixture(i, KICKOFF), band, at, at) for i in event_ids))
+    return Call(at, tuple(Target(Game(i, KICKOFF), band, at, at) for i in event_ids))
 
 
 def raw_event(api_id: str) -> dict[str, Any]:
@@ -216,7 +216,7 @@ class TestBackfillExecutor:
         assert [
             (f.sport_key, f.api_quota_remaining, f.api_quota_used) for f in writer.fetch_logs
         ] == [("soccer_epl", None, None)]
-        assert (result.fixtures_stored, result.snapshots_stored) == (2, 4)
+        assert (result.games_stored, result.snapshots_stored) == (2, 4)
         assert progress == [CallProgress(T0, "fetched", 2, 20, 900)]
 
     async def test_units_and_quota_follow_the_calls(self, test_session, writer) -> None:
@@ -247,7 +247,7 @@ class TestBackfillExecutor:
 
         assert slept == sleeps
 
-    async def test_skips_a_call_whose_fixtures_all_have_its_snapshot(
+    async def test_skips_a_call_whose_games_all_have_its_snapshot(
         self, test_session, writer
     ) -> None:
         for event_id in (1, 2):
@@ -261,7 +261,7 @@ class TestBackfillExecutor:
         assert (result.calls_made, result.calls_skipped) == (0, 1)
         assert client.requests == []
 
-    async def test_skips_a_call_when_any_served_fixture_has_the_snapshot(
+    async def test_skips_a_call_when_any_served_game_has_the_snapshot(
         self, test_session, writer
     ) -> None:
         for event_id in (1, 2):
@@ -274,7 +274,7 @@ class TestBackfillExecutor:
 
         assert (result.calls_made, result.calls_skipped) == (0, 1)
 
-    async def test_calls_when_no_served_fixture_has_a_requested_market(
+    async def test_calls_when_no_served_game_has_a_requested_market(
         self, test_session, writer
     ) -> None:
         await add_event(test_session, make_epl_event(1, KICKOFF))

@@ -1,4 +1,4 @@
-# Per-sport fixed-schedule rules. Currently empty — fetch-espn-fixtures
+# Per-sport fixed-schedule rules. Currently empty — fetch-espn-games
 # runs on the local scheduler
 # (see `fixed_schedule_expressions` below). The resources are retained so
 # adding a new Lambda-hosted fixed-schedule job is a single-line change
@@ -86,7 +86,7 @@ locals {
 
   # Schedule expressions for fixed-schedule jobs (map lookup prevents
   # a new job silently inheriting the wrong schedule via a ternary fallback).
-  # Only jobs that fire from EventBridge belong here; fetch-espn-fixtures runs in the local
+  # Only jobs that fire from EventBridge belong here; fetch-espn-games runs in the local
   # scheduler.
   fixed_schedule_expressions = {}
 
