@@ -174,6 +174,8 @@ def report() -> None:
         console.print("[yellow]No candidates registered and no candidate bets[/yellow]")
         return
     console.print(_report_table(summaries))
+    if any(s.delayed_fills for s in summaries):
+        console.print(_delayed_fill_table(summaries))
     for s in summaries:
         if len(s.leagues) > 1:
             console.print(_league_table(f"{s.name} v{s.version}", s.leagues))
@@ -224,6 +226,38 @@ def _report_table(summaries: list[CandidateSummary]) -> Table:
             f"[{style}]{s.verdict}[/{style}]",
         )
     return table
+
+
+def _delayed_fill_table(summaries: list[CandidateSummary]) -> Table:
+    table = Table(
+        title="Delayed fill, for information: the verdict is the instant fill's",
+        caption=(
+            "Instant and delayed EV over the bets filled at that delay; void: bets whose book "
+            "did not quote the selection then, of those observed"
+        ),
+    )
+    table.add_column("Candidate", style="cyan")
+    table.add_column("Version", justify="right")
+    table.add_column("With close", justify="right")
+    for score in next(s.delayed_fills for s in summaries if s.delayed_fills):
+        label = score.label
+        table.add_column(f"Instant EV {label}", justify="right")
+        table.add_column(f"EV {label}", justify="right")
+        table.add_column(f"Void {label}", justify="right")
+        table.add_column(f"Unobserved {label}", justify="right")
+    for s in summaries:
+        if not s.delayed_fills:
+            continue
+        cells = [s.name, str(s.version), str(s.bets_with_close)]
+        for f in s.delayed_fills:
+            rate = "-" if f.void_rate is None else f"{f.void_rate:.0%}"
+            cells += [_ev(f.instant_ev), _ev(f.mean_ev), f"{rate} ({f.voided})", str(f.unobserved)]
+        table.add_row(*cells)
+    return table
+
+
+def _ev(value: float | None) -> str:
+    return "-" if value is None else f"{value:+.4f}"
 
 
 def _league_table(

@@ -3,7 +3,8 @@
 A candidate is scored by EV at the price taken against the Betfair Exchange close
 (``p_close * price_decimal - 1``), on the bets with a close in the prefix of its bets
 that is settled and final, at checkpoints of 100, 200, ... bets. Realised P&L is
-reported beside it.
+reported beside it, and so is the EV of the same bets filled at their book's price some
+minutes after placement, which no verdict reads.
 """
 
 from __future__ import annotations
@@ -25,12 +26,13 @@ from odds_core.candidates import Candidate, CandidateStatus, RuleCandidate
 from odds_core.close import close_grace, close_quotes, event_close
 from odds_core.exchange_price import ExchangePrice
 from odds_core.market_prices import Outcome
-from odds_core.models import Event, EventStatus
+from odds_core.models import Event, EventStatus, OddsSnapshot
 from odds_core.odds_math import calculate_profit_from_decimal, selection_won
-from odds_core.quotes import Quote
-from odds_core.vocabulary import Market, Source
+from odds_core.quotes import Quote, quotes
+from odds_core.vocabulary import Market, Side, Source
 from odds_lambda.candidate_rules import BetIntent
-from sqlalchemy import func, or_, select
+from odds_lambda.candidate_rules.inputs import RETAIL_SOURCES
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -49,6 +51,8 @@ MIN_CURRENT_EVENTS = 2
 # The family's promote levels put the interval tails at a few resamples when this is 2000.
 DEFAULT_BOOTSTRAP_SAMPLES = 10_000
 BOOTSTRAP_SEED = 0
+# How long after a decision a bet placed by hand is filled, in the delayed-fill EV (#896).
+FILL_DELAYS: tuple[timedelta, ...] = (timedelta(minutes=5), timedelta(minutes=10))
 
 
 class Verdict(StrEnum):
@@ -61,6 +65,26 @@ class Verdict(StrEnum):
 def expected_value(p_close: float, price_decimal: float) -> float:
     """EV per unit staked of taking ``price_decimal`` against the close probability."""
     return p_close * price_decimal - 1
+
+
+class FillStatus(StrEnum):
+    """What a bet's book showed some minutes after placement (``delayed_fill``)."""
+
+    # The book quoted the selection on the bet's line.
+    FILLED = "filled"
+    # The book was quoted without the selection on that line, so the delayed bet is not placed.
+    VOIDED = "voided"
+    # No retail snapshot by kick-off quoted the book, so nothing is known.
+    UNOBSERVED = "unobserved"
+
+
+@dataclass(frozen=True)
+class DelayedFill:
+    """A bet at its book ``delay`` after placement: ``price_decimal`` is set when ``FILLED``."""
+
+    delay: timedelta
+    status: FillStatus
+    price_decimal: float | None = None
 
 
 @dataclass(frozen=True)
@@ -89,6 +113,8 @@ class ScoredBet:
     close_source: Source | None
     # The EV the rule estimated at decision time (``BetIntent.estimated_ev``); None without one.
     estimated_ev: float | None
+    # One per ``FILL_DELAYS``, for a live bet only; empty for a replayed or backtest bet.
+    delayed: tuple[DelayedFill, ...] = ()
 
     @property
     def settled(self) -> bool:
@@ -97,6 +123,18 @@ class ScoredBet:
     @property
     def ev(self) -> float | None:
         return None if self.p_close is None else expected_value(self.p_close, self.price_decimal)
+
+    def fill(self, delay: timedelta) -> DelayedFill | None:
+        """The fill at ``delay``; None on a bet without one (a replayed or backtest bet)."""
+        return next((f for f in self.delayed if f.delay == delay), None)
+
+    def delayed_ev(self, delay: timedelta) -> float | None:
+        """EV at the price ``delay`` after placement; None without a close or a filled price."""
+        fill = self.fill(delay)
+        price = None if fill is None else fill.price_decimal
+        return (
+            None if self.p_close is None or price is None else expected_value(self.p_close, price)
+        )
 
     @property
     def ev_power(self) -> float | None:
@@ -132,6 +170,36 @@ class LeagueBreakdown:
 
 
 @dataclass(frozen=True)
+class DelayedFillScore:
+    """The bets with a close in the scoreable prefix filled ``delay`` after placement, for
+    information. Of the ``bets``, ``voided`` were not quoted then and ``unobserved`` had no
+    snapshot to tell. Over the filled rest, ``instant_ev`` is the stake-weighted mean EV at the
+    price taken and ``mean_ev`` at the delayed price, so their gap is the price change alone;
+    both None with none filled."""
+
+    delay: timedelta
+    bets: int
+    voided: int
+    unobserved: int
+    instant_ev: float | None
+    mean_ev: float | None
+
+    @property
+    def label(self) -> str:
+        return f"+{int(self.delay.total_seconds() // 60)} min"
+
+    @property
+    def filled(self) -> int:
+        return self.bets - self.voided - self.unobserved
+
+    @property
+    def void_rate(self) -> float | None:
+        """Voided bets per observed bet; None with none observed."""
+        observed = self.bets - self.unobserved
+        return self.voided / observed if observed else None
+
+
+@dataclass(frozen=True)
 class CandidateSummary:
     """``registered`` is the registry's entry at exactly this version, None for a version the
     registry no longer holds: a version bump overwrites the file, so an old version's kind,
@@ -162,6 +230,8 @@ class CandidateSummary:
     leagues: tuple[LeagueBreakdown, ...]
     # Over every bet with a close, as ``current`` (``estimates_of``).
     estimates: Estimates | None
+    # The bets with a close filled at each of ``FILL_DELAYS`` (``delayed_fill_scores``).
+    delayed_fills: tuple[DelayedFillScore, ...]
 
     @property
     def status(self) -> CandidateStatus | None:
@@ -459,6 +529,30 @@ def stake_weighted_mean_ev(with_close: Sequence[ScoredBet]) -> float | None:
     return sum(t.stake * t.ev for t in with_close if t.ev is not None) / stake
 
 
+def delayed_fill_scores(with_close: Sequence[ScoredBet]) -> tuple[DelayedFillScore, ...]:
+    """``with_close``, bets with a close, scored at each delay of ``FILL_DELAYS`` with
+    ``expected_value`` and their close probability; empty without a bet or when one of them has
+    no fills (a replayed or backtest bet)."""
+    if not with_close or any(not t.delayed for t in with_close):
+        return ()
+    scores: list[DelayedFillScore] = []
+    for delay in FILL_DELAYS:
+        statuses = [f.status for t in with_close if (f := t.fill(delay)) is not None]
+        filled = [(t, ev) for t in with_close if (ev := t.delayed_ev(delay)) is not None]
+        stake = sum(t.stake for t, _ in filled)
+        scores.append(
+            DelayedFillScore(
+                delay=delay,
+                bets=len(with_close),
+                voided=statuses.count(FillStatus.VOIDED),
+                unobserved=statuses.count(FillStatus.UNOBSERVED),
+                instant_ev=stake_weighted_mean_ev([t for t, _ in filled]),
+                mean_ev=sum(t.stake * ev for t, ev in filled) / stake if stake else None,
+            )
+        )
+    return tuple(scores)
+
+
 def estimates_of(with_close: Sequence[ScoredBet], n_boot: int, seed: int) -> Estimates | None:
     """The estimates over ``with_close``, bets with a close in placement order, with the gap's
     interval at ``KILL_LEVEL`` like the checkpoint's; None without a bet or when one of them has
@@ -602,6 +696,7 @@ def summarize_candidate(
         family_versions=checkpoint.family_versions if checkpoint else family_size(now),
         leagues=league_breakdown(bets, now),
         estimates=estimates_of(with_close, n_boot, seed),
+        delayed_fills=delayed_fill_scores(with_close),
     )
 
 
@@ -712,8 +807,149 @@ async def close_probabilities(
     ]
 
 
+class RetailStamp(NamedTuple):
+    """A retail snapshot's id, source and time."""
+
+    snapshot_id: int
+    source: Source
+    snapshot_time: datetime
+
+
+def delayed_snapshots(
+    stamps: Sequence[RetailStamp], after: datetime, kickoff: datetime
+) -> list[RetailStamp]:
+    """Each source's first of ``stamps`` (an event's retail snapshots) stamped at or
+    after ``after`` and by ``kickoff``, earliest first."""
+    first: dict[Source, RetailStamp] = {}
+    for stamp in sorted(stamps, key=lambda s: (s.snapshot_time, s.snapshot_id)):
+        if after <= stamp.snapshot_time <= kickoff:
+            first.setdefault(stamp.source, stamp)
+    return list(first.values())
+
+
+def delayed_fill(
+    delay: timedelta,
+    snapshots: Sequence[RetailStamp],
+    prices: Sequence[Quote],
+    bookmaker: str,
+    selection: str,
+    line: float | None,
+) -> DelayedFill:
+    """The fill at ``delay`` from ``snapshots`` (``delayed_snapshots``, earliest first) and their
+    back ``prices``: filled at ``bookmaker``'s price on ``selection`` and ``line`` in the earliest
+    snapshot that quotes it, voided when one quotes the book but none that selection, and
+    unobserved when none quotes the book.
+
+    A source's first snapshot rather than the book's next quote, so a withdrawn selection voids
+    the bet; a source without the book, such as OddsPortal after its last pre-match scrape, says
+    nothing about it.
+    """
+    quoted = False
+    for stamp in snapshots:
+        for q in prices:
+            if q.snapshot_id != stamp.snapshot_id or q.bookmaker != bookmaker:
+                continue
+            quoted = True
+            if q.outcome == selection and q.line == line:
+                return DelayedFill(delay, FillStatus.FILLED, q.price)
+    return DelayedFill(delay, FillStatus.VOIDED if quoted else FillStatus.UNOBSERVED)
+
+
+async def retail_stamps(
+    session: AsyncSession, windows: Mapping[tuple[int, str], tuple[datetime, datetime]]
+) -> dict[tuple[int, str], list[RetailStamp]]:
+    """The retail snapshots of each (event id, market) stamped within its window, which ends at
+    kick-off,
+    inclusive."""
+    found: dict[tuple[int, str], list[RetailStamp]] = defaultdict(list)
+    if not windows:
+        return found
+    rows = await session.execute(
+        select(
+            col(OddsSnapshot.id),
+            col(OddsSnapshot.event_id),
+            col(OddsSnapshot.market),
+            col(OddsSnapshot.source),
+            col(OddsSnapshot.snapshot_time),
+        ).where(
+            col(OddsSnapshot.source).in_(RETAIL_SOURCES),
+            or_(
+                *(
+                    and_(
+                        col(OddsSnapshot.event_id) == event_id,
+                        col(OddsSnapshot.market) == market,
+                        col(OddsSnapshot.snapshot_time).between(since, until),
+                    )
+                    for (event_id, market), (since, until) in windows.items()
+                )
+            ),
+        )
+    )
+    for snapshot_id, event_id, market, source, snapshot_time in rows.all():
+        found[(event_id, market)].append(RetailStamp(snapshot_id, Source(source), snapshot_time))
+    return found
+
+
+async def delayed_fills(
+    session: AsyncSession, rows: Sequence[tuple[Bet, Event]]
+) -> list[tuple[DelayedFill, ...]]:
+    """Each bet's fill at each of ``FILL_DELAYS``, in ``rows`` order: its book's price in the
+    retail snapshots ``delayed_snapshots`` picks from that long after placement
+    (``delayed_fill``)."""
+    first_placed: dict[tuple[int, str], datetime] = {}
+    kickoffs: dict[int, datetime] = {}
+    for bet, event in rows:
+        key = (event.id, bet.market)
+        first_placed[key] = min(bet.placed_at, first_placed.get(key, bet.placed_at))
+        kickoffs[event.id] = event.commence_time
+    windows = {
+        key: (placed + min(FILL_DELAYS), kickoffs[key[0]]) for key, placed in first_placed.items()
+    }
+    stamps = await retail_stamps(session, windows)
+    picked = [
+        [
+            delayed_snapshots(
+                stamps.get((event.id, bet.market), []), bet.placed_at + d, event.commence_time
+            )
+            for d in FILL_DELAYS
+        ]
+        for bet, event in rows
+    ]
+    by_market: dict[str, set[int]] = defaultdict(set)
+    for (bet, _), per_delay in zip(rows, picked, strict=True):
+        by_market[bet.market].update(s.snapshot_id for snapshots in per_delay for s in snapshots)
+    prices: dict[int, list[Quote]] = defaultdict(list)
+    for market, ids in by_market.items():
+        if not ids:
+            continue
+        for q in await quotes(
+            session,
+            {e.id for b, e in rows if b.market == market},
+            Market(market),
+            bookmakers={b.bookmaker for b, _ in rows if b.market == market},
+            sides=[Side.BACK],
+            snapshot_ids=ids,
+        ):
+            prices[q.snapshot_id].append(q)
+    return [
+        tuple(
+            delayed_fill(
+                delay,
+                snapshots,
+                [q for s in snapshots for q in prices[s.snapshot_id]],
+                bet.bookmaker,
+                bet.selection,
+                bet.line,
+            )
+            for delay, snapshots in zip(FILL_DELAYS, per_delay, strict=True)
+        )
+        for (bet, _), per_delay in zip(rows, picked, strict=True)
+    ]
+
+
 async def load_scored_bets(session: AsyncSession) -> list[ScoredBet]:
-    """Non-void candidate bets in placement order, each with its close probability."""
+    """Non-void candidate bets in placement order, each with its close probability and its
+    delayed fills."""
     stmt = (
         select(Bet, Event)
         .join(Event, Bet.event_id == Event.id)
@@ -723,9 +959,10 @@ async def load_scored_bets(session: AsyncSession) -> list[ScoredBet]:
     )
     rows = [(bet, event) for bet, event in (await session.execute(stmt)).all()]
     p_closes = await close_probabilities(session, rows)
+    fills = await delayed_fills(session, rows)
 
     scored: list[ScoredBet] = []
-    for (bet, event), p_close in zip(rows, p_closes, strict=True):
+    for (bet, event), p_close, delayed in zip(rows, p_closes, fills, strict=True):
         assert bet.candidate_name is not None and bet.candidate_version is not None
         scored.append(
             ScoredBet(
@@ -746,6 +983,7 @@ async def load_scored_bets(session: AsyncSession) -> list[ScoredBet]:
                 p_close_power=None if p_close is None else p_close.power,
                 close_source=None if p_close is None else p_close.source,
                 estimated_ev=bet.estimated_ev,
+                delayed=delayed,
             )
         )
     return scored

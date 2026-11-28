@@ -15,9 +15,12 @@ import pytest
 from fastapi.testclient import TestClient
 from odds_analytics.book_replays import BookReplay, BookRow, BookScore, BookSetReplay
 from odds_analytics.candidate_report import (
+    FILL_DELAYS,
     CandidateReport,
     CandidateSummary,
     DecisionStart,
+    DelayedFill,
+    FillStatus,
     RunningScore,
     ScoredBet,
 )
@@ -607,6 +610,50 @@ class TestBookReplays:
         assert client.get("/fragments/portfolio").text == before
 
 
+class TestDelayedFills:
+    """The information section: the report's delayed-fill EV beside the instant fill's."""
+
+    def test_the_page_shows_instant_and_delayed_ev_with_the_void_rate(
+        self, client: TestClient, data: dict[str, object]
+    ) -> None:
+        five, ten = FILL_DELAYS
+        bets = [
+            dataclasses.replace(
+                bet(i, 0.2),
+                delayed=(
+                    DelayedFill(five, FillStatus.FILLED, 2.5 if i == 0 else 3.0),
+                    DelayedFill(
+                        ten, FillStatus.VOIDED if i == 0 else FillStatus.FILLED, 3.0 if i else None
+                    ),
+                ),
+            )
+            for i in range(4)
+        ]
+        seed(data, bets, rule_candidate())
+
+        body = client.get("/c/gap/1").text
+
+        rows = re.findall(
+            r"<tr><td class=\"text\">([^<]+)</td>(.*?)</tr>",
+            body.split('id="delayed-fills"')[1].split("</table>")[0],
+            re.DOTALL,
+        )
+        cells = {fill: re.findall(r">([^<]*)</td>", rest) for fill, rest in rows}
+        # +5: one bet shortened to 2.5 (EV 0), so (0 + 3 * 0.2) / 4; +10: one voided of four.
+        assert cells == {
+            "+5 min": ["4", "4", "+20.0%", "+15.0%", "0", "0%", "0"],
+            "+10 min": ["4", "3", "+20.0%", "+20.0%", "1", "25%", "0"],
+        }
+        assert "The verdict is the instant fill's" in body
+
+    def test_no_section_for_bets_without_fills(
+        self, client: TestClient, data: dict[str, object]
+    ) -> None:
+        seed(data, [bet(i, 0.5) for i in range(3)], rule_candidate())
+
+        assert 'id="delayed-fill"' not in client.get("/c/gap/1").text
+
+
 class TestEstimateLine:
     def test_is_the_reports_running_mean_estimate_over_the_series_bets(self) -> None:
         summary, running = scored([bet(i, 0.1, estimated_ev=0.1 + i / 100) for i in range(3)])
@@ -713,6 +760,7 @@ class TestNoScoringInOddsWeb:
             "CandidateReport",
             "CandidateSummary",
             "Checkpoint",
+            "DelayedFillScore",
             "EstimateGap",
             "Estimates",
             "BOOTSTRAP_SEED",

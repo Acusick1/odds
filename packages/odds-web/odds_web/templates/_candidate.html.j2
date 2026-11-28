@@ -63,6 +63,24 @@
 </table>
 {% endif %}
 
+{% if c.delayed_fills %}
+<h3 id="delayed-fill">Delayed fill</h3>
+<div class="sub">For information: the bets with a close taken at their book's price some minutes after placement, as a bet placed by hand would be. A bet whose book does not quote the selection then is voided; one with no retail snapshot quoting the book by kick-off is unobserved. Instant and delayed EV are over the bets filled at that delay. The verdict is the instant fill's.</div>
+<table id="delayed-fills">
+<thead><tr><th>Delay</th><th class="r">Bets</th><th class="r">Filled</th><th class="r">Instant EV</th><th class="r">Delayed EV</th><th class="r">Voided</th><th class="r">Void rate</th><th class="r">Unobserved</th></tr></thead>
+<tbody class="num">
+{% for f in c.delayed_fills %}
+<tr><td class="text">{{ f.label }}</td><td class="r">{{ f.bets }}</td><td class="r">{{ f.filled }}</td>
+<td class="r {{ ('pos' if f.instant_ev >= 0 else 'neg') if f.instant_ev is not none }}">{{ f.instant_ev | percent }}</td>
+<td class="r {{ ('pos' if f.mean_ev >= 0 else 'neg') if f.mean_ev is not none }}">{{ f.mean_ev | percent }}</td>
+<td class="r">{{ f.voided }}</td>
+<td class="r">{{ '%.0f%%' | format(f.void_rate * 100) if f.void_rate is not none else '—' }}</td>
+<td class="r">{{ f.unobserved }}</td></tr>
+{% endfor %}
+</tbody>
+</table>
+{% endif %}
+
 {% if c.book_replay %}
 {% set r = c.book_replay.replay %}
 <h3 id="book-sets">Book sets <span class="sub">{{ r.decisions }} recorded decisions replayed</span></h3>
