@@ -39,7 +39,7 @@ sources:
   - odds_lambda.health_monitor.UNMATCHED_LOOKBACK
   - odds_lambda.health_readers.DeadChain
   - odds_lambda.health_readers.dead_chains
-  - odds_lambda.health_readers.JOB_ENABLED
+  - odds_lambda.scheduling.jobs.is_job_enabled
   - odds_lambda.health_readers.SCHEDULE_OVERDUE_GRACE
   - odds_lambda.scheduling.backends.local.LocalSchedulerBackend.get_outstanding_job_names
   - odds_lambda.health_monitor.check_system_health
@@ -100,7 +100,7 @@ The monitor is a [healthchecks.io](https://healthchecks.io/docs/) check (the fre
 `odds_lambda.health_monitor.HealthMonitor.check_schedule_chains` catches a self-scheduling job whose chain has ended, before its data goes stale. It reads the schedules and outstanding jobs from the scheduler and passes them to `odds_lambda.health_readers.dead_chains`, the judgement the web UI's [status strip](odds-web.md#status-strip) also uses with its own read-only readers. It runs only when `odds_lambda.health_monitor.check_system_health` is given the local scheduler store (`SCHEDULER_BACKEND=local`); a `odds_lambda.health_monitor.HealthMonitor` built without one skips it. It covers every compound job that `odds_core.config.SchedulerConfig.bootstrap_jobs` expands to (`run-candidates` included), except:
 
 - cron jobs, which APScheduler re-fires on its own;
-- jobs that return before booking a run while disabled (`odds_lambda.health_readers.JOB_ENABLED`: Betfair while `odds_core.config.BetfairConfig.enabled` is false, `fetch-polymarket-odds` while Polymarket is disabled);
+- jobs switched off by a setting, which return before booking a run: those whose `odds_core.job_specs.JobSpec` `enabled` predicate is false (`odds_lambda.scheduling.jobs.is_job_enabled`; the gated jobs are listed in the [registry](../scheduling/job-registry.md#registry));
 - jobs with a released, unfinished APScheduler job under their schedule id (`odds_lambda.scheduling.backends.local.LocalSchedulerBackend.get_outstanding_job_names`). A job that books its next run only after its work, such as check-health itself, has no schedule while it runs. A run cannot stay outstanding past `odds_lambda.scheduling.runner.JOB_TIMEOUT`, so a hung run is cancelled instead of hiding its chain here. A chain that keeps failing is re-booked every 15 minutes and so stays booked; the `job_chain_rebooked:<job>` warning is what shows it ([Alerts](alerts.md#alert-history)).
 
 A covered job is dead when it has no stored schedule, or when its next run is more than `odds_lambda.health_readers.SCHEDULE_OVERDUE_GRACE` (15 min) in the past. Each run of `deploy.sh` restarts the scheduler on the code it just pulled (and then the web UI, once the `odds_web` grants and role check pass), which restarts a dead chain, including after it recreated Postgres with the scheduler stopped; its smoke step skips jobs that spend Odds API quota ([bootstrap](../scheduling/local-scheduler.md#bootstrap-jobs-and-cron-table)).

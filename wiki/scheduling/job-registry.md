@@ -6,6 +6,7 @@ sources:
   - odds_core.job_specs
   - odds_core.job_specs.JOB_SPECS
   - odds_lambda.scheduling.jobs.get_job_sports
+  - odds_lambda.scheduling.jobs.is_job_enabled
   - odds_lambda.scheduling.jobs.resolve_target_sports
   - odds_lambda.scheduling.jobs._SPORT_SUFFIX_MAP
   - odds_lambda.scheduling.jobs.JobContext
@@ -19,7 +20,7 @@ status: stable
 
 # Job registry
 
-`odds_core.job_specs.JOB_SPECS` contains immutable `odds_core.job_specs.JobSpec` records. Each record owns the entry point, league routing (`fetch-espn-fixtures` lists seven leagues; `fetch-oddsportal-results` lists the six football leagues, and `fetch-oddsportal` and `fetch-betfair-exchange` carry a heartbeat for each league they collect), bootstrap default and override, smoke side effects, forward cadence, static cron and heartbeat identifiers. Core stores module names without importing runtime code; `odds_lambda.scheduling.jobs` resolves names and imports entry points lazily. [Where each job runs](job-deployment-matrix.md#where-each-job-runs) covers deployment.
+`odds_core.job_specs.JOB_SPECS` contains immutable `odds_core.job_specs.JobSpec` records. Each record owns the entry point, league routing (`fetch-espn-fixtures` lists seven leagues; `fetch-oddsportal-results` lists the six football leagues, and `fetch-oddsportal` and `fetch-betfair-exchange` carry a heartbeat for each league they collect), bootstrap default and override, smoke side effects, the setting that switches it off, forward cadence, static cron and heartbeat identifiers. Core stores module names without importing runtime code; `odds_lambda.scheduling.jobs` resolves names and imports entry points lazily. [Where each job runs](job-deployment-matrix.md#where-each-job-runs) covers deployment.
 
 ## Registry
 
@@ -27,6 +28,7 @@ status: stable
 - `bootstrap_function` optionally names a different function in the same module. `odds_lambda.scheduling.jobs.get_bootstrap_function` adapts it to `odds_lambda.scheduling.jobs.JobContext`; `agent-run` books its next wake-up through `odds_lambda.jobs.agent_run.schedule_next`.
 - `bootstrap` controls membership in `odds_core.job_specs.default_bootstrap_jobs`. `odds_core.config.SchedulerConfig.bootstrap_jobs` remains the operator override, including an explicitly empty list.
 - `agent_bets`, `candidate_bets` and `paid_api` drive the separate smoke opt-ins `--include-agent`, `--include-candidates` and `--include-paid-api` ([CLI](local-scheduler.md#cli)).
+- `enabled` optionally names the setting that switches the job off, as a predicate on `odds_core.config.Settings`; unset, the job is always enabled. `fetch-betfair-exchange` reads `odds_core.config.BetfairConfig.enabled` and `fetch-polymarket-odds` reads `odds_core.config.PolymarketConfig.enabled`. `odds_lambda.scheduling.jobs.is_job_enabled` evaluates it for a base or compound name: each gated job's `main` returns before booking a run when it is false, and the [schedule chain check](../operations/health-monitor.md#schedule-chain-check) skips the job then, so the two read one definition.
 - `cron` gives the fixed local schedule. A self-scheduling job leaves it unset; bootstrap otherwise replaces its pending run with that cron.
 - `per_sport` controls compound naming. `sports` optionally restricts configured leagues through an explicit tuple or a lazy `odds_core.job_specs.SportMap` reference to the adapter's authoritative map; `odds_lambda.scheduling.jobs.resolve_target_sports` intersects the allowlist with the operator's configured leagues. An unrestricted job runs for every configured league.
 - `cadence` holds the default forward polling intervals in hours, one per `odds_core.job_specs.Cadence` field (`closing`, `pregame`, `day_before`, `early`, `opening` and `no_game`); `sport_cadences` supplies league overrides. `odds_core.job_specs.job_cadence` selects them without runtime imports. Runtime `odds_lambda.scheduling.decision.CadenceConfig` adds `odds_lambda.scheduling.decision.CadenceConfig.interval_for`, the lookup from an `odds_lambda.fetch_tier.FetchTier`, to the core value record.

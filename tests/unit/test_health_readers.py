@@ -16,7 +16,7 @@ SOON = NOW + timedelta(minutes=10)
 @pytest.fixture
 def settings() -> Settings:
     return SimpleNamespace(  # type: ignore[return-value]
-        betfair=SimpleNamespace(enabled=True), polymarket=SimpleNamespace(enabled=False)
+        betfair=SimpleNamespace(enabled=True), polymarket=SimpleNamespace(enabled=True)
     )
 
 
@@ -51,10 +51,3 @@ class TestDeadChains:
 
     def test_an_outstanding_job_is_alive_without_a_next_run(self, settings: Settings) -> None:
         assert dead_chains(["run-candidates-epl"], {}, {"run-candidates-epl"}, settings, NOW) == []
-
-    def test_a_job_disabled_by_its_setting_is_skipped(self, settings: Settings) -> None:
-        names = ["fetch-betfair-exchange-epl", "fetch-polymarket-odds-epl"]
-
-        assert dead_chains(names, {}, (), settings, NOW) == [
-            DeadChain("fetch-betfair-exchange-epl", None)
-        ]

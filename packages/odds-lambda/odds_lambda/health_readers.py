@@ -6,7 +6,7 @@ source or a job by the same rule.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -27,6 +27,7 @@ from odds_lambda.collection_calendar import (
 )
 from odds_lambda.scheduling.jobs import (
     get_job_cron,
+    is_job_enabled,
     make_compound_job_name,
     resolve_job_name,
     resolve_target_sports,
@@ -35,12 +36,6 @@ from odds_lambda.tier_utils import calculate_tier
 
 HEARTBEAT_PREFIX = "heartbeat:"
 SCHEDULE_OVERDUE_GRACE = timedelta(minutes=15)
-
-# Self-scheduling jobs that return before booking a next run while disabled.
-JOB_ENABLED: dict[str, Callable[[Settings], bool]] = {
-    "fetch-betfair-exchange": lambda settings: settings.betfair.enabled,
-    "fetch-polymarket-odds": lambda settings: settings.polymarket.enabled,
-}
 
 
 def collection_sources() -> tuple[CollectionSource, ...]:
@@ -210,8 +205,7 @@ def dead_chains(
         base_name, _ = resolve_job_name(job_name)
         if get_job_cron(base_name) is not None or job_name in outstanding:
             continue
-        enabled = JOB_ENABLED.get(base_name)
-        if enabled is not None and not enabled(settings):
+        if not is_job_enabled(base_name, settings):
             continue
         next_run = next_runs.get(job_name)
         if next_run is None or next_run < now - SCHEDULE_OVERDUE_GRACE:
